@@ -1806,6 +1806,9 @@ function Dialog({
   ) => Record<string, string>;
 }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [visiblePasswords, setVisiblePasswords] = useState<
+    Record<string, boolean>
+  >({});
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-[#151922]/30 p-4">
       <form
