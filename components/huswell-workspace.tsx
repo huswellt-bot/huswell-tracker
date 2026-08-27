@@ -10278,28 +10278,6 @@ export function HuswellWorkspace({
             >
               <Menu size={21} />
             </button>
-            <div className="min-w-0">
-              <h1 className="truncate text-[18px] font-semibold tracking-tight text-[#151922] sm:text-[21px] lg:text-[23px]">
-                {active === "Dashboard"
-                  ? "Good morning, Huswell Team!"
-                  : active}
-              </h1>
-              <p className="mt-1 truncate text-[12px] text-[#8b92a1]">
-                Huswell Trading ·{" "}
-                <span className="capitalize">
-                  {role === "super_admin"
-                    ? "Super Admin"
-                    : role === "owner"
-                      ? "Owner / General Manager"
-                      : role === "admin"
-                        ? "Administrator"
-                        : role === "project_manager"
-                          ? "Project Officer"
-                          : role.replaceAll("_", " ")}
-                </span>{" "}
-                workspace
-              </p>
-            </div>
           </div>
           <div className="flex shrink-0 items-center gap-3 text-[#626b7a]">
             <span className="hidden items-center gap-2 text-[12px] font-medium sm:flex">
