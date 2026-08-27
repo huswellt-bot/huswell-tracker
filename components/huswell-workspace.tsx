@@ -643,12 +643,6 @@ const leads: Module = {
     { key: "client_name", label: "Company Name (Optional)" },
     { key: "email", label: "Email" },
     { key: "phone", label: "Viber" },
-    {
-      key: "outbound_caller",
-      label: "Outbound caller",
-      type: "select",
-      options: ["Ms. Alyssa", "Ms. Anne"],
-    },
     { key: "date_contacted", label: "Date contacted", type: "date" },
     {
       key: "contact_method",
@@ -2201,19 +2195,6 @@ function Records({
         options: store.suppliers
           .filter((supplier) => supplier.is_active !== false)
           .map((supplier) => `${supplier.id}|${text(supplier.company_name)}`),
-      };
-    if (module.table === "leads" && field.key === "outbound_caller")
-      return {
-        ...field,
-        options: store.organization_members
-          .filter((member) => text(member.role) === "project_manager")
-          .map((member) =>
-            text(
-              store.profiles.find((profile) => profile.id === member.user_id)
-                ?.full_name,
-            ),
-          )
-          .filter(Boolean),
       };
     return field;
   });
@@ -5339,7 +5320,7 @@ function Quotations({
                 return (
                 <tr key={text(q.id)}>
                   <td className="px-5 py-3">
-                    <b className="text-[#1769e8]">{text(q.quotation_no)}</b>
+                    <b>{text(q.quotation_no)}</b>
                     <small>
                       v{text(q.version, "1")} · {day(q.issue_date)}
                     </small>
@@ -10189,7 +10170,7 @@ export function HuswellWorkspace({
     <div className="huswell-workspace min-h-screen bg-[#fafafa] text-[#151922]">
       <LoadingModal open={loading} title="Loading workspace" message="Please wait a moment." />
       <aside
-        className={`${mobile ? "translate-x-0" : "-translate-x-full"} sidebar-shell fixed inset-y-0 z-30 flex w-64 flex-col border-r border-white/10 bg-[#182334] p-4 text-[#d7e2f0] transition-transform lg:translate-x-0`}
+        className={`${mobile ? "translate-x-0" : "-translate-x-full"} sidebar-shell fixed inset-y-0 z-30 flex w-64 flex-col border-r border-[#e2e7ef] bg-white p-4 text-[#475467] transition-transform lg:translate-x-0`}
       >
         <div className="mb-7 flex flex-col items-center px-1">
           <Image
@@ -10217,11 +10198,11 @@ export function HuswellWorkspace({
                       lineHeight: "20px",
                     }}
                     aria-current={active === view ? "page" : undefined}
-                    className={`${active === view ? "bg-[#c43b43] font-medium text-white" : "text-[#d7e2f0] hover:bg-[#25344a] hover:text-white"} group flex min-h-9 w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[#182334]`}
+                    className={`${active === view ? "bg-[#c43b43] font-medium text-white" : "text-[#475467] hover:bg-[#f7f7f8] hover:text-[#151922]"} group flex min-h-9 w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c43b43] focus-visible:ring-offset-2 focus-visible:ring-offset-white`}
                   >
                     <Icon
                       size={17}
-                      className={`${active === view ? "text-white" : "text-[#d7e2f0] group-hover:text-white group-focus-visible:text-white"} shrink-0 transition-colors`}
+                      className={`${active === view ? "text-white" : "text-[#626b7a] group-hover:text-[#151922] group-focus-visible:text-[#151922]"} shrink-0 transition-colors`}
                     />
                     <span className="min-w-0 flex-1 truncate">{view}</span>
                   </button>
@@ -10230,16 +10211,16 @@ export function HuswellWorkspace({
             </div>
           ))}
         </nav>
-        <div className="mt-4 border-t border-white/15 pt-4">
+        <div className="mt-4 border-t border-[#e2e7ef] pt-4">
           <div className="flex items-center px-2">
-            <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-white">
+            <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-[#151922]">
               {profileEmail}
             </span>
           </div>
           {canEditOwnProfile && (
             <a
               href="/profile"
-              className="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-[#d7e2f0] transition-colors hover:bg-[#25344a] hover:text-white"
+              className="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-[#475467] transition-colors hover:bg-[#f7f7f8] hover:text-[#151922]"
             >
               <UserRound size={17} />
               Profile
@@ -10247,7 +10228,7 @@ export function HuswellWorkspace({
           )}
           <button
             onClick={() => setSignOutOpen(true)}
-            className="mt-4 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-[#d7e2f0] transition-colors hover:bg-[#25344a] hover:text-white"
+            className="mt-4 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-[#475467] transition-colors hover:bg-[#f7f7f8] hover:text-[#151922]"
           >
             <LogOut size={17} />
             Sign out
