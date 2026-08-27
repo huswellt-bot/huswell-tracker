@@ -2102,7 +2102,6 @@ function Records({
   const [page, setPage] = useState(0);
   const [saving, setSaving] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [leadFilter, setLeadFilter] = useState<"all" | "mine">("all");
   const [evaluationFilter, setEvaluationFilter] = useState("all");
   const [doneDealStatusFilter, setDoneDealStatusFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState("");
@@ -2145,7 +2144,6 @@ function Records({
         .filter(
           (r) =>
             module.table !== "leads" ||
-            leadFilter === "all" ||
             text(r.created_by, "") === currentUserId,
         )
         .filter(
@@ -2178,7 +2176,6 @@ function Records({
       store,
       module.table,
       query,
-      leadFilter,
       currentUserId,
       isProjectsPage,
       evaluationFilter,
@@ -2437,18 +2434,6 @@ function Records({
           </label>
           {module.table === "leads" ? (
             <>
-              <select
-                aria-label="Filter lead ownership"
-                value={leadFilter}
-                onChange={(event) => {
-                  setLeadFilter(event.target.value as "all" | "mine");
-                  setPage(0);
-                }}
-                className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium text-[#202938] outline-none focus:border-[#c43b43]"
-              >
-                <option value="all">All {isProjectsPage ? "projects" : "leads"}</option>
-                <option value="mine">My {isProjectsPage ? "projects" : "leads"}</option>
-              </select>
               {!isProjectsPage ? (
                 <select
                   aria-label="Filter evaluation status"
