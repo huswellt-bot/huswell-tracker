@@ -48,7 +48,7 @@ export default function AuthPage() {
             Welcome back
           </h1>
           <p className="mb-6 text-center text-[12px] text-[#626b7a]">
-            Sign in to Huswell Command Center
+            Sign in to Huswell Virtual Office
           </p>
           <form onSubmit={submit} className="space-y-4">
             <label className="block text-[14px] font-medium">

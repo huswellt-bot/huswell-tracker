@@ -46,6 +46,8 @@ const titleCase = (value: string) =>
     /(^|[^A-Za-z])([a-z])/g,
     (_, prefix: string, letter: string) => `${prefix}${letter.toUpperCase()}`,
   );
+const signatureFileName = (url: string) =>
+  url.split("?")[0].split("/").pop() || "signature image";
 
 export function SuperAdminConsole({
   organizationName,
@@ -530,6 +532,27 @@ export function SuperAdminConsole({
                     }
                     className="mt-1.5 block w-full text-[13px] font-normal text-[#475467] file:mr-3 file:rounded-md file:border-0 file:bg-[#f0f3f7] file:px-3 file:py-2 file:text-[13px] file:font-semibold file:text-[#344054] hover:file:bg-[#e6ebf1]"
                   />
+                  {editSignatureFile ? (
+                    <span className="mt-2 block truncate rounded-md border border-[#cce8d9] bg-[#f0fbf5] px-3 py-2 text-[12px] font-normal text-[#127543]" title={editSignatureFile.name}>
+                      New image selected: {editSignatureFile.name}
+                    </span>
+                  ) : editingUser.signature_url ? (
+                    <span className="mt-2 flex items-center gap-3 rounded-md border border-[#dfe5ed] bg-[#f8faff] p-2 font-normal">
+                      {/* Supabase Storage signature URLs are dynamic. */}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={editingUser.signature_url}
+                        alt="Current saved signature"
+                        className="h-10 w-20 shrink-0 rounded border border-[#e4e8ef] bg-white object-contain"
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-[12px] font-medium text-[#202938]">Current signature uploaded</span>
+                        <span className="block truncate text-[11px] text-[#778195]" title={signatureFileName(editingUser.signature_url)}>
+                          {signatureFileName(editingUser.signature_url)}
+                        </span>
+                      </span>
+                    </span>
+                  ) : null}
                   <span className="mt-1 block text-[12px] font-normal text-[#7d8797]">
                     {editingUser.signature_url
                       ? "A signature is saved. Choose a new image to replace it."
@@ -660,6 +683,11 @@ export function SuperAdminConsole({
                     }
                     className="mt-1.5 block w-full text-[13px] font-normal text-[#475467] file:mr-3 file:rounded-md file:border-0 file:bg-[#f0f3f7] file:px-3 file:py-2 file:text-[13px] file:font-semibold file:text-[#344054] hover:file:bg-[#e6ebf1]"
                   />
+                  {signatureFile && (
+                    <span className="mt-2 block truncate rounded-md border border-[#cce8d9] bg-[#f0fbf5] px-3 py-2 text-[12px] font-normal text-[#127543]" title={signatureFile.name}>
+                      Image selected: {signatureFile.name}
+                    </span>
+                  )}
                   <span className="mt-1 block text-[12px] font-normal text-[#7d8797]">
                     Optional. PNG, JPG, or WebP, up to 2 MB. It will be used automatically {values.role === "admin" ? "when this General Manager approves a PDF." : "on this officer&apos;s PDFs."}
                   </span>
