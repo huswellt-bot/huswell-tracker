@@ -28,7 +28,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
-  CircleDollarSign,
+  PhilippinePeso,
   Eye,
   EyeOff,
   FileText,
@@ -9261,7 +9261,7 @@ function Dashboard({
   const readOnlyKpiView = isProjectOfficer ? "Dashboard" as View : "Finance" as View;
   const primaryMetrics = [
     { label: "Total sales", value: peso.format(dashboardSales), detail: "Invoiced this month", icon: TrendingUp, iconClass: "bg-[#1769e8] text-white", accent: "bg-[#1769e8]", view: readOnlyKpiView },
-    { label: "Collections received", value: peso.format(dashboardCollections), detail: "Payments received", icon: CircleDollarSign, iconClass: "bg-[#16854f] text-white", accent: "bg-[#16854f]", view: readOnlyKpiView },
+    { label: "Collections received", value: peso.format(dashboardCollections), detail: "Payments received", icon: PhilippinePeso, iconClass: "bg-[#16854f] text-white", accent: "bg-[#16854f]", view: readOnlyKpiView },
     { label: "Total receivables", value: peso.format(dashboardReceivables), detail: "Balance awaiting payment", icon: ReceiptText, iconClass: "bg-[#d98a1d] text-white", accent: "bg-[#d98a1d]", view: readOnlyKpiView },
     { label: "Overdue receivables", value: peso.format(dashboardOverdue), detail: "Past due balances", icon: CalendarDays, iconClass: "bg-[#c43b43] text-white", accent: "bg-[#c43b43]", view: readOnlyKpiView },
     { label: "Quarterly sales quota", value: dashboardQuarterTarget ? `${dashboardQuarterProgress}%` : "Not set", detail: dashboardQuarterTarget ? `${quarterLabel} · ${peso.format(Math.max(dashboardQuarterTarget - dashboardQuarterSales, 0))} remaining` : `Set a target for ${quarterLabel}`, icon: Goal, iconClass: "bg-[#7043ca] text-white", accent: "bg-[#7043ca]", view: isProjectOfficer ? "Dashboard" as View : "Targets" as View },
@@ -9427,7 +9427,7 @@ function Dashboard({
               <p className="mt-1 text-[10px] text-[#16854f]">For {monthName}</p>
             </button>
             <button type="button" onClick={() => go(readOnlyKpiView)} className="rounded-lg border border-[#eef1f5] bg-[#fbfcfe] p-3 text-left transition-colors hover:bg-[#f6f8fb] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c43b43]">
-              <span className="grid size-7 place-items-center rounded-md bg-[#16854f] text-white"><CircleDollarSign size={15} /></span>
+              <span className="grid size-7 place-items-center rounded-md bg-[#16854f] text-white"><PhilippinePeso size={15} /></span>
               <p className="mt-4 text-[10px] font-medium uppercase tracking-[.06em] text-[#8b92a1]">Collections</p>
               <p className="mt-1 text-[23px] font-semibold tracking-[-.03em] text-[#151922]">{peso.format(dashboardCollections)}</p>
               <p className="mt-1 text-[10px] text-[#16854f]">For {monthName}</p>
@@ -9455,7 +9455,7 @@ function Dashboard({
         <section className="relative isolate overflow-hidden rounded-lg bg-gradient-to-br from-[#17233a] via-[#17324a] to-[#096c5d] p-5 text-white shadow-[0_8px_20px_rgb(21_25_34_/_14%)]">
           <div className="absolute -right-16 -top-12 size-52 rounded-full bg-[#2bd6a7]/25 blur-3xl" />
           <div className="relative">
-            <div className="flex items-center gap-2 text-[12px] font-medium text-white/90"><CircleDollarSign size={15} /> Receivables health</div>
+            <div className="flex items-center gap-2 text-[12px] font-medium text-white/90"><PhilippinePeso size={15} /> Receivables health</div>
             <p className="mt-4 text-[10px] font-medium uppercase tracking-[.08em] text-white/60">Outstanding customer balance</p>
             <p className="mt-1 text-[28px] font-semibold tracking-[-.04em]">{peso.format(dashboardReceivables)}</p>
             <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/15">
