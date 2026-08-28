@@ -138,6 +138,7 @@ type TableName =
   | "project_edit_requests"
   | "lead_change_requests"
   | "quotation_revision_requests"
+  | "project_schedules"
   | "activity_log"
   | "leads"
   | "supplier_payables"
@@ -211,6 +212,7 @@ const tables: TableName[] = [
   "project_edit_requests",
   "lead_change_requests",
   "quotation_revision_requests",
+  "project_schedules",
   "activity_log",
   "leads",
   "supplier_payables",
@@ -416,27 +418,26 @@ const Status = ({ value }: { value: unknown }) => (
     {text(value, "draft").replaceAll("_", " ")}
   </span>
 );
-const evaluationStatuses = [
+const leadStatuses = [
   "1|New Client",
   "2|Repeat Client",
-  "3|Follow-Up Due",
-  "4|Qualified Lead",
-  "5|Quotation Sent",
-  "6|Negotiation Stage",
-  "7|Done Deal",
-  "8|Lost Sale",
-  "9|Last Contact Date",
+  "3|Dropped Client",
 ] as const;
+// Done Deal remains an internal marker that keeps projects separate from leads.
+const evaluationStatuses = [...leadStatuses, "7|Done Deal"] as const;
 const doneDealStatuses = [
-  "1|Layout & Design",
-  "2|Materials Buying",
-  "3|Mock Up",
-  "4|Ongoing Mass Production",
-  "5|Quality Control",
-  "6|Repacking",
-  "7|Invoicing",
-  "8|Delivery",
-  "9|After Sales",
+  "1|Inquiry | Details | Illustrations",
+  "2|Costing Breakdown",
+  "3|Price Quotation",
+  "4|Purchase Order",
+  "5|Mock Up / Sample Approval",
+  "6|Invoicing / Down Payment",
+  "7|Production / Buying Materials",
+  "8|Quality Control",
+  "9|Repacking",
+  "10|Invoicing / Full Payment",
+  "11|Delivery",
+  "12|Completed / After Sales",
 ] as const;
 const statusLabel = (options: readonly string[], value: unknown) =>
   options
@@ -460,6 +461,7 @@ const rolePermissions: Record<
       "suppliers",
       "quotations",
       "quotation_items",
+      "project_schedules",
       "production_material_usage",
       "expenses",
     ],
@@ -547,6 +549,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "project_edit_requests",
     "lead_change_requests",
     "quotation_revision_requests",
+    "project_schedules",
   ],
   sales: [
     "business_settings",
@@ -687,10 +690,10 @@ const leads: Module = {
     },
     {
       key: "evaluation_number",
-      label: "Evaluation status",
+      label: "Lead status",
       type: "select",
       required: true,
-      options: [...evaluationStatuses],
+      options: [...leadStatuses],
     },
     {
       key: "done_deal_status",
@@ -732,7 +735,7 @@ const leads: Module = {
     { label: "Outbound method", value: (r) => text(r.contact_method, "—") },
     { label: "Date sent", value: (r) => day(r.date_sent) },
     {
-      label: "Evaluation status",
+      label: "Lead status",
       value: (r) => evaluationLabel(r.evaluation_number),
     },
   ],
@@ -1525,12 +1528,50 @@ function Panel({
         </header>
       )}
       {hideHeading && action && (
-        <div className="fixed right-4 bottom-4 z-20 flex gap-2 sm:right-5 sm:bottom-5 lg:right-6 lg:bottom-6">
+        <div className="fixed left-16 top-3 z-40 flex gap-2 sm:top-4 lg:left-[17rem]">
           {action}
         </div>
       )}
       {children}
     </section>
+  );
+}
+type LeadWorkspaceMode =
+  | "leads"
+  | "projects"
+  | "costing"
+  | "quotation";
+function LeadWorkspaceTabs({
+  active,
+  onChange,
+  className = "",
+}: {
+  active: LeadWorkspaceMode;
+  onChange: (mode: LeadWorkspaceMode) => void;
+  className?: string;
+}) {
+  const tabs: { mode: LeadWorkspaceMode; label: string }[] = [
+    { mode: "leads", label: "Leads" },
+    { mode: "costing", label: "Costing Breakdown" },
+    { mode: "quotation", label: "Price Quotations" },
+  ];
+  return (
+    <nav
+      aria-label="Lead workspace sections"
+      className={`${className} flex gap-1 overflow-x-auto border-b border-[#e4e8ef] pt-2`}
+    >
+      {tabs.map((tab) => (
+        <button
+          key={tab.mode}
+          type="button"
+          onClick={() => onChange(tab.mode)}
+          aria-current={active === tab.mode ? "page" : undefined}
+          className={`shrink-0 px-3 py-2 text-[12px] font-medium ${active === tab.mode ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1] hover:text-[#4b5565]"}`}
+        >
+          {tab.label}
+        </button>
+      ))}
+    </nav>
   );
 }
 function Empty({ children }: { children: ReactNode }) {
@@ -2112,8 +2153,8 @@ function Records({
   notice: (m: string) => void;
   role: string;
   onPrint?: (r: Row) => void;
-  leadMode?: "leads" | "projects";
-  onLeadModeChange?: (mode: "leads" | "projects") => void;
+  leadMode?: LeadWorkspaceMode;
+  onLeadModeChange?: (mode: LeadWorkspaceMode) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Row | null>(null);
@@ -2134,9 +2175,6 @@ function Records({
     !isProjectsPage && canAccess(role, module.table, "create");
   const canUpdate = canAccess(role, module.table, "update");
   const canArchive = canAccess(role, module.table, "archive");
-  const totalLeadCount = store.leads.filter(
-    (lead) => n(lead.evaluation_number) !== 7,
-  ).length;
   const ownProjectEditRequests =
     isProjectsPage && role === "project_manager"
       ? store.project_edit_requests.filter(
@@ -2226,6 +2264,7 @@ function Records({
   );
   const shown =
     module.table === "leads" ? rows : rows.slice(page * 10, page * 10 + 10);
+  const totalLeadCount = rows.length;
   const fields = module.fields.map((field) => {
     if (field.key === "supplier_id")
       return {
@@ -2253,7 +2292,7 @@ function Records({
   const columns =
     module.table === "leads" && isProjectsPage
       ? leadColumns.map((column) =>
-          column.label === "Evaluation status"
+          column.label === "Lead status"
             ? {
                 label: "Done Deal Status",
                 value: (row: Row) => doneDealStatusLabel(row.done_deal_status),
@@ -2262,10 +2301,12 @@ function Records({
         )
       : leadColumns;
   const visibleFields =
-    module.table === "leads" &&
-    text(values.evaluation_number, "").split("|")[0] !== "7"
-      ? fields.filter((field) => field.key !== "done_deal_status")
-      : fields;
+    module.table === "leads" && isProjectsPage
+      ? fields.filter((field) => field.key !== "evaluation_number")
+      : module.table === "leads" &&
+          text(values.evaluation_number, "").split("|")[0] !== "7"
+        ? fields.filter((field) => field.key !== "done_deal_status")
+        : fields;
   const initial = (row?: Row) =>
     Object.fromEntries(
       module.fields.map((f) => [
@@ -2507,23 +2548,12 @@ function Records({
           ) : undefined
         }
       >
-        {module.table === "leads" && onLeadModeChange && (
-          <div className={`${contentPadding} flex gap-1 border-b border-[#e4e8ef] pt-2`}>
-            <button
-              type="button"
-              onClick={() => onLeadModeChange("leads")}
-              className={`px-3 py-2 text-[12px] font-medium ${!isProjectsPage ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}
-            >
-              Leads
-            </button>
-            <button
-              type="button"
-              onClick={() => onLeadModeChange("projects")}
-              className={`px-3 py-2 text-[12px] font-medium ${isProjectsPage ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}
-            >
-              Projects
-            </button>
-          </div>
+        {module.table === "leads" && onLeadModeChange && !isProjectsPage && (
+          <LeadWorkspaceTabs
+            active={leadMode}
+            onChange={onLeadModeChange}
+            className={contentPadding}
+          />
         )}
         {!isProjectsPage && module.table === "leads" && (
           <div className={`${contentPadding} border-t border-[#edf0f5] py-2.5`}>
@@ -2573,7 +2603,7 @@ function Records({
               )}
               {!isProjectsPage ? (
                 <select
-                  aria-label="Filter evaluation status"
+                  aria-label="Filter lead status"
                   value={evaluationFilter}
                   onChange={(event) => {
                     setEvaluationFilter(event.target.value);
@@ -2581,7 +2611,7 @@ function Records({
                   }}
                   className={`lead-filter-select min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${evaluationFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}
                 >
-                  <option value="all">Filter By Evaluation Status</option>
+                  <option value="all">Filter By Lead Status</option>
                   {evaluationStatuses
                     .filter((status) => !status.startsWith("7|"))
                     .map((status) => (
@@ -2763,6 +2793,307 @@ function Records({
         />
       )}
     </div>
+  );
+}
+
+const localDateKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+const monthStartFromValue = (value: string) => {
+  const [year, month] = value.split("-").map(Number);
+  return new Date(year, month - 1, 1);
+};
+const monthValue = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+
+function ProjectCalendar({
+  store,
+  orgId,
+  reload,
+  notice,
+  role,
+}: {
+  store: Store;
+  orgId: string;
+  reload: () => Promise<void>;
+  notice: (message: string) => void;
+  role: string;
+}) {
+  const [month, setMonth] = useState(currentMonth);
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const schedules = store.project_schedules.slice().sort((a, b) =>
+    text(a.start_date, "").localeCompare(text(b.start_date, "")),
+  );
+  const approvedSchedules = schedules.filter(
+    (schedule) => text(schedule.status, "approved") === "approved",
+  );
+  const myScheduleRequests = schedules.filter(
+    (schedule) =>
+      role === "project_manager" &&
+      text(schedule.assigned_to, "") === text(schedule.created_by, ""),
+  );
+  const scheduledQuoteIds = new Set(
+    schedules
+      .filter((schedule) => text(schedule.status, "approved") !== "rejected")
+      .map((schedule) => text(schedule.quotation_id, "")),
+  );
+  const approvedQuotes = store.quotations.filter(
+    (quote) =>
+      text(quote.document_type, "") === "price_quotation" &&
+      text(quote.status, "") === "approved" &&
+      !scheduledQuoteIds.has(text(quote.id, "")),
+  );
+  const canCreateSchedule = role === "project_manager";
+  const scheduleFields: Field[] = [
+    {
+      key: "quotation_id",
+      label: "Approved price quotation",
+      type: "select",
+      required: true,
+      options: approvedQuotes.map(
+        (quote) =>
+          `${text(quote.id)}|${text(quote.quotation_no)} · ${text(quote.project_name, text(quote.client_name, "Untitled project"))}`,
+      ),
+    },
+    { key: "project_name", label: "Project name", required: true },
+    { key: "client_name", label: "Client name", required: true },
+    { key: "product_name", label: "Product", required: true },
+    { key: "quantity", label: "Quantity", type: "number", required: true },
+    { key: "start_date", label: "Start date", type: "date", required: true },
+    { key: "due_date", label: "Deadline", type: "date", required: true },
+  ];
+  const shiftMonth = (offset: number) => {
+    const start = monthStartFromValue(month);
+    start.setMonth(start.getMonth() + offset);
+    setMonth(monthValue(start));
+  };
+  const save = async () => {
+    const quotationId = values.quotation_id.split("|")[0];
+    if (
+      !quotationId ||
+      !values.project_name.trim() ||
+      !values.client_name.trim() ||
+      !values.product_name.trim() ||
+      !values.quantity ||
+      !values.start_date ||
+      !values.due_date
+    )
+      return notice("Complete the project, client, product, quantity, and schedule fields.");
+    if (!Number.isFinite(Number(values.quantity)) || Number(values.quantity) <= 0)
+      return notice("Quantity must be greater than zero.");
+    if (values.due_date < values.start_date)
+      return notice("The deadline cannot be before the start date.");
+    setSaving(true);
+    try {
+      const client = createClient();
+      const { data } = await client.auth.getUser();
+      if (!data.user) throw new Error("Please sign in again before scheduling a project.");
+      const rejectedSchedule = schedules.find(
+        (schedule) =>
+          text(schedule.quotation_id, "") === quotationId &&
+          text(schedule.status, "") === "rejected",
+      );
+      const payload = {
+        project_name: values.project_name.trim(),
+        client_name: values.client_name.trim(),
+        product_name: values.product_name.trim(),
+        quantity: Number(values.quantity),
+        start_date: values.start_date,
+        due_date: values.due_date,
+      };
+      const { error } = rejectedSchedule?.id
+        ? await client.rpc("resubmit_project_schedule", {
+            p_schedule_id: rejectedSchedule.id,
+            ...payload,
+          })
+        : await client.from("project_schedules").insert({
+            organization_id: orgId,
+            quotation_id: quotationId,
+            ...payload,
+            status: "pending",
+            assigned_to: data.user.id,
+            created_by: data.user.id,
+          });
+      if (error) throw error;
+      setOpen(false);
+      await reload();
+      notice(rejectedSchedule ? "Project resubmitted for General Manager approval." : "Project submitted for General Manager approval.");
+    } catch (error) {
+      notice(error instanceof Error ? error.message : "Project scheduling could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const scheduleNamesForDay = (key: string) =>
+    approvedSchedules.filter(
+      (schedule) =>
+        key >= text(schedule.start_date, "") && key <= text(schedule.due_date, ""),
+    );
+  const calendarMonths = Array.from({ length: 3 }, (_, index) => {
+    const start = monthStartFromValue(month);
+    start.setMonth(start.getMonth() + index);
+    return start;
+  });
+  const officerName = (schedule: Row) => {
+    const profile = store.profiles.find(
+      (item) => text(item.id, "") === text(schedule.assigned_to, ""),
+    );
+    return text(profile?.full_name, "Unassigned");
+  };
+  return (
+    <Panel
+      title="Project calendar"
+      detail="Approved Price Quotations scheduled for production."
+      variant="page"
+      hideHeading
+      action={
+        canCreateSchedule ? (
+          <Button
+            disabled={!approvedQuotes.length}
+            onClick={() => {
+              setValues({ quotation_id: "", project_name: "", client_name: "", product_name: "", quantity: "", start_date: isoToday(), due_date: "" });
+              setOpen(true);
+            }}
+          >
+            <Plus size={14} /> Add project
+          </Button>
+        ) : undefined
+      }
+    >
+      <section className="border-b border-[#e4e8ef] px-4 py-4 sm:px-5 lg:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Button secondary onClick={() => shiftMonth(-1)} aria-label="Show previous three months">
+              <ChevronLeft size={15} />
+            </Button>
+            <label className="flex h-9 items-center gap-2 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium text-[#344054]">
+              <CalendarDays size={15} className="text-[#c43b43]" />
+              <span className="sr-only">Starting month</span>
+              <input
+                type="month"
+                value={month}
+                onChange={(event) => setMonth(event.target.value)}
+                className="border-0 bg-transparent p-0 text-[12px] font-medium outline-none"
+              />
+            </label>
+            <Button secondary onClick={() => shiftMonth(1)} aria-label="Show next three months">
+              <ChevronRight size={15} />
+            </Button>
+          </div>
+          <p className="text-[12px] text-[#687386]">
+            Green dates show General Manager-approved projects from start date through deadline.
+          </p>
+        </div>
+        <div className="mt-4 grid gap-3 xl:grid-cols-3">
+          {calendarMonths.map((calendarMonth) => {
+            const year = calendarMonth.getFullYear();
+            const monthIndex = calendarMonth.getMonth();
+            const firstWeekday = calendarMonth.getDay();
+            const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+            return (
+              <section key={monthValue(calendarMonth)} className="overflow-hidden rounded-xl border border-[#d9e0e9] bg-white">
+                <h2 className="bg-[#102f61] px-3 py-2 text-center text-[13px] font-semibold uppercase tracking-[.06em] text-white">
+                  {new Intl.DateTimeFormat("en-PH", { month: "long", year: "numeric" }).format(calendarMonth)}
+                </h2>
+                <div className="grid grid-cols-7 bg-[#c43b43] text-center text-[10px] font-semibold uppercase text-white">
+                  {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((weekday) => (
+                    <span key={weekday} className="border-r border-white/25 py-1.5 last:border-r-0">{weekday}</span>
+                  ))}
+                </div>
+                <div className="grid grid-cols-7">
+                  {Array.from({ length: 42 }, (_, index) => {
+                    const dayNumber = index - firstWeekday + 1;
+                    if (dayNumber < 1 || dayNumber > daysInMonth)
+                      return <div key={index} className="min-h-12 border-b border-r border-[#e7ebf0] bg-[#fafbfc] last:border-r-0" />;
+                    const date = new Date(year, monthIndex, dayNumber);
+                    const key = localDateKey(date);
+                    const activeSchedules = scheduleNamesForDay(key);
+                    const active = activeSchedules.length > 0;
+                    return (
+                      <div
+                        key={key}
+                        title={activeSchedules.map((schedule) => text(schedule.project_name, text(schedule.quotation_no))).join(" · ") || undefined}
+                        className={`min-h-12 border-b border-r border-[#e7ebf0] p-1.5 text-right text-[11px] last:border-r-0 ${active ? activeSchedules.length > 1 ? "bg-[#397c2d] font-semibold text-white" : "bg-[#68a947] font-semibold text-white" : "text-[#475467]"}`}
+                      >
+                        {dayNumber}
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      </section>
+      <section className="px-4 py-4 sm:px-5 lg:px-6">
+        <Table
+          labels={["Project name", "Client name", "Quotation code", "Quantity", "Product", "Start date", "Deadline", "Assigned Project Officer"]}
+          minWidth={1080}
+          className="modern-page-table"
+        >
+          {approvedSchedules.map((schedule) => (
+            <tr key={text(schedule.id)} className="hover:bg-[#fbfcff]">
+              <td className="px-4 py-2 font-medium">{text(schedule.project_name)}</td>
+              <td className="px-4 py-2">{text(schedule.client_name)}</td>
+              <td className="px-4 py-2">{text(schedule.quotation_no)}</td>
+              <td className="px-4 py-2">{n(schedule.quantity).toLocaleString()}</td>
+              <td className="px-4 py-2">{text(schedule.product_name)}</td>
+              <td className="px-4 py-2">{day(schedule.start_date)}</td>
+              <td className="px-4 py-2">{day(schedule.due_date)}</td>
+              <td className="px-4 py-2">{officerName(schedule)}</td>
+            </tr>
+          ))}
+        </Table>
+        {!approvedSchedules.length && (
+          <Empty>
+            No approved projects are scheduled yet.
+          </Empty>
+        )}
+        {role === "project_manager" && myScheduleRequests.length > 0 && (
+          <div className="mt-5 rounded-xl border border-[#e4e8ef] bg-[#fafbfe] p-4">
+            <h2 className="text-[13px] font-semibold text-[#202938]">My project submissions</h2>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {myScheduleRequests.map((schedule) => (
+                <div key={text(schedule.id)} className="rounded-lg border border-[#e4e8ef] bg-white px-3 py-2 text-[12px]">
+                  <p className="font-medium text-[#202938]">{text(schedule.project_name, text(schedule.quotation_no))}</p>
+                  <p className="mt-0.5 text-[#687386]">{day(schedule.start_date)} – {day(schedule.due_date)}</p>
+                  <div className="mt-1"><Status value={text(schedule.status, "pending")} /></div>
+                  {text(schedule.decision_note) && <p className="mt-1 text-[#687386]">{text(schedule.decision_note)}</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+      {open && (
+        <Dialog
+          title="Submit project for approval"
+          fields={scheduleFields}
+          values={values}
+          setValues={setValues}
+          save={() => void save()}
+          close={() => setOpen(false)}
+          saving={saving}
+          saveLabel="Submit for approval"
+          className="max-w-2xl"
+          onFieldChange={(key, value, current) => {
+            if (key !== "quotation_id") return { ...current, [key]: value };
+            const quote = approvedQuotes.find(
+              (item) => text(item.id, "") === value.split("|")[0],
+            );
+            return {
+              ...current,
+              quotation_id: value,
+              project_name: text(quote?.project_name),
+              client_name: text(quote?.client_name),
+              product_name: text(quote?.project_types),
+              quantity: quote?.project_quantity == null ? "" : String(quote.project_quantity),
+            };
+          }}
+        />
+      )}
+    </Panel>
   );
 }
 
@@ -4782,6 +5113,8 @@ function Quotations({
   profileName,
   mode = "quotation",
   pageLayout = false,
+  leadWorkspaceMode,
+  onLeadWorkspaceModeChange,
 }: {
   store: Store;
   orgId: string;
@@ -4791,6 +5124,8 @@ function Quotations({
   profileName: string;
   mode?: "quotation" | "costing";
   pageLayout?: boolean;
+  leadWorkspaceMode?: LeadWorkspaceMode;
+  onLeadWorkspaceModeChange?: (mode: LeadWorkspaceMode) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [editingQuote, setEditingQuote] = useState<Row | null>(null);
@@ -5430,6 +5765,13 @@ function Quotations({
         }
         variant={pageLayout ? "page" : "card"}
       >
+        {leadWorkspaceMode && onLeadWorkspaceModeChange && (
+          <LeadWorkspaceTabs
+            active={leadWorkspaceMode}
+            onChange={onLeadWorkspaceModeChange}
+            className="px-4 sm:px-5"
+          />
+        )}
         <div className="flex flex-wrap gap-2 border-t border-[#edf0f5] px-4 py-2.5 sm:px-5">
           <label className="relative min-w-0 flex-1 sm:min-w-56 sm:max-w-md">
             <Search className="absolute left-3 top-2.5 text-[#8b92a1]" size={15} />
@@ -6993,7 +7335,7 @@ function LeadChangeRequestReview({
     date_sent: "Date sent",
     date_contacted: "Date contacted",
     contact_method: "Outbound method",
-    evaluation_number: "Evaluation status",
+    evaluation_number: "Lead status",
     done_deal_status: "Done Deal status",
   };
   const valueFor = (key: string, value: unknown) =>
@@ -7075,7 +7417,7 @@ function Submissions({
 }) {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Row | null>(null);
-  const [tab, setTab] = useState<"costings" | "projects" | "leads" | "revisions">("costings");
+  const [tab, setTab] = useState<"costings" | "projects" | "leads" | "revisions" | "calendar_projects">("costings");
   const [selectedProjectEdit, setSelectedProjectEdit] = useState<Row | null>(null);
   const [selectedLeadChange, setSelectedLeadChange] = useState<Row | null>(null);
   const pendingCostings = store.quotations.filter(
@@ -7202,6 +7544,33 @@ function Submissions({
     );
     await reload();
   };
+  const decideProjectSchedule = async (
+    schedule: Row,
+    decision: "approved" | "rejected",
+  ) => {
+    if (!schedule.id) return;
+    setSavingId(text(schedule.id));
+    try {
+      const client = createClient();
+      const { data } = await client.auth.getUser();
+      if (!data.user) throw new Error("Please sign in again before reviewing this project.");
+      const { error } = await client.rpc("review_project_schedule", {
+        p_schedule_id: schedule.id,
+        p_decision: decision,
+      });
+      if (error) throw error;
+      notice(
+        decision === "approved"
+          ? "Project approved and added to the production calendar."
+          : "Project schedule rejected.",
+      );
+      await reload();
+    } catch (error) {
+      notice(error instanceof Error ? error.message : "Project review could not be saved.");
+    } finally {
+      setSavingId(null);
+    }
+  };
   const pendingProjectEdits = store.project_edit_requests.filter(
     (request) => text(request.status) === "pending",
   );
@@ -7211,21 +7580,31 @@ function Submissions({
   const pendingQuotationRevisions = store.quotation_revision_requests.filter(
     (request) => text(request.status) === "pending",
   );
+  const pendingProjectSchedules = store.project_schedules.filter(
+    (schedule) => text(schedule.status) === "pending",
+  );
   const projectOfficerName = (request: Row) =>
     text(
       store.profiles.find((profile) => profile.id === request.submitted_by)
         ?.full_name,
       "Project Officer",
     );
+  const scheduleOfficerName = (schedule: Row) =>
+    text(
+      store.profiles.find((profile) => profile.id === schedule.assigned_to)
+        ?.full_name,
+      "Project Officer",
+    );
   return (
     <Panel
       title="General Manager Submissions"
-      detail="Review Costing Breakdowns, revisions, project edits, and Lead change requests."
+      detail="Review Costing Breakdowns, revisions, project schedules, edits, and Lead change requests."
       hideHeading
     >
       <div className="flex gap-1 border-b border-[#e4e8ef] px-5">
         <button type="button" onClick={() => setTab("costings")} className={`px-3 py-2 text-[12px] font-medium ${tab === "costings" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Costing Reviews ({pendingCostings.length})</button>
         <button type="button" onClick={() => setTab("revisions")} className={`px-3 py-2 text-[12px] font-medium ${tab === "revisions" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Costing Revisions ({pendingQuotationRevisions.length})</button>
+        <button type="button" onClick={() => setTab("calendar_projects")} className={`px-3 py-2 text-[12px] font-medium ${tab === "calendar_projects" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Project Calendar ({pendingProjectSchedules.length})</button>
         <button type="button" onClick={() => setTab("projects")} className={`px-3 py-2 text-[12px] font-medium ${tab === "projects" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Project Edits ({pendingProjectEdits.length})</button>
         <button type="button" onClick={() => setTab("leads")} className={`px-3 py-2 text-[12px] font-medium ${tab === "leads" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Lead Changes ({pendingLeadChanges.length})</button>
       </div>
@@ -7297,6 +7676,22 @@ function Submissions({
           })}
         </Table>
       ) : <Empty>No Costing Breakdown revisions are awaiting review.</Empty>)}
+      {tab === "calendar_projects" && (pendingProjectSchedules.length ? (
+        <Table labels={["Project", "Client", "Quotation code", "Quantity", "Product", "Schedule", "Project Officer", "Review"]} minWidth={1020}>
+          {pendingProjectSchedules.map((schedule) => (
+            <tr key={text(schedule.id)}>
+              <td className="px-5 py-3 font-medium">{text(schedule.project_name)}</td>
+              <td className="px-5 py-3">{text(schedule.client_name)}</td>
+              <td className="px-5 py-3">{text(schedule.quotation_no)}</td>
+              <td className="px-5 py-3">{n(schedule.quantity).toLocaleString()}</td>
+              <td className="px-5 py-3">{text(schedule.product_name)}</td>
+              <td className="px-5 py-3">{day(schedule.start_date)} – {day(schedule.due_date)}</td>
+              <td className="px-5 py-3">{scheduleOfficerName(schedule)}</td>
+              <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve project schedule" tone="green" disabled={savingId === schedule.id} onClick={() => void decideProjectSchedule(schedule, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project schedule" tone="red" disabled={savingId === schedule.id} onClick={() => void decideProjectSchedule(schedule, "rejected")}><X size={15} /></ActionIcon></div></td>
+            </tr>
+          ))}
+        </Table>
+      ) : <Empty>No Project Calendar submissions are awaiting review.</Empty>)}
       {tab === "projects" && (pendingProjectEdits.length ? (
         <Table labels={["Project", "Project Officer", "Submitted", "Requested changes", "Review"]}>
           {pendingProjectEdits.map((request) => {
@@ -9259,6 +9654,16 @@ function Dashboard({
   const dashboardQuarterTarget = sharedKpis ? n(sharedKpis.quarter_target) : quarterlyTargetValue;
   const dashboardQuarterProgress = dashboardQuarterTarget ? Math.min(Math.round((dashboardQuarterSales / dashboardQuarterTarget) * 100), 100) : 0;
   const readOnlyKpiView = isProjectOfficer ? "Dashboard" as View : "Finance" as View;
+  const ongoingMockups = store.leads.filter(
+    (lead) =>
+      n(lead.evaluation_number) === 7 &&
+      text(lead.mockup_status, "").toLowerCase() === "ongoing",
+  ).length;
+  const submittedMockups = store.leads.filter(
+    (lead) =>
+      n(lead.evaluation_number) === 7 &&
+      text(lead.mockup_status, "").toLowerCase() === "submitted",
+  ).length;
   const primaryMetrics = [
     { label: "Total sales", value: peso.format(dashboardSales), detail: "Invoiced this month", icon: TrendingUp, iconClass: "bg-[#1769e8] text-white", accent: "bg-[#1769e8]", view: readOnlyKpiView },
     { label: "Collections received", value: peso.format(dashboardCollections), detail: "Payments received", icon: PhilippinePeso, iconClass: "bg-[#16854f] text-white", accent: "bg-[#16854f]", view: readOnlyKpiView },
@@ -9271,6 +9676,12 @@ function Dashboard({
     { label: "Price quotations", value: dashboardQuotes, detail: "Sent or approved", icon: FileText, tone: "bg-[#1769e8]", view: "Price Quotations" as View },
     { label: "Open costings", value: dashboardOpenCostings, detail: "Draft, pending, or needing revision", icon: ReceiptText, tone: "bg-[#d98a1d]", view: "Costing Breakdown" as View },
   ];
+  const generalManagerMockupMetrics = role === "admin"
+    ? [
+        { label: "Ongoing mockup", value: ongoingMockups, detail: "Projects in mockup progress", icon: ImageIcon, tone: "bg-[#7043ca]", view: "Leads" as View },
+        { label: "Submitted mockup", value: submittedMockups, detail: "Projects awaiting mockup review", icon: ImageIcon, tone: "bg-[#1769e8]", view: "Leads" as View },
+      ]
+    : [];
   const funnel = [
     { label: "Leads generated", value: dashboardLeads, width: "w-full", color: "bg-[#7043ca]", view: isProjectOfficer ? "Dashboard" as View : "Leads" as View },
     { label: "Price quotations", value: dashboardQuotes, width: "w-[72%]", color: "bg-[#1769e8]", view: isProjectOfficer ? "Dashboard" as View : "Price Quotations" as View },
@@ -9308,11 +9719,7 @@ function Dashboard({
   const funnelMax = Math.max(1, ...funnel.map((stage) => stage.value));
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h2 className="text-[18px] font-semibold tracking-[-.02em] text-[#151922]">Dashboard</h2>
-          <p className="mt-0.5 text-[12px] text-[#626b7a]">Here is the latest organization sales and collections activity.</p>
-        </div>
+      <div className="flex flex-wrap justify-end gap-3">
         <label className="flex h-9 items-center gap-2 rounded-lg border border-[#dfe4eb] bg-white px-3 text-[12px] font-medium text-[#4b5565] shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
           <CalendarDays size={15} className="text-[#c43b43]" />
           <span className="sr-only">Reporting month</span>
@@ -9361,7 +9768,7 @@ function Dashboard({
           </section>
           {canReviewSubmissions && (
             <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {operationsMetrics.map(({ label, value, detail, icon: Icon, tone, view }) => (
+              {[...operationsMetrics, ...generalManagerMockupMetrics].map(({ label, value, detail, icon: Icon, tone, view }) => (
                 <button
                   key={label}
                   type="button"
@@ -10205,7 +10612,7 @@ export function HuswellWorkspace({
   const [active, setActive] = useState<View>(
     initialView ?? (role === "accountant" ? "Finance" : "Dashboard"),
   );
-  const [leadMode, setLeadMode] = useState<"leads" | "projects">("leads");
+  const [leadMode, setLeadMode] = useState<LeadWorkspaceMode>("leads");
   const [mobile, setMobile] = useState(false);
   const [store, setStore] = useState<Store>(blank);
   const [loading, setLoading] = useState(true);
@@ -10217,6 +10624,21 @@ export function HuswellWorkspace({
   const canEditOwnProfile = ["owner", "admin", "project_manager"].includes(
     role,
   );
+  const selectLeadWorkspaceMode = useCallback((mode: LeadWorkspaceMode) => {
+    setLeadMode(mode);
+    setActive("Leads");
+  }, []);
+  const navigate = useCallback((view: View) => {
+    if (view === "Costing Breakdown") return selectLeadWorkspaceMode("costing");
+    if (view === "Price Quotations") return selectLeadWorkspaceMode("quotation");
+    if (view === "Projects") {
+      setLeadMode("projects");
+      setActive("Projects");
+      return;
+    }
+    if (view === "Leads") setLeadMode("leads");
+    setActive(view);
+  }, [selectLeadWorkspaceMode]);
   const load = useCallback(async () => {
     setLoading(true);
     const childTables: TableName[] = [
@@ -10267,6 +10689,7 @@ export function HuswellWorkspace({
     super_admin: [
       "Dashboard",
       "Leads",
+      "Projects",
       "Costing Breakdown",
       "Price Quotations",
       "Suppliers & Materials",
@@ -10277,6 +10700,7 @@ export function HuswellWorkspace({
     owner: [
       "Dashboard",
       "Leads",
+      "Projects",
       "Costing Breakdown",
       "Price Quotations",
       "Suppliers & Materials",
@@ -10287,6 +10711,7 @@ export function HuswellWorkspace({
     admin: [
       "Dashboard",
       "Leads",
+      "Projects",
       "Costing Breakdown",
       "Price Quotations",
       "Suppliers & Materials",
@@ -10297,6 +10722,7 @@ export function HuswellWorkspace({
     project_manager: [
       "Dashboard",
       "Leads",
+      "Projects",
       "Costing Breakdown",
       "Price Quotations",
       "Suppliers & Materials",
@@ -10327,8 +10753,7 @@ export function HuswellWorkspace({
       items: [
         { view: "Dashboard", icon: LayoutDashboard },
         { view: "Leads", icon: ClipboardCheck },
-        { view: "Costing Breakdown", icon: ReceiptText },
-        { view: "Price Quotations", icon: FileText },
+        { view: "Projects", icon: ClipboardCheck },
         { view: "Suppliers & Materials", icon: UsersRound },
       ],
     },
@@ -10354,7 +10779,7 @@ export function HuswellWorkspace({
     .filter((group) => group.items.length > 0);
   const pageHeader: Record<View, { title: string; detail: string }> = {
     Dashboard: {
-      title: role === "project_manager" ? "KPI Dashboard" : "Dashboard",
+      title: role === "project_manager" || role === "admin" ? "KPI Dashboard" : "Dashboard",
       detail:
         role === "project_manager"
           ? "Track your lead, costing, quotation, and supplier key performance indicators."
@@ -10450,6 +10875,14 @@ export function HuswellWorkspace({
     },
   };
   const activePageHeader = pageHeader[active];
+  const activeLeadWorkspaceMode: LeadWorkspaceMode =
+    active === "Projects"
+      ? "projects"
+      : active === "Costing Breakdown"
+        ? "costing"
+        : active === "Price Quotations"
+          ? "quotation"
+          : leadMode;
   const content =
     active === "Profile" ? (
       <AccountProfileDialog open embedded role={role} />
@@ -10473,43 +10906,41 @@ export function HuswellWorkspace({
         </div>
       </Panel>
     ) : active === "Dashboard" ? (
-      <Dashboard store={store} go={setActive} role={role} orgId={organizationId} />
-    ) : active === "Leads" || active === "Projects" ? (
-      <Records
-        module={active === "Projects" || leadMode === "projects" ? projects : leads}
+      <Dashboard store={store} go={navigate} role={role} orgId={organizationId} />
+    ) : active === "Projects" ? (
+      <ProjectCalendar
         store={store}
         orgId={organizationId}
         reload={load}
         notice={setMessage}
         role={role}
-        leadMode={active === "Projects" ? "projects" : leadMode}
-        onLeadModeChange={(mode) => {
-          setLeadMode(mode);
-          setActive("Leads");
-        }}
       />
-    ) : active === "Costing Breakdown" ? (
-      <Quotations
-        store={store}
-        orgId={organizationId}
-        reload={load}
-        notice={setMessage}
-        role={role}
-        profileName={profileName}
-        mode="costing"
-        pageLayout
-      />
-    ) : active === "Price Quotations" ? (
-      <Quotations
-        store={store}
-        orgId={organizationId}
-        reload={load}
-        notice={setMessage}
-        role={role}
-        profileName={profileName}
-        mode="quotation"
-        pageLayout
-      />
+    ) : ["Leads", "Costing Breakdown", "Price Quotations"].includes(active) ? (
+      activeLeadWorkspaceMode === "costing" || activeLeadWorkspaceMode === "quotation" ? (
+        <Quotations
+          store={store}
+          orgId={organizationId}
+          reload={load}
+          notice={setMessage}
+          role={role}
+          profileName={profileName}
+          mode={activeLeadWorkspaceMode === "costing" ? "costing" : "quotation"}
+          pageLayout
+          leadWorkspaceMode={activeLeadWorkspaceMode}
+          onLeadWorkspaceModeChange={selectLeadWorkspaceMode}
+        />
+      ) : (
+        <Records
+          module={leads}
+          store={store}
+          orgId={organizationId}
+          reload={load}
+          notice={setMessage}
+          role={role}
+          leadMode={activeLeadWorkspaceMode}
+          onLeadModeChange={selectLeadWorkspaceMode}
+        />
+      )
     ) : active === "Suppliers & Materials" ? (
       <SupplierMaterials
         store={store}
@@ -10629,7 +11060,7 @@ export function HuswellWorkspace({
       <aside
         className={`${mobile ? "translate-x-0" : "-translate-x-full"} sidebar-shell fixed inset-y-0 z-30 flex w-64 flex-col border-r border-[#e2e7ef] bg-white p-4 text-[#475467] transition-transform lg:translate-x-0`}
       >
-        <div className="mb-7 flex flex-col items-center px-1">
+        <div className="mb-5 flex flex-col items-center px-1">
           <Image
             src="https://www.huswelltrading.com/logo/huswell-logo.png"
             alt="Huswell Trading"
@@ -10639,20 +11070,20 @@ export function HuswellWorkspace({
             className="huswell-sidebar-logo h-auto w-24"
           />
         </div>
-        <nav className="sidebar-scroll flex-1 space-y-2 overflow-y-auto">
+        <nav className="sidebar-scroll flex-1 space-y-0.5 overflow-y-auto">
           {nav.map((group) => (
             <div key={group.label}>
-              <div className="space-y-1">
+              <div className="space-y-0.5">
                 {group.items.map(({ view, icon: Icon }) => {
                   const navigationLabel =
-                    view === "Dashboard" && role === "project_manager"
+                    view === "Dashboard" && ["project_manager", "admin"].includes(role)
                       ? "KPI"
                       : view;
                   return (
                     <button
                     key={view}
                     onClick={() => {
-                      setActive(view);
+                      navigate(view);
                       setMobile(false);
                     }}
                     style={{
@@ -10660,7 +11091,7 @@ export function HuswellWorkspace({
                       lineHeight: "20px",
                     }}
                     aria-current={active === view ? "page" : undefined}
-                    className={`${active === view ? "bg-[#c43b43] font-medium text-white" : "text-[#202124] hover:bg-[#f1f3f4]"} group flex min-h-9 w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c43b43] focus-visible:ring-offset-2 focus-visible:ring-offset-white`}
+                    className={`${active === view ? "bg-[#c43b43] font-medium text-white" : "text-[#202124] hover:bg-[#f1f3f4]"} group flex min-h-9 w-full items-center gap-2.5 rounded-lg px-3 py-1 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c43b43] focus-visible:ring-offset-2 focus-visible:ring-offset-white`}
                   >
                     <Icon
                       size={17}
@@ -10742,7 +11173,7 @@ export function HuswellWorkspace({
         />
       )}
       <main className="min-h-screen bg-[#fafafa] lg:pl-64">
-        <header className="flex min-h-[64px] items-center justify-between gap-3 border-b border-[#dfe5ed] bg-white px-4 py-3 sm:min-h-[72px] sm:px-5 lg:px-6">
+        <header className="sticky top-0 z-30 flex min-h-[64px] items-center justify-between gap-3 border-b border-[#dfe5ed] bg-white px-4 py-3 sm:min-h-[72px] sm:px-5 lg:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <button
               className="grid size-10 shrink-0 place-items-center rounded-lg text-[#151922] hover:bg-[#f7f7f8] lg:hidden"
@@ -10751,14 +11182,7 @@ export function HuswellWorkspace({
             >
               <Menu size={21} />
             </button>
-            <div className="min-w-0">
-              <h1 className="truncate text-[15px] font-semibold text-[#202124] sm:text-[16px]">
-                {activePageHeader.title}
-              </h1>
-              <p className="hidden truncate text-[12px] text-[#6b7280] sm:block">
-                {activePageHeader.detail}
-              </p>
-            </div>
+            <span className="sr-only">{activePageHeader.title}</span>
           </div>
           <div className="flex shrink-0 items-center gap-3 text-[#626b7a]">
             <span className="hidden items-center gap-2 text-[12px] font-medium sm:flex">

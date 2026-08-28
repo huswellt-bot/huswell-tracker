@@ -42,7 +42,10 @@
 40. Run `046_quarterly_sales_targets.sql` to add quarterly sales quotas used by the KPI dashboard.
 41. Run `047_shared_kpi_aggregates.sql` to give the KPI dashboard shared organization totals without exposing source records.
 42. Run `048_shared_open_costings_kpi.sql` to include the organization-wide Open Costings total on the Sales Project Officer KPI cards.
-43. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
+43. Run `049_expand_done_deal_statuses.sql` before using the twelve-stage Done Deal project workflow.
+44. Run `050_project_calendar.sql` to enable approved Price Quotation project scheduling and the Project Calendar.
+45. Run `051_project_schedule_approvals.sql` to require General Manager approval for each Project Calendar entry and add its approval workflow.
+46. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 
