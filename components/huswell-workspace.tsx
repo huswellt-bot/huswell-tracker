@@ -58,6 +58,8 @@ import {
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
+  Area,
+  AreaChart,
   Bar,
   BarChart,
   CartesianGrid,
@@ -134,6 +136,8 @@ type TableName =
   | "target_goals"
   | "approval_requests"
   | "project_edit_requests"
+  | "lead_change_requests"
+  | "quotation_revision_requests"
   | "activity_log"
   | "leads"
   | "supplier_payables"
@@ -205,6 +209,8 @@ const tables: TableName[] = [
   "target_goals",
   "approval_requests",
   "project_edit_requests",
+  "lead_change_requests",
+  "quotation_revision_requests",
   "activity_log",
   "leads",
   "supplier_payables",
@@ -223,6 +229,32 @@ const text = (value: unknown, fallback = "—") =>
   value === null || value === undefined || value === ""
     ? fallback
     : String(value);
+const projectOfficerOptions = (store: Store) =>
+  store.organization_members
+    .filter((member) => text(member.role, "") === "project_manager")
+    .map((member) => {
+      const id = text(member.user_id, "");
+      return {
+        id,
+        name: text(
+          store.profiles.find((profile) => profile.id === id)?.full_name,
+          "Project Officer",
+        ),
+      };
+    })
+    .filter((officer) => Boolean(officer.id))
+    .sort((left, right) => left.name.localeCompare(right.name));
+const projectOfficerIdForQuote = (store: Store, quote: Row) => {
+  const sourceCosting = quote.costing_source_id
+    ? store.quotations.find((item) => item.id === quote.costing_source_id)
+    : quote;
+  return text(
+    sourceCosting?.prepared_by_user_id ??
+      sourceCosting?.submitted_by ??
+      sourceCosting?.created_by,
+    "",
+  );
+};
 const titleCase = (value: string) =>
   value.replace(
     /(^|[^A-Za-z])([a-z])/g,
@@ -323,6 +355,7 @@ const day = (value: unknown) =>
       }).format(new Date(String(value)))
     : "—";
 const isoToday = () => new Date().toISOString().slice(0, 10);
+const currentMonth = () => isoToday().slice(0, 7);
 const ref = (prefix: string) =>
   `${prefix}-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
 const DEFAULT_QUOTATION_TERMS = [
@@ -512,6 +545,8 @@ const roleReadableTables: Record<string, TableName[]> = {
     "quotations",
     "quotation_items",
     "project_edit_requests",
+    "lead_change_requests",
+    "quotation_revision_requests",
   ],
   sales: [
     "business_settings",
@@ -636,7 +671,7 @@ const leads: Module = {
   title: "Leads",
   detail:
     "Register outbound client contacts using the same fields as the outbound tracker.",
-  add: "Add lead / project",
+  add: "Add lead",
   fields: [
     { key: "date_sent", label: "Date sent", type: "date" },
     { key: "contact_name", label: "Client name", required: true },
@@ -676,10 +711,10 @@ const leads: Module = {
         </>
       ),
     },
-    { label: "Contact", value: (r) => text(r.contact_name, "—") },
+    { label: "Client's Name", value: (r) => text(r.contact_name, "—") },
     { label: "Company name", value: (r) => text(r.client_name, "—") },
     { label: "Email", value: (r) => text(r.email, "—") },
-    { label: "Contact number", value: (r) => text(r.phone, "—") },
+    { label: "Phone Number", value: (r) => text(r.phone, "—") },
     {
       label: "Outbound caller",
       value: (r, s) => {
@@ -1115,6 +1150,7 @@ const targets: Module = {
       options: [
         "monthly_item",
         "monthly_sales",
+        "quarterly_sales",
         "annual_sales",
         "daily_task",
         "weekly_task",
@@ -1456,12 +1492,14 @@ function Panel({
   action,
   children,
   variant = "card",
+  hideHeading = false,
 }: {
   title: string;
   detail: string;
   action?: ReactNode;
   children: ReactNode;
   variant?: "card" | "page";
+  hideHeading?: boolean;
 }) {
   return (
     <section
@@ -1471,19 +1509,26 @@ function Panel({
           : "overflow-hidden rounded-[14px] border border-[#dfe5ed] bg-white"
       }
     >
-      <header
-        className={`flex flex-wrap items-start justify-between gap-3 ${variant === "page" ? "border-b border-[#e9edf2] px-4 py-3 sm:px-6 lg:px-7" : "p-4 sm:p-5"}`}
-      >
-        <div className="min-w-0">
-          <h2 className="text-[15px] font-semibold">{title}</h2>
-          <p
-            className={`${variant === "page" ? "mt-0.5" : "mt-1"} text-[12px] text-[#8b92a1]`}
-          >
-            {detail}
-          </p>
+      {!hideHeading && (
+        <header
+          className={`flex flex-wrap items-start justify-between gap-3 ${variant === "page" ? "border-b border-[#e9edf2] px-4 py-3 sm:px-6 lg:px-7" : "p-4 sm:p-5"}`}
+        >
+          <div className="min-w-0">
+            <h2 className="text-[15px] font-semibold">{title}</h2>
+            <p
+              className={`${variant === "page" ? "mt-0.5" : "mt-1"} text-[12px] text-[#8b92a1]`}
+            >
+              {detail}
+            </p>
+          </div>
+          {action}
+        </header>
+      )}
+      {hideHeading && action && (
+        <div className="fixed right-4 bottom-4 z-20 flex gap-2 sm:right-5 sm:bottom-5 lg:right-6 lg:bottom-6">
+          {action}
         </div>
-        {action}
-      </header>
+      )}
       {children}
     </section>
   );
@@ -1517,87 +1562,60 @@ type MonthlyPerformancePoint = {
 
 function MonthlyPerformanceChart({
   data,
+  primaryLabel = "Invoiced revenue",
+  secondaryLabel = "Recorded expenses",
+  primaryColor = "#1769e8",
+  secondaryColor = "#159957",
 }: {
   data: MonthlyPerformancePoint[];
+  primaryLabel?: string;
+  secondaryLabel?: string;
+  primaryColor?: string;
+  secondaryColor?: string;
 }) {
-  const max = Math.max(
-    1,
-    ...data.flatMap((point) => [point.revenue, point.expense]),
-  );
   const compact = new Intl.NumberFormat("en-PH", {
     notation: "compact",
     maximumFractionDigits: 1,
   });
-  const chartHeight = 150;
-  const baseline = 178;
-  const left = 42;
-  const plotWidth = 654;
-  const slot = plotWidth / data.length;
-  const barWidth = Math.max(4, Math.min(16, (slot - 8) / 2));
 
   return (
-    <div className="px-5 pb-5">
+    <div className="px-4 pb-4 pt-1 sm:px-5">
       <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] text-[#626b7a]">
         <span className="inline-flex items-center gap-2">
-          <i className="size-2 rounded-sm bg-[#1769e8]" /> Invoiced revenue
+          <i className="size-2 rounded-full" style={{ backgroundColor: primaryColor }} /> {primaryLabel}
         </span>
         <span className="inline-flex items-center gap-2">
-          <i className="size-2 rounded-sm bg-[#f0a348]" /> Recorded expenses
+          <i className="size-2 rounded-full" style={{ backgroundColor: secondaryColor }} /> {secondaryLabel}
         </span>
       </div>
-      <svg
-        viewBox="0 0 720 218"
-        className="h-auto w-full"
-        role="img"
-        aria-label="Monthly invoiced revenue and recorded expenses"
-      >
-        {[0, 0.5, 1].map((ratio) => {
-          const y = baseline - chartHeight * ratio;
-          return (
-            <g key={ratio}>
-              <line x1={left} x2="704" y1={y} y2={y} stroke="#edf0f5" />
-              <text x="0" y={y + 4} fill="#8b92a1" fontSize="10">
-                {compact.format(max * ratio)}
-              </text>
-            </g>
-          );
-        })}
-        {data.map((point, index) => {
-          const center = left + slot * index + slot / 2;
-          const revenueHeight = (point.revenue / max) * chartHeight;
-          const expenseHeight = (point.expense / max) * chartHeight;
-          return (
-            <g key={point.label}>
-              <title>{`${point.label}: ${peso.format(point.revenue)} invoiced revenue, ${peso.format(point.expense)} expenses`}</title>
-              <rect
-                x={center - barWidth - 2}
-                y={baseline - revenueHeight}
-                width={barWidth}
-                height={revenueHeight}
-                rx="2"
-                fill="#1769e8"
-              />
-              <rect
-                x={center + 2}
-                y={baseline - expenseHeight}
-                width={barWidth}
-                height={expenseHeight}
-                rx="2"
-                fill="#f0a348"
-              />
-              <text
-                x={center}
-                y="202"
-                textAnchor="middle"
-                fill="#8b92a1"
-                fontSize="10"
-              >
-                {point.label}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
+      <div className="h-60" role="img" aria-label={`Monthly ${primaryLabel.toLowerCase()} and ${secondaryLabel.toLowerCase()}`}>
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={data} margin={{ top: 8, right: 6, left: -12, bottom: 0 }}>
+            <defs>
+              <linearGradient id="dashboard-primary-area" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor={primaryColor} stopOpacity={0.28} />
+                <stop offset="95%" stopColor={primaryColor} stopOpacity={0.01} />
+              </linearGradient>
+              <linearGradient id="dashboard-secondary-area" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor={secondaryColor} stopOpacity={0.14} />
+                <stop offset="95%" stopColor={secondaryColor} stopOpacity={0.01} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid vertical={false} stroke="#edf0f5" strokeDasharray="3 5" />
+            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#8b92a1", fontSize: 10 }} dy={8} />
+            <YAxis axisLine={false} tickLine={false} tick={{ fill: "#8b92a1", fontSize: 10 }} tickFormatter={(value) => compact.format(value)} width={42} />
+            <Tooltip
+              cursor={{ stroke: "#cfd7e3", strokeDasharray: "3 3" }}
+              contentStyle={{ borderRadius: 10, border: "1px solid #e4e8ef", boxShadow: "0 10px 24px rgb(16 24 40 / 12%)", padding: "9px 11px" }}
+              labelStyle={{ color: "#151922", fontSize: 12, fontWeight: 600, marginBottom: 5 }}
+              itemStyle={{ color: "#626b7a", fontSize: 11, padding: 0 }}
+              formatter={(value, name) => [peso.format(Number(value)), name === "revenue" ? primaryLabel : secondaryLabel]}
+            />
+            <Area type="monotone" dataKey="expense" name="expense" stroke={secondaryColor} strokeWidth={2.25} fill="url(#dashboard-secondary-area)" activeDot={{ r: 4, fill: secondaryColor, stroke: "#fff", strokeWidth: 2 }} />
+            <Area type="monotone" dataKey="revenue" name="revenue" stroke={primaryColor} strokeWidth={2.75} fill="url(#dashboard-primary-area)" activeDot={{ r: 4, fill: primaryColor, stroke: "#fff", strokeWidth: 2 }} />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }
@@ -1733,7 +1751,7 @@ function Table({
   children,
   minWidth = 680,
   className,
-  scrollable = false,
+  scrollable = true,
 }: {
   labels: string[];
   children: ReactNode;
@@ -1750,7 +1768,7 @@ function Table({
         style={{ minWidth }}
       >
         <thead
-          className={`border-y border-[#edf0f5] bg-[#f8faff] text-[11px] font-semibold text-[#626b7a] ${scrollable ? "sticky top-0 z-10" : ""}`}
+          className={`border-y border-[#edf0f5] bg-[#f8faff] text-[12px] font-bold text-[#4b5565] ${scrollable ? "sticky top-0 z-10" : ""}`}
         >
           <tr>
             {labels.map((l) => (
@@ -2085,6 +2103,7 @@ function Records({
   role,
   onPrint,
   leadMode = "leads",
+  onLeadModeChange,
 }: {
   module: Module;
   store: Store;
@@ -2094,6 +2113,7 @@ function Records({
   role: string;
   onPrint?: (r: Row) => void;
   leadMode?: "leads" | "projects";
+  onLeadModeChange?: (mode: "leads" | "projects") => void;
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Row | null>(null);
@@ -2104,8 +2124,12 @@ function Records({
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [evaluationFilter, setEvaluationFilter] = useState("all");
   const [doneDealStatusFilter, setDoneDealStatusFilter] = useState("all");
-  const [monthFilter, setMonthFilter] = useState("");
+  const [monthFilter, setMonthFilter] = useState(currentMonth);
+  const [projectOfficerFilter, setProjectOfficerFilter] = useState("all");
   const isProjectsPage = module.table === "leads" && leadMode === "projects";
+  const isGeneralManager = role === "admin";
+  const canFilterByProjectOfficer = isGeneralManager && !isProjectsPage;
+  const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
   const canCreate =
     !isProjectsPage && canAccess(role, module.table, "create");
   const canUpdate = canAccess(role, module.table, "update");
@@ -2116,6 +2140,12 @@ function Records({
   const ownProjectEditRequests =
     isProjectsPage && role === "project_manager"
       ? store.project_edit_requests.filter(
+          (request) => text(request.submitted_by, "") === currentUserId,
+        )
+      : [];
+  const ownLeadChangeRequests =
+    module.table === "leads" && !isProjectsPage && role === "project_manager"
+      ? store.lead_change_requests.filter(
           (request) => text(request.submitted_by, "") === currentUserId,
         )
       : [];
@@ -2144,7 +2174,15 @@ function Records({
         .filter(
           (r) =>
             module.table !== "leads" ||
+            isGeneralManager ||
             text(r.created_by, "") === currentUserId,
+        )
+        .filter(
+          (r) =>
+            module.table !== "leads" ||
+            !canFilterByProjectOfficer ||
+            projectOfficerFilter === "all" ||
+            text(r.assigned_to ?? r.created_by, "") === projectOfficerFilter,
         )
         .filter(
           (r) =>
@@ -2178,6 +2216,9 @@ function Records({
       query,
       currentUserId,
       isProjectsPage,
+      isGeneralManager,
+      canFilterByProjectOfficer,
+      projectOfficerFilter,
       evaluationFilter,
       doneDealStatusFilter,
       monthFilter,
@@ -2197,7 +2238,10 @@ function Records({
   });
   const leadColumns =
     module.table === "leads"
-      ? module.columns.map((column) =>
+      ? module.columns.filter(
+          (column) =>
+            role !== "project_manager" || column.label !== "Outbound caller",
+        ).map((column) =>
           column.label === "Lead / project"
             ? {
                 label: "Lead ID",
@@ -2288,6 +2332,25 @@ function Records({
         module === inventory ? "material" : payload.item_type || "product";
     if (
       editing?.id &&
+      module.table === "leads" &&
+      !isProjectsPage &&
+      role === "project_manager"
+    ) {
+      const { error } = await client.rpc("request_lead_change", {
+        p_lead_id: editing.id,
+        p_change_type: "update",
+        p_proposed_changes: payload,
+      });
+      setSaving(false);
+      if (error) return notice(error.message);
+      setOpen(false);
+      setEditing(null);
+      notice("Lead edit submitted for General Manager approval.");
+      await reload();
+      return;
+    }
+    if (
+      editing?.id &&
       isProjectsPage &&
       role === "project_manager"
     ) {
@@ -2347,9 +2410,27 @@ function Records({
     notice("Lead / project deleted.");
     await reload();
   };
+  const requestLeadDeletion = async (row: Row) => {
+    if (!row.id) return;
+    setSaving(true);
+    const { error } = await createClient().rpc("request_lead_change", {
+      p_lead_id: row.id,
+      p_change_type: "delete",
+      p_proposed_changes: {},
+    });
+    setSaving(false);
+    if (error) return notice(error.message);
+    notice("Lead deletion submitted for General Manager approval.");
+    await reload();
+  };
   const canDeleteLead = (row: Row) =>
     module.table === "leads" &&
     memberRole(role);
+  const canRequestLeadDeletion = (row: Row) =>
+    module.table === "leads" &&
+    !isProjectsPage &&
+    role === "project_manager" &&
+    text(row.created_by, "") === currentUserId;
   const canEditRow = (row: Row) =>
     canUpdate &&
     (module.table !== "leads" ||
@@ -2379,10 +2460,30 @@ function Records({
           </Table>
         </Panel>
       )}
+      {!isProjectsPage && role === "project_manager" && ownLeadChangeRequests.length > 0 && (
+        <Panel title="My Lead Change Requests" detail="Lead edits and deletions take effect only after General Manager approval.">
+          <Table labels={["Lead", "Requested", "Change", "Status", "General Manager note"]} minWidth={720}>
+            {ownLeadChangeRequests.map((request) => {
+              const lead = store.leads.find((item) => item.id === request.lead_id);
+              const changes = request.proposed_changes && typeof request.proposed_changes === "object" ? Object.keys(request.proposed_changes as Record<string, unknown>) : [];
+              return (
+                <tr key={text(request.id)}>
+                  <td className="px-4 py-3"><b>{text(lead?.project_name)}</b><small>{text(lead?.client_name)} · {text(lead?.contact_name)}</small></td>
+                  <td className="px-4 py-3">{day(request.submitted_at)}</td>
+                  <td className="px-4 py-3">{text(request.change_type, "") === "delete" ? "Deletion request" : changes.map((change) => change.replaceAll("_", " ")).join(", ")}</td>
+                  <td className="px-4 py-3"><Status value={request.status} /></td>
+                  <td className="px-4 py-3">{text(request.decision_note)}</td>
+                </tr>
+              );
+            })}
+          </Table>
+        </Panel>
+      )}
       <Panel
         title={module.title}
         detail={module.detail}
         variant={isPageLayout ? "page" : "card"}
+        hideHeading={isPageLayout}
         action={
           canCreate ? (
             <Button
@@ -2406,6 +2507,24 @@ function Records({
           ) : undefined
         }
       >
+        {module.table === "leads" && onLeadModeChange && (
+          <div className={`${contentPadding} flex gap-1 border-b border-[#e4e8ef] pt-2`}>
+            <button
+              type="button"
+              onClick={() => onLeadModeChange("leads")}
+              className={`px-3 py-2 text-[12px] font-medium ${!isProjectsPage ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}
+            >
+              Leads
+            </button>
+            <button
+              type="button"
+              onClick={() => onLeadModeChange("projects")}
+              className={`px-3 py-2 text-[12px] font-medium ${isProjectsPage ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}
+            >
+              Projects
+            </button>
+          </div>
+        )}
         {!isProjectsPage && module.table === "leads" && (
           <div className={`${contentPadding} border-t border-[#edf0f5] py-2.5`}>
             <span className="inline-flex items-center gap-2 rounded-md border border-[#d9e0e9] bg-[#f8faff] px-3 py-1.5 text-[12px] font-medium text-[#344054]">
@@ -2434,6 +2553,24 @@ function Records({
           </label>
           {module.table === "leads" ? (
             <>
+              {canFilterByProjectOfficer && (
+                <select
+                  aria-label="Filter by project officer"
+                  value={projectOfficerFilter}
+                  onChange={(event) => {
+                    setProjectOfficerFilter(event.target.value);
+                    setPage(0);
+                  }}
+                  className={`lead-filter-select min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${projectOfficerFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}
+                >
+                  <option value="all">All Project Officers</option>
+                  {projectOfficers.map((officer) => (
+                    <option key={officer.id} value={officer.id}>
+                      {officer.name}
+                    </option>
+                  ))}
+                </select>
+              )}
               {!isProjectsPage ? (
                 <select
                   aria-label="Filter evaluation status"
@@ -2534,11 +2671,21 @@ function Records({
                             <Printer size={15} />
                           </ActionIcon>
                         )}
-                        {canDeleteLead(row) && (
+                        {(canDeleteLead(row) || canRequestLeadDeletion(row)) && (
                           <ActionIcon
                             disabled={saving}
-                            onClick={() => void deleteLead(row)}
-                            label="Delete lead / project"
+                            onClick={() =>
+                              void (
+                                canDeleteLead(row)
+                                  ? deleteLead(row)
+                                  : requestLeadDeletion(row)
+                              )
+                            }
+                            label={
+                              canDeleteLead(row)
+                                ? "Delete lead / project"
+                                : "Request lead deletion"
+                            }
                             tone="red"
                           >
                             <Trash2 size={15} />
@@ -3805,7 +3952,7 @@ function QuotationDocument({
                   style={{
                     background: "#c43b43",
                     color: "#fff",
-                    fontWeight: 500,
+                    fontWeight: 700,
                     textAlign: "center",
                   }}
                 >
@@ -4171,7 +4318,7 @@ function QuotationDocument({
                 <b>Quotation no.:</b> {text(quote.quotation_no)}
               </p>
               <table className="mt-1 w-full border-collapse text-[11px]">
-                <thead style={{ display: "table-header-group" }}>
+                <thead className="font-bold" style={{ display: "table-header-group" }}>
                   <tr>
                     {[
                       ["ITEM", "w-[11%]"],
@@ -4526,7 +4673,7 @@ function CostingDocument({
           </header>
           <section className="mt-5 grid grid-cols-[minmax(0,1fr)_auto] gap-10"><div className="min-w-0"><h2 className="font-medium text-[#a22d35]">CLIENT INFORMATION</h2><dl className="mt-2 grid grid-cols-[150px_minmax(180px,1fr)] gap-y-1"><dt>Company Name:</dt><dd className="min-w-0 border border-[#d5dbe5] px-2 py-1">{companyName}</dd><dt>Client Name:</dt><dd className="min-w-0 border border-[#d5dbe5] px-2 py-1">{clientName}</dd><dt>Phone / Email:</dt><dd className="min-w-0 border border-[#d5dbe5] px-2 py-1">{text(quote.client_phone)}</dd></dl></div><div className="pt-7"><span>Date: </span><span className="inline-block min-w-36 border border-[#d5dbe5] px-2 py-1 text-center">{day(quote.issue_date)}</span></div></section>
           <section className="mt-5 grid grid-cols-2 gap-7 border-y border-[#111] py-3"><div><b>DETAILS</b><dl className="mt-2 grid grid-cols-[145px_1fr] gap-y-1"><dt>Size: L x W x H (in./cm.):</dt><dd className="border-b border-[#777] px-1">{text(quote.size_details)}</dd><dt>Quantity:</dt><dd className="border-b border-[#777] px-1">{text(quote.project_quantity)}</dd><dt>Delivery Date:</dt><dd className="border-b border-[#777] px-1">{day(quote.delivery_date)}</dd></dl></div><div><b>PROJECT TYPE</b><div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1.5">{projectTypeOptions.map((type) => <div key={type} className="flex items-center gap-2"><span className="inline-grid size-4 place-items-center border border-[#111] text-[11px]">{text(quote.project_types, "") === type ? "✓" : ""}</span><span>{type}</span></div>)}</div></div></section>
-          <table className="pdf-fixed-table mt-6 w-full border-collapse text-sm"><thead><tr className="bg-[#c43b43] text-white"><th className="w-[52%] border border-[#c43b43] p-2 text-left">Materials and Production</th><th className="w-[14%] border border-[#c43b43] p-2">Quantity</th><th className="w-[17%] border border-[#c43b43] p-2">Unit Cost</th><th className="w-[17%] border border-[#c43b43] p-2">Subtotal</th></tr></thead><tbody>{lines.map((line) => <tr key={text(line.id)}><td className="border border-[#d5dbe5] p-2">{text(line.description)}</td><td className="border border-[#d5dbe5] p-2 text-center">{n(line.quantity)}</td><td className="border border-[#d5dbe5] p-2 text-right">{peso.format(n(line.unit_cost))}</td><td className="border border-[#d5dbe5] p-2 text-right">{peso.format(n(line.line_total))}</td></tr>)}<tr className="font-medium"><td colSpan={3} className="border border-[#d5dbe5] bg-[#fff7f7] p-2">TOTAL ESTIMATED COGS</td><td className="border border-[#d5dbe5] bg-[#fff7f7] p-2 text-right">{peso.format(cogs)}</td></tr></tbody></table>
+          <table className="pdf-fixed-table mt-6 w-full border-collapse text-sm"><thead className="font-bold"><tr className="bg-[#c43b43] text-white"><th className="w-[52%] border border-[#c43b43] p-2 text-left">Materials and Production</th><th className="w-[14%] border border-[#c43b43] p-2">Quantity</th><th className="w-[17%] border border-[#c43b43] p-2">Unit Cost</th><th className="w-[17%] border border-[#c43b43] p-2">Subtotal</th></tr></thead><tbody>{lines.map((line) => <tr key={text(line.id)}><td className="border border-[#d5dbe5] p-2">{text(line.description)}</td><td className="border border-[#d5dbe5] p-2 text-center">{n(line.quantity)}</td><td className="border border-[#d5dbe5] p-2 text-right">{peso.format(n(line.unit_cost))}</td><td className="border border-[#d5dbe5] p-2 text-right">{peso.format(n(line.line_total))}</td></tr>)}<tr className="font-medium"><td colSpan={3} className="border border-[#d5dbe5] bg-[#fff7f7] p-2">TOTAL ESTIMATED COGS</td><td className="border border-[#d5dbe5] bg-[#fff7f7] p-2 text-right">{peso.format(cogs)}</td></tr></tbody></table>
           <section className="mt-7 max-w-sm border border-[#d5dbe5]"><h2 className="border-b border-[#d5dbe5] bg-[#fff7f7] px-3 py-2 font-medium text-[#a22d35]">MARKUP, VAT, EXPENSES</h2><Cost label={`Declared Markup (${n(quote.profit_margin_rate)}%)`} value={profit} /><Cost label={`Overhead Allocation (${n(quote.overhead_rate)}%)`} value={overhead} /><Cost label={`Buffer Margin (${n(quote.buffer_margin_rate)}%)`} value={buffer} /><Cost label={`Production Commission (${n(quote.commission_rate)}%)`} value={commission} /><Cost label={`VAT (${n(quote.vat_rate)}%)`} value={n(quote.vat_amount)} /><Cost label="SELLING PRICE VAT INC." value={n(quote.total_amount)} strong /><Cost label="SELLING PRICE VAT EX." value={sellingExVat} strong /></section>
           <section className="mt-12 flex items-end justify-between"><div className="w-56 text-center"><div className="h-14" /><div className="mx-auto w-52 border-b border-[#111] pb-1 font-semibold">{text(quote.representative)}</div><div>Sales Project Officer</div></div><div className="w-56 text-center"><div className="h-14">{approved && <img src="/marvin-tavarez-signature.png" alt="Signature of Mr. Marvin S. Tavarez" className="mx-auto h-14 max-w-full object-contain" />}</div><div className="mx-auto w-52 border-b border-[#111] pb-1 font-semibold">{approved ? "Mr. Marvin S. Tavarez" : "Pending approval"}</div><div>{approved ? `Approved and Signed By · ${day(quote.approved_at)}` : "Approved and Signed By"}</div></div></section>
         </article>
@@ -4585,7 +4732,7 @@ function InvoiceDocument({
             </div>
           </div>
           <table className="pdf-fixed-table w-full border-collapse">
-            <thead>
+            <thead className="font-bold">
               <tr className="border-y border-[#151922]">
                 <th className="w-[44%] p-2 text-left">Product / service</th>
                 <th className="w-[9%] p-2 text-right">Qty</th>
@@ -4684,6 +4831,19 @@ function Quotations({
   const [generatingPdf, setGeneratingPdf] = useState<"quotation" | "costing" | null>(null);
   const [saving, setSaving] = useState(false);
   const [quoteQuery, setQuoteQuery] = useState("");
+  const [monthFilter, setMonthFilter] = useState(currentMonth);
+  const [projectOfficerFilter, setProjectOfficerFilter] = useState("all");
+  const requestRevision = async (quote: Row) => {
+    if (!quote.id) return;
+    setSaving(true);
+    const { error } = await createClient().rpc("request_quotation_revision", {
+      p_costing_id: quote.id,
+    });
+    setSaving(false);
+    if (error) return notice(error.message);
+    notice("Costing Breakdown revision submitted for General Manager approval.");
+    await reload();
+  };
   const openPdf = (quote: Row, isCosting: boolean, shouldPrint: boolean) => {
     setPdfWindow(null);
     setPrintAfterOpen(shouldPrint);
@@ -4728,6 +4888,8 @@ function Quotations({
     }
   };
   const isGeneralManager = memberRole(role);
+  const canFilterByProjectOfficer = role === "admin";
+  const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
   const canGenerateCostingPdf = ["owner", "admin"].includes(role);
   const canDeleteQuote = ["owner", "admin"].includes(role);
   const canCreateQuote = mode === "costing"
@@ -5178,7 +5340,16 @@ function Quotations({
     JSON.stringify(store.leads.find((lead) => lead.id === quote.lead_id) ?? {})
       .toLowerCase()
       .includes(quoteQuery.toLowerCase()),
-  );
+  ).filter(
+    (quote) =>
+      !canFilterByProjectOfficer ||
+      projectOfficerFilter === "all" ||
+      projectOfficerIdForQuote(store, quote) === projectOfficerFilter,
+  ).filter((quote) => {
+    if (!monthFilter) return true;
+    const quoteDate = text(quote.issue_date, "") || text(quote.created_at, "");
+    return quoteDate.slice(0, 7) === monthFilter;
+  });
   return (
     <div
       className={
@@ -5195,6 +5366,7 @@ function Quotations({
             ? "Build material and production costs, then submit them for General Manager review."
             : "Generated after General Manager approval. View or print the client Price Quotation."
         }
+        hideHeading
         action={
           canCreateQuote ? (
             <div className="flex gap-2">
@@ -5258,7 +5430,7 @@ function Quotations({
         }
         variant={pageLayout ? "page" : "card"}
       >
-        <div className="flex border-t border-[#edf0f5] px-4 py-2.5 sm:px-5">
+        <div className="flex flex-wrap gap-2 border-t border-[#edf0f5] px-4 py-2.5 sm:px-5">
           <label className="relative min-w-0 flex-1 sm:min-w-56 sm:max-w-md">
             <Search className="absolute left-3 top-2.5 text-[#8b92a1]" size={15} />
             <input
@@ -5268,6 +5440,31 @@ function Quotations({
               placeholder="Search quotation, project, company, or client"
             />
           </label>
+          <label className="flex items-center gap-2 text-[12px] text-[#687386]">
+            <span className="whitespace-nowrap">Month</span>
+            <input
+              type="month"
+              value={monthFilter}
+              onClick={(event) => event.currentTarget.showPicker?.()}
+              onChange={(event) => setMonthFilter(event.target.value)}
+              className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px] text-[#202938] outline-none focus:border-[#c43b43]"
+            />
+          </label>
+          {canFilterByProjectOfficer && (
+            <select
+              aria-label="Filter by project officer"
+              value={projectOfficerFilter}
+              onChange={(event) => setProjectOfficerFilter(event.target.value)}
+              className={`lead-filter-select min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${projectOfficerFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}
+            >
+              <option value="all">All Project Officers</option>
+              {projectOfficers.map((officer) => (
+                <option key={officer.id} value={officer.id}>
+                  {officer.name}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
         {quoteRows.length ? (
           <div className={pageLayout ? "modern-table-shell" : undefined}>
@@ -5281,7 +5478,7 @@ function Quotations({
               scrollable={pageLayout}
               labels={[
                 isCosting ? "Costing Breakdown" : "Price Quotation",
-                "Customer / project",
+                isCosting ? "Client's Name / Company" : "Customer / project",
                 "Estimated COGS",
                 isCosting ? "VAT incl." : "Selling price VAT inc.",
                 "Submitted by",
@@ -5293,6 +5490,13 @@ function Quotations({
               {quoteRows.map((q) => {
                 const sourceCosting = !isCosting
                   ? store.quotations.find((item) => item.id === q.costing_source_id)
+                  : null;
+                const revisionRequest = isCosting
+                  ? store.quotation_revision_requests.find(
+                      (request) =>
+                        request.costing_id === q.id &&
+                        text(request.status) === "pending",
+                    )
                   : null;
                 const submittedById = isCosting
                   ? q.submitted_by ?? q.created_by
@@ -5307,7 +5511,7 @@ function Quotations({
                   <td className="px-5 py-3">
                     <b>{text(q.quotation_no)}</b>
                     <small>
-                      v{text(q.version, "1")} · {day(q.issue_date)}
+                      {day(q.issue_date)}
                     </small>
                   </td>
                   <td className="px-5 py-3">
@@ -5325,6 +5529,9 @@ function Quotations({
                   <td className="px-5 py-3 text-center">
                     <div className="flex items-center justify-center gap-1.5">
                       <Status value={isCosting ? q.status : sourceCosting?.status ?? "approved"} />
+                      {revisionRequest && (
+                        <span className="text-[11px] text-[#a76605]">Revision requested</span>
+                      )}
                       {isCosting && text(q.status) === "needs_revision" && text(q.revision_note, "") && (
                         <ActionIcon
                           label="View revision note"
@@ -5421,6 +5628,19 @@ function Quotations({
                         >
                           <Send size={15} />
                         </ActionIcon>}
+                      {isCosting &&
+                        role === "project_manager" &&
+                        text(q.status) === "approved" &&
+                        !revisionRequest && (
+                          <ActionIcon
+                            label="Request costing revision"
+                            tone="amber"
+                            disabled={saving}
+                            onClick={() => void requestRevision(q)}
+                          >
+                            <RotateCcw size={15} />
+                          </ActionIcon>
+                        )}
                       {canDeleteQuote && (
                         <ActionIcon
                           label={`Delete ${isCosting ? "Costing Breakdown" : "Price Quotation"}`}
@@ -6744,6 +6964,104 @@ function ProjectEditRequestReview({
   );
 }
 
+function LeadChangeRequestReview({
+  request,
+  store,
+  saving,
+  close,
+  decide,
+}: {
+  request: Row;
+  store: Store;
+  saving: boolean;
+  close: () => void;
+  decide: (decision: "approved" | "rejected", note: string) => void;
+}) {
+  const [note, setNote] = useState("");
+  const lead = store.leads.find((item) => item.id === request.lead_id);
+  const isDeletion = text(request.change_type, "") === "delete";
+  const changes =
+    request.proposed_changes && typeof request.proposed_changes === "object"
+      ? (request.proposed_changes as Record<string, unknown>)
+      : {};
+  const labels: Record<string, string> = {
+    project_name: "Project name",
+    contact_name: "Client's name",
+    client_name: "Company name",
+    email: "Email",
+    phone: "Phone number",
+    date_sent: "Date sent",
+    date_contacted: "Date contacted",
+    contact_method: "Outbound method",
+    evaluation_number: "Evaluation status",
+    done_deal_status: "Done Deal status",
+  };
+  const valueFor = (key: string, value: unknown) =>
+    key === "evaluation_number"
+      ? evaluationLabel(value)
+      : key === "done_deal_status"
+        ? doneDealStatusLabel(value)
+        : text(value, "—");
+  return (
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4">
+      <section className="mx-auto my-8 w-full max-w-2xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
+        <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4">
+          <div>
+            <h2 className="text-[17px] font-semibold text-[#202938]">
+              {isDeletion ? "Review Lead Deletion" : "Review Lead Edit"}
+            </h2>
+            <p className="mt-1 text-[12px] text-[#687386]">
+              {text(lead?.project_name)} · {text(lead?.lead_no)}
+            </p>
+          </div>
+          <button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938]">
+            <X size={18} />
+          </button>
+        </div>
+        {isDeletion ? (
+          <p className="mt-4 rounded-lg border border-[#fed7d7] bg-[#fff5f5] p-3 text-[13px] leading-5 text-[#9b1c1c]">
+            Approving this request permanently deletes the Lead. Linked quotations keep their records, but no longer reference this Lead.
+          </p>
+        ) : (
+          <Table labels={["Field", "Current", "Requested"]} minWidth={0}>
+            {Object.entries(changes).map(([key, value]) => (
+              <tr key={key}>
+                <td className="px-4 py-3 font-medium text-[#344054]">
+                  {labels[key] ?? key}
+                </td>
+                <td className="px-4 py-3 text-[#687386]">
+                  {valueFor(key, lead?.[key])}
+                </td>
+                <td className="px-4 py-3 font-medium">
+                  {valueFor(key, value)}
+                </td>
+              </tr>
+            ))}
+          </Table>
+        )}
+        <label className="mt-4 block text-[12px] font-medium text-[#202938]">
+          Decision note
+          <textarea rows={3} value={note} onChange={(event) => setNote(titleCaseEntry(event.target.value, "note"))} className="input mt-1 min-h-[76px] resize-y" placeholder="Optional note for the Sales Project Officer" />
+        </label>
+        <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-[#edf0f5] pt-4">
+          <Button secondary onClick={close}>Close</Button>
+          <Button secondary disabled={saving} onClick={() => decide("rejected", note)}><X size={14} /> Reject</Button>
+          <Button
+            tone="green"
+            disabled={saving}
+            confirm={isDeletion}
+            confirmationText="Approve and permanently delete this Lead? This cannot be undone."
+            onClick={() => decide("approved", note)}
+          >
+            <Check size={14} />
+            {isDeletion ? "Approve deletion" : "Approve edit"}
+          </Button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function Submissions({
   store,
   orgId,
@@ -6757,8 +7075,9 @@ function Submissions({
 }) {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Row | null>(null);
-  const [tab, setTab] = useState<"costings" | "projects">("costings");
+  const [tab, setTab] = useState<"costings" | "projects" | "leads" | "revisions">("costings");
   const [selectedProjectEdit, setSelectedProjectEdit] = useState<Row | null>(null);
+  const [selectedLeadChange, setSelectedLeadChange] = useState<Row | null>(null);
   const pendingCostings = store.quotations.filter(
     (quotation) =>
       text(quotation.status) === "pending" &&
@@ -6807,9 +7126,16 @@ function Submissions({
     setSavingId(null);
     if (error) return notice(error.message);
     setSelected(null);
+    const hasLinkedPriceQuotation = store.quotations.some(
+      (item) =>
+        item.costing_source_id === quotation.id &&
+        text(item.document_type) === "price_quotation",
+    );
     notice(
       status === "approved"
-        ? "Costing Breakdown approved and Price Quotation created."
+        ? hasLinkedPriceQuotation
+          ? "Costing Breakdown approved and Price Quotation updated."
+          : "Costing Breakdown approved and Price Quotation created."
         : "Returned to the Project Officer for re-evaluation.",
     );
     await reload();
@@ -6832,7 +7158,57 @@ function Submissions({
     notice(decision === "approved" ? "Project edit approved." : "Project edit rejected.");
     await reload();
   };
+  const decideLeadChange = async (
+    request: Row,
+    decision: "approved" | "rejected",
+    note: string,
+  ) => {
+    if (!request.id) return;
+    setSavingId(text(request.id));
+    const { error } = await createClient().rpc("review_lead_change", {
+      p_request_id: request.id,
+      p_decision: decision,
+      p_decision_note: note,
+    });
+    setSavingId(null);
+    if (error) return notice(error.message);
+    setSelectedLeadChange(null);
+    const isDeletion = text(request.change_type, "") === "delete";
+    notice(
+      decision === "approved"
+        ? isDeletion
+          ? "Lead deletion approved."
+          : "Lead edit approved."
+        : "Lead change request rejected.",
+    );
+    await reload();
+  };
+  const decideQuotationRevision = async (
+    request: Row,
+    decision: "approved" | "rejected",
+  ) => {
+    if (!request.id) return;
+    setSavingId(text(request.id));
+    const { error } = await createClient().rpc("review_quotation_revision", {
+      p_request_id: request.id,
+      p_decision: decision,
+    });
+    setSavingId(null);
+    if (error) return notice(error.message);
+    notice(
+      decision === "approved"
+        ? "Costing Breakdown reopened for revision."
+        : "Costing Breakdown revision request rejected.",
+    );
+    await reload();
+  };
   const pendingProjectEdits = store.project_edit_requests.filter(
+    (request) => text(request.status) === "pending",
+  );
+  const pendingLeadChanges = store.lead_change_requests.filter(
+    (request) => text(request.status) === "pending",
+  );
+  const pendingQuotationRevisions = store.quotation_revision_requests.filter(
     (request) => text(request.status) === "pending",
   );
   const projectOfficerName = (request: Row) =>
@@ -6844,11 +7220,14 @@ function Submissions({
   return (
     <Panel
       title="General Manager Submissions"
-      detail="Review Costing Breakdowns and Project Officer project edit requests."
+      detail="Review Costing Breakdowns, revisions, project edits, and Lead change requests."
+      hideHeading
     >
       <div className="flex gap-1 border-b border-[#e4e8ef] px-5">
         <button type="button" onClick={() => setTab("costings")} className={`px-3 py-2 text-[12px] font-medium ${tab === "costings" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Costing Reviews ({pendingCostings.length})</button>
+        <button type="button" onClick={() => setTab("revisions")} className={`px-3 py-2 text-[12px] font-medium ${tab === "revisions" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Costing Revisions ({pendingQuotationRevisions.length})</button>
         <button type="button" onClick={() => setTab("projects")} className={`px-3 py-2 text-[12px] font-medium ${tab === "projects" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Project Edits ({pendingProjectEdits.length})</button>
+        <button type="button" onClick={() => setTab("leads")} className={`px-3 py-2 text-[12px] font-medium ${tab === "leads" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Lead Changes ({pendingLeadChanges.length})</button>
       </div>
       {tab === "costings" && (pendingCostings.length ? (
         <Table
@@ -6905,6 +7284,19 @@ function Submissions({
           })}
         </Table>
       ) : <Empty>No costing breakdowns are awaiting review.</Empty>)}
+      {tab === "revisions" && (pendingQuotationRevisions.length ? (
+        <Table labels={["Costing Breakdown", "Project Officer", "Requested", "Review"]}>
+          {pendingQuotationRevisions.map((request) => {
+            const costing = store.quotations.find((item) => item.id === request.costing_id);
+            return <tr key={text(request.id)}>
+              <td className="px-5 py-3"><b>{text(costing?.quotation_no, "Costing Breakdown")}</b><small>{text(costing?.project_name)}</small></td>
+              <td className="px-5 py-3">{projectOfficerName(request)}</td>
+              <td className="px-5 py-3">{day(request.submitted_at)}</td>
+              <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve costing revision" tone="green" disabled={savingId === request.id} onClick={() => void decideQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject costing revision" tone="red" disabled={savingId === request.id} onClick={() => void decideQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td>
+            </tr>;
+          })}
+        </Table>
+      ) : <Empty>No Costing Breakdown revisions are awaiting review.</Empty>)}
       {tab === "projects" && (pendingProjectEdits.length ? (
         <Table labels={["Project", "Project Officer", "Submitted", "Requested changes", "Review"]}>
           {pendingProjectEdits.map((request) => {
@@ -6920,6 +7312,22 @@ function Submissions({
           })}
         </Table>
       ) : <Empty>No project edits are awaiting review.</Empty>)}
+      {tab === "leads" && (pendingLeadChanges.length ? (
+        <Table labels={["Lead", "Project Officer", "Requested", "Change", "Review"]}>
+          {pendingLeadChanges.map((request) => {
+            const lead = store.leads.find((item) => item.id === request.lead_id);
+            const changes = request.proposed_changes && typeof request.proposed_changes === "object" ? Object.keys(request.proposed_changes as Record<string, unknown>) : [];
+            const isDeletion = text(request.change_type, "") === "delete";
+            return <tr key={text(request.id)}>
+              <td className="px-5 py-3"><b>{text(lead?.project_name)}</b><small>{text(lead?.client_name)} · {text(lead?.contact_name)}</small></td>
+              <td className="px-5 py-3">{projectOfficerName(request)}</td>
+              <td className="px-5 py-3">{day(request.submitted_at)}</td>
+              <td className="px-5 py-3">{isDeletion ? "Deletion request" : changes.map((change) => change.replaceAll("_", " ")).join(", ")}</td>
+              <td className="px-5 py-3"><ActionIcon label="Review lead change" confirm={false} onClick={() => setSelectedLeadChange(request)}><FileText size={15} /></ActionIcon></td>
+            </tr>;
+          })}
+        </Table>
+      ) : <Empty>No lead changes are awaiting review.</Empty>)}
       {selected && (
         <GeneralManagerCostingReview
           quotation={selected}
@@ -6937,6 +7345,15 @@ function Submissions({
           saving={savingId === selectedProjectEdit.id}
           close={() => setSelectedProjectEdit(null)}
           decide={(decision, note) => void decideProjectEdit(selectedProjectEdit, decision, note)}
+        />
+      )}
+      {selectedLeadChange && (
+        <LeadChangeRequestReview
+          request={selectedLeadChange}
+          store={store}
+          saving={savingId === selectedLeadChange.id}
+          close={() => setSelectedLeadChange(null)}
+          decide={(decision, note) => void decideLeadChange(selectedLeadChange, decision, note)}
         />
       )}
     </Panel>
@@ -8735,380 +9152,347 @@ function Dashboard({
   store,
   go,
   role,
+  orgId,
 }: {
   store: Store;
   go: (view: View) => void;
   role: string;
+  orgId: string;
 }) {
-  const year = String(new Date().getFullYear());
-  const month = "all";
-  const matchesPeriod = (value: unknown) => {
-    const dateValue = new Date(String(value));
-    return (
-      (!year || String(dateValue.getFullYear()) === year) &&
-      (month === "all" ||
-        String(dateValue.getMonth() + 1).padStart(2, "0") === month)
-    );
+  const now = new Date();
+  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
+  const [sharedKpis, setSharedKpis] = useState<Row | null>(null);
+  const [selectedYear, selectedMonthIndex] = selectedMonth.split("-").map(Number);
+  const monthDate = new Date(selectedYear, selectedMonthIndex - 1, 1);
+  const monthName = new Intl.DateTimeFormat("en-PH", {
+    month: "long",
+    year: "numeric",
+  }).format(monthDate);
+  const isProjectOfficer = role === "project_manager";
+  useEffect(() => {
+    let active = true;
+    void createClient()
+      .rpc("shared_kpi_dashboard", {
+        p_organization_id: orgId,
+        p_month: `${selectedMonth}-01`,
+      })
+      .then(({ data }) => {
+        if (active && data && typeof data === "object") setSharedKpis(data as Row);
+      });
+    return () => {
+      active = false;
+    };
+  }, [orgId, selectedMonth]);
+  const quarter = Math.floor((selectedMonthIndex - 1) / 3) + 1;
+  const quarterStartMonth = (quarter - 1) * 3;
+  const quarterLabel = `Q${quarter} ${selectedYear}`;
+  const isCurrentMonth = (value: unknown) => {
+    const date = new Date(String(value));
+    return !Number.isNaN(date.getTime()) && date.getFullYear() === selectedYear && date.getMonth() === selectedMonthIndex - 1;
   };
-  const invoices = store.invoices.filter(
-    (i) => i.status !== "void" && matchesPeriod(i.issue_date),
+  const nonVoidInvoices = store.invoices.filter((invoice) => text(invoice.status) !== "void");
+  const monthInvoices = nonVoidInvoices.filter((invoice) => isCurrentMonth(invoice.issue_date));
+  const monthPayments = store.payments.filter((payment) => !payment.reversed_at && isCurrentMonth(payment.paid_at));
+  const invoiceBalance = (invoice: Row) => Math.max(
+    n(invoice.total_amount) - store.payments.filter((payment) => payment.invoice_id === invoice.id && !payment.reversed_at).reduce((sum, payment) => sum + n(payment.amount), 0),
+    0,
   );
-  const revenue = invoices.reduce((sum, i) => sum + n(i.total_amount), 0);
-  const expense = store.expenses
-    .filter(
-      (e) =>
-        !e.archived_at &&
-        !["rejected", "cancelled"].includes(text(e.status)) &&
-        matchesPeriod(e.expense_date),
-    )
-    .reduce((sum, e) => sum + n(e.amount), 0);
-  const available = store.inventory_items.filter(
-    (i) => i.item_type === "material",
+  const totalSales = monthInvoices.reduce((sum, invoice) => sum + n(invoice.total_amount), 0);
+  const collections = monthPayments.reduce((sum, payment) => sum + n(payment.amount), 0);
+  const receivables = nonVoidInvoices.reduce((sum, invoice) => sum + invoiceBalance(invoice), 0);
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const overdueReceivables = nonVoidInvoices.filter((invoice) => {
+    const dueDate = new Date(text(invoice.due_date, ""));
+    return invoiceBalance(invoice) > 0 && !Number.isNaN(dueDate.getTime()) && dueDate < todayStart;
+  }).reduce((sum, invoice) => sum + invoiceBalance(invoice), 0);
+  const costings = store.quotations.filter((quotation) => text(quotation.document_type) === "costing_breakdown");
+  const priceQuotations = store.quotations.filter((quotation) => text(quotation.document_type) === "price_quotation");
+  const monthlyQuotedValue = priceQuotations.filter((quotation) => isCurrentMonth(quotation.issue_date)).reduce((sum, quotation) => sum + n(quotation.total_amount), 0);
+  const leadsGenerated = store.leads.filter((lead) => isCurrentMonth(lead.date_sent ?? lead.created_at)).length;
+  const priceQuoteSent = priceQuotations.filter((quotation) => isCurrentMonth(quotation.issue_date) && ["sent", "approved"].includes(text(quotation.status))).length;
+  const paidClients = new Set(monthInvoices.filter((invoice) => text(invoice.status) === "paid").map((invoice) => invoice.customer_id).filter(Boolean)).size;
+  const openCostings = costings.filter((quotation) => isCurrentMonth(quotation.created_at) && ["draft", "needs_revision", "pending"].includes(text(quotation.status))).length;
+  const isSelectedQuarter = (value: unknown) => {
+    const date = new Date(String(value));
+    return !Number.isNaN(date.getTime()) && date.getFullYear() === selectedYear && date.getMonth() >= quarterStartMonth && date.getMonth() < quarterStartMonth + 3;
+  };
+  const quarterSales = nonVoidInvoices
+    .filter((invoice) => isSelectedQuarter(invoice.issue_date))
+    .reduce((sum, invoice) => sum + n(invoice.total_amount), 0);
+  const quarterlySalesTarget = store.target_goals.find(
+    (goal) =>
+      text(goal.goal_type, "") === "quarterly_sales" &&
+      isSelectedQuarter(goal.period_start),
   );
-  const low = available.filter(
-    (i) => n(i.quantity_on_hand) <= n(i.reorder_level),
-  );
-  const cashReceived = store.payments
-    .filter((payment) => matchesPeriod(payment.paid_at))
-    .reduce((sum, payment) => sum + n(payment.amount), 0);
-  const activeProduction = store.production_jobs.filter(
-    (job) =>
-      !["completed", "delivered", "cancelled"].includes(text(job.status)),
-  ).length;
-  const weekFromNow = new Date();
-  weekFromNow.setDate(weekFromNow.getDate() + 7);
-  const jobsDueThisWeek = store.production_jobs.filter((job) => {
-    const due = new Date(text(job.due_date, ""));
-    return (
-      !["completed", "delivered", "cancelled"].includes(text(job.status)) &&
-      !Number.isNaN(due.getTime()) &&
-      due >= new Date(new Date().toDateString()) &&
-      due <= weekFromNow
-    );
-  }).length;
-  const chartYear = year ? Number(year) : new Date().getFullYear();
-  const monthlyPerformance = Array.from({ length: 12 }, (_, month) => {
-    const inChartMonth = (value: unknown) => {
+  const quarterlyTargetValue = n(quarterlySalesTarget?.target_value);
+  const quarterlyActual = quarterSales;
+  const quarterlyTargetProgress = quarterlyTargetValue
+    ? Math.min(Math.round((quarterlyActual / quarterlyTargetValue) * 100), 100)
+    : 0;
+  const monthlyPerformance = Array.from({ length: 12 }, (_, index) => {
+    const inMonth = (value: unknown) => {
       const date = new Date(String(value));
-      return date.getFullYear() === chartYear && date.getMonth() === month;
+      return !Number.isNaN(date.getTime()) && date.getFullYear() === selectedYear && date.getMonth() === index;
     };
     return {
-      label: new Intl.DateTimeFormat("en-PH", { month: "short" }).format(
-        new Date(chartYear, month, 1),
-      ),
-      revenue: store.invoices
-        .filter(
-          (invoice) =>
-            invoice.status !== "void" && inChartMonth(invoice.issue_date),
-        )
-        .reduce((sum, invoice) => sum + n(invoice.total_amount), 0),
-      expense: store.expenses
-        .filter(
-          (entry) =>
-            !entry.archived_at &&
-            !["rejected", "cancelled"].includes(text(entry.status)) &&
-            inChartMonth(entry.expense_date),
-        )
-        .reduce((sum, entry) => sum + n(entry.amount), 0),
+      label: new Intl.DateTimeFormat("en-PH", { month: "short" }).format(new Date(selectedYear, index, 1)),
+      revenue: isProjectOfficer
+        ? priceQuotations.filter((quotation) => inMonth(quotation.issue_date)).reduce((sum, quotation) => sum + n(quotation.total_amount), 0)
+        : nonVoidInvoices.filter((invoice) => inMonth(invoice.issue_date)).reduce((sum, invoice) => sum + n(invoice.total_amount), 0),
+      expense: isProjectOfficer
+        ? costings.filter((quotation) => inMonth(quotation.created_at)).reduce((sum, quotation) => sum + n(quotation.total_cost), 0)
+      : store.payments.filter((payment) => !payment.reversed_at && inMonth(payment.paid_at)).reduce((sum, payment) => sum + n(payment.amount), 0),
     };
   });
-  const quotationStatuses = Object.entries(
-    store.quotations
-      .filter(
-        (quotation) =>
-          text(quotation.document_type) === "price_quotation" &&
-          matchesPeriod(quotation.issue_date),
-      )
-      .reduce<Record<string, number>>(
-        (groups, quotation) => ({
-          ...groups,
-          [text(quotation.status, "draft")]:
-            (groups[text(quotation.status, "draft")] ?? 0) + 1,
-        }),
-        {},
-      ),
-  ).sort(([, left], [, right]) => right - left);
-  const operationalPulse: {
-    label: string;
-    value: number;
-    detail: string;
-    view: View;
-  }[] = [
-    {
-      label: "Open costings",
-      value: store.quotations.filter(
-        (quotation) =>
-          text(quotation.document_type) === "costing_breakdown" &&
-          ["draft", "needs_revision", "pending"].includes(text(quotation.status)),
-      ).length,
-      detail: "Draft, returned, or awaiting GM review",
-      view: "Costing Breakdown",
-    },
-    {
-      label: "Active leads",
-      value: store.leads.filter(
-        (lead) => !["won", "lost"].includes(text(lead.status)),
-      ).length,
-      detail: "Projects being qualified or quoted",
-      view: "Leads",
-    },
-    {
-      label: "Costing materials",
-      value: low.length,
-      detail: "Materials at or below reorder level",
-      view: "Costing Breakdown",
-    },
-    ...(memberRole(role)
-      ? [
-          {
-            label: "Costing reviews",
-            value: store.quotations.filter(
-              (quotation) =>
-                text(quotation.document_type) === "costing_breakdown" &&
-                text(quotation.status) === "pending",
-            ).length,
-            detail: "Awaiting General Manager review",
-            view: "Submissions" as View,
-          },
-        ]
-      : []),
+  const sharedPerformance = Array.isArray(sharedKpis?.monthly_performance)
+    ? (sharedKpis.monthly_performance as Row[]).map((point) => ({ label: text(point.label), revenue: n(point.revenue), expense: n(point.expense) }))
+    : monthlyPerformance;
+  const dashboardSales = sharedKpis ? n(sharedKpis.total_sales) : totalSales;
+  const dashboardCollections = sharedKpis ? n(sharedKpis.collections) : collections;
+  const dashboardReceivables = sharedKpis ? n(sharedKpis.receivables) : receivables;
+  const dashboardOverdue = sharedKpis ? n(sharedKpis.overdue_receivables) : overdueReceivables;
+  const dashboardLeads = sharedKpis ? n(sharedKpis.leads_generated) : leadsGenerated;
+  const dashboardQuotes = sharedKpis ? n(sharedKpis.price_quotations) : priceQuoteSent;
+  const dashboardOpenCostings = sharedKpis ? n(sharedKpis.open_costings) : openCostings;
+  const dashboardPaidClients = sharedKpis ? n(sharedKpis.paid_clients) : paidClients;
+  const dashboardQuarterSales = sharedKpis ? n(sharedKpis.quarter_sales) : quarterlyActual;
+  const dashboardQuarterTarget = sharedKpis ? n(sharedKpis.quarter_target) : quarterlyTargetValue;
+  const dashboardQuarterProgress = dashboardQuarterTarget ? Math.min(Math.round((dashboardQuarterSales / dashboardQuarterTarget) * 100), 100) : 0;
+  const readOnlyKpiView = isProjectOfficer ? "Dashboard" as View : "Finance" as View;
+  const primaryMetrics = [
+    { label: "Total sales", value: peso.format(dashboardSales), detail: "Invoiced this month", icon: TrendingUp, iconClass: "bg-[#1769e8] text-white", accent: "bg-[#1769e8]", view: readOnlyKpiView },
+    { label: "Collections received", value: peso.format(dashboardCollections), detail: "Payments received", icon: CircleDollarSign, iconClass: "bg-[#16854f] text-white", accent: "bg-[#16854f]", view: readOnlyKpiView },
+    { label: "Total receivables", value: peso.format(dashboardReceivables), detail: "Balance awaiting payment", icon: ReceiptText, iconClass: "bg-[#d98a1d] text-white", accent: "bg-[#d98a1d]", view: readOnlyKpiView },
+    { label: "Overdue receivables", value: peso.format(dashboardOverdue), detail: "Past due balances", icon: CalendarDays, iconClass: "bg-[#c43b43] text-white", accent: "bg-[#c43b43]", view: readOnlyKpiView },
+    { label: "Quarterly sales quota", value: dashboardQuarterTarget ? `${dashboardQuarterProgress}%` : "Not set", detail: dashboardQuarterTarget ? `${quarterLabel} · ${peso.format(Math.max(dashboardQuarterTarget - dashboardQuarterSales, 0))} remaining` : `Set a target for ${quarterLabel}`, icon: Goal, iconClass: "bg-[#7043ca] text-white", accent: "bg-[#7043ca]", view: isProjectOfficer ? "Dashboard" as View : "Targets" as View },
   ];
-  const metrics =
-    role === "project_manager"
+  const operationsMetrics = [
+    { label: "Leads generated", value: dashboardLeads, detail: "All project officers", icon: ClipboardCheck, tone: "bg-[#7043ca]", view: "Leads" as View },
+    { label: "Price quotations", value: dashboardQuotes, detail: "Sent or approved", icon: FileText, tone: "bg-[#1769e8]", view: "Price Quotations" as View },
+    { label: "Open costings", value: dashboardOpenCostings, detail: "Draft, pending, or needing revision", icon: ReceiptText, tone: "bg-[#d98a1d]", view: "Costing Breakdown" as View },
+  ];
+  const funnel = [
+    { label: "Leads generated", value: dashboardLeads, width: "w-full", color: "bg-[#7043ca]", view: isProjectOfficer ? "Dashboard" as View : "Leads" as View },
+    { label: "Price quotations", value: dashboardQuotes, width: "w-[72%]", color: "bg-[#1769e8]", view: isProjectOfficer ? "Dashboard" as View : "Price Quotations" as View },
+    { label: "Paid clients", value: dashboardPaidClients, width: "w-[58%]", color: "bg-[#16854f]", view: readOnlyKpiView },
+  ];
+  const canReviewSubmissions = ["admin", "owner", "super_admin"].includes(role);
+  const pendingCostingReviews = costings.filter(
+    (quotation) => text(quotation.status) === "pending",
+  ).length;
+  const pendingCostingRevisions = store.quotation_revision_requests.filter(
+    (request) => text(request.status) === "pending",
+  ).length;
+  const pendingLeadChanges = store.lead_change_requests.filter(
+    (request) => text(request.status) === "pending",
+  ).length;
+  const pendingProjectEdits = store.project_edit_requests.filter(
+    (request) => text(request.status) === "pending",
+  ).length;
+  const actionItems = canReviewSubmissions
+    ? [
+        { label: "Costing reviews", detail: "Awaiting approval", count: pendingCostingReviews, icon: ReceiptText, tone: "bg-[#d98a1d]", view: "Submissions" as View },
+        { label: "Costing revisions", detail: "Requested by officers", count: pendingCostingRevisions, icon: RotateCcw, tone: "bg-[#7043ca]", view: "Submissions" as View },
+        { label: "Lead changes", detail: "Awaiting a decision", count: pendingLeadChanges, icon: ClipboardCheck, tone: "bg-[#1769e8]", view: "Submissions" as View },
+        { label: "Project edits", detail: "Awaiting a decision", count: pendingProjectEdits, icon: Pencil, tone: "bg-[#c43b43]", view: "Submissions" as View },
+      ]
+    : isProjectOfficer
       ? [
-          {
-            name: "Active leads",
-            value: store.leads
-              .filter((lead) => !["won", "lost"].includes(text(lead.status)))
-              .length.toString(),
-            hint: "Projects being qualified or costed",
-            hintClass: "text-[#2168d6]",
-            icon: ClipboardCheck,
-            iconClass: "bg-[#2168d6] text-white",
-          },
-          {
-            name: "Costing in progress",
-            value: store.quotations
-              .filter(
-                (quotation) =>
-                  text(quotation.document_type) === "costing_breakdown" &&
-                  ["draft", "needs_revision"].includes(text(quotation.status)),
-              )
-              .length.toString(),
-            hint: "Draft cost breakdowns",
-            hintClass: "text-[#a76605]",
-            icon: ReceiptText,
-            iconClass: "bg-[#de8a00] text-white",
-          },
-          {
-            name: "Client quotations",
-            value: store.quotations
-              .filter(
-                (quotation) =>
-                  text(quotation.document_type) === "price_quotation",
-              )
-              .length.toString(),
-            hint: "Generated and ready to print",
-            hintClass: "text-[#2168d6]",
-            icon: FileText,
-            iconClass: "bg-[#7445d6] text-white",
-          },
-          {
-            name: "Active suppliers",
-            value: store.suppliers
-              .filter((supplier) => supplier.is_active !== false)
-              .length.toString(),
-            hint: "Available for costing",
-            hintClass: "text-[#159957]",
-            icon: UsersRound,
-            iconClass: "bg-[#159957] text-white",
-          },
+          { label: "Costings need revision", detail: "Update and submit again", count: costings.filter((quotation) => text(quotation.status) === "needs_revision").length, icon: RotateCcw, tone: "bg-[#c43b43]", view: "Costing Breakdown" as View },
+          { label: "Awaiting GM review", detail: "Submitted costings", count: pendingCostingReviews, icon: ReceiptText, tone: "bg-[#d98a1d]", view: "Costing Breakdown" as View },
+          { label: "Revision requests", detail: "Awaiting GM decision", count: pendingCostingRevisions, icon: RotateCcw, tone: "bg-[#7043ca]", view: "Costing Breakdown" as View },
+          { label: "Lead changes", detail: "Awaiting GM decision", count: pendingLeadChanges, icon: ClipboardCheck, tone: "bg-[#1769e8]", view: "Leads" as View },
         ]
-      : [
-          {
-            name: "Invoiced revenue",
-            value: peso.format(revenue),
-            hint: `${invoices.length} issued invoices`,
-            hintClass: "text-[#159957]",
-            icon: TrendingUp,
-            iconClass: "bg-[#159957] text-white",
-          },
-          {
-            name: "Cash received",
-            value: peso.format(cashReceived),
-            hint: "Payments received",
-            hintClass: "text-[#2168d6]",
-            icon: CircleDollarSign,
-            iconClass: "bg-[#2168d6] text-white",
-          },
-          {
-            name: "Expenses",
-            value: peso.format(expense),
-            hint: "Recorded costs",
-            hintClass: "text-[#b42318]",
-            icon: ReceiptText,
-            iconClass: "bg-[#b42318] text-white",
-          },
-          {
-            name: "Net operating result",
-            value: peso.format(revenue - expense),
-            hint: "Revenue less expenses",
-            hintClass:
-              revenue - expense > 0
-                ? "text-[#159957]"
-                : revenue - expense < 0
-                  ? "text-[#b42318]"
-                  : "text-[#626b7a]",
-            icon: Wallet,
-            iconClass: "bg-[#7445d6] text-white",
-          },
-        ];
+      : [];
+  const activeActionItems = actionItems.filter((item) => item.count > 0);
+  const funnelMax = Math.max(1, ...funnel.map((stage) => stage.value));
   return (
-    <div className="space-y-5">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {metrics.map(
-          ({ name, value, hint, hintClass, icon: Icon, iconClass }) => (
-            <div
-              key={name}
-              className="dashboard-metric h-[108px] rounded-[14px] border border-[#dfe5ed] bg-white px-4 py-3 lg:px-5 lg:py-3"
-            >
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-[18px] font-semibold tracking-[-.02em] text-[#151922]">Dashboard</h2>
+          <p className="mt-0.5 text-[12px] text-[#626b7a]">Here is the latest organization sales and collections activity.</p>
+        </div>
+        <label className="flex h-9 items-center gap-2 rounded-lg border border-[#dfe4eb] bg-white px-3 text-[12px] font-medium text-[#4b5565] shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
+          <CalendarDays size={15} className="text-[#c43b43]" />
+          <span className="sr-only">Reporting month</span>
+          <input
+            type="month"
+            value={selectedMonth}
+            onChange={(event) => setSelectedMonth(event.target.value)}
+            className="border-0 bg-transparent p-0 text-[12px] font-medium text-[#202124] outline-none"
+          />
+        </label>
+      </div>
+      {isProjectOfficer ? (
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {operationsMetrics.map(({ label, value, detail, icon: Icon, tone }) => (
+            <div key={label} className="dashboard-metric h-[108px] rounded-[14px] border border-[#dfe5ed] bg-white px-4 py-3 shadow-[0_1px_2px_rgb(16_24_40_/_3%)] lg:px-5">
               <div className="grid h-full grid-cols-[44px_minmax(0,1fr)] items-center gap-3">
-                <span
-                  className={`grid size-11 shrink-0 place-items-center rounded-full ${iconClass}`}
-                >
-                  <Icon size={21} strokeWidth={2.2} />
-                </span>
+                <span className={`grid size-11 shrink-0 place-items-center rounded-full text-white ${tone}`}><Icon size={21} strokeWidth={2.2} /></span>
                 <div className="min-w-0">
-                  <p
-                    title={name}
-                    className="dashboard-metric-label truncate font-semibold uppercase tracking-[.08em] text-[#626b7a]"
-                  >
-                    {name}
-                  </p>
-                  <p
-                    title={value}
-                    className="dashboard-metric-value mt-1 truncate font-semibold tracking-tight text-[#151922]"
-                  >
-                    {value}
-                  </p>
-                  <p
-                    title={hint}
-                    className={`dashboard-metric-hint mt-1 truncate font-medium ${hintClass}`}
-                  >
-                    {hint}
-                  </p>
+                  <p className="dashboard-metric-label truncate font-semibold uppercase tracking-[.08em] text-[#626b7a]">{label}</p>
+                  <p className="dashboard-metric-value mt-1 truncate font-semibold tracking-tight text-[#151922]">{value.toLocaleString()}</p>
+                  <p className="dashboard-metric-hint mt-1 truncate font-medium text-[#626b7a]">{detail}</p>
                 </div>
               </div>
             </div>
-          ),
-        )}
-      </div>
-      <div className="grid gap-5 xl:grid-cols-5">
-        <div className="xl:col-span-3">
-          {role === "project_manager" ? (
-            <Panel
-              title="Project pipeline"
-              detail="Current leads and projects requiring your next action."
-            >
-              {store.leads.length ? (
-                <Table labels={["Project", "Client", "Target date", "Stage"]}>
-                  {store.leads.slice(0, 6).map((lead) => (
-                    <tr key={text(lead.id)}>
-                      <td className="px-5 py-3 font-medium">
-                        {text(lead.project_name)}
-                      </td>
-                      <td className="px-5 py-3">{text(lead.client_name)}</td>
-                      <td className="px-5 py-3">{day(lead.due_date)}</td>
-                      <td className="px-5 py-3">
-                        <Status value={lead.status} />
-                      </td>
-                    </tr>
-                  ))}
-                </Table>
-              ) : (
-                <Empty>No leads or projects recorded yet.</Empty>
-              )}
-            </Panel>
-          ) : (
-            <Panel
-              title="Financial performance"
-              detail={`Monthly invoiced revenue and expenses for ${chartYear}.`}
-            >
-              <MonthlyPerformanceChart data={monthlyPerformance} />
-            </Panel>
-          )}
-        </div>
-        <div className="xl:col-span-2">
-          <Panel title="Operations pulse" detail="Work requiring attention.">
-            <div className="divide-y divide-[#edf0f5] border-t border-[#edf0f5]">
-              {operationalPulse.map((item) => (
+          ))}
+        </section>
+      ) : (
+        <>
+          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            {primaryMetrics.map(({ label, value, detail, icon: Icon, iconClass, accent, view }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => go(view)}
+                className="group rounded-lg border border-[#e7ebf0] bg-white p-3.5 text-left shadow-[0_1px_2px_rgb(16_24_40_/_3%)] transition-all hover:-translate-y-0.5 hover:border-[#d6dce6] hover:shadow-[0_8px_18px_rgb(16_24_40_/_7%)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c43b43]"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <span className={`grid size-8 place-items-center rounded-md ${iconClass}`}><Icon size={16} /></span>
+                  <span className={`mt-1 size-2 rounded-full ${accent}`} aria-hidden />
+                </div>
+                <p className="mt-3 text-[11px] font-medium text-[#4b5565]">{label}</p>
+                <p className="mt-1 truncate text-[22px] font-semibold tracking-[-.03em] text-[#151922]" title={value}>{value}</p>
+                <p className="mt-1 text-[10px] text-[#8b92a1]">{detail}</p>
+              </button>
+            ))}
+          </section>
+          {canReviewSubmissions && (
+            <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {operationsMetrics.map(({ label, value, detail, icon: Icon, tone, view }) => (
                 <button
-                  key={item.label}
-                  onClick={() => go(item.view)}
-                  className="flex w-full items-center justify-between gap-4 px-5 py-3 text-left hover:bg-[#f8faff]"
+                  key={label}
+                  type="button"
+                  onClick={() => go(view)}
+                  className="group rounded-lg border border-[#e7ebf0] bg-white p-3.5 text-left shadow-[0_1px_2px_rgb(16_24_40_/_3%)] transition-all hover:-translate-y-0.5 hover:border-[#d6dce6] hover:shadow-[0_8px_18px_rgb(16_24_40_/_7%)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c43b43]"
                 >
-                  <span>
-                    <b className="block text-[14px]">{item.label}</b>
-                    <span className="mt-0.5 block text-[12px] text-[#8b92a1]">
-                      {item.detail}
-                    </span>
-                  </span>
-                  <span className="text-[20px] font-semibold tracking-tight">
-                    {item.value}
-                  </span>
+                  <div className="flex items-start justify-between gap-3">
+                    <span className={`grid size-8 place-items-center rounded-md text-white ${tone}`}><Icon size={16} /></span>
+                    <span className={`mt-1 size-2 rounded-full ${tone}`} aria-hidden />
+                  </div>
+                  <p className="mt-3 text-[11px] font-medium text-[#4b5565]">{label}</p>
+                  <p className="mt-1 truncate text-[22px] font-semibold tracking-[-.03em] text-[#151922]">{value.toLocaleString()}</p>
+                  <p className="mt-1 text-[10px] text-[#8b92a1]">{detail}</p>
+                </button>
+              ))}
+            </section>
+          )}
+        </>
+      )}
+      {!isProjectOfficer && (
+        <>
+      {actionItems.length > 0 && (
+        <section className="rounded-lg border border-[#e7ebf0] bg-white shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#eef1f5] px-4 py-3.5">
+            <div className="flex items-center gap-2.5">
+              <span className="grid size-8 place-items-center rounded-md bg-[#c43b43] text-white"><ClipboardCheck size={16} /></span>
+              <div>
+                <h2 className="text-[13px] font-semibold text-[#151922]">{canReviewSubmissions ? "Action required" : "My work needing action"}</h2>
+                <p className="mt-0.5 text-[11px] text-[#8b92a1]">{canReviewSubmissions ? "Live approvals that need your decision." : "Your live workflow items that need follow-up."}</p>
+              </div>
+            </div>
+            {activeActionItems.length > 0 && <span className="rounded-full bg-[#fff0f0] px-2.5 py-1 text-[11px] font-semibold text-[#c43b43]">{activeActionItems.reduce((total, item) => total + item.count, 0)} pending</span>}
+          </div>
+          {activeActionItems.length ? (
+            <div className="grid divide-y divide-[#eef1f5] sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4">
+              {activeActionItems.map(({ label, detail, count, icon: Icon, tone, view }) => (
+                <button key={label} type="button" onClick={() => go(view)} className="flex min-w-0 items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-[#fafbfc] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#c43b43]">
+                  <span className={`grid size-8 shrink-0 place-items-center rounded-md text-white ${tone}`}><Icon size={15} /></span>
+                  <span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-medium text-[#202124]">{label}</span><span className="mt-0.5 block truncate text-[10px] text-[#8b92a1]">{detail}</span></span>
+                  <b className="text-[18px] font-semibold tracking-[-.02em] text-[#151922]">{count}</b>
                 </button>
               ))}
             </div>
-          </Panel>
-        </div>
-      </div>
-      <Panel
-        title="Cumulative operating result"
-        detail={`Cumulative invoiced revenue less expenses for ${chartYear}.`}
-      >
-        <CumulativePerformanceChart data={monthlyPerformance} />
-      </Panel>
-      <div className="grid gap-5 xl:grid-cols-2">
-        <Panel
-          title="Price Quotation distribution"
-          detail="Generated Price Quotations for the selected period."
-        >
-          {quotationStatuses.length ? (
-            <QuotationStatusPie data={quotationStatuses} />
           ) : (
-            <Empty>No quotations in the selected period.</Empty>
+            <div className="flex items-center gap-3 px-4 py-4 text-[12px] text-[#626b7a]"><span className="grid size-8 place-items-center rounded-full bg-[#e7f7ef] text-[#16854f]"><Check size={16} /></span><span>{canReviewSubmissions ? "No approvals are waiting for review." : "You have no workflow items waiting for follow-up."}</span></div>
           )}
-        </Panel>
-        <Panel
-          title="Low stock"
-          detail="Materials at or below their reorder level."
-        >
-          {low.length ? (
-            <div className="divide-y divide-[#edf0f5] border-t border-[#edf0f5]">
-              {low.slice(0, 5).map((i) => (
-                <div
-                  key={text(i.id)}
-                  className="flex items-center justify-between px-5 py-3"
-                >
-                  <span>
-                    <b className="block text-[12px]">{text(i.name)}</b>
-                    <small>
-                      {n(i.quantity_on_hand)} {text(i.unit)} on hand
-                    </small>
-                  </span>
-                  <Status
-                    value={
-                      n(i.quantity_on_hand) <= 0 ? "out of stock" : "low stock"
-                    }
-                  />
-                </div>
-              ))}
+        </section>
+      )}
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,.98fr)_minmax(0,1.02fr)]">
+        <section className="rounded-lg border border-[#e7ebf0] bg-white p-4 shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-[13px] font-semibold text-[#151922]">Collection forecast</h2>
+              <p className="mt-1 text-[11px] text-[#8b92a1]">Your current month summary.</p>
             </div>
-          ) : (
-            <Empty>All raw supplies are above their alert level.</Empty>
-          )}
-        </Panel>
+            <span className="rounded-full bg-[#f5f7fa] px-2 py-1 text-[10px] font-medium text-[#626b7a]">{monthName}</span>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <button type="button" onClick={() => go(readOnlyKpiView)} className="rounded-lg border border-[#eef1f5] bg-[#fbfcfe] p-3 text-left transition-colors hover:bg-[#f6f8fb] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c43b43]">
+              <span className="grid size-7 place-items-center rounded-md bg-[#1769e8] text-white"><TrendingUp size={15} /></span>
+              <p className="mt-4 text-[10px] font-medium uppercase tracking-[.06em] text-[#8b92a1]">Sales invoiced</p>
+              <p className="mt-1 text-[23px] font-semibold tracking-[-.03em] text-[#151922]">{peso.format(dashboardSales)}</p>
+              <p className="mt-1 text-[10px] text-[#16854f]">For {monthName}</p>
+            </button>
+            <button type="button" onClick={() => go(readOnlyKpiView)} className="rounded-lg border border-[#eef1f5] bg-[#fbfcfe] p-3 text-left transition-colors hover:bg-[#f6f8fb] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c43b43]">
+              <span className="grid size-7 place-items-center rounded-md bg-[#16854f] text-white"><CircleDollarSign size={15} /></span>
+              <p className="mt-4 text-[10px] font-medium uppercase tracking-[.06em] text-[#8b92a1]">Collections</p>
+              <p className="mt-1 text-[23px] font-semibold tracking-[-.03em] text-[#151922]">{peso.format(dashboardCollections)}</p>
+              <p className="mt-1 text-[10px] text-[#16854f]">For {monthName}</p>
+            </button>
+          </div>
+        </section>
+        <section className="overflow-hidden rounded-lg border border-[#e7ebf0] bg-white shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
+          <div className="flex flex-wrap items-start justify-between gap-3 px-4 pb-2 pt-4">
+            <div>
+              <h2 className="text-[13px] font-semibold text-[#151922]">Sales trend</h2>
+              <p className="mt-1 text-[11px] text-[#8b92a1]">Invoiced sales and collections in {selectedYear}.</p>
+            </div>
+            <span className="text-[11px] font-semibold text-[#202124]">{peso.format(dashboardSales)}</span>
+          </div>
+          <MonthlyPerformanceChart
+            data={sharedPerformance}
+            primaryLabel="Total sales"
+            secondaryLabel="Collections received"
+            primaryColor="#1769e8"
+            secondaryColor="#16854f"
+          />
+        </section>
       </div>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.08fr)_minmax(320px,.92fr)]">
+        <section className="relative isolate overflow-hidden rounded-lg bg-gradient-to-br from-[#17233a] via-[#17324a] to-[#096c5d] p-5 text-white shadow-[0_8px_20px_rgb(21_25_34_/_14%)]">
+          <div className="absolute -right-16 -top-12 size-52 rounded-full bg-[#2bd6a7]/25 blur-3xl" />
+          <div className="relative">
+            <div className="flex items-center gap-2 text-[12px] font-medium text-white/90"><CircleDollarSign size={15} /> Receivables health</div>
+            <p className="mt-4 text-[10px] font-medium uppercase tracking-[.08em] text-white/60">Outstanding customer balance</p>
+            <p className="mt-1 text-[28px] font-semibold tracking-[-.04em]">{peso.format(dashboardReceivables)}</p>
+            <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/15">
+              <span className="block h-full rounded-full bg-[#4ee1b8]" style={{ width: `${Math.max(8, Math.min(100, Math.round((dashboardCollections / Math.max(dashboardSales, 1)) * 100)))}%` }} />
+            </div>
+            <div className="mt-2 flex justify-between text-[10px] text-white/65"><span>Collection-to-sales ratio</span><span>{Math.round((dashboardCollections / Math.max(dashboardSales, 1)) * 100)}%</span></div>
+            <div className="mt-5 grid grid-cols-2 gap-4 border-t border-white/10 pt-4">
+              <div><p className="text-[10px] text-white/60">Overdue balance</p><p className="mt-1 text-[17px] font-semibold">{peso.format(dashboardOverdue)}</p></div>
+              <div><p className="text-[10px] text-white/60">Paid clients</p><p className="mt-1 text-[17px] font-semibold">{dashboardPaidClients}</p></div>
+            </div>
+          </div>
+        </section>
+        <section className="rounded-lg border border-[#e7ebf0] bg-white p-4 shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-[13px] font-semibold text-[#151922]">Pipeline overview</h2>
+              <p className="mt-1 text-[11px] text-[#8b92a1]">Lead progression in {monthName}.</p>
+            </div>
+            <span className="grid size-8 place-items-center rounded-md bg-[#7043ca] text-white"><UsersRound size={16} /></span>
+          </div>
+          <div className="mt-5 space-y-3.5">
+            {funnel.map((stage) => (
+              <button key={stage.label} type="button" onClick={() => go(stage.view)} className="block w-full text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c43b43]">
+                <span className="flex items-center justify-between gap-3 text-[11px]">
+                  <span className="font-medium text-[#4b5565]">{stage.label}</span>
+                  <b className="text-[14px] font-semibold text-[#151922]">{stage.value}</b>
+                </span>
+                <span className="mt-1.5 block h-1.5 overflow-hidden rounded-full bg-[#f0f2f6]">
+                  <span className={`block h-full rounded-full ${stage.color} transition-[width]`} style={{ width: `${Math.max(8, Math.round((stage.value / funnelMax) * 100))}%` }} />
+                </span>
+              </button>
+            ))}
+          </div>
+        </section>
+      </div>
+        </>
+      )}
     </div>
   );
 }
@@ -9821,6 +10205,7 @@ export function HuswellWorkspace({
   const [active, setActive] = useState<View>(
     initialView ?? (role === "accountant" ? "Finance" : "Dashboard"),
   );
+  const [leadMode, setLeadMode] = useState<"leads" | "projects">("leads");
   const [mobile, setMobile] = useState(false);
   const [store, setStore] = useState<Store>(blank);
   const [loading, setLoading] = useState(true);
@@ -9882,7 +10267,6 @@ export function HuswellWorkspace({
     super_admin: [
       "Dashboard",
       "Leads",
-      "Projects",
       "Costing Breakdown",
       "Price Quotations",
       "Suppliers & Materials",
@@ -9893,7 +10277,6 @@ export function HuswellWorkspace({
     owner: [
       "Dashboard",
       "Leads",
-      "Projects",
       "Costing Breakdown",
       "Price Quotations",
       "Suppliers & Materials",
@@ -9904,7 +10287,6 @@ export function HuswellWorkspace({
     admin: [
       "Dashboard",
       "Leads",
-      "Projects",
       "Costing Breakdown",
       "Price Quotations",
       "Suppliers & Materials",
@@ -9915,7 +10297,6 @@ export function HuswellWorkspace({
     project_manager: [
       "Dashboard",
       "Leads",
-      "Projects",
       "Costing Breakdown",
       "Price Quotations",
       "Suppliers & Materials",
@@ -9948,7 +10329,6 @@ export function HuswellWorkspace({
         { view: "Leads", icon: ClipboardCheck },
         { view: "Costing Breakdown", icon: ReceiptText },
         { view: "Price Quotations", icon: FileText },
-        { view: "Projects", icon: ClipboardCheck },
         { view: "Suppliers & Materials", icon: UsersRound },
       ],
     },
@@ -9972,6 +10352,104 @@ export function HuswellWorkspace({
       ),
     }))
     .filter((group) => group.items.length > 0);
+  const pageHeader: Record<View, { title: string; detail: string }> = {
+    Dashboard: {
+      title: role === "project_manager" ? "KPI Dashboard" : "Dashboard",
+      detail:
+        role === "project_manager"
+          ? "Track your lead, costing, quotation, and supplier key performance indicators."
+          : "Monitor business performance and current work.",
+    },
+    Leads: {
+      title: leads.title,
+      detail: leads.detail,
+    },
+    Projects: {
+      title: projects.title,
+      detail: projects.detail,
+    },
+    "Costing Breakdown": {
+      title: "Costing Breakdown",
+      detail:
+        "Build material and production costs, then submit them for General Manager review.",
+    },
+    "Price Quotations": {
+      title: "Price Quotations",
+      detail:
+        "Generated after General Manager approval. View or print the client Price Quotation.",
+    },
+    "Materials List": {
+      title: "Materials List",
+      detail: "Maintain the material choices used in Costing Breakdowns.",
+    },
+    "Suppliers & Materials": {
+      title: "Suppliers & Materials",
+      detail: "Maintain the vendors and materials used for costing and quotations.",
+    },
+    Suppliers: {
+      title: "Suppliers",
+      detail: supplierDirectory.detail,
+    },
+    Quotations: {
+      title: "Quotation workflow moved",
+      detail:
+        "Price Quotations are generated only after General Manager approval of a Costing Breakdown.",
+    },
+    Production: {
+      title: "Production jobs",
+      detail:
+        "Record material usage and delivery progress for approved quotations.",
+    },
+    Catalog: {
+      title: catalog.title,
+      detail: catalog.detail,
+    },
+    Inventory: {
+      title: "Inventory",
+      detail: "Track stock levels, movements, and finished product stock-ins.",
+    },
+    Sales: {
+      title: "Sales",
+      detail: "Manage customer invoices and payment collection.",
+    },
+    Expenses: {
+      title: expenses.title,
+      detail: expenses.detail,
+    },
+    Finance: {
+      title: "Finance",
+      detail: "Review receivables, payables, and financial performance.",
+    },
+    "Payroll & Leave": {
+      title: "Payroll & Leave",
+      detail: "Manage payroll periods, employee entries, and leave requests.",
+    },
+    Directory: {
+      title: "Directory",
+      detail: "Maintain your customer, supplier, and staff records.",
+    },
+    Targets: {
+      title: targets.title,
+      detail: targets.detail,
+    },
+    Approvals: {
+      title: "Approvals & audit",
+      detail: "Review approval requests and activity history.",
+    },
+    Submissions: {
+      title: "General Manager Submissions",
+      detail: "Review Costing Breakdowns, revisions, project edits, and Lead change requests.",
+    },
+    Settings: {
+      title: "Business settings",
+      detail: "Manage business defaults, profile details, and staff access.",
+    },
+    Profile: {
+      title: "Profile",
+      detail: "Manage your account details.",
+    },
+  };
+  const activePageHeader = pageHeader[active];
   const content =
     active === "Profile" ? (
       <AccountProfileDialog open embedded role={role} />
@@ -9995,26 +10473,20 @@ export function HuswellWorkspace({
         </div>
       </Panel>
     ) : active === "Dashboard" ? (
-      <Dashboard store={store} go={setActive} role={role} />
-    ) : active === "Leads" ? (
+      <Dashboard store={store} go={setActive} role={role} orgId={organizationId} />
+    ) : active === "Leads" || active === "Projects" ? (
       <Records
-        module={leads}
+        module={active === "Projects" || leadMode === "projects" ? projects : leads}
         store={store}
         orgId={organizationId}
         reload={load}
         notice={setMessage}
         role={role}
-        leadMode="leads"
-      />
-    ) : active === "Projects" ? (
-      <Records
-        module={projects}
-        store={store}
-        orgId={organizationId}
-        reload={load}
-        notice={setMessage}
-        role={role}
-        leadMode="projects"
+        leadMode={active === "Projects" ? "projects" : leadMode}
+        onLeadModeChange={(mode) => {
+          setLeadMode(mode);
+          setActive("Leads");
+        }}
       />
     ) : active === "Costing Breakdown" ? (
       <Quotations
@@ -10171,8 +10643,13 @@ export function HuswellWorkspace({
           {nav.map((group) => (
             <div key={group.label}>
               <div className="space-y-1">
-                {group.items.map(({ view, icon: Icon }) => (
-                  <button
+                {group.items.map(({ view, icon: Icon }) => {
+                  const navigationLabel =
+                    view === "Dashboard" && role === "project_manager"
+                      ? "KPI"
+                      : view;
+                  return (
+                    <button
                     key={view}
                     onClick={() => {
                       setActive(view);
@@ -10183,29 +10660,25 @@ export function HuswellWorkspace({
                       lineHeight: "20px",
                     }}
                     aria-current={active === view ? "page" : undefined}
-                    className={`${active === view ? "bg-[#c43b43] font-medium text-white" : "text-[#475467] hover:bg-[#f7f7f8] hover:text-[#151922]"} group flex min-h-9 w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c43b43] focus-visible:ring-offset-2 focus-visible:ring-offset-white`}
+                    className={`${active === view ? "bg-[#c43b43] font-medium text-white" : "text-[#202124] hover:bg-[#f1f3f4]"} group flex min-h-9 w-full items-center gap-2.5 rounded-lg px-3 py-1.5 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c43b43] focus-visible:ring-offset-2 focus-visible:ring-offset-white`}
                   >
                     <Icon
                       size={17}
-                      className={`${active === view ? "text-white" : "text-[#626b7a] group-hover:text-[#151922] group-focus-visible:text-[#151922]"} shrink-0 transition-colors`}
+                      className={`${active === view ? "text-white" : "text-[#5f6368] group-focus-visible:text-[#202124]"} shrink-0 transition-colors`}
                     />
-                    <span className="min-w-0 flex-1 truncate">{view}</span>
+                    <span className="min-w-0 flex-1 truncate">{navigationLabel}</span>
                   </button>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ))}
         </nav>
         <div className="mt-4 border-t border-[#e2e7ef] pt-4">
-          <div className="flex items-center px-2">
-            <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-[#151922]">
-              {profileEmail}
-            </span>
-          </div>
           {canEditOwnProfile && (
             <a
               href="/profile"
-              className="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-[#475467] transition-colors hover:bg-[#f7f7f8] hover:text-[#151922]"
+              className="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-[#202124] transition-colors hover:bg-[#f1f3f4]"
             >
               <UserRound size={17} />
               Profile
@@ -10213,7 +10686,7 @@ export function HuswellWorkspace({
           )}
           <button
             onClick={() => setSignOutOpen(true)}
-            className="mt-4 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-[#475467] transition-colors hover:bg-[#f7f7f8] hover:text-[#151922]"
+            className="mt-4 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-[#202124] transition-colors hover:bg-[#f1f3f4]"
           >
             <LogOut size={17} />
             Sign out
@@ -10278,6 +10751,14 @@ export function HuswellWorkspace({
             >
               <Menu size={21} />
             </button>
+            <div className="min-w-0">
+              <h1 className="truncate text-[15px] font-semibold text-[#202124] sm:text-[16px]">
+                {activePageHeader.title}
+              </h1>
+              <p className="hidden truncate text-[12px] text-[#6b7280] sm:block">
+                {activePageHeader.detail}
+              </p>
+            </div>
           </div>
           <div className="flex shrink-0 items-center gap-3 text-[#626b7a]">
             <span className="hidden items-center gap-2 text-[12px] font-medium sm:flex">

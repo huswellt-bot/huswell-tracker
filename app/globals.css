@@ -203,6 +203,22 @@ textarea {
 .app-table :is(th, td) {
   white-space: nowrap;
 }
+.app-table thead th,
+.app-table tbody td {
+  padding-top: 0.5rem !important;
+  padding-bottom: 0.5rem !important;
+}
+.app-table thead,
+.app-table tbody tr,
+.costing-detail-table thead,
+.costing-detail-table tbody tr,
+.costing-detail-table tfoot {
+  border-color: #d6dee8 !important;
+}
+.costing-detail-table :is(th, td) {
+  padding-top: 0.5rem !important;
+  padding-bottom: 0.5rem !important;
+}
 .app-table textarea {
   white-space: pre-wrap;
 }
@@ -417,10 +433,10 @@ select:not([multiple]) {
     width: calc(100% - 32px);
   }
   .huswell-workspace .modern-page-table thead th {
-    height: 48px;
+    height: 42px;
   }
   .huswell-workspace .modern-page-table tbody tr {
-    height: 52px;
+    height: 46px;
   }
   .huswell-workspace .modern-page-table :is(th, td) {
     padding-left: 1rem;
@@ -443,23 +459,23 @@ select:not([multiple]) {
   background: #f8fafc;
 }
 .huswell-workspace .modern-page-table thead th {
-  height: 56px;
+  height: 44px;
   border-bottom: 1px solid #e5eaf0;
   background: #f8fafc;
-  color: #536174;
+  color: #4b5565;
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.01em;
 }
 .huswell-workspace .modern-page-table tbody tr {
-  height: 60px;
+  height: 48px;
   transition: background-color 150ms ease;
 }
 .huswell-workspace .modern-page-table tbody tr:hover {
   background: #fff9f9 !important;
 }
 .huswell-workspace .modern-page-table tbody td {
-  border-bottom: 1px solid #edf0f4;
+  border-bottom: 1px solid #d6dee8;
   color: #273244;
 }
 .huswell-workspace .modern-page-table tbody tr:last-child td {
@@ -620,8 +636,8 @@ select option[value=""] {
 }
 
 .table-action {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   display: inline-grid;
   place-items: center;
   border: 1px solid transparent;

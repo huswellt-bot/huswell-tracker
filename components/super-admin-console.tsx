@@ -324,7 +324,7 @@ export function SuperAdminConsole({
           </div>
           <div className="max-h-[460px] overflow-auto">
             <table className="app-table w-full min-w-[760px] text-left text-[14px]">
-              <thead className="sticky top-0 z-10 border-b border-[#edf0f5] bg-[#f8faff] text-[14px] font-semibold text-[#667085]">
+              <thead className="sticky top-0 z-10 border-b border-[#edf0f5] bg-[#f8faff] text-[14px] font-bold text-[#4b5565]">
                 <tr>
                   <th className="px-5 py-3">User</th>
                   <th className="px-5 py-3">Email</th>

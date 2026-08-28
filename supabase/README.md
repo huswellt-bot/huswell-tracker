@@ -36,7 +36,13 @@
 34. Run `035_fix_costing_approval_status_enum.sql` to fix the Costing Breakdown approval status type mismatch.
 35. Run `040_quotation_bank_details.sql` to enable quotation bank-account defaults.
 36. Run `041_sales_project_officer_signatures.sql` before using Sales Project Officer signatures in PDFs.
-37. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
+37. Run `042_auto_assign_lead_creator.sql` and `043_restrict_lead_reads_to_creators.sql` to keep new Lead ownership aligned with the creating Sales Project Officer.
+38. Run `044_sales_project_officer_lead_change_approvals.sql` to require General Manager approval for Sales Project Officer Lead edits and deletions.
+39. Run `045_live_costing_and_price_quotation_revisions.sql` to require General Manager approval before revising an approved Costing Breakdown and to refresh its existing Price Quotation after re-approval.
+40. Run `046_quarterly_sales_targets.sql` to add quarterly sales quotas used by the KPI dashboard.
+41. Run `047_shared_kpi_aggregates.sql` to give the KPI dashboard shared organization totals without exposing source records.
+42. Run `048_shared_open_costings_kpi.sql` to include the organization-wide Open Costings total on the Sales Project Officer KPI cards.
+43. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 
