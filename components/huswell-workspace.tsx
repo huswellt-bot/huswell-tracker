@@ -629,6 +629,106 @@ const roleReadableTables: Record<string, TableName[]> = {
 const canReadTable = (role: string, table: TableName) =>
   memberRole(role) ||
   (roleReadableTables[role] ?? roleReadableTables.viewer).includes(table);
+const workspaceViewTables = (
+  view: View,
+  leadMode: LeadWorkspaceMode,
+  role: string,
+): TableName[] => {
+  if (view === "Dashboard")
+    return role === "project_manager"
+      ? ["leads", "quotations", "project_schedules"]
+      : ["invoices", "payments", "target_goals", "quotations", "leads"];
+  if (view === "Leads" && leadMode === "leads")
+    return ["leads", "profiles", "organization_members", "lead_change_requests"];
+  if (view === "Projects")
+    return [
+      "project_schedules",
+      "quotations",
+      "leads",
+      "profiles",
+      "project_edit_requests",
+      "project_schedule_revision_requests",
+      "project_schedule_completion_requests",
+    ];
+  if (
+    view === "Costing Breakdown" ||
+    view === "Price Quotations" ||
+    (view === "Leads" && ["costing", "quotation"].includes(leadMode))
+  )
+    return [
+      "quotations",
+      "quotation_items",
+      "leads",
+      "customers",
+      "inventory_items",
+      "business_settings",
+      "profiles",
+      "quotation_revision_requests",
+    ];
+  if (view === "Suppliers & Materials")
+    return [
+      "suppliers",
+      "inventory_items",
+      "inventory_movements",
+      "production_material_usage",
+      "finished_product_stock_ins",
+      "quotation_items",
+      "invoice_items",
+      "expenses",
+      "supplier_payables",
+    ];
+  if (view === "Production")
+    return [
+      "production_jobs",
+      "production_material_usage",
+      "production_job_activity",
+      "inventory_items",
+      "inventory_movements",
+      "finished_product_stock_ins",
+      "customers",
+    ];
+  if (view === "Catalog") return ["inventory_items"];
+  if (view === "Inventory")
+    return [
+      "inventory_items",
+      "inventory_movements",
+      "production_material_usage",
+      "production_jobs",
+      "finished_product_stock_ins",
+    ];
+  if (view === "Sales")
+    return ["invoices", "invoice_items", "payments", "customers", "inventory_items"];
+  if (view === "Expenses") return ["expenses", "suppliers"];
+  if (view === "Finance")
+    return [
+      "invoices",
+      "payments",
+      "expenses",
+      "cash_flow_entries",
+      "customers",
+      "suppliers",
+      "supplier_payables",
+    ];
+  if (view === "Payroll & Leave")
+    return ["employees", "payroll_periods", "payroll_entries", "leave_requests"];
+  if (view === "Directory") return ["customers", "suppliers", "employees"];
+  if (view === "Targets") return ["target_goals"];
+  if (view === "Submissions")
+    return [
+      "quotations",
+      "profiles",
+      "project_edit_requests",
+      "leads",
+      "lead_change_requests",
+      "quotation_revision_requests",
+      "project_schedules",
+      "project_schedule_revision_requests",
+      "project_schedule_completion_requests",
+    ];
+  if (view === "Settings")
+    return ["business_settings", "organization_members", "profiles"];
+  return [];
+};
 
 const directory: Module = {
   table: "customers",
@@ -2308,9 +2408,19 @@ function Records({
         "Unassigned",
       ),
   };
+  const dateSentLeadColumns = leadColumns.filter(
+    (column) => column.label === "Date sent",
+  );
+  const remainingLeadColumns = leadColumns.filter(
+    (column) => column.label !== "Date sent",
+  );
+  const leadColumnsDateFirst = [
+    ...dateSentLeadColumns,
+    ...remainingLeadColumns,
+  ];
   const columns =
     module.table === "leads" && isProjectsPage
-      ? leadColumns.map((column) =>
+      ? leadColumnsDateFirst.map((column) =>
           column.label === "Lead status"
             ? {
                 label: "Done Deal Status",
@@ -2319,8 +2429,12 @@ function Records({
             : column,
         )
       : module.table === "leads" && isGeneralManager
-        ? [assignmentColumn, ...leadColumns]
-        : leadColumns;
+        ? [
+            ...dateSentLeadColumns,
+            assignmentColumn,
+            ...remainingLeadColumns,
+          ]
+        : leadColumnsDateFirst;
   const visibleFields =
     module.table === "leads" && isProjectsPage
       ? fields.filter((field) => field.key !== "evaluation_number")
@@ -11135,7 +11249,10 @@ export function HuswellWorkspace({
   const [navigationDate, setNavigationDate] = useState(() => new Date());
   const client = useMemo(() => createClient(), []);
   const workspaceRefreshTimer = useRef<number | null>(null);
-  const loadRequestId = useRef(0);
+  const tableRequestIds = useRef(new Map<TableName, number>());
+  const loadedTables = useRef(new Set<TableName>());
+  const initialViewLoaded = useRef(false);
+  const pendingRealtimeTables = useRef(new Set<TableName>());
   const canEditOwnProfile = ["owner", "admin", "project_manager"].includes(
     role,
   );
@@ -11154,58 +11271,103 @@ export function HuswellWorkspace({
     if (view === "Leads") setLeadMode("leads");
     setActive(view);
   }, [selectLeadWorkspaceMode]);
-  const load = useCallback(async (showLoading = true) => {
-    const requestId = ++loadRequestId.current;
+  const fetchTable = useCallback(
+    async (table: TableName) => {
+      const childTables: TableName[] = [
+        "profiles",
+        "quotation_items",
+        "invoice_items",
+        "payroll_entries",
+      ];
+      return childTables.includes(table)
+        ? client.from(table).select("*").order("created_at", { ascending: false })
+        : client
+            .from(table)
+            .select("*")
+            .eq("organization_id", organizationId)
+            .order("created_at", { ascending: false });
+    },
+    [client, organizationId],
+  );
+  const refreshTables = useCallback(async (
+    requestedTables: TableName[],
+    showLoading = false,
+  ) => {
+    const tablesToRefresh = [...new Set(requestedTables)].filter((table) =>
+      canReadTable(role, table),
+    );
+    if (!tablesToRefresh.length) {
+      if (showLoading) setLoading(false);
+      return;
+    }
+    const requestIds = new Map(
+      tablesToRefresh.map((table) => {
+        const requestId = (tableRequestIds.current.get(table) ?? 0) + 1;
+        tableRequestIds.current.set(table, requestId);
+        return [table, requestId];
+      }),
+    );
     if (showLoading) setLoading(true);
-    const childTables: TableName[] = [
-      "profiles",
-      "quotation_items",
-      "invoice_items",
-      "payroll_entries",
-    ];
     const results = await Promise.all(
-      tables
-        .filter((table) => canReadTable(role, table))
+      tablesToRefresh
         .map(async (table) => ({
           table,
-          result: childTables.includes(table)
-            ? await client
-                .from(table)
-                .select("*")
-                .order("created_at", { ascending: false })
-            : await client
-                .from(table)
-                .select("*")
-                .eq("organization_id", organizationId)
-                .order("created_at", { ascending: false }),
+          result: await fetchTable(table),
         })),
     );
-    const next = blank();
     const errors = results
       .filter((r) => r.result.error)
       .map((r) => `${r.table}: ${r.result.error?.message}`);
-    results.forEach((r) => (next[r.table] = (r.result.data ?? []) as Row[]));
-    if (requestId !== loadRequestId.current) return;
-    setStore(next);
-    setLoading(false);
+    const freshResults = results.filter(
+      (result) =>
+        tableRequestIds.current.get(result.table) === requestIds.get(result.table),
+    );
+    if (!freshResults.length) return;
+    setStore((current) => {
+      const next = { ...current };
+      freshResults.forEach((result) => {
+        if (!result.result.error) {
+          next[result.table] = (result.result.data ?? []) as Row[];
+          loadedTables.current.add(result.table);
+        }
+      });
+      return next;
+    });
+    if (showLoading) setLoading(false);
     if (errors.length)
       setMessage(
         `Workspace data could not load: ${errors.join(" | ")}`,
       );
-  }, [client, organizationId, role]);
+  }, [fetchTable, role]);
+  const load = useCallback(
+    async (showLoading = false) => refreshTables(tables, showLoading),
+    [refreshTables],
+  );
+  const reload = useCallback(() => load(false), [load]);
   useEffect(() => {
-    void load();
-  }, [load]);
+    const neededTables = workspaceViewTables(active, leadMode, role).filter(
+      (table) => !loadedTables.current.has(table),
+    );
+    if (!neededTables.length) return;
+    const showLoading = !initialViewLoaded.current;
+    void refreshTables(neededTables, showLoading).finally(() => {
+      initialViewLoaded.current = true;
+    });
+  }, [active, leadMode, refreshTables, role]);
   useEffect(() => {
     const realtimeTables = tables.filter((table) => canReadTable(role, table));
     if (!realtimeTables.length) return;
+    const pendingTables = pendingRealtimeTables.current;
 
-    const refreshWorkspace = () => {
+    const refreshWorkspace = (table: TableName) => {
+      pendingTables.add(table);
       if (workspaceRefreshTimer.current)
         window.clearTimeout(workspaceRefreshTimer.current);
       workspaceRefreshTimer.current = window.setTimeout(() => {
         workspaceRefreshTimer.current = null;
-        void load(false);
+        const changedTables = [...pendingTables];
+        pendingTables.clear();
+        void refreshTables(changedTables);
       }, 250);
     };
     const channel = client.channel(`workspace-data:${organizationId}`);
@@ -11217,7 +11379,7 @@ export function HuswellWorkspace({
           schema: "public",
           table,
         },
-        refreshWorkspace,
+        () => refreshWorkspace(table),
       );
     });
     channel.subscribe();
@@ -11227,9 +11389,10 @@ export function HuswellWorkspace({
         window.clearTimeout(workspaceRefreshTimer.current);
         workspaceRefreshTimer.current = null;
       }
+      pendingTables.clear();
       void client.removeChannel(channel);
     };
-  }, [client, load, organizationId, role]);
+  }, [client, organizationId, refreshTables, role]);
   useEffect(() => {
     const refreshDate = () => setNavigationDate(new Date());
     refreshDate();
@@ -11462,7 +11625,7 @@ export function HuswellWorkspace({
       <ProjectCalendar
         store={store}
         orgId={organizationId}
-        reload={load}
+        reload={reload}
         notice={setMessage}
         role={role}
       />
@@ -11471,7 +11634,7 @@ export function HuswellWorkspace({
         <Quotations
           store={store}
           orgId={organizationId}
-          reload={load}
+          reload={reload}
           notice={setMessage}
           role={role}
           profileName={profileName}
@@ -11485,7 +11648,7 @@ export function HuswellWorkspace({
           module={leads}
           store={store}
           orgId={organizationId}
-          reload={load}
+          reload={reload}
           notice={setMessage}
           role={role}
           leadMode={activeLeadWorkspaceMode}
@@ -11496,7 +11659,7 @@ export function HuswellWorkspace({
       <SupplierMaterials
         store={store}
         orgId={organizationId}
-        reload={load}
+        reload={reload}
         notice={setMessage}
         role={role}
       />
@@ -11511,7 +11674,7 @@ export function HuswellWorkspace({
       <Production
         store={store}
         orgId={organizationId}
-        reload={load}
+        reload={reload}
         notice={setMessage}
         role={role}
       />
@@ -11520,7 +11683,7 @@ export function HuswellWorkspace({
         module={catalog}
         store={store}
         orgId={organizationId}
-        reload={load}
+        reload={reload}
         notice={setMessage}
         role={role}
       />
@@ -11528,7 +11691,7 @@ export function HuswellWorkspace({
       <Inventory
         store={store}
         orgId={organizationId}
-        reload={load}
+        reload={reload}
         notice={setMessage}
         role={role}
       />
@@ -11536,7 +11699,7 @@ export function HuswellWorkspace({
       <Sales
         store={store}
         orgId={organizationId}
-        reload={load}
+        reload={reload}
         notice={setMessage}
         role={role}
       />
@@ -11545,7 +11708,7 @@ export function HuswellWorkspace({
         module={expenses}
         store={store}
         orgId={organizationId}
-        reload={load}
+        reload={reload}
         notice={setMessage}
         role={role}
       />
@@ -11553,7 +11716,7 @@ export function HuswellWorkspace({
       <FinanceReports
         store={store}
         orgId={organizationId}
-        reload={load}
+        reload={reload}
         notice={setMessage}
         role={role}
       />
@@ -11561,7 +11724,7 @@ export function HuswellWorkspace({
       <PayrollLeave
         store={store}
         orgId={organizationId}
-        reload={load}
+        reload={reload}
         notice={setMessage}
         role={role}
       />
@@ -11569,7 +11732,7 @@ export function HuswellWorkspace({
       <Directory
         store={store}
         orgId={organizationId}
-        reload={load}
+        reload={reload}
         notice={setMessage}
         role={role}
       />
@@ -11578,7 +11741,7 @@ export function HuswellWorkspace({
         module={targets}
         store={store}
         orgId={organizationId}
-        reload={load}
+        reload={reload}
         notice={setMessage}
         role={role}
       />
@@ -11593,14 +11756,14 @@ export function HuswellWorkspace({
       <Submissions
         store={store}
         orgId={organizationId}
-        reload={load}
+        reload={reload}
         notice={setMessage}
       />
     ) : (
       <SettingsView
         store={store}
         orgId={organizationId}
-        reload={load}
+        reload={reload}
         notice={setMessage}
         role={role}
       />
