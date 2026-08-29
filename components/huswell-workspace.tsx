@@ -2223,7 +2223,7 @@ function Records({
           (r) =>
             module.table !== "leads" ||
             isGeneralManager ||
-            text(r.created_by, "") === currentUserId,
+            text(r.assigned_to ?? r.created_by, "") === currentUserId,
         )
         .filter(
           (r) =>
@@ -2299,6 +2299,15 @@ function Records({
             : column,
         )
       : module.columns;
+  const assignmentColumn = {
+    label: "Sales Project Officer",
+    value: (row: Row) =>
+      text(
+        store.profiles.find((profile) => profile.id === row.assigned_to)
+          ?.full_name,
+        "Unassigned",
+      ),
+  };
   const columns =
     module.table === "leads" && isProjectsPage
       ? leadColumns.map((column) =>
@@ -2309,7 +2318,9 @@ function Records({
               }
             : column,
         )
-      : leadColumns;
+      : module.table === "leads" && isGeneralManager
+        ? [assignmentColumn, ...leadColumns]
+        : leadColumns;
   const visibleFields =
     module.table === "leads" && isProjectsPage
       ? fields.filter((field) => field.key !== "evaluation_number")
@@ -2317,6 +2328,21 @@ function Records({
           text(values.evaluation_number, "").split("|")[0] !== "7"
         ? fields.filter((field) => field.key !== "done_deal_status")
         : fields;
+  const dialogFields =
+    module.table === "leads" && isGeneralManager && !isProjectsPage
+      ? [
+          ...visibleFields,
+          {
+            key: "assigned_to",
+            label: "Sales Project Officer",
+            type: "select" as const,
+            options: projectOfficers.map(
+              (officer) => `${officer.id}|${officer.name}`,
+            ),
+            hint: "Leave blank to keep this chatbot lead unassigned.",
+          },
+        ]
+      : visibleFields;
   const initial = (row?: Row) =>
     Object.fromEntries(
       module.fields.map((f) => [
@@ -2481,12 +2507,12 @@ function Records({
     module.table === "leads" &&
     !isProjectsPage &&
     role === "project_manager" &&
-    text(row.created_by, "") === currentUserId;
+    text(row.assigned_to ?? row.created_by, "") === currentUserId;
   const canEditRow = (row: Row) =>
     canUpdate &&
     (module.table !== "leads" ||
       memberRole(role) ||
-      text(row.created_by, "") === currentUserId);
+      text(row.assigned_to ?? row.created_by, "") === currentUserId);
   const isPageLayout = module.table === "leads";
   const contentPadding = isPageLayout ? "px-4 sm:px-6 lg:px-7" : "px-4 sm:px-5";
   return (
@@ -2695,7 +2721,12 @@ function Records({
                           <ActionIcon
                             onClick={() => {
                               setEditing(row);
-                              setValues(initial(row));
+                              setValues({
+                                ...initial(row),
+                                ...(module.table === "leads"
+                                  ? { assigned_to: text(row.assigned_to, "") }
+                                  : {}),
+                              });
                               setOpen(true);
                             }}
                             label="Edit record"
@@ -2791,7 +2822,7 @@ function Records({
       {open && (
         <Dialog
           title={editing ? `Edit ${module.title}` : module.add}
-          fields={visibleFields}
+          fields={dialogFields}
           values={values}
           setValues={setValues}
           save={() => void save()}

@@ -55,7 +55,8 @@
 53. Run `059_atomic_general_approval_decisions.sql` to make general approval decisions atomic with their related record updates.
 54. Run `060_project_schedule_revisions.sql` to require General Manager approval before changing approved Project Calendar dates.
 55. Run `061_project_completion_approvals.sql` to require General Manager approval before marking a scheduled project finished and to synchronize its Production Job and KPI count.
-56. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
+56. Run `062_chatbot_lead_intake_and_assignment.sql` before deploying chatbot lead intake. It adds idempotent chatbot lead receipt, lets the General Manager assign a lead to a Sales Project Officer, and limits each officer to their assigned leads.
+57. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 
@@ -64,6 +65,22 @@ The schema covers customers, suppliers, employees, product/service and supply in
 Every application table has Row Level Security enabled. Members can access only records belonging to their own organization; no service-role key is needed in the browser.
 
 Keep `SUPABASE_SERVICE_ROLE_KEY` server-only in `.env.local` (without the `NEXT_PUBLIC_` prefix). It is required only for the secure server route that creates Project Manager authentication accounts; never expose it in browser code.
+
+## Confirmed chatbot leads
+
+After running migration `062_chatbot_lead_intake_and_assignment.sql`, add these server-only deployment variables:
+
+```text
+CHATBOT_LEAD_WEBHOOK_SECRET=<a long random value shared only with the chatbot server>
+CHATBOT_LEAD_ORGANIZATION_ID=<the Huswell organization UUID>
+```
+
+The chatbot should POST its already-confirmed lead payload to
+`/api/integrations/chatbot/leads` with `Authorization: Bearer <shared secret>`.
+The endpoint accepts the chatbot's existing `leadId`, `capturedAt`, `fields`, and
+`fieldTypes` payload, stores it once, and returns `{ "ok": true }` on both an
+initial delivery and a safe retry. Chatbot leads are initially unassigned; a
+General Manager assigns them from the existing **Leads** workspace.
 
 ## If the first run failed
 
