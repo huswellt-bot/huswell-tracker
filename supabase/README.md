@@ -56,7 +56,9 @@
 54. Run `060_project_schedule_revisions.sql` to require General Manager approval before changing approved Project Calendar dates.
 55. Run `061_project_completion_approvals.sql` to require General Manager approval before marking a scheduled project finished and to synchronize its Production Job and KPI count.
 56. Run `062_chatbot_lead_intake_and_assignment.sql` before deploying chatbot lead intake. It adds idempotent chatbot lead receipt, lets the General Manager assign a lead to a Sales Project Officer, and limits each officer to their assigned leads.
-57. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
+57. Run `063_enable_realtime_leads.sql` to enable the initial Leads real-time publication.
+58. Run `064_enable_workspace_realtime.sql` to update every workspace screen automatically when authorized data is created, changed, or deleted.
+59. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 

@@ -11134,6 +11134,8 @@ export function HuswellWorkspace({
   const [signingOut, setSigningOut] = useState(false);
   const [navigationDate, setNavigationDate] = useState(() => new Date());
   const client = useMemo(() => createClient(), []);
+  const workspaceRefreshTimer = useRef<number | null>(null);
+  const loadRequestId = useRef(0);
   const canEditOwnProfile = ["owner", "admin", "project_manager"].includes(
     role,
   );
@@ -11152,8 +11154,9 @@ export function HuswellWorkspace({
     if (view === "Leads") setLeadMode("leads");
     setActive(view);
   }, [selectLeadWorkspaceMode]);
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (showLoading = true) => {
+    const requestId = ++loadRequestId.current;
+    if (showLoading) setLoading(true);
     const childTables: TableName[] = [
       "profiles",
       "quotation_items",
@@ -11182,6 +11185,7 @@ export function HuswellWorkspace({
       .filter((r) => r.result.error)
       .map((r) => `${r.table}: ${r.result.error?.message}`);
     results.forEach((r) => (next[r.table] = (r.result.data ?? []) as Row[]));
+    if (requestId !== loadRequestId.current) return;
     setStore(next);
     setLoading(false);
     if (errors.length)
@@ -11192,6 +11196,40 @@ export function HuswellWorkspace({
   useEffect(() => {
     void load();
   }, [load]);
+  useEffect(() => {
+    const realtimeTables = tables.filter((table) => canReadTable(role, table));
+    if (!realtimeTables.length) return;
+
+    const refreshWorkspace = () => {
+      if (workspaceRefreshTimer.current)
+        window.clearTimeout(workspaceRefreshTimer.current);
+      workspaceRefreshTimer.current = window.setTimeout(() => {
+        workspaceRefreshTimer.current = null;
+        void load(false);
+      }, 250);
+    };
+    const channel = client.channel(`workspace-data:${organizationId}`);
+    realtimeTables.forEach((table) => {
+      channel.on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table,
+        },
+        refreshWorkspace,
+      );
+    });
+    channel.subscribe();
+
+    return () => {
+      if (workspaceRefreshTimer.current) {
+        window.clearTimeout(workspaceRefreshTimer.current);
+        workspaceRefreshTimer.current = null;
+      }
+      void client.removeChannel(channel);
+    };
+  }, [client, load, organizationId, role]);
   useEffect(() => {
     const refreshDate = () => setNavigationDate(new Date());
     refreshDate();
