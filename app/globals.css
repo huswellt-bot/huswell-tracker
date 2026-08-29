@@ -497,8 +497,8 @@ select:not([multiple]) {
 }
 .huswell-workspace .leads-table {
   table-layout: fixed;
-  width: 2155px;
-  min-width: 2155px;
+  width: 2265px;
+  min-width: 2265px;
 }
 .huswell-workspace .leads-table thead th {
   white-space: nowrap !important;
@@ -559,6 +559,10 @@ select:not([multiple]) {
 .huswell-workspace .leads-table td:nth-child(11) {
   width: 175px;
   white-space: nowrap;
+}
+.huswell-workspace .leads-table th:nth-child(12),
+.huswell-workspace .leads-table td:nth-child(12) {
+  width: 110px;
 }
 .huswell-workspace .cost-lines-table th:first-child,
 .huswell-workspace .cost-lines-table td:first-child {

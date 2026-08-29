@@ -2700,7 +2700,7 @@ function Records({
             <div className={isPageLayout ? "modern-table-shell" : undefined}>
               <Table
                 labels={[...columns.map((c) => c.label), "Actions"]}
-                minWidth={module.table === "leads" ? 2155 : 680}
+                minWidth={module.table === "leads" ? 2265 : 680}
                 scrollable={isPageLayout}
                 className={
                   module.table === "leads"
