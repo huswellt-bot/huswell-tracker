@@ -2829,6 +2829,12 @@ function ProjectCalendar({
   role: string;
 }) {
   const [month, setMonth] = useState(currentMonth);
+  const [projectStatusTab, setProjectStatusTab] = useState<
+    "active" | "completed"
+  >("active");
+  const [activeMonthFilter, setActiveMonthFilter] = useState(currentMonth);
+  const [completedMonthFilter, setCompletedMonthFilter] =
+    useState(currentMonth);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -2840,6 +2846,24 @@ function ProjectCalendar({
   const approvedSchedules = schedules.filter(
     (schedule) => text(schedule.status, "approved") === "approved",
   );
+  const activeSchedules = approvedSchedules.filter(
+    (schedule) => !schedule.completed_at,
+  );
+  const completedSchedules = approvedSchedules.filter(
+    (schedule) => Boolean(schedule.completed_at),
+  );
+  const selectedMonthFilter =
+    projectStatusTab === "active" ? activeMonthFilter : completedMonthFilter;
+  const tableSchedules =
+    projectStatusTab === "active" ? activeSchedules : completedSchedules;
+  const filteredTableSchedules = tableSchedules.filter((schedule) => {
+    if (!selectedMonthFilter) return true;
+    const date =
+      projectStatusTab === "active"
+        ? text(schedule.due_date, "")
+        : text(schedule.completed_at, "");
+    return date.slice(0, 7) === selectedMonthFilter;
+  });
   const myScheduleRequests = schedules.filter(
     (schedule) =>
       role === "project_manager" &&
@@ -3041,6 +3065,8 @@ function ProjectCalendar({
     );
   const showScheduleRevisionActions =
     isGeneralManager || role === "project_manager";
+  const showProjectActions =
+    showScheduleRevisionActions && projectStatusTab === "active";
   const canRequestScheduleCompletion = (schedule: Row) =>
     !schedule.completed_at &&
     !hasPendingScheduleRevision(schedule) &&
@@ -3087,6 +3113,7 @@ function ProjectCalendar({
               <input
                 type="month"
                 value={month}
+                onClick={(event) => event.currentTarget.showPicker?.()}
                 onChange={(event) => setMonth(event.target.value)}
                 className="border-0 bg-transparent p-0 text-[12px] font-medium outline-none"
               />
@@ -3141,6 +3168,52 @@ function ProjectCalendar({
         </div>
       </section>
       <section className="px-4 py-4 sm:px-5 lg:px-6">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <nav
+            aria-label="Project status"
+            className="flex gap-1 overflow-x-auto border-b border-[#e4e8ef]"
+          >
+            {[
+              { value: "active", label: "Active", count: activeSchedules.length },
+              {
+                value: "completed",
+                label: "Completed",
+                count: completedSchedules.length,
+              },
+            ].map((tab) => (
+              <button
+                key={tab.value}
+                type="button"
+                onClick={() => setProjectStatusTab(tab.value as "active" | "completed")}
+                aria-current={projectStatusTab === tab.value ? "page" : undefined}
+                className={`shrink-0 px-3 py-2 text-[12px] font-medium ${projectStatusTab === tab.value ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1] hover:text-[#4b5565]"}`}
+              >
+                {tab.label} ({tab.count})
+              </button>
+            ))}
+          </nav>
+          <label className="flex items-center gap-2 text-[12px] text-[#687386]">
+            <span className="whitespace-nowrap">Month</span>
+            <input
+              type="month"
+              aria-label={
+                projectStatusTab === "active"
+                  ? "Filter active projects by due month"
+                  : "Filter completed projects by completion month"
+              }
+              value={selectedMonthFilter}
+              onClick={(event) => event.currentTarget.showPicker?.()}
+              onChange={(event) => {
+                if (projectStatusTab === "active") {
+                  setActiveMonthFilter(event.target.value);
+                } else {
+                  setCompletedMonthFilter(event.target.value);
+                }
+              }}
+              className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px] text-[#202938] outline-none focus:border-[#c43b43]"
+            />
+          </label>
+        </div>
         <Table
           labels={[
             ...(isGeneralManager ? ["Assigned Project Officer"] : []),
@@ -3151,12 +3224,12 @@ function ProjectCalendar({
             "Start date",
             "Due Date",
             "Project status",
-            ...(showScheduleRevisionActions ? ["Actions"] : []),
+            ...(showProjectActions ? ["Actions"] : []),
           ]}
           minWidth={isGeneralManager ? 1140 : 990}
           className="modern-page-table"
         >
-          {approvedSchedules.map((schedule) => (
+          {filteredTableSchedules.map((schedule) => (
             <tr key={text(schedule.id)} className="hover:bg-[#fbfcff]">
               {isGeneralManager && <td className="px-4 py-2">{officerName(schedule)}</td>}
               <td className="px-4 py-2">{text(schedule.quotation_no)}</td>
@@ -3166,7 +3239,7 @@ function ProjectCalendar({
               <td className="px-4 py-2">{day(schedule.start_date)}</td>
               <td className="px-4 py-2">{day(schedule.due_date)}</td>
               <td className="px-4 py-2"><Status value={schedule.completed_at ? "completed" : hasPendingScheduleCompletion(schedule) ? "completion pending" : "active"} /></td>
-              {showScheduleRevisionActions && (
+              {showProjectActions && (
                 <td className="px-4 py-2">
                   {canRequestScheduleCompletion(schedule) && (
                     <ActionIcon
@@ -3208,9 +3281,11 @@ function ProjectCalendar({
             </tr>
           ))}
         </Table>
-        {!approvedSchedules.length && (
+        {!filteredTableSchedules.length && (
           <Empty>
-            No approved projects are scheduled yet.
+            {projectStatusTab === "active"
+              ? "No active projects are due in the selected month."
+              : "No completed projects match the selected month."}
           </Empty>
         )}
         {role === "project_manager" && myScheduleRequests.length > 0 && (
