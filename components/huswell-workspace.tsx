@@ -136,6 +136,8 @@ type TableName =
   | "target_goals"
   | "approval_requests"
   | "project_edit_requests"
+  | "project_schedule_revision_requests"
+  | "project_schedule_completion_requests"
   | "lead_change_requests"
   | "quotation_revision_requests"
   | "project_schedules"
@@ -210,6 +212,8 @@ const tables: TableName[] = [
   "target_goals",
   "approval_requests",
   "project_edit_requests",
+  "project_schedule_revision_requests",
+  "project_schedule_completion_requests",
   "lead_change_requests",
   "quotation_revision_requests",
   "project_schedules",
@@ -259,7 +263,7 @@ const projectOfficerIdForQuote = (store: Store, quote: Row) => {
 };
 const titleCase = (value: string) =>
   value.replace(
-    /(^|[^A-Za-z])([a-z])/g,
+    /(^|[^A-Za-z'])([a-z])/g,
     (_, prefix: string, letter: string) => `${prefix}${letter.toUpperCase()}`,
   );
 const titleCaseEntry = (value: string, key = "") =>
@@ -547,6 +551,8 @@ const roleReadableTables: Record<string, TableName[]> = {
     "quotations",
     "quotation_items",
     "project_edit_requests",
+    "project_schedule_revision_requests",
+    "project_schedule_completion_requests",
     "lead_change_requests",
     "quotation_revision_requests",
     "project_schedules",
@@ -1269,15 +1275,15 @@ function ConfirmationDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirmation-title"
-        className="w-full max-w-sm rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"
+        className="w-full max-w-sm min-w-0 rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"
       >
         <h2
           id="confirmation-title"
-          className="text-[16px] font-semibold text-[#202938]"
+          className="min-w-0 break-words text-[16px] font-semibold text-[#202938]"
         >
           {title}
         </h2>
-        <p className="mt-2 text-[13px] leading-5 text-[#626b7a]">
+        <p className="mt-2 min-w-0 whitespace-normal break-words [overflow-wrap:anywhere] text-[13px] leading-5 text-[#626b7a]">
           {description}
         </p>
         <div className="mt-6 flex justify-end gap-2">
@@ -1439,7 +1445,7 @@ function CostingBreakdownPdf({ quote, store, origin }: { quote: Row; store: Stor
   const lines = store.quotation_items.filter((item) => item.quotation_id === quote.id);
   const customer = store.customers.find((item) => item.id === quote.customer_id);
   const lead = store.leads.find((item) => item.id === quote.lead_id);
-  const cogs = n(quote.total_cost); const sellingExVat = cogs + cogs * n(quote.profit_margin_rate) / 100 + cogs * n(quote.overhead_rate) / 100 + cogs * n(quote.buffer_margin_rate) / 100 + cogs * n(quote.commission_rate) / 100; const currency = (value: number) => new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(value);
+  const cogs = n(quote.total_cost); const sellingExVat = n(quote.subtotal); const currency = (value: number) => new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(value);
   const approvedByName = text(quote.approved_by_name, "Marvin S. Tavarez");
   const approvedBySignature = text(quote.approved_by_signature_url, "") || (quote.approved_by_name ? undefined : `${origin}/marvin-tavarez-signature.png`);
   const approvedByRole = quote.approved_by_name ? "General Manager" : "Proprietor";
@@ -1802,29 +1808,33 @@ function Table({
 }) {
   return (
     <div
-      className={`max-w-full overflow-x-auto overscroll-x-contain ${scrollable ? "max-h-[656px] overflow-y-auto" : ""}`}
+      className="max-w-full overflow-hidden rounded-lg border border-[#d6dee8] bg-white"
     >
-      <table
-        className={`app-table w-full text-left text-[12px] ${className ?? ""}`}
-        style={{ minWidth }}
+      <div
+        className={`overflow-x-auto overscroll-x-contain ${scrollable ? "max-h-[656px] overflow-y-auto" : ""}`}
       >
-        <thead
-          className={`border-y border-[#edf0f5] bg-[#f8faff] text-[12px] font-bold text-[#4b5565] ${scrollable ? "sticky top-0 z-10" : ""}`}
+        <table
+          className={`app-table w-full text-left text-[12px] ${className ?? ""}`}
+          style={{ minWidth }}
         >
-          <tr>
-            {labels.map((l) => (
-              <th
-                key={l}
-                scope="col"
-                className={`whitespace-nowrap px-5 py-3 ${l.toLowerCase() === "actions" ? "text-center" : ""}`}
-              >
-                {titleCase(l)}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-[#edf0f5]">{children}</tbody>
-      </table>
+          <thead
+            className={`border-y border-[#102f61] bg-[#102f61] text-[12px] font-bold text-white ${scrollable ? "sticky top-0 z-10" : ""}`}
+          >
+            <tr>
+              {labels.map((l) => (
+                <th
+                  key={l}
+                  scope="col"
+                  className={`whitespace-nowrap px-5 py-3 ${l.toLowerCase() === "actions" ? "text-center" : ""}`}
+                >
+                  {titleCase(l)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[#edf0f5]">{children}</tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -2822,6 +2832,8 @@ function ProjectCalendar({
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [editingSchedule, setEditingSchedule] = useState<Row | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const schedules = store.project_schedules.slice().sort((a, b) =>
     text(a.start_date, "").localeCompare(text(b.start_date, "")),
   );
@@ -2832,6 +2844,16 @@ function ProjectCalendar({
     (schedule) =>
       role === "project_manager" &&
       text(schedule.assigned_to, "") === text(schedule.created_by, ""),
+  );
+  const myScheduleRevisionRequests = store.project_schedule_revision_requests.filter(
+    (request) =>
+      role === "project_manager" &&
+      text(request.submitted_by, "") === currentUserId,
+  );
+  const myScheduleCompletionRequests = store.project_schedule_completion_requests.filter(
+    (request) =>
+      role === "project_manager" &&
+      text(request.submitted_by, "") === currentUserId,
   );
   const scheduledQuoteIds = new Set(
     schedules
@@ -2844,7 +2866,8 @@ function ProjectCalendar({
       text(quote.status, "") === "approved" &&
       !scheduledQuoteIds.has(text(quote.id, "")),
   );
-  const canCreateSchedule = role === "project_manager";
+  const canCreateSchedule = ["project_manager", "admin"].includes(role);
+  const isGeneralManager = role === "admin";
   const scheduleFields: Field[] = [
     {
       key: "quotation_id",
@@ -2856,30 +2879,71 @@ function ProjectCalendar({
           `${text(quote.id)}|${text(quote.quotation_no)} · ${text(quote.project_name, text(quote.client_name, "Untitled project"))}`,
       ),
     },
-    { key: "project_name", label: "Project name", required: true },
-    { key: "client_name", label: "Client name", required: true },
-    { key: "product_name", label: "Product", required: true },
-    { key: "quantity", label: "Quantity", type: "number", required: true },
     { key: "start_date", label: "Start date", type: "date", required: true },
-    { key: "due_date", label: "Deadline", type: "date", required: true },
+    { key: "due_date", label: "Due Date", type: "date", required: true },
   ];
+  const revisionFields: Field[] = [
+    { key: "start_date", label: "Start date", type: "date", required: true },
+    { key: "due_date", label: "Due Date", type: "date", required: true },
+  ];
+  useEffect(() => {
+    let active = true;
+    void createClient()
+      .auth.getUser()
+      .then(({ data }) => {
+        if (active) setCurrentUserId(data.user?.id ?? null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   const shiftMonth = (offset: number) => {
     const start = monthStartFromValue(month);
     start.setMonth(start.getMonth() + offset);
     setMonth(monthValue(start));
   };
   const save = async () => {
+    if (editingSchedule?.id) {
+      if (!values.start_date || !values.due_date)
+        return notice("Enter the revised start and due dates.");
+      if (values.due_date < values.start_date)
+        return notice("The deadline cannot be before the start date.");
+      setSaving(true);
+      try {
+        const { error } = await createClient().rpc(
+          "request_project_schedule_revision",
+          {
+            p_schedule_id: editingSchedule.id,
+            p_start_date: values.start_date,
+            p_due_date: values.due_date,
+          },
+        );
+        if (error) throw error;
+        setOpen(false);
+        setEditingSchedule(null);
+        await reload();
+        notice("Project schedule revision submitted for General Manager approval.");
+      } catch (error) {
+        notice(
+          error instanceof Error
+            ? error.message
+            : "Project schedule revision could not be submitted.",
+        );
+      } finally {
+        setSaving(false);
+      }
+      return;
+    }
     const quotationId = values.quotation_id.split("|")[0];
+    if (!quotationId || !values.start_date || !values.due_date)
+      return notice("Select an approved price quotation, then enter the start and due dates.");
     if (
-      !quotationId ||
       !values.project_name.trim() ||
       !values.client_name.trim() ||
       !values.product_name.trim() ||
-      !values.quantity ||
-      !values.start_date ||
-      !values.due_date
+      !values.quantity
     )
-      return notice("Complete the project, client, product, quantity, and schedule fields.");
+      return notice("The selected quotation is missing project details needed for scheduling.");
     if (!Number.isFinite(Number(values.quantity)) || Number(values.quantity) <= 0)
       return notice("Quantity must be greater than zero.");
     if (values.due_date < values.start_date)
@@ -2925,10 +2989,31 @@ function ProjectCalendar({
       setSaving(false);
     }
   };
-  const scheduleNamesForDay = (key: string) =>
+  const requestCompletion = async (schedule: Row) => {
+    if (!schedule.id) return;
+    setSaving(true);
+    try {
+      const { error } = await createClient().rpc(
+        "request_project_schedule_completion",
+        { p_schedule_id: schedule.id },
+      );
+      if (error) throw error;
+      await reload();
+      notice("Project completion submitted for General Manager approval.");
+    } catch (error) {
+      notice(
+        error instanceof Error
+          ? error.message
+          : "Project completion could not be submitted.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+  const schedulesDueOnDay = (key: string) =>
     approvedSchedules.filter(
       (schedule) =>
-        key >= text(schedule.start_date, "") && key <= text(schedule.due_date, ""),
+        !schedule.completed_at && key === text(schedule.due_date, ""),
     );
   const calendarMonths = Array.from({ length: 3 }, (_, index) => {
     const start = monthStartFromValue(month);
@@ -2941,6 +3026,34 @@ function ProjectCalendar({
     );
     return text(profile?.full_name, "Unassigned");
   };
+  const canRequestScheduleRevision = (schedule: Row) =>
+    !schedule.completed_at &&
+    !hasPendingScheduleCompletion(schedule) &&
+    (isGeneralManager ||
+      (role === "project_manager" &&
+        text(schedule.assigned_to, "") === currentUserId &&
+        text(schedule.created_by, "") === currentUserId));
+  const hasPendingScheduleRevision = (schedule: Row) =>
+    store.project_schedule_revision_requests.some(
+      (request) =>
+        text(request.schedule_id, "") === text(schedule.id, "") &&
+        text(request.status, "") === "pending",
+    );
+  const showScheduleRevisionActions =
+    isGeneralManager || role === "project_manager";
+  const canRequestScheduleCompletion = (schedule: Row) =>
+    !schedule.completed_at &&
+    !hasPendingScheduleRevision(schedule) &&
+    (isGeneralManager ||
+      (role === "project_manager" &&
+        text(schedule.assigned_to, "") === currentUserId &&
+        text(schedule.created_by, "") === currentUserId));
+  const hasPendingScheduleCompletion = (schedule: Row) =>
+    store.project_schedule_completion_requests.some(
+      (request) =>
+        text(request.schedule_id, "") === text(schedule.id, "") &&
+        text(request.status, "") === "pending",
+    );
   return (
     <Panel
       title="Project calendar"
@@ -2952,6 +3065,7 @@ function ProjectCalendar({
           <Button
             disabled={!approvedQuotes.length}
             onClick={() => {
+              setEditingSchedule(null);
               setValues({ quotation_id: "", project_name: "", client_name: "", product_name: "", quantity: "", start_date: isoToday(), due_date: "" });
               setOpen(true);
             }}
@@ -2982,7 +3096,7 @@ function ProjectCalendar({
             </Button>
           </div>
           <p className="text-[12px] text-[#687386]">
-            Green dates show General Manager-approved projects from start date through deadline.
+            Green dates show active, General Manager-approved project due dates.
           </p>
         </div>
         <div className="mt-4 grid gap-3 xl:grid-cols-3">
@@ -3008,7 +3122,7 @@ function ProjectCalendar({
                       return <div key={index} className="min-h-12 border-b border-r border-[#e7ebf0] bg-[#fafbfc] last:border-r-0" />;
                     const date = new Date(year, monthIndex, dayNumber);
                     const key = localDateKey(date);
-                    const activeSchedules = scheduleNamesForDay(key);
+                    const activeSchedules = schedulesDueOnDay(key);
                     const active = activeSchedules.length > 0;
                     return (
                       <div
@@ -3028,20 +3142,69 @@ function ProjectCalendar({
       </section>
       <section className="px-4 py-4 sm:px-5 lg:px-6">
         <Table
-          labels={["Project name", "Client name", "Quotation code", "Quantity", "Product", "Start date", "Deadline", "Assigned Project Officer"]}
-          minWidth={1080}
+          labels={[
+            ...(isGeneralManager ? ["Assigned Project Officer"] : []),
+            "Quotation code",
+            "Client's Name / Company",
+            "Quantity",
+            "Project type",
+            "Start date",
+            "Due Date",
+            "Project status",
+            ...(showScheduleRevisionActions ? ["Actions"] : []),
+          ]}
+          minWidth={isGeneralManager ? 1140 : 990}
           className="modern-page-table"
         >
           {approvedSchedules.map((schedule) => (
             <tr key={text(schedule.id)} className="hover:bg-[#fbfcff]">
-              <td className="px-4 py-2 font-medium">{text(schedule.project_name)}</td>
-              <td className="px-4 py-2">{text(schedule.client_name)}</td>
+              {isGeneralManager && <td className="px-4 py-2">{officerName(schedule)}</td>}
               <td className="px-4 py-2">{text(schedule.quotation_no)}</td>
+              <td className="px-4 py-2">{text(schedule.client_name)}</td>
               <td className="px-4 py-2">{n(schedule.quantity).toLocaleString()}</td>
               <td className="px-4 py-2">{text(schedule.product_name)}</td>
               <td className="px-4 py-2">{day(schedule.start_date)}</td>
               <td className="px-4 py-2">{day(schedule.due_date)}</td>
-              <td className="px-4 py-2">{officerName(schedule)}</td>
+              <td className="px-4 py-2"><Status value={schedule.completed_at ? "completed" : hasPendingScheduleCompletion(schedule) ? "completion pending" : "active"} /></td>
+              {showScheduleRevisionActions && (
+                <td className="px-4 py-2">
+                  {canRequestScheduleCompletion(schedule) && (
+                    <ActionIcon
+                      label={
+                        hasPendingScheduleCompletion(schedule)
+                          ? "Project completion is awaiting General Manager approval"
+                          : "Request project completion"
+                      }
+                      tone="green"
+                      disabled={saving || hasPendingScheduleCompletion(schedule)}
+                      onClick={() => void requestCompletion(schedule)}
+                    >
+                      <Check size={15} />
+                    </ActionIcon>
+                  )}
+                  {canRequestScheduleRevision(schedule) && (
+                    <ActionIcon
+                      label={
+                        hasPendingScheduleRevision(schedule)
+                          ? "A schedule revision is awaiting General Manager approval"
+                          : "Request project schedule revision"
+                      }
+                      disabled={saving || hasPendingScheduleRevision(schedule)}
+                      confirm={false}
+                      onClick={() => {
+                        setEditingSchedule(schedule);
+                        setValues({
+                          start_date: text(schedule.start_date, ""),
+                          due_date: text(schedule.due_date, ""),
+                        });
+                        setOpen(true);
+                      }}
+                    >
+                      <RotateCcw size={15} />
+                    </ActionIcon>
+                  )}
+                </td>
+              )}
             </tr>
           ))}
         </Table>
@@ -3065,20 +3228,59 @@ function ProjectCalendar({
             </div>
           </div>
         )}
+        {role === "project_manager" && myScheduleRevisionRequests.length > 0 && (
+          <div className="mt-5 rounded-xl border border-[#e4e8ef] bg-[#fafbfe] p-4">
+            <h2 className="text-[13px] font-semibold text-[#202938]">My project schedule revision requests</h2>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {myScheduleRevisionRequests.map((request) => {
+                const schedule = schedules.find((item) => item.id === request.schedule_id);
+                return (
+                  <div key={text(request.id)} className="rounded-lg border border-[#e4e8ef] bg-white px-3 py-2 text-[12px]">
+                    <p className="font-medium text-[#202938]">{text(schedule?.project_name, text(schedule?.quotation_no))}</p>
+                    <p className="mt-0.5 text-[#687386]">{day(request.proposed_start_date)} – {day(request.proposed_due_date)}</p>
+                    <div className="mt-1"><Status value={text(request.status, "pending")} /></div>
+                    {text(request.decision_note) && <p className="mt-1 text-[#687386]">{text(request.decision_note)}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        {role === "project_manager" && myScheduleCompletionRequests.length > 0 && (
+          <div className="mt-5 rounded-xl border border-[#e4e8ef] bg-[#fafbfe] p-4">
+            <h2 className="text-[13px] font-semibold text-[#202938]">My project completion requests</h2>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+              {myScheduleCompletionRequests.map((request) => {
+                const schedule = schedules.find((item) => item.id === request.schedule_id);
+                return (
+                  <div key={text(request.id)} className="rounded-lg border border-[#e4e8ef] bg-white px-3 py-2 text-[12px]">
+                    <p className="font-medium text-[#202938]">{text(schedule?.project_name, text(schedule?.quotation_no))}</p>
+                    <p className="mt-0.5 text-[#687386]">Requested {day(request.submitted_at)}</p>
+                    <div className="mt-1"><Status value={text(request.status, "pending")} /></div>
+                    {text(request.decision_note) && <p className="mt-1 text-[#687386]">{text(request.decision_note)}</p>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </section>
       {open && (
         <Dialog
-          title="Submit project for approval"
-          fields={scheduleFields}
+          title={editingSchedule ? "Request project schedule revision" : "Submit project for approval"}
+          fields={editingSchedule ? revisionFields : scheduleFields}
           values={values}
           setValues={setValues}
           save={() => void save()}
-          close={() => setOpen(false)}
+          close={() => {
+            setOpen(false);
+            setEditingSchedule(null);
+          }}
           saving={saving}
-          saveLabel="Submit for approval"
+          saveLabel={editingSchedule ? "Submit revision" : "Submit for approval"}
           className="max-w-2xl"
           onFieldChange={(key, value, current) => {
-            if (key !== "quotation_id") return { ...current, [key]: value };
+            if (editingSchedule || key !== "quotation_id") return { ...current, [key]: value };
             const quote = approvedQuotes.find(
               (item) => text(item.id, "") === value.split("|")[0],
             );
@@ -4986,7 +5188,7 @@ function CostingDocument({
   const overhead = (cogs * n(quote.overhead_rate)) / 100;
   const buffer = (cogs * n(quote.buffer_margin_rate)) / 100;
   const commission = (cogs * n(quote.commission_rate)) / 100;
-  const sellingExVat = cogs + profit + overhead + buffer + commission;
+  const sellingExVat = n(quote.subtotal);
   const projectTypeOptions = [
     "Premium Rigid Box",
     "Regular Rigid Box",
@@ -5180,6 +5382,10 @@ function Quotations({
     await reload();
   };
   const openPdf = (quote: Row, isCosting: boolean, shouldPrint: boolean) => {
+    if (isCosting && text(quote.status) !== "approved") {
+      notice("Costing Breakdown PDFs are available after General Manager approval.");
+      return;
+    }
     setPdfWindow(null);
     setPrintAfterOpen(shouldPrint);
     setGeneratingPdf(isCosting ? "costing" : "quotation");
@@ -5198,6 +5404,12 @@ function Quotations({
   }, [costingImage]);
   const selectCostingImage = async (file: File | null) => {
     if (!file) return;
+    if (costingValues.inventory_item_id !== "__manual__") {
+      notice(
+        "Material images come from the Materials List. Choose Others / Manual Material to upload an image.",
+      );
+      return;
+    }
     if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
       notice("Choose a PNG, JPG, or WebP product image.");
       return;
@@ -5227,6 +5439,7 @@ function Quotations({
   const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
   const canGenerateCostingPdf = ["owner", "admin"].includes(role);
   const canDeleteQuote = ["owner", "admin"].includes(role);
+  const canRequestCostingRevision = ["project_manager", "owner", "admin"].includes(role);
   const canCreateQuote = mode === "costing"
     ? role === "project_manager" || isGeneralManager
     : false;
@@ -5338,6 +5551,11 @@ function Quotations({
       document_type: "costing_breakdown",
       status: "draft",
       issue_date: values.issue_date || isoToday(),
+      profit_margin_rate: n(values.profit_margin_rate),
+      overhead_rate: n(values.overhead_rate),
+      buffer_margin_rate: n(values.buffer_margin_rate),
+      commission_rate: n(values.commission_rate),
+      vat_rate: n(values.vat_rate),
       created_by: user.user.id,
     };
     clean.size_details = costingSizeDetails(
@@ -5584,28 +5802,15 @@ function Quotations({
     );
     await reload();
   };
-  const deleteQuote = async (quote: Row) => {
+  const deleteCostingBreakdown = async (quote: Row) => {
     if (!quote.id || !canDeleteQuote) return;
-    const hasGeneratedPriceQuotation =
-      text(quote.document_type) === "costing_breakdown" &&
-      store.quotations.some(
-        (item) =>
-          item.costing_source_id === quote.id &&
-          text(item.document_type) === "price_quotation",
-      );
-    if (hasGeneratedPriceQuotation) {
-      notice("Delete the linked Price Quotation before deleting this Costing Breakdown.");
-      return;
-    }
     setSaving(true);
-    const { error } = await createClient()
-      .from("quotations")
-      .delete()
-      .eq("id", quote.id)
-      .eq("organization_id", orgId);
+    const { error } = await createClient().rpc("delete_costing_breakdown", {
+      p_costing_id: quote.id,
+    });
     setSaving(false);
     if (error) return notice(error.message);
-    notice(`${text(quote.document_type) === "costing_breakdown" ? "Costing Breakdown" : "Price Quotation"} deleted.`);
+    notice("Costing Breakdown and its linked Price Quotation deleted.");
     await reload();
   };
   const saveQuoteEdit = async () => {
@@ -5755,7 +5960,7 @@ function Quotations({
                   >
                     <Plus size={14} />
                     {isCosting
-                      ? "New costing breakdown"
+                      ? "Add costing breakdown"
                       : "New price quotation"}
                   </Button>
                 </>
@@ -5822,7 +6027,6 @@ function Quotations({
                 isCosting ? "Costing Breakdown" : "Price Quotation",
                 isCosting ? "Client's Name / Company" : "Customer / project",
                 "Estimated COGS",
-                isCosting ? "VAT incl." : "Selling price VAT inc.",
                 "Submitted by",
                 isCosting ? "Approval" : "GM approval",
                 isCosting ? "Approval date" : "GM approval date",
@@ -5862,15 +6066,12 @@ function Quotations({
                   <td className="px-5 py-3 text-right tabular-nums">
                     {peso.format(n(q.total_cost))}
                   </td>
-                  <td className="px-5 py-3 text-right font-semibold tabular-nums">
-                    {peso.format(n(q.total_amount))}
-                  </td>
                   <td className="px-5 py-3 text-center text-[12px]">
                     {submittedBy}
                   </td>
                   <td className="px-5 py-3 text-center">
                     <div className="flex items-center justify-center gap-1.5">
-                      <Status value={isCosting ? q.status : sourceCosting?.status ?? "approved"} />
+                      <Status value={q.status} />
                       {revisionRequest && (
                         <span className="text-[11px] text-[#a76605]">Revision requested</span>
                       )}
@@ -5887,19 +6088,19 @@ function Quotations({
                     </div>
                   </td>
                   <td className="px-5 py-3 text-center text-[12px]">
-                    {day(isCosting ? q.approved_at : sourceCosting?.approved_at)}
+                    {day(q.approved_at)}
                   </td>
                   <td className="px-5 py-3 text-center">
                     <div className="flex items-center justify-center gap-1">
                       {isCosting ? (
-                        canGenerateCostingPdf ? (
+                        canGenerateCostingPdf && text(q.status) === "approved" ? (
                           <ActionIcon
                             label="View Costing Breakdown PDF"
                             onClick={() => openPdf(q, true, false)}
                           >
                             <FileText size={15} />
                           </ActionIcon>
-                        ) : (
+                        ) : !isGeneralManager ? (
                           <ActionIcon
                             label="View Costing Breakdown"
                             confirm={false}
@@ -5913,7 +6114,7 @@ function Quotations({
                           >
                             <FileText size={15} />
                           </ActionIcon>
-                        )
+                        ) : null
                       ) : <>
                         <ActionIcon
                           label="View Price Quotation PDF"
@@ -5971,7 +6172,7 @@ function Quotations({
                           <Send size={15} />
                         </ActionIcon>}
                       {isCosting &&
-                        role === "project_manager" &&
+                        canRequestCostingRevision &&
                         text(q.status) === "approved" &&
                         !revisionRequest && (
                           <ActionIcon
@@ -5983,12 +6184,12 @@ function Quotations({
                             <RotateCcw size={15} />
                           </ActionIcon>
                         )}
-                      {canDeleteQuote && (
+                      {isCosting && canDeleteQuote && (
                         <ActionIcon
-                          label={`Delete ${isCosting ? "Costing Breakdown" : "Price Quotation"}`}
+                          label="Delete Costing Breakdown and linked Price Quotation"
                           tone="red"
                           disabled={saving}
-                          onClick={() => void deleteQuote(q)}
+                          onClick={() => void deleteCostingBreakdown(q)}
                         >
                           <Trash2 size={15} />
                         </ActionIcon>
@@ -6504,12 +6705,19 @@ function Quotations({
                         </p>
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
-                        <label className="cursor-pointer rounded-md px-2 py-1.5 text-[12px] font-medium text-[#b5323a] transition hover:bg-[#fff0f1]">
+                        <label
+                          className={`rounded-md px-2 py-1.5 text-[12px] font-medium ${
+                            isManualCostingLine
+                              ? "cursor-pointer text-[#b5323a] transition hover:bg-[#fff0f1]"
+                              : "cursor-not-allowed text-[#9aa5b5]"
+                          }`}
+                        >
                           Replace
                           <input
                             key={imageInputKey}
                             type="file"
                             accept="image/png,image/jpeg,image/webp"
+                            disabled={!isManualCostingLine}
                             onChange={(event) =>
                               void selectCostingImage(
                                 event.target.files?.[0] ?? null,
@@ -6521,32 +6729,50 @@ function Quotations({
                         <button
                           type="button"
                           onClick={() => {
+                            if (!isManualCostingLine) return;
                             setCostingImage(null);
                             setImageInputKey((key) => key + 1);
                           }}
-                          className="grid size-8 place-items-center rounded-md text-[#8a95a6] transition hover:bg-[#fff0f1] hover:text-[#c43b43]"
-                          title="Remove selected image"
-                          aria-label="Remove selected image"
+                          disabled={!isManualCostingLine}
+                          className={`grid size-8 place-items-center rounded-md text-[#8a95a6] transition ${
+                            isManualCostingLine
+                              ? "hover:bg-[#fff0f1] hover:text-[#c43b43]"
+                              : "cursor-not-allowed opacity-50"
+                          }`}
+                          title={isManualCostingLine ? "Remove selected image" : "Image is managed by the Materials List"}
+                          aria-label={isManualCostingLine ? "Remove selected image" : "Image is managed by the Materials List"}
                         >
                           <Trash2 size={15} />
                         </button>
                       </div>
                     </div>
                   ) : (
-                    <label className="mt-1 flex min-h-[72px] cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-[#c7d0de] bg-[#fafbfe] px-4 text-center transition hover:border-[#c43b43] hover:bg-[#fff8f8]">
+                    <label
+                      className={`mt-1 flex min-h-[72px] items-center justify-center gap-2 rounded-lg border border-dashed px-4 text-center ${
+                        isManualCostingLine
+                          ? "cursor-pointer border-[#c7d0de] bg-[#fafbfe] transition hover:border-[#c43b43] hover:bg-[#fff8f8]"
+                          : "cursor-not-allowed border-[#d7deea] bg-[#f6f8fb]"
+                      }`}
+                    >
                       <ImageIcon size={17} className="text-[#c43b43]" />
                       <span>
                         <span className="block text-[13px] font-medium text-[#313b4b]">
-                          Upload Product Image
+                          {isManualCostingLine ? "Upload Product Image" : "Image managed by Materials List"}
                         </span>
-                        <span className="block text-[11px] font-normal text-[#7d8797]">
+                        <span className={`block text-[11px] font-normal text-[#7d8797] ${isManualCostingLine ? "" : "hidden"}`}>
                           PNG, JPG or WebP · Images are optimized automatically
                         </span>
                       </span>
+                      {!isManualCostingLine && (
+                        <span className="text-[11px] font-normal text-[#7d8797]">
+                          Choose Others / Manual Material to upload an image
+                        </span>
+                      )}
                       <input
                         key={imageInputKey}
                         type="file"
                         accept="image/png,image/jpeg,image/webp"
+                        disabled={!isManualCostingLine}
                         onChange={(event) =>
                           void selectCostingImage(
                             event.target.files?.[0] ?? null,
@@ -6880,8 +7106,8 @@ function GeneralManagerCostingReview({
   const overhead = (cogs * n(rates.overhead_rate)) / 100;
   const buffer = (cogs * n(rates.buffer_margin_rate)) / 100;
   const commission = (cogs * n(rates.commission_rate)) / 100;
-  const sellingExVat = cogs + profit + overhead + buffer + commission;
-  const vat = (sellingExVat * n(rates.vat_rate)) / 100;
+  const sellingExVat = Math.round((cogs + profit + overhead + buffer + commission) * 100) / 100;
+  const vat = Math.round(sellingExVat * n(rates.vat_rate)) / 100;
   const changes = {
     profit_margin_rate: n(rates.profit_margin_rate),
     overhead_rate: n(rates.overhead_rate),
@@ -7417,7 +7643,7 @@ function Submissions({
 }) {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Row | null>(null);
-  const [tab, setTab] = useState<"costings" | "projects" | "leads" | "revisions" | "calendar_projects">("costings");
+  const [tab, setTab] = useState<"costings" | "projects" | "leads" | "revisions" | "calendar_projects" | "calendar_revisions" | "calendar_completions">("costings");
   const [selectedProjectEdit, setSelectedProjectEdit] = useState<Row | null>(null);
   const [selectedLeadChange, setSelectedLeadChange] = useState<Row | null>(null);
   const pendingCostings = store.quotations.filter(
@@ -7571,6 +7797,68 @@ function Submissions({
       setSavingId(null);
     }
   };
+  const decideProjectScheduleRevision = async (
+    request: Row,
+    decision: "approved" | "rejected",
+  ) => {
+    if (!request.id) return;
+    setSavingId(text(request.id));
+    try {
+      const { error } = await createClient().rpc(
+        "review_project_schedule_revision",
+        {
+          p_request_id: request.id,
+          p_decision: decision,
+        },
+      );
+      if (error) throw error;
+      notice(
+        decision === "approved"
+          ? "Project schedule revision approved."
+          : "Project schedule revision rejected.",
+      );
+      await reload();
+    } catch (error) {
+      notice(
+        error instanceof Error
+          ? error.message
+          : "Project schedule revision could not be reviewed.",
+      );
+    } finally {
+      setSavingId(null);
+    }
+  };
+  const decideProjectScheduleCompletion = async (
+    request: Row,
+    decision: "approved" | "rejected",
+  ) => {
+    if (!request.id) return;
+    setSavingId(text(request.id));
+    try {
+      const { error } = await createClient().rpc(
+        "review_project_schedule_completion",
+        {
+          p_request_id: request.id,
+          p_decision: decision,
+        },
+      );
+      if (error) throw error;
+      notice(
+        decision === "approved"
+          ? "Project marked completed, delivered, and counted in the KPI."
+          : "Project completion request rejected.",
+      );
+      await reload();
+    } catch (error) {
+      notice(
+        error instanceof Error
+          ? error.message
+          : "Project completion could not be reviewed.",
+      );
+    } finally {
+      setSavingId(null);
+    }
+  };
   const pendingProjectEdits = store.project_edit_requests.filter(
     (request) => text(request.status) === "pending",
   );
@@ -7583,6 +7871,14 @@ function Submissions({
   const pendingProjectSchedules = store.project_schedules.filter(
     (schedule) => text(schedule.status) === "pending",
   );
+  const pendingProjectScheduleRevisions =
+    store.project_schedule_revision_requests.filter(
+      (request) => text(request.status) === "pending",
+    );
+  const pendingProjectScheduleCompletions =
+    store.project_schedule_completion_requests.filter(
+      (request) => text(request.status) === "pending",
+    );
   const projectOfficerName = (request: Row) =>
     text(
       store.profiles.find((profile) => profile.id === request.submitted_by)
@@ -7601,10 +7897,12 @@ function Submissions({
       detail="Review Costing Breakdowns, revisions, project schedules, edits, and Lead change requests."
       hideHeading
     >
-      <div className="flex gap-1 border-b border-[#e4e8ef] px-5">
+      <div className="flex gap-1 overflow-x-auto border-b border-[#e4e8ef] px-5">
         <button type="button" onClick={() => setTab("costings")} className={`px-3 py-2 text-[12px] font-medium ${tab === "costings" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Costing Reviews ({pendingCostings.length})</button>
         <button type="button" onClick={() => setTab("revisions")} className={`px-3 py-2 text-[12px] font-medium ${tab === "revisions" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Costing Revisions ({pendingQuotationRevisions.length})</button>
         <button type="button" onClick={() => setTab("calendar_projects")} className={`px-3 py-2 text-[12px] font-medium ${tab === "calendar_projects" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Project Calendar ({pendingProjectSchedules.length})</button>
+        <button type="button" onClick={() => setTab("calendar_revisions")} className={`px-3 py-2 text-[12px] font-medium ${tab === "calendar_revisions" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Project Revisions ({pendingProjectScheduleRevisions.length})</button>
+        <button type="button" onClick={() => setTab("calendar_completions")} className={`px-3 py-2 text-[12px] font-medium ${tab === "calendar_completions" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Project Completion ({pendingProjectScheduleCompletions.length})</button>
         <button type="button" onClick={() => setTab("projects")} className={`px-3 py-2 text-[12px] font-medium ${tab === "projects" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Project Edits ({pendingProjectEdits.length})</button>
         <button type="button" onClick={() => setTab("leads")} className={`px-3 py-2 text-[12px] font-medium ${tab === "leads" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Lead Changes ({pendingLeadChanges.length})</button>
       </div>
@@ -7677,21 +7975,66 @@ function Submissions({
         </Table>
       ) : <Empty>No Costing Breakdown revisions are awaiting review.</Empty>)}
       {tab === "calendar_projects" && (pendingProjectSchedules.length ? (
-        <Table labels={["Project", "Client", "Quotation code", "Quantity", "Product", "Schedule", "Project Officer", "Review"]} minWidth={1020}>
+        <Table labels={["Assigned Project Officer", "Quotation Code", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1140}>
           {pendingProjectSchedules.map((schedule) => (
             <tr key={text(schedule.id)}>
-              <td className="px-5 py-3 font-medium">{text(schedule.project_name)}</td>
-              <td className="px-5 py-3">{text(schedule.client_name)}</td>
+              <td className="px-5 py-3">{scheduleOfficerName(schedule)}</td>
               <td className="px-5 py-3">{text(schedule.quotation_no)}</td>
+              <td className="px-5 py-3">{text(schedule.client_name)}</td>
               <td className="px-5 py-3">{n(schedule.quantity).toLocaleString()}</td>
               <td className="px-5 py-3">{text(schedule.product_name)}</td>
-              <td className="px-5 py-3">{day(schedule.start_date)} – {day(schedule.due_date)}</td>
-              <td className="px-5 py-3">{scheduleOfficerName(schedule)}</td>
+              <td className="px-5 py-3">{day(schedule.start_date)}</td>
+              <td className="px-5 py-3">{day(schedule.due_date)}</td>
+              <td className="px-5 py-3"><Status value={schedule.status} /></td>
               <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve project schedule" tone="green" disabled={savingId === schedule.id} onClick={() => void decideProjectSchedule(schedule, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project schedule" tone="red" disabled={savingId === schedule.id} onClick={() => void decideProjectSchedule(schedule, "rejected")}><X size={15} /></ActionIcon></div></td>
             </tr>
           ))}
         </Table>
       ) : <Empty>No Project Calendar submissions are awaiting review.</Empty>)}
+      {tab === "calendar_revisions" && (pendingProjectScheduleRevisions.length ? (
+        <Table labels={["Assigned Project Officer", "Quotation Code", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1140}>
+          {pendingProjectScheduleRevisions.map((request) => {
+            const schedule = store.project_schedules.find(
+              (item) => item.id === request.schedule_id,
+            );
+            return (
+              <tr key={text(request.id)}>
+                <td className="px-5 py-3">{projectOfficerName(request)}</td>
+                <td className="px-5 py-3">{text(schedule?.quotation_no)}</td>
+                <td className="px-5 py-3">{text(schedule?.client_name)}</td>
+                <td className="px-5 py-3">{n(schedule?.quantity).toLocaleString()}</td>
+                <td className="px-5 py-3">{text(schedule?.product_name)}</td>
+                <td className="px-5 py-3"><b>{day(request.proposed_start_date)}</b><small>Current: {day(schedule?.start_date)}</small></td>
+                <td className="px-5 py-3"><b>{day(request.proposed_due_date)}</b><small>Current: {day(schedule?.due_date)}</small></td>
+                <td className="px-5 py-3"><Status value="revision pending" /></td>
+                <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve project schedule revision" tone="green" disabled={savingId === request.id} onClick={() => void decideProjectScheduleRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project schedule revision" tone="red" disabled={savingId === request.id} onClick={() => void decideProjectScheduleRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td>
+              </tr>
+            );
+          })}
+        </Table>
+      ) : <Empty>No Project Calendar revisions are awaiting review.</Empty>)}
+      {tab === "calendar_completions" && (pendingProjectScheduleCompletions.length ? (
+        <Table labels={["Assigned Project Officer", "Quotation Code", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1140}>
+          {pendingProjectScheduleCompletions.map((request) => {
+            const schedule = store.project_schedules.find(
+              (item) => item.id === request.schedule_id,
+            );
+            return (
+              <tr key={text(request.id)}>
+                <td className="px-5 py-3">{projectOfficerName(request)}</td>
+                <td className="px-5 py-3">{text(schedule?.quotation_no)}</td>
+                <td className="px-5 py-3">{text(schedule?.client_name)}</td>
+                <td className="px-5 py-3">{n(schedule?.quantity).toLocaleString()}</td>
+                <td className="px-5 py-3">{text(schedule?.product_name)}</td>
+                <td className="px-5 py-3">{day(schedule?.start_date)}</td>
+                <td className="px-5 py-3">{day(schedule?.due_date)}</td>
+                <td className="px-5 py-3"><Status value="completion pending" /></td>
+                <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve project completion" tone="green" disabled={savingId === request.id} onClick={() => void decideProjectScheduleCompletion(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project completion" tone="red" disabled={savingId === request.id} onClick={() => void decideProjectScheduleCompletion(request, "rejected")}><X size={15} /></ActionIcon></div></td>
+              </tr>
+            );
+          })}
+        </Table>
+      ) : <Empty>No Project Calendar completion requests are awaiting review.</Empty>)}
       {tab === "projects" && (pendingProjectEdits.length ? (
         <Table labels={["Project", "Project Officer", "Submitted", "Requested changes", "Review"]}>
           {pendingProjectEdits.map((request) => {
@@ -9543,6 +9886,190 @@ function FinanceReports({
   );
 }
 
+function ProjectOfficerSalesFunnel({
+  store,
+  colorMode,
+}: {
+  store: Store;
+  colorMode?: boolean;
+}) {
+  const [localColorMode, setLocalColorMode] = useState(true);
+  const isColorMode = colorMode ?? localColorMode;
+  const isColorModeControlled = colorMode !== undefined;
+  const countUniqueLeads = (rows: Row[]) => new Set(rows.map((row) => text(row.lead_id, text(row.id, ""))).filter(Boolean)).size;
+  const costingBreakdowns = store.quotations.filter((quotation) => text(quotation.document_type) === "costing_breakdown");
+  const priceQuotations = store.quotations.filter((quotation) => text(quotation.document_type) === "price_quotation" && ["sent", "approved"].includes(text(quotation.status)));
+  const doneDeals = store.leads.filter((lead) => n(lead.evaluation_number) === 7);
+  const completedProjects = store.project_schedules.filter(
+    (schedule) => Boolean(schedule.completed_at),
+  ).length;
+  const completedAt = (stage: number) => doneDeals.filter((lead) => n(lead.done_deal_status) >= stage).length;
+  const stages = [
+    { label: "1. Leads Generated", description: "All potential leads collected", total: store.leads.length, color: "#0863c4", Icon: UsersRound },
+    { label: "2. Leads Contacted", description: "Leads that were successfully contacted", total: store.leads.filter((lead) => Boolean(text(lead.date_contacted, ""))).length, color: "#08aabd", Icon: MessageSquareText },
+    { label: "3. Costing Breakdown", description: "Leads with costing information shared", total: countUniqueLeads(costingBreakdowns), color: "#43a717", Icon: ReceiptText },
+    { label: "4. Price Quotation", description: "Quotation provided to interested leads", total: countUniqueLeads(priceQuotations), color: "#ee9500", Icon: FileText },
+    { label: "5. Paid Clients", description: "Leads who made a payment / became clients", total: completedAt(6), color: "#e74408", Icon: PhilippinePeso },
+    { label: "6. Mock-Up / Sample Approval", description: "Samples approved by the client", total: completedAt(5), color: "#d32971", Icon: ClipboardCheck },
+    { label: "7. Purchase Order received", description: "Official PO received from the client", total: completedAt(4), color: "#6330bd", Icon: FileText },
+    { label: "8. Completed Projects", description: "General Manager-approved finished projects", total: completedProjects, color: "#075fc3", Icon: Check },
+  ];
+  const percentage = (current: number, previous: number) => previous ? `${((current / previous) * 100).toFixed(2)}%` : "—";
+  const overallPercentage = percentage(stages.at(-1)?.total ?? 0, stages[0].total);
+  const ink = isColorMode ? "#092d67" : "#000000";
+  const border = isColorMode ? "#6e7480" : "#000000";
+  const displayColor = (stage: (typeof stages)[number]) => isColorMode ? stage.color : "#000000";
+
+  const StageIdentity = ({ stage }: { stage: (typeof stages)[number] }) => {
+    const { Icon } = stage;
+    return <div className="flex min-w-0 items-center gap-2 px-2 py-1">
+      <span className="grid size-8 shrink-0 place-items-center rounded-sm" style={{ backgroundColor: isColorMode ? stage.color : "#ffffff", color: isColorMode ? "#ffffff" : "#000000" }}><Icon aria-hidden="true" size={19} strokeWidth={2.7} /></span>
+      <span className="text-[13px] font-black leading-tight" style={{ color: displayColor(stage) }}>{stage.label}</span>
+    </div>;
+  };
+
+  return <section
+    className="mx-auto w-full max-w-[1480px] bg-white px-3 pb-6 pt-5 sm:px-6 sm:pt-8"
+    style={{ fontFamily: '"SF Pro Display", Arial, Helvetica, sans-serif', fontSize: "13px" }}
+  >
+    <header className="relative mb-4 text-center sm:mb-5">
+      <h1 className="text-[28px] font-black leading-none tracking-[.045em] sm:text-[36px]" style={{ color: ink }}>OUTREACH SALES FUNNEL</h1>
+      <p className="mt-1 text-[13px] font-black tracking-[.13em]" style={{ color: ink }}>PROJECT OFFICER DASHBOARD</p>
+      {!isColorModeControlled && <button type="button" role="switch" aria-checked={isColorMode} aria-label="Switch sales funnel between color and black-and-white" onClick={() => setLocalColorMode((current) => !current)} className="mx-auto mt-3 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[13px] font-bold shadow-sm transition hover:bg-[#f5f5f5] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2" style={{ borderColor: ink, color: ink }}>
+        <span>Black &amp; white</span><span className="relative inline-block h-5 w-9 shrink-0 rounded-full" style={{ backgroundColor: isColorMode ? "#0d4d9c" : "#606060" }} aria-hidden="true"><span className={`absolute left-0.5 top-0.5 size-4 rounded-full bg-white shadow transition-transform ${isColorMode ? "translate-x-4" : "translate-x-0"}`} /></span><span>Color</span>
+      </button>}
+    </header>
+
+    <div className="mx-auto hidden max-w-[1060px] overflow-hidden border-2 md:block" style={{ borderColor: border }}>
+      <div className="grid grid-cols-[1.35fr_1.2fr_.92fr_.95fr] text-center text-[13px] font-black leading-tight">
+        <div className={`border-r px-2 py-2 ${isColorMode ? "bg-[#0c4293] text-white" : "bg-white text-black"}`} style={{ borderColor: border }}>FUNNEL STAGE</div>
+        <div className={`border-r px-2 py-2 ${isColorMode ? "bg-[#1158b9] text-white" : "bg-white text-black"}`} style={{ borderColor: border }}>DESCRIPTION</div>
+        <div className={`border-r px-2 py-2 ${isColorMode ? "bg-[#38a944] text-white" : "bg-white text-black"}`} style={{ borderColor: border }}>TOTAL</div>
+        <div className={`px-2 py-2 ${isColorMode ? "bg-[#6023ae] text-white" : "bg-white text-black"}`}>CONVERSION</div>
+      </div>
+      {stages.map((stage, index) => {
+        const previous = stages[index - 1];
+        return <div className="grid grid-cols-[1.35fr_1.2fr_.92fr_.95fr]" key={stage.label}>
+          <div className="flex min-h-[52px] items-center border-r border-t" style={{ borderColor: border }}><StageIdentity stage={stage} /></div>
+          <div className="flex min-h-[52px] items-center border-r border-t px-3 text-[13px] font-medium leading-tight text-black" style={{ borderColor: border }}>{stage.description}</div>
+          <div className="flex min-h-[52px] items-center justify-center border-r border-t text-[13px] font-black tabular-nums" style={{ borderColor: border, color: displayColor(stage) }}>{stage.total.toLocaleString()}</div>
+          <div className="flex min-h-[52px] flex-col items-center justify-center border-t px-2 text-center" style={{ borderColor: border, color: displayColor(stage) }}><b className="text-[13px] leading-none tabular-nums">{index ? percentage(stage.total, previous.total) : "—"}</b>{index > 0 && <span className="mt-0.5 text-[13px] font-medium leading-none text-black">({stage.total.toLocaleString()} / {previous.total.toLocaleString()})</span>}</div>
+        </div>;
+      })}
+    </div>
+
+    <div className="space-y-3 md:hidden">
+      {stages.map((stage, index) => {
+        const previous = stages[index - 1];
+        return <article className="overflow-hidden border-2" style={{ borderColor: border }} key={stage.label}>
+          <StageIdentity stage={stage} />
+          <p className="border-t px-4 py-3 text-[13px] font-medium leading-snug text-black" style={{ borderColor: border }}>{stage.description}</p>
+          <dl className="grid grid-cols-2 border-t" style={{ borderColor: border }}><div className="border-r p-3 text-center" style={{ borderColor: border }}><dt className="text-[13px] font-black">TOTAL (PROJECTS)</dt><dd className="mt-1 text-[13px] font-black tabular-nums" style={{ color: displayColor(stage) }}>{stage.total.toLocaleString()}</dd></div><div className="p-3 text-center"><dt className="text-[13px] font-black">CONVERSION</dt><dd className="mt-1 text-[13px] font-black tabular-nums" style={{ color: displayColor(stage) }}>{index ? percentage(stage.total, previous.total) : "—"}</dd>{index > 0 && <span className="text-[13px] text-black">({stage.total.toLocaleString()} / {previous.total.toLocaleString()})</span>}</div></dl>
+        </article>;
+      })}
+    </div>
+
+    <footer className="mx-auto mt-5 grid max-w-[1120px] overflow-hidden border-2 sm:grid-cols-[1.2fr_1fr]" style={{ borderColor: ink, color: ink }}>
+      <div className="flex items-center justify-center gap-4 p-4 sm:border-r-2" style={{ borderColor: ink }}><Goal aria-hidden="true" size={55} strokeWidth={2.8} /><div><p className="text-center text-[13px] font-black">OVERALL CONVERSION RATE</p><p className="text-center text-[13px] font-black leading-none tabular-nums">{overallPercentage}</p></div></div>
+      <p className="border-t-2 px-5 py-4 text-center text-[13px] font-bold leading-snug sm:border-t-0" style={{ borderColor: ink }}>From Leads Generated<br />to Completed Projects <span className="block tabular-nums">({stages.at(-1)?.total.toLocaleString()} / {stages[0].total.toLocaleString()})</span></p>
+    </footer>
+  </section>;
+}
+
+function GeneralManagerKpiDashboard({ store }: { store: Store }) {
+  const [isColorMode, setIsColorMode] = useState(true);
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+  const isInMonth = (value: unknown, year: number, month: number) => {
+    const date = new Date(String(value));
+    return !Number.isNaN(date.getTime()) && date.getFullYear() === year && date.getMonth() === month;
+  };
+  const previousMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+  const previousYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+  const invoices = store.invoices.filter((invoice) => text(invoice.status) !== "void");
+  const invoiceBalance = (invoice: Row) => Math.max(
+    n(invoice.total_amount) - store.payments.filter((payment) => payment.invoice_id === invoice.id && !payment.reversed_at).reduce((sum, payment) => sum + n(payment.amount), 0),
+    0,
+  );
+  const salesFor = (year: number, month: number) => invoices.filter((invoice) => isInMonth(invoice.issue_date, year, month)).reduce((sum, invoice) => sum + n(invoice.total_amount), 0);
+  const collectionsFor = (year: number, month: number) => store.payments.filter((payment) => !payment.reversed_at && isInMonth(payment.paid_at, year, month)).reduce((sum, payment) => sum + n(payment.amount), 0);
+  const totalSales = salesFor(currentYear, currentMonth);
+  const collections = collectionsFor(currentYear, currentMonth);
+  const previousSales = salesFor(previousYear, previousMonth);
+  const previousCollections = collectionsFor(previousYear, previousMonth);
+  const receivables = invoices.reduce((sum, invoice) => sum + invoiceBalance(invoice), 0);
+  const today = new Date(currentYear, currentMonth, now.getDate());
+  const overdue = invoices.filter((invoice) => {
+    const dueDate = new Date(text(invoice.due_date, ""));
+    return invoiceBalance(invoice) > 0 && !Number.isNaN(dueDate.getTime()) && dueDate < today;
+  }).reduce((sum, invoice) => sum + invoiceBalance(invoice), 0);
+  const previousOverdue = invoices.filter((invoice) => {
+    const dueDate = new Date(text(invoice.due_date, ""));
+    const previousToday = new Date(previousYear, previousMonth, Math.min(now.getDate(), new Date(previousYear, previousMonth + 1, 0).getDate()));
+    return invoiceBalance(invoice) > 0 && !Number.isNaN(dueDate.getTime()) && dueDate < previousToday;
+  }).reduce((sum, invoice) => sum + invoiceBalance(invoice), 0);
+  const quarter = Math.floor(currentMonth / 3);
+  const quarterStart = new Date(currentYear, quarter * 3, 1);
+  const quarterEnd = new Date(currentYear, quarter * 3 + 3, 1);
+  const quarterSales = invoices.filter((invoice) => {
+    const date = new Date(String(invoice.issue_date));
+    return !Number.isNaN(date.getTime()) && date >= quarterStart && date < quarterEnd;
+  }).reduce((sum, invoice) => sum + n(invoice.total_amount), 0);
+  const quota = n(store.target_goals.find((goal) => text(goal.goal_type) === "quarterly_sales" && isInMonth(goal.period_start, currentYear, quarter * 3))?.target_value);
+  const quotaProgress = quota ? Math.min(Math.round((quarterSales / quota) * 100), 100) : 0;
+  const monthLabel = new Intl.DateTimeFormat("en-PH", { month: "long", year: "numeric" }).format(now);
+  const compare = (value: number, previous: number) => previous ? `${Math.abs(((value - previous) / previous) * 100).toFixed(1)}% ${value >= previous ? "up" : "down"}` : "No prior month";
+  const financeAmountSize = (value: number) => {
+    const length = peso.format(value).length;
+    if (length > 18) return "17px";
+    if (length > 15) return "21px";
+    if (length > 12) return "25px";
+    return "30px";
+  };
+  const ink = isColorMode ? "#061e52" : "#000000";
+  const accent = isColorMode ? "#0b63e6" : "#000000";
+  const metricCards = [
+    { title: "TOTAL SALES", value: totalSales, detail: "This month", compare: compare(totalSales, previousSales), previous: previousSales, Icon: TrendingUp, color: "#1262e7", tint: "#edf4ff" },
+    { title: "COLLECTIONS RECEIVED", value: collections, detail: "This month", compare: compare(collections, previousCollections), previous: previousCollections, Icon: Wallet, color: "#087b19", tint: "#edf9ef" },
+    { title: "TOTAL RECEIVABLES", value: receivables, detail: "As of today", Icon: ReceiptText, color: "#f38300", tint: "#fff5e8" },
+    { title: "OVERDUE RECEIVABLES", value: overdue, detail: "As of today", compare: compare(overdue, previousOverdue), previous: previousOverdue, Icon: CalendarDays, color: "#e30719", tint: "#fff0f1" },
+  ];
+
+  return <div className="space-y-7" style={{ fontFamily: '"SF Pro Display", Arial, Helvetica, sans-serif', fontSize: "13px" }}>
+    <section className="overflow-hidden rounded-2xl border bg-white" style={{ borderColor: isColorMode ? "#dfe5ed" : ink }}>
+      <header className="flex flex-col gap-4 px-5 py-5 text-white sm:px-8 lg:flex-row lg:items-center lg:justify-between" style={{ backgroundColor: ink }}>
+        <div className="flex items-center gap-3">
+          <span className="grid size-12 shrink-0 place-items-center rounded-full border-2 border-white/70"><Goal size={31} strokeWidth={2.7} /></span>
+          <div><h1 className="text-[28px] font-black leading-none sm:text-[36px]">HUSWELL TRADING KPI</h1><p className="mt-2 flex items-center gap-2 text-[13px] font-semibold"><CalendarDays size={16} /> As of {monthLabel}</p></div>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 lg:justify-end">
+          <button type="button" role="switch" aria-checked={isColorMode} aria-label="Switch finance KPI between color and black-and-white" onClick={() => setIsColorMode((current) => !current)} className="inline-flex items-center gap-2 rounded-full border border-white/70 px-3 py-1.5 text-[13px] font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#061e52]"><span>Black &amp; white</span><span className="relative inline-block h-5 w-9 shrink-0 rounded-full bg-white/45" aria-hidden="true"><span className={`absolute left-0.5 top-0.5 size-4 rounded-full bg-white shadow transition-transform ${isColorMode ? "translate-x-4" : "translate-x-0"}`} /></span><span>Color</span></button>
+        </div>
+      </header>
+      <div className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4 sm:p-6">
+        {metricCards.map(({ title, value, detail, compare: change, previous, Icon, color, tint }) => <article key={title} className="min-w-0 rounded-2xl border p-4 text-center" style={{ borderColor: isColorMode ? "#e0e3e8" : ink }}>
+          <span className="mx-auto grid size-12 place-items-center rounded-full text-white" style={{ backgroundColor: isColorMode ? color : ink }}><Icon size={27} /></span>
+          <h2 className="mt-3 text-[13px] font-black" style={{ color: isColorMode ? color : ink }}>{title}</h2>
+          <p className="mt-4 whitespace-nowrap font-black leading-none tabular-nums" style={{ color: ink, fontSize: financeAmountSize(value) }}>{peso.format(value)}</p>
+          <p className="mt-1 text-[13px] font-medium" style={{ color: ink }}>{detail}</p>
+          {change && <div className="mt-4 flex items-center justify-between rounded-lg px-3 py-2 text-left" style={{ backgroundColor: isColorMode ? tint : "#f3f3f3", color: ink }}><span className="text-[13px] font-black">{change}</span><span className="text-right text-[13px]">Previous<br /><b>{peso.format(previous ?? 0)}</b></span></div>}
+        </article>)}
+      </div>
+      <section className="mx-4 mb-5 overflow-hidden rounded-2xl border sm:mx-6 sm:mb-6" style={{ borderColor: isColorMode ? "#dfe5ed" : ink }}>
+        <h2 className="flex items-center gap-3 px-5 py-3 text-[13px] font-black text-white" style={{ backgroundColor: ink }}><Goal size={25} /> QUARTERLY SALES QUOTA</h2>
+        <div className="grid gap-6 p-5 sm:grid-cols-[.85fr_1.15fr] sm:items-center sm:p-7">
+          <div className="mx-auto grid size-44 place-items-center rounded-full" style={{ background: `conic-gradient(${accent} ${quotaProgress}%, #e5e7eb 0)` }}><div className="grid size-36 place-items-center rounded-full bg-white text-center" style={{ color: ink }}><b className="leading-none" style={{ fontSize: "38px" }}>{quotaProgress}%</b><span className="text-[13px] font-black">ACHIEVED</span></div></div>
+          <dl className="divide-y" style={{ borderColor: isColorMode ? "#dfe5ed" : ink }}>
+            {[{ label: `QUOTA (Q${quarter + 1} ${currentYear})`, value: quota, Icon: Goal }, { label: "ACHIEVED AMOUNT", value: quarterSales, Icon: Check }, { label: "REMAINING AMOUNT", value: Math.max(quota - quarterSales, 0), Icon: Wallet }].map(({ label, value, Icon }) => <div className="flex items-center gap-3 py-3" key={label}><span className="grid size-9 place-items-center rounded-full text-white" style={{ backgroundColor: accent }}><Icon size={20} /></span><div><dt className="text-[13px] font-black" style={{ color: accent }}>{label}</dt><dd className="font-black leading-tight tabular-nums" style={{ color: ink, fontSize: "28px" }}>{peso.format(value)}</dd></div></div>)}
+          </dl>
+        </div>
+      </section>
+    </section>
+    <ProjectOfficerSalesFunnel store={store} colorMode={isColorMode} />
+  </div>;
+}
+
 function Dashboard({
   store,
   go,
@@ -9565,6 +10092,7 @@ function Dashboard({
   }).format(monthDate);
   const isProjectOfficer = role === "project_manager";
   useEffect(() => {
+    if (isProjectOfficer) return;
     let active = true;
     void createClient()
       .rpc("shared_kpi_dashboard", {
@@ -9577,7 +10105,9 @@ function Dashboard({
     return () => {
       active = false;
     };
-  }, [orgId, selectedMonth]);
+  }, [isProjectOfficer, orgId, selectedMonth]);
+  if (isProjectOfficer) return <ProjectOfficerSalesFunnel store={store} />;
+  if (role === "admin") return <GeneralManagerKpiDashboard store={store} />;
   const quarter = Math.floor((selectedMonthIndex - 1) / 3) + 1;
   const quarterStartMonth = (quarter - 1) * 3;
   const quarterLabel = `Q${quarter} ${selectedYear}`;
@@ -9606,7 +10136,6 @@ function Dashboard({
   const leadsGenerated = store.leads.filter((lead) => isCurrentMonth(lead.date_sent ?? lead.created_at)).length;
   const priceQuoteSent = priceQuotations.filter((quotation) => isCurrentMonth(quotation.issue_date) && ["sent", "approved"].includes(text(quotation.status))).length;
   const paidClients = new Set(monthInvoices.filter((invoice) => text(invoice.status) === "paid").map((invoice) => invoice.customer_id).filter(Boolean)).size;
-  const openCostings = costings.filter((quotation) => isCurrentMonth(quotation.created_at) && ["draft", "needs_revision", "pending"].includes(text(quotation.status))).length;
   const isSelectedQuarter = (value: unknown) => {
     const date = new Date(String(value));
     return !Number.isNaN(date.getTime()) && date.getFullYear() === selectedYear && date.getMonth() >= quarterStartMonth && date.getMonth() < quarterStartMonth + 3;
@@ -9648,7 +10177,8 @@ function Dashboard({
   const dashboardOverdue = sharedKpis ? n(sharedKpis.overdue_receivables) : overdueReceivables;
   const dashboardLeads = sharedKpis ? n(sharedKpis.leads_generated) : leadsGenerated;
   const dashboardQuotes = sharedKpis ? n(sharedKpis.price_quotations) : priceQuoteSent;
-  const dashboardOpenCostings = sharedKpis ? n(sharedKpis.open_costings) : openCostings;
+  const dashboardOfficerLeads = sharedKpis ? n(sharedKpis.officer_leads_generated) : 0;
+  const dashboardOfficerQuotes = sharedKpis ? n(sharedKpis.officer_price_quotations) : 0;
   const dashboardPaidClients = sharedKpis ? n(sharedKpis.paid_clients) : paidClients;
   const dashboardQuarterSales = sharedKpis ? n(sharedKpis.quarter_sales) : quarterlyActual;
   const dashboardQuarterTarget = sharedKpis ? n(sharedKpis.quarter_target) : quarterlyTargetValue;
@@ -9674,7 +10204,12 @@ function Dashboard({
   const operationsMetrics = [
     { label: "Leads generated", value: dashboardLeads, detail: "All project officers", icon: ClipboardCheck, tone: "bg-[#7043ca]", view: "Leads" as View },
     { label: "Price quotations", value: dashboardQuotes, detail: "Sent or approved", icon: FileText, tone: "bg-[#1769e8]", view: "Price Quotations" as View },
-    { label: "Open costings", value: dashboardOpenCostings, detail: "Draft, pending, or needing revision", icon: ReceiptText, tone: "bg-[#d98a1d]", view: "Costing Breakdown" as View },
+  ];
+  const projectOfficerMetrics = [
+    { label: "All leads generated", value: dashboardLeads, detail: "All project officers", icon: ClipboardCheck, tone: "bg-[#7043ca]" },
+    { label: "My leads generated", value: dashboardOfficerLeads, detail: "Assigned to you", icon: UserRound, tone: "bg-[#7043ca]" },
+    { label: "All price quotations", value: dashboardQuotes, detail: "Team sent or approved", icon: FileText, tone: "bg-[#1769e8]" },
+    { label: "My price quotations", value: dashboardOfficerQuotes, detail: "Your sent or approved", icon: UserRound, tone: "bg-[#1769e8]" },
   ];
   const generalManagerMockupMetrics = role === "admin"
     ? [
@@ -9688,34 +10223,6 @@ function Dashboard({
     { label: "Paid clients", value: dashboardPaidClients, width: "w-[58%]", color: "bg-[#16854f]", view: readOnlyKpiView },
   ];
   const canReviewSubmissions = ["admin", "owner", "super_admin"].includes(role);
-  const pendingCostingReviews = costings.filter(
-    (quotation) => text(quotation.status) === "pending",
-  ).length;
-  const pendingCostingRevisions = store.quotation_revision_requests.filter(
-    (request) => text(request.status) === "pending",
-  ).length;
-  const pendingLeadChanges = store.lead_change_requests.filter(
-    (request) => text(request.status) === "pending",
-  ).length;
-  const pendingProjectEdits = store.project_edit_requests.filter(
-    (request) => text(request.status) === "pending",
-  ).length;
-  const actionItems = canReviewSubmissions
-    ? [
-        { label: "Costing reviews", detail: "Awaiting approval", count: pendingCostingReviews, icon: ReceiptText, tone: "bg-[#d98a1d]", view: "Submissions" as View },
-        { label: "Costing revisions", detail: "Requested by officers", count: pendingCostingRevisions, icon: RotateCcw, tone: "bg-[#7043ca]", view: "Submissions" as View },
-        { label: "Lead changes", detail: "Awaiting a decision", count: pendingLeadChanges, icon: ClipboardCheck, tone: "bg-[#1769e8]", view: "Submissions" as View },
-        { label: "Project edits", detail: "Awaiting a decision", count: pendingProjectEdits, icon: Pencil, tone: "bg-[#c43b43]", view: "Submissions" as View },
-      ]
-    : isProjectOfficer
-      ? [
-          { label: "Costings need revision", detail: "Update and submit again", count: costings.filter((quotation) => text(quotation.status) === "needs_revision").length, icon: RotateCcw, tone: "bg-[#c43b43]", view: "Costing Breakdown" as View },
-          { label: "Awaiting GM review", detail: "Submitted costings", count: pendingCostingReviews, icon: ReceiptText, tone: "bg-[#d98a1d]", view: "Costing Breakdown" as View },
-          { label: "Revision requests", detail: "Awaiting GM decision", count: pendingCostingRevisions, icon: RotateCcw, tone: "bg-[#7043ca]", view: "Costing Breakdown" as View },
-          { label: "Lead changes", detail: "Awaiting GM decision", count: pendingLeadChanges, icon: ClipboardCheck, tone: "bg-[#1769e8]", view: "Leads" as View },
-        ]
-      : [];
-  const activeActionItems = actionItems.filter((item) => item.count > 0);
   const funnelMax = Math.max(1, ...funnel.map((stage) => stage.value));
   return (
     <div className="space-y-4">
@@ -9732,8 +10239,8 @@ function Dashboard({
         </label>
       </div>
       {isProjectOfficer ? (
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {operationsMetrics.map(({ label, value, detail, icon: Icon, tone }) => (
+        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {projectOfficerMetrics.map(({ label, value, detail, icon: Icon, tone }) => (
             <div key={label} className="dashboard-metric h-[108px] rounded-[14px] border border-[#dfe5ed] bg-white px-4 py-3 shadow-[0_1px_2px_rgb(16_24_40_/_3%)] lg:px-5">
               <div className="grid h-full grid-cols-[44px_minmax(0,1fr)] items-center gap-3">
                 <span className={`grid size-11 shrink-0 place-items-center rounded-full text-white ${tone}`}><Icon size={21} strokeWidth={2.2} /></span>
@@ -9788,35 +10295,6 @@ function Dashboard({
           )}
         </>
       )}
-      {!isProjectOfficer && (
-        <>
-      {actionItems.length > 0 && (
-        <section className="rounded-lg border border-[#e7ebf0] bg-white shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#eef1f5] px-4 py-3.5">
-            <div className="flex items-center gap-2.5">
-              <span className="grid size-8 place-items-center rounded-md bg-[#c43b43] text-white"><ClipboardCheck size={16} /></span>
-              <div>
-                <h2 className="text-[13px] font-semibold text-[#151922]">{canReviewSubmissions ? "Action required" : "My work needing action"}</h2>
-                <p className="mt-0.5 text-[11px] text-[#8b92a1]">{canReviewSubmissions ? "Live approvals that need your decision." : "Your live workflow items that need follow-up."}</p>
-              </div>
-            </div>
-            {activeActionItems.length > 0 && <span className="rounded-full bg-[#fff0f0] px-2.5 py-1 text-[11px] font-semibold text-[#c43b43]">{activeActionItems.reduce((total, item) => total + item.count, 0)} pending</span>}
-          </div>
-          {activeActionItems.length ? (
-            <div className="grid divide-y divide-[#eef1f5] sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4">
-              {activeActionItems.map(({ label, detail, count, icon: Icon, tone, view }) => (
-                <button key={label} type="button" onClick={() => go(view)} className="flex min-w-0 items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-[#fafbfc] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#c43b43]">
-                  <span className={`grid size-8 shrink-0 place-items-center rounded-md text-white ${tone}`}><Icon size={15} /></span>
-                  <span className="min-w-0 flex-1"><span className="block truncate text-[12px] font-medium text-[#202124]">{label}</span><span className="mt-0.5 block truncate text-[10px] text-[#8b92a1]">{detail}</span></span>
-                  <b className="text-[18px] font-semibold tracking-[-.02em] text-[#151922]">{count}</b>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="flex items-center gap-3 px-4 py-4 text-[12px] text-[#626b7a]"><span className="grid size-8 place-items-center rounded-full bg-[#e7f7ef] text-[#16854f]"><Check size={16} /></span><span>{canReviewSubmissions ? "No approvals are waiting for review." : "You have no workflow items waiting for follow-up."}</span></div>
-          )}
-        </section>
-      )}
       <div className="grid gap-4 xl:grid-cols-[minmax(0,.98fr)_minmax(0,1.02fr)]">
         <section className="rounded-lg border border-[#e7ebf0] bg-white p-4 shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
           <div className="flex items-start justify-between gap-3">
@@ -9858,24 +10336,7 @@ function Dashboard({
           />
         </section>
       </div>
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.08fr)_minmax(320px,.92fr)]">
-        <section className="relative isolate overflow-hidden rounded-lg bg-gradient-to-br from-[#17233a] via-[#17324a] to-[#096c5d] p-5 text-white shadow-[0_8px_20px_rgb(21_25_34_/_14%)]">
-          <div className="absolute -right-16 -top-12 size-52 rounded-full bg-[#2bd6a7]/25 blur-3xl" />
-          <div className="relative">
-            <div className="flex items-center gap-2 text-[12px] font-medium text-white/90"><PhilippinePeso size={15} /> Receivables health</div>
-            <p className="mt-4 text-[10px] font-medium uppercase tracking-[.08em] text-white/60">Outstanding customer balance</p>
-            <p className="mt-1 text-[28px] font-semibold tracking-[-.04em]">{peso.format(dashboardReceivables)}</p>
-            <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/15">
-              <span className="block h-full rounded-full bg-[#4ee1b8]" style={{ width: `${Math.max(8, Math.min(100, Math.round((dashboardCollections / Math.max(dashboardSales, 1)) * 100)))}%` }} />
-            </div>
-            <div className="mt-2 flex justify-between text-[10px] text-white/65"><span>Collection-to-sales ratio</span><span>{Math.round((dashboardCollections / Math.max(dashboardSales, 1)) * 100)}%</span></div>
-            <div className="mt-5 grid grid-cols-2 gap-4 border-t border-white/10 pt-4">
-              <div><p className="text-[10px] text-white/60">Overdue balance</p><p className="mt-1 text-[17px] font-semibold">{peso.format(dashboardOverdue)}</p></div>
-              <div><p className="text-[10px] text-white/60">Paid clients</p><p className="mt-1 text-[17px] font-semibold">{dashboardPaidClients}</p></div>
-            </div>
-          </div>
-        </section>
-        <section className="rounded-lg border border-[#e7ebf0] bg-white p-4 shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
+      <section className="rounded-lg border border-[#e7ebf0] bg-white p-4 shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-[13px] font-semibold text-[#151922]">Pipeline overview</h2>
@@ -9896,10 +10357,7 @@ function Dashboard({
               </button>
             ))}
           </div>
-        </section>
-      </div>
-        </>
-      )}
+      </section>
     </div>
   );
 }
@@ -10044,73 +10502,18 @@ function Approvals({
 }) {
   const admin = memberRole(role);
   const decide = async (r: Row, status: "approved" | "rejected") => {
+    if (r.resource_type === "quotation") {
+      return notice(
+        "Review Costing Breakdown submissions from General Manager Submissions.",
+      );
+    }
     const client = createClient();
-    const { data: user } = await client.auth.getUser();
     const { error } = await client
-      .from("approval_requests")
-      .update({
-        status,
-        decided_by: user.user?.id,
-        decided_at: new Date().toISOString(),
-      })
-      .eq("id", r.id)
-      .eq("organization_id", orgId);
+      .rpc("review_approval_request", {
+        p_request_id: r.id,
+        p_decision: status,
+      });
     if (error) return notice(error.message);
-    if (r.resource_type === "quotation")
-      await client
-        .from("quotations")
-        .update({
-          status,
-          approved_by: user.user?.id,
-          approved_at: new Date().toISOString(),
-        })
-        .eq("id", r.resource_id)
-        .eq("organization_id", orgId);
-    if (r.resource_type === "expense")
-      await client
-        .from("expenses")
-        .update({ status: status === "approved" ? "approved" : "rejected" })
-        .eq("id", r.resource_id)
-        .eq("organization_id", orgId);
-    if (r.resource_type === "cash_flow")
-      await client
-        .from("cash_flow_entries")
-        .update({
-          status,
-          approved_by: user.user?.id,
-          approved_at: new Date().toISOString(),
-        })
-        .eq("id", r.resource_id)
-        .eq("organization_id", orgId);
-    if (r.resource_type === "payroll")
-      await client
-        .from("payroll_periods")
-        .update({
-          status,
-          approved_by: user.user?.id,
-          approved_at: new Date().toISOString(),
-        })
-        .eq("id", r.resource_id)
-        .eq("organization_id", orgId);
-    if (r.resource_type === "invoice_void" && status === "approved")
-      await client
-        .from("invoices")
-        .update({
-          status: "void",
-          voided_by: user.user?.id,
-          voided_at: new Date().toISOString(),
-        })
-        .eq("id", r.resource_id)
-        .eq("organization_id", orgId);
-    if (r.resource_type === "payment_reversal" && status === "approved")
-      await client
-        .from("payments")
-        .update({
-          reversed_at: new Date().toISOString(),
-          reversed_by: user.user?.id,
-        })
-        .eq("id", r.resource_id)
-        .eq("organization_id", orgId);
     notice("Decision recorded.");
     await reload();
   };
@@ -10135,7 +10538,11 @@ function Approvals({
                 <Status value={r.status} />
               </td>
               <td className="px-5 py-3">
-                {admin && r.status === "pending" ? (
+                {admin && r.status === "pending" ? r.resource_type === "quotation" ? (
+                  <span className="text-[12px] text-[#687386]">
+                    Review in General Manager Submissions
+                  </span>
+                ) : (
                   <>
                     <ActionIcon
                       label="Approve request"
@@ -11056,7 +11463,6 @@ export function HuswellWorkspace({
     );
   return (
     <div className="huswell-workspace min-h-screen bg-[#fafafa] text-[#151922]">
-      <LoadingModal open={loading} title="Loading workspace" message="Please wait a moment." />
       <aside
         className={`${mobile ? "translate-x-0" : "-translate-x-full"} sidebar-shell fixed inset-y-0 z-30 flex w-64 flex-col border-r border-[#e2e7ef] bg-white p-4 text-[#475467] transition-transform lg:translate-x-0`}
       >
@@ -11070,10 +11476,10 @@ export function HuswellWorkspace({
             className="huswell-sidebar-logo h-auto w-24"
           />
         </div>
-        <nav className="sidebar-scroll flex-1 space-y-0.5 overflow-y-auto">
+        <nav className="sidebar-scroll flex-1 space-y-px overflow-y-auto">
           {nav.map((group) => (
             <div key={group.label}>
-              <div className="space-y-0.5">
+              <div className="space-y-px">
                 {group.items.map(({ view, icon: Icon }) => {
                   const navigationLabel =
                     view === "Dashboard" && ["project_manager", "admin"].includes(role)

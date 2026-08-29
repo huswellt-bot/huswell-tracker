@@ -322,9 +322,9 @@ export function SuperAdminConsole({
               Add User
             </button>
           </div>
-          <div className="max-h-[460px] overflow-auto">
+          <div className="max-h-[460px] overflow-auto rounded-lg border border-[#d6dee8] bg-white">
             <table className="app-table w-full min-w-[760px] text-left text-[14px]">
-              <thead className="sticky top-0 z-10 border-b border-[#edf0f5] bg-[#f8faff] text-[14px] font-bold text-[#4b5565]">
+              <thead className="sticky top-0 z-10 border-b border-[#102f61] bg-[#102f61] text-[14px] font-bold text-white">
                 <tr>
                   <th className="px-5 py-3">User</th>
                   <th className="px-5 py-3">Email</th>

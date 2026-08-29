@@ -89,9 +89,9 @@ export function CostingBreakdownView({
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto rounded-lg border border-[#d6dee8] bg-white">
           <table className="costing-detail-table w-full min-w-[760px] text-left text-[13px]">
-            <thead className="border-b border-[#e9edf2] bg-[#f8faff] text-[12px] font-bold uppercase tracking-[0.04em] text-[#4b5565]">
+            <thead className="border-b border-[#102f61] bg-[#102f61] text-[12px] font-bold uppercase tracking-[0.04em] text-white">
               <tr>
                 <th className="px-5 py-3 sm:px-7">Material / production cost</th>
                 <th className="px-5 py-3 text-center">Quantity</th>

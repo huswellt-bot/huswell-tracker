@@ -45,7 +45,17 @@
 43. Run `049_expand_done_deal_statuses.sql` before using the twelve-stage Done Deal project workflow.
 44. Run `050_project_calendar.sql` to enable approved Price Quotation project scheduling and the Project Calendar.
 45. Run `051_project_schedule_approvals.sql` to require General Manager approval for each Project Calendar entry and add its approval workflow.
-46. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
+46. Run `052_project_officer_kpi_aggregates.sql` to show organization and personal KPI counts for each Sales Project Officer. Run this before deploying the corresponding app code.
+47. Run `053_general_manager_project_schedule_submit.sql` to allow General Managers to add project schedules while preserving the approval workflow.
+48. Run `054_correct_quotation_total_rounding.sql` to persist configured costing rates and calculate quotation totals from rounded subtotal and VAT amounts.
+49. Run `055_delete_linked_price_quotation_with_costing.sql` to delete a Costing Breakdown and its linked Price Quotation together, while protecting invoiced, scheduled, and production-linked quotations.
+50. Run `056_general_manager_costing_revisions.sql` to allow General Managers to request revisions for approved Costing Breakdowns.
+51. Run `057_approve_price_quotations_with_costings.sql` to mark generated Price Quotations approved when their Costing Breakdown is General Manager-approved, including existing eligible quotations.
+52. Run `058_fix_costing_revision_reopen_order.sql` to reopen the linked Price Quotation before its Costing Breakdown during an approved revision request.
+53. Run `059_atomic_general_approval_decisions.sql` to make general approval decisions atomic with their related record updates.
+54. Run `060_project_schedule_revisions.sql` to require General Manager approval before changing approved Project Calendar dates.
+55. Run `061_project_completion_approvals.sql` to require General Manager approval before marking a scheduled project finished and to synchronize its Production Job and KPI count.
+56. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 

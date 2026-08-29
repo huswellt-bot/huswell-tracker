@@ -215,6 +215,12 @@ textarea {
 .costing-detail-table tfoot {
   border-color: #d6dee8 !important;
 }
+.app-table thead,
+.costing-detail-table thead {
+  border-color: #102f61 !important;
+  background: #102f61 !important;
+  color: #ffffff !important;
+}
 .costing-detail-table :is(th, td) {
   padding-top: 0.5rem !important;
   padding-bottom: 0.5rem !important;
@@ -456,13 +462,13 @@ select:not([multiple]) {
 }
 .huswell-workspace .modern-page-table thead {
   border: 0;
-  background: #f8fafc;
+  background: #102f61;
 }
 .huswell-workspace .modern-page-table thead th {
   height: 44px;
-  border-bottom: 1px solid #e5eaf0;
-  background: #f8fafc;
-  color: #4b5565;
+  border-bottom: 1px solid #102f61;
+  background: #102f61;
+  color: #ffffff;
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.01em;

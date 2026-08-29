@@ -54,7 +54,7 @@ export async function POST(request: Request) {
   if (!user) return Response.json({ error: "Sign in to generate this PDF." }, { status: 401 });
   const { data: document, error: documentError } = await supabase
     .from("quotations")
-    .select("id, organization_id, document_type")
+    .select("id, organization_id, document_type, status")
     .eq("id", documentId)
     .eq("document_type", documentType)
     .maybeSingle();
@@ -62,6 +62,12 @@ export async function POST(request: Request) {
     return Response.json({ error: "You do not have access to this document." }, { status: 403 });
   }
   if (documentType === "costing_breakdown") {
+    if (document.status !== "approved") {
+      return Response.json(
+        { error: "Costing Breakdown PDFs are available after General Manager approval." },
+        { status: 403 },
+      );
+    }
     const { data: membership } = await supabase
       .from("organization_members")
       .select("role")
