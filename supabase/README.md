@@ -67,7 +67,8 @@
 65. Run `070_project_due_dates_by_project_type.sql` to allow different Project Types on one due date while preventing duplicates of the same Project Type and due date.
 66. Run `071_price_quotation_illustrations_and_resubmission.sql` to add up to five view-only item illustrations, date-based direct quotation numbers, and the edit-then-resubmit Price Quotation revision workflow.
 67. Run `072_project_schedule_progress.sql` to add protected Project Officer progress percentage and remark updates.
-68. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
+68. Run `073_extend_workspace_realtime.sql` to deliver newer Price Quotation revision updates automatically to open workspaces.
+69. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 
