@@ -376,6 +376,24 @@ const DEFAULT_QUOTATION_TERMS = [
   "Artwork Revisions: Any revisions or changes requested after the artwork has been approved may result in an adjustment of the production lead time. The revised delivery schedule will be based on the scope and timing of the requested changes.",
 ].join("\n");
 
+const PRICE_QUOTATION_PROJECT_TYPES = [
+  "Premium Rigid Box",
+  "Regular Rigid Box",
+  "Corrugated",
+  "Offset",
+  "Digital",
+  "Mock Up",
+] as const;
+
+const projectTypeCalendarColors: Record<string, string> = {
+  "Premium Rigid Box": "#2f855a",
+  "Regular Rigid Box": "#c48200",
+  Corrugated: "#c45d1a",
+  Offset: "#805ad5",
+  Digital: "#168c83",
+  "Mock Up": "#64748b",
+};
+
 type BankDetail = {
   bank_name: string;
   account_name: string;
@@ -1556,7 +1574,7 @@ function PriceQuotationPdf({ quote, store, origin }: { quote: Row; store: Store;
     return { heading: heading.trim(), description: description.join(":").trim() || heading.trim() };
   });
   const bankDetails = quotationBankDetails(quote.bank_details);
-  const currency = (value: number) => new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(value);
+  const currency = (value: number) => new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP", minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(value);
   const approvedByName = text(quote.approved_by_name, "Marvin S. Tavarez");
   const approvedByRole = quote.approved_by_name ? "General Manager" : "Proprietor";
   const preparedBySignature = text(quote.prepared_by_signature_url, "") || undefined;
@@ -1588,7 +1606,7 @@ function PriceQuotationPdf({ quote, store, origin }: { quote: Row; store: Store;
       </PdfView>
       <PdfView style={priceQuotationPdfStyles.clientGrid}>
         <PdfView style={priceQuotationPdfStyles.clientColumn}>{clientField("Company Name", clientName)}{clientField("Contact Person", contactName)}{clientField("Contact Number", contactNumber)}</PdfView>
-        <PdfView style={priceQuotationPdfStyles.clientColumnRight}>{clientField("Date", leadDate)}{clientField("Email", clientEmail)}</PdfView>
+        <PdfView style={priceQuotationPdfStyles.clientColumnRight}>{clientField("Date", leadDate)}{clientField("Email", clientEmail)}{clientField("Project Type", text(quote.project_types, "-"))}</PdfView>
       </PdfView>
       <PdfText style={priceQuotationPdfStyles.salutation}>Dear Sir/Madam, Thank you for the opportunity to serve your requirements.</PdfText>
       <PdfView style={priceQuotationPdfStyles.table} wrap>
@@ -3112,6 +3130,10 @@ function ProjectCalendar({
   const [values, setValues] = useState<Record<string, string>>({});
   const [editingSchedule, setEditingSchedule] = useState<Row | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [projectQuery, setProjectQuery] = useState("");
+  const [projectOfficerFilter, setProjectOfficerFilter] = useState("all");
+  const [progressDrafts, setProgressDrafts] = useState<Record<string, { percentage: string; remark: string }>>({});
+  const [savingProgressId, setSavingProgressId] = useState<string | null>(null);
   const schedules = store.project_schedules.slice().sort((a, b) =>
     text(a.start_date, "").localeCompare(text(b.start_date, "")),
   );
@@ -3128,13 +3150,34 @@ function ProjectCalendar({
     projectStatusTab === "active" ? activeMonthFilter : completedMonthFilter;
   const tableSchedules =
     projectStatusTab === "active" ? activeSchedules : completedSchedules;
+  const projectOfficerOptions = Array.from(
+    new Map(
+      tableSchedules.map((schedule) => [
+        text(schedule.assigned_to),
+        text(store.profiles.find((profile) => text(profile.id) === text(schedule.assigned_to))?.full_name, "Unassigned"),
+      ]),
+    ).entries(),
+  ).filter(([id]) => id);
   const filteredTableSchedules = tableSchedules.filter((schedule) => {
-    if (!selectedMonthFilter) return true;
     const date =
       projectStatusTab === "active"
         ? text(schedule.due_date, "")
         : text(schedule.completed_at, "");
-    return date.slice(0, 7) === selectedMonthFilter;
+    if (selectedMonthFilter && date.slice(0, 7) !== selectedMonthFilter) return false;
+    if (role !== "project_manager" && projectOfficerFilter !== "all" && text(schedule.assigned_to) !== projectOfficerFilter) return false;
+    const quotation = store.quotations.find((quote) => quote.id === schedule.quotation_id);
+    const lead = store.leads.find((leadItem) => leadItem.id === quotation?.lead_id);
+    const query = [
+      quotation?.quotation_no,
+      quotation?.client_name,
+      quotation?.project_name,
+      lead?.client_name,
+      lead?.contact_name,
+      schedule.project_name,
+      schedule.product_name,
+      schedule.progress_remark,
+    ].map((value) => text(value).toLowerCase()).join(" ");
+    return query.includes(projectQuery.trim().toLowerCase());
   });
   const myScheduleRequests = schedules.filter(
     (schedule) =>
@@ -3164,6 +3207,27 @@ function ProjectCalendar({
   );
   const canCreateSchedule = ["project_manager", "admin"].includes(role);
   const isGeneralManager = role === "admin";
+  const scheduleProjectType = (schedule: Row) =>
+    text(
+      store.quotations.find((quote) => quote.id === schedule.quotation_id)
+        ?.project_types,
+      text(schedule.product_name, "Unspecified"),
+    );
+  const calendarColorForProjectType = (projectType: string) =>
+    projectTypeCalendarColors[projectType] ?? "#64748b";
+  const isDueDateReserved = (
+    dueDate: string,
+    projectType: string,
+    excludeScheduleId?: unknown,
+  ) =>
+    Boolean(dueDate) &&
+    schedules.some(
+      (schedule) =>
+        text(schedule.due_date, "") === dueDate &&
+        scheduleProjectType(schedule) === projectType &&
+        text(schedule.id, "") !== text(excludeScheduleId, "") &&
+        text(schedule.status, "pending") !== "rejected",
+    );
   const scheduleFields: Field[] = [
     {
       key: "quotation_id",
@@ -3176,11 +3240,11 @@ function ProjectCalendar({
       ),
     },
     { key: "start_date", label: "Start date", type: "date", required: true },
-    { key: "due_date", label: "Due Date", type: "date", required: true },
+    { key: "due_date", label: "Due Date", type: "date", required: true, hint: "Each Project Type can use a due date once." },
   ];
   const revisionFields: Field[] = [
     { key: "start_date", label: "Start date", type: "date", required: true },
-    { key: "due_date", label: "Due Date", type: "date", required: true },
+    { key: "due_date", label: "Due Date", type: "date", required: true, hint: "Each Project Type can use a due date once." },
   ];
   useEffect(() => {
     let active = true;
@@ -3204,6 +3268,8 @@ function ProjectCalendar({
         return notice("Enter the revised start and due dates.");
       if (values.due_date < values.start_date)
         return notice("The deadline cannot be before the start date.");
+      if (isDueDateReserved(values.due_date, scheduleProjectType(editingSchedule), editingSchedule.id))
+        return notice("This due date is already assigned to another project.");
       setSaving(true);
       try {
         const { error } = await createClient().rpc(
@@ -3242,7 +3308,9 @@ function ProjectCalendar({
     const firstItem = store.quotation_items.find((item) => item.quotation_id === quotation.id);
     const projectName = text(quotation.project_name ?? lead?.project_name ?? quotation.quotation_no, "Untitled project");
     const clientName = text(quotation.client_name ?? lead?.client_name ?? lead?.contact_name, "Client");
-    const productName = text(firstItem?.description, projectName);
+    const productName = text(quotation.project_types, text(firstItem?.description, projectName));
+    if (isDueDateReserved(values.due_date, productName))
+      return notice("This Project Type already has a project due on that date.");
     const quantity = n(firstItem?.quantity) > 0 ? n(firstItem?.quantity) : 1;
     setSaving(true);
     try {
@@ -3352,6 +3420,38 @@ function ProjectCalendar({
         text(request.schedule_id, "") === text(schedule.id, "") &&
         text(request.status, "") === "pending",
     );
+  const totalLeadTime = (schedule: Row) => {
+    const start = text(schedule.start_date);
+    const due = text(schedule.due_date);
+    if (!start || !due) return "—";
+    const days = Math.max(0, Math.round((new Date(`${due}T00:00:00`).getTime() - new Date(`${start}T00:00:00`).getTime()) / 86_400_000));
+    return `${days} ${days === 1 ? "day" : "days"}`;
+  };
+  const projectProgress = (schedule: Row) =>
+    progressDrafts[text(schedule.id)] ?? {
+      percentage: text(schedule.progress_percentage, "0"),
+      remark: text(schedule.progress_remark),
+    };
+  const saveProgress = async (schedule: Row) => {
+    const progress = projectProgress(schedule);
+    const percentage = n(progress.percentage);
+    if (percentage < 0 || percentage > 100) return notice("Progress percentage must be between 0 and 100.");
+    setSavingProgressId(text(schedule.id));
+    const { error } = await createClient().rpc("update_project_schedule_progress", {
+      p_schedule_id: schedule.id,
+      p_progress_percentage: percentage,
+      p_progress_remark: progress.remark,
+    });
+    setSavingProgressId(null);
+    if (error) return notice(error.message);
+    setProgressDrafts((current) => {
+      const next = { ...current };
+      delete next[text(schedule.id)];
+      return next;
+    });
+    notice("Project progress updated.");
+    await reload();
+  };
   return (
     <Panel
       title="Project calendar"
@@ -3395,8 +3495,11 @@ function ProjectCalendar({
             </Button>
           </div>
           <p className="text-[12px] text-[#687386]">
-            Green dates show active, General Manager-approved project due dates.
+            Colored circles show approved project due dates by Project Type.
           </p>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-[11px] text-[#687386]">
+          {PRICE_QUOTATION_PROJECT_TYPES.map((projectType) => <span key={projectType} className="inline-flex items-center gap-1.5"><span className="size-[13px] rounded-full" style={{ backgroundColor: calendarColorForProjectType(projectType) }} aria-hidden="true" />{projectType}</span>)}
         </div>
         <div className="mt-4 grid gap-3 xl:grid-cols-3">
           {calendarMonths.map((calendarMonth) => {
@@ -3422,14 +3525,22 @@ function ProjectCalendar({
                     const date = new Date(year, monthIndex, dayNumber);
                     const key = localDateKey(date);
                     const activeSchedules = schedulesDueOnDay(key);
-                    const active = activeSchedules.length > 0;
+                    const dueProjectTypes = Array.from(
+                      new Map(
+                        activeSchedules.map((schedule) => [
+                          scheduleProjectType(schedule),
+                          schedule,
+                        ]),
+                      ).entries(),
+                    );
                     return (
                       <div
                         key={key}
                         title={activeSchedules.map((schedule) => text(schedule.project_name, text(schedule.quotation_no))).join(" · ") || undefined}
-                        className={`min-h-12 border-b border-r border-[#e7ebf0] p-1.5 text-right text-[11px] last:border-r-0 ${active ? activeSchedules.length > 1 ? "bg-[#397c2d] font-semibold text-white" : "bg-[#68a947] font-semibold text-white" : "text-[#475467]"}`}
+                        className="min-h-12 border-b border-r border-[#e7ebf0] p-1.5 text-right text-[11px] text-[#475467] last:border-r-0"
                       >
-                        {dayNumber}
+                        <span>{dayNumber}</span>
+                        {dueProjectTypes.length > 0 && <span className="mt-1 flex flex-wrap justify-end gap-1">{dueProjectTypes.map(([projectType, schedule]) => <span key={`${text(schedule.id)}-${projectType}`} className="size-[13px] rounded-full ring-1 ring-black/10" style={{ backgroundColor: calendarColorForProjectType(projectType) }} title={`${text(schedule.project_name, text(schedule.quotation_no))} — ${projectType}`} aria-label={`${projectType} due`} />)}</span>}
                       </div>
                     );
                   })}
@@ -3464,27 +3575,31 @@ function ProjectCalendar({
               </button>
             ))}
           </nav>
-          <label className="flex items-center gap-2 text-[12px] text-[#687386]">
-            <span className="whitespace-nowrap">Month</span>
-            <input
-              type="month"
-              aria-label={
-                projectStatusTab === "active"
-                  ? "Filter active projects by due month"
-                  : "Filter completed projects by completion month"
-              }
-              value={selectedMonthFilter}
-              onClick={(event) => event.currentTarget.showPicker?.()}
-              onChange={(event) => {
-                if (projectStatusTab === "active") {
-                  setActiveMonthFilter(event.target.value);
-                } else {
-                  setCompletedMonthFilter(event.target.value);
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="relative min-w-0 sm:w-56" htmlFor="project-search"><Search className="pointer-events-none absolute left-3 top-2.5 text-[#8b92a1]" size={15} /><span className="sr-only">Search projects</span><input id="project-search" type="search" value={projectQuery} onChange={(event) => setProjectQuery(event.target.value)} placeholder="Search projects" className="min-h-9 w-full rounded-lg border border-[#d9e0e9] bg-white py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]" /></label>
+            <label className="flex items-center gap-2 text-[12px] text-[#687386]">
+              <span className="whitespace-nowrap">Month</span>
+              <input
+                type="month"
+                aria-label={
+                  projectStatusTab === "active"
+                    ? "Filter active projects by due month"
+                    : "Filter completed projects by completion month"
                 }
-              }}
-              className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px] text-[#202938] outline-none focus:border-[#c43b43]"
-            />
-          </label>
+                value={selectedMonthFilter}
+                onClick={(event) => event.currentTarget.showPicker?.()}
+                onChange={(event) => {
+                  if (projectStatusTab === "active") {
+                    setActiveMonthFilter(event.target.value);
+                  } else {
+                    setCompletedMonthFilter(event.target.value);
+                  }
+                }}
+                className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px] text-[#202938] outline-none focus:border-[#c43b43]"
+              />
+            </label>
+            {role !== "project_manager" && <><label className="sr-only" htmlFor="project-officer-filter">Sales Project Officer</label><select id="project-officer-filter" value={projectOfficerFilter} onChange={(event) => setProjectOfficerFilter(event.target.value)} className={`min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${projectOfficerFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}><option value="all">All Sales Project Officers</option>{projectOfficerOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></>}
+          </div>
         </div>
         <Table
           labels={[
@@ -3493,11 +3608,15 @@ function ProjectCalendar({
             "Company Name",
             "Start Date",
             "Due Date",
+            "Total Lead Time",
             "Project Status",
+            "Project Type",
+            "Percentage",
+            "Remark",
             ...(role !== "project_manager" ? ["Sales Project Officer"] : []),
             "Actions",
           ]}
-          minWidth={role === "project_manager" ? 900 : 1080}
+          minWidth={role === "project_manager" ? 1340 : 1520}
           className="modern-page-table"
         >
           {filteredTableSchedules.map((schedule) => {
@@ -3509,10 +3628,15 @@ function ProjectCalendar({
               <td className="px-4 py-2">{text(lead?.client_name ?? quotation?.client_name ?? schedule.client_name, "—")}</td>
               <td className="px-4 py-2">{day(schedule.start_date)}</td>
               <td className="px-4 py-2">{day(schedule.due_date)}</td>
+              <td className="px-4 py-2 whitespace-nowrap">{totalLeadTime(schedule)}</td>
               <td className="px-4 py-2"><Status value={schedule.completed_at ? "completed" : hasPendingScheduleCompletion(schedule) ? "completion pending" : "active"} /></td>
+              <td className="px-4 py-2"><span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full" style={{ backgroundColor: calendarColorForProjectType(scheduleProjectType(schedule)) }} aria-hidden="true" />{scheduleProjectType(schedule)}</span></td>
+              <td className="px-4 py-2">{role === "project_manager" && !schedule.completed_at ? <input aria-label={`Progress percentage for ${text(schedule.project_name, text(schedule.quotation_no))}`} type="number" min="0" max="100" step="0.01" value={projectProgress(schedule).percentage} onChange={(event) => setProgressDrafts((current) => ({ ...current, [text(schedule.id)]: { ...projectProgress(schedule), percentage: event.target.value } }))} className="input mt-0 w-20 text-center" /> : `${n(schedule.progress_percentage)}%`}</td>
+              <td className="px-4 py-2">{role === "project_manager" && !schedule.completed_at ? <input aria-label={`Progress remark for ${text(schedule.project_name, text(schedule.quotation_no))}`} value={projectProgress(schedule).remark} onChange={(event) => setProgressDrafts((current) => ({ ...current, [text(schedule.id)]: { ...projectProgress(schedule), remark: event.target.value } }))} placeholder="Add remark" maxLength={1000} className="input mt-0 min-w-44" /> : text(schedule.progress_remark, "â€”")}</td>
               {role !== "project_manager" && <td className="px-4 py-2">{officerName(schedule)}</td>}
               <td className="px-4 py-2">
                 {showProjectActions ? <div className="flex items-center gap-1">
+                  {role === "project_manager" && !schedule.completed_at && <ActionIcon label="Save project progress" tone="green" disabled={savingProgressId === schedule.id} onClick={() => void saveProgress(schedule)}><Check size={15} /></ActionIcon>}
                   {canRequestScheduleCompletion(schedule) && (
                     <ActionIcon
                       label={
@@ -7405,10 +7529,18 @@ function PriceQuotationWorkspace({
   role: string;
   profileName: string;
 }) {
-  type DraftItem = { key: string; description: string; quantity: string };
+  type DraftItem = {
+    key: string;
+    description: string;
+    quantity: string;
+    imageUrl?: string;
+    imageFile?: File;
+    imagePreview?: string;
+  };
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<Row | null>(null);
   const [leadId, setLeadId] = useState("");
+  const [projectType, setProjectType] = useState("");
   const [items, setItems] = useState<DraftItem[]>([
     { key: "item-1", description: "", quantity: "1" },
   ]);
@@ -7422,6 +7554,7 @@ function PriceQuotationWorkspace({
   const [pdfWindow, setPdfWindow] = useState<Window | null>(null);
   const [reviewing, setReviewing] = useState<Row | null>(null);
   const [revisionNoteQuote, setRevisionNoteQuote] = useState<Row | null>(null);
+  const [illustrationQuote, setIllustrationQuote] = useState<Row | null>(null);
   const isGeneralManager = memberRole(role);
   const canPrepare = role === "project_manager" || isGeneralManager;
   useEffect(() => {
@@ -7464,11 +7597,6 @@ function PriceQuotationWorkspace({
     ].map((value) => text(value).toLowerCase()).join(" ");
     return searchable.includes(quotationQuery.trim().toLowerCase());
   });
-  const pendingRevisionQuoteIds = new Set(
-    store.price_quotation_revision_requests
-      .filter((request) => text(request.status) === "pending")
-      .map((request) => text(request.quotation_id)),
-  );
   const availableLeads = store.leads.filter(
     (lead) =>
       !["won", "lost"].includes(text(lead.status)) &&
@@ -7478,11 +7606,13 @@ function PriceQuotationWorkspace({
     setEditorOpen(false);
     setEditing(null);
     setLeadId("");
+    setProjectType("");
     setItems([{ key: `item-${Date.now()}`, description: "", quantity: "1" }]);
   };
   const openNew = () => {
     setEditing(null);
     setLeadId("");
+    setProjectType("");
     setItems([{ key: `item-${Date.now()}`, description: "", quantity: "1" }]);
     setEditorOpen(true);
   };
@@ -7492,12 +7622,14 @@ function PriceQuotationWorkspace({
     );
     setEditing(quote);
     setLeadId(text(quote.lead_id));
+    setProjectType(text(quote.project_types));
     setItems(
       quoteItems.length
         ? quoteItems.map((item, index) => ({
             key: text(item.id, `item-${index}`),
             description: text(item.description),
             quantity: text(item.quantity, "1"),
+            imageUrl: text(item.image_url) || undefined,
           }))
         : [{ key: "item-1", description: "", quantity: "1" }],
     );
@@ -7505,14 +7637,41 @@ function PriceQuotationWorkspace({
   };
   const saveDraft = async () => {
     if (!leadId) return notice("Select a lead before saving the quotation.");
+    if (!projectType.trim()) return notice("Enter the project type before saving the quotation.");
+    if (items.filter((item) => item.imageUrl || item.imageFile).length > 5) {
+      return notice("A Price Quotation can have a maximum of five illustrations.");
+    }
     setSaving(true);
-    const { data, error } = await createClient().rpc("save_price_quotation_draft", {
+    const client = createClient();
+    const savedItems: DraftItem[] = [];
+    try {
+      for (const item of items) {
+        let imageUrl = item.imageUrl;
+        if (item.imageFile) {
+          const extension = item.imageFile.type === "image/png" ? "png" : item.imageFile.type === "image/webp" ? "webp" : "jpg";
+          const path = `${orgId}/price-quotation-illustrations/${crypto.randomUUID()}.${extension}`;
+          const { error: uploadError } = await client.storage
+            .from("quotation-images")
+            .upload(path, item.imageFile, { contentType: item.imageFile.type, upsert: false });
+          if (uploadError) throw uploadError;
+          imageUrl = client.storage.from("quotation-images").getPublicUrl(path).data.publicUrl;
+        }
+        savedItems.push({ ...item, imageUrl });
+      }
+    } catch (error) {
+      setSaving(false);
+      return notice(error instanceof Error ? error.message : "Illustrations could not be uploaded.");
+    }
+    const { data, error } = await client.rpc("save_price_quotation_draft", {
       p_quotation_id: editing?.id ?? null,
       p_lead_id: leadId,
-      p_items: items.map((item) => ({
+      p_project_type: projectType.trim(),
+      p_items: savedItems.map((item) => ({
         description: item.description,
         quantity: n(item.quantity),
+        image_url: item.imageUrl ?? "",
       })),
+      p_has_illustrations: savedItems.some((item) => Boolean(item.imageUrl)),
     });
     setSaving(false);
     if (error) return notice(error.message);
@@ -7541,15 +7700,31 @@ function PriceQuotationWorkspace({
     notice("Price Quotation returned to draft.");
     await reload();
   };
-  const requestRevision = async (quote: Row) => {
+  const beginRevision = async (quote: Row) => {
     setSaving(true);
-    const { error } = await createClient().rpc("request_price_quotation_revision", {
+    const { error } = await createClient().rpc("begin_price_quotation_revision", {
       p_quotation_id: quote.id,
     });
     setSaving(false);
     if (error) return notice(error.message);
-    notice("Price Quotation revision requested for General Manager approval.");
     await reload();
+    openEdit({ ...quote, status: "needs_revision" });
+    notice("Update the Price Quotation, then submit it for General Manager review.");
+  };
+  const chooseIllustration = (itemKey: string, file?: File) => {
+    if (!file) return;
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      return notice("Illustrations must be JPEG, PNG, or WebP images.");
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      return notice("Each illustration must be 5 MB or smaller.");
+    }
+    const item = items.find((value) => value.key === itemKey);
+    const illustrationCount = items.filter((value) => value.imageUrl || value.imageFile).length;
+    if (!item?.imageUrl && !item?.imageFile && illustrationCount >= 5) {
+      return notice("A Price Quotation can have a maximum of five illustrations.");
+    }
+    setItems((current) => current.map((value) => value.key === itemKey ? { ...value, imageFile: file, imagePreview: URL.createObjectURL(file) } : value));
   };
   const openPdf = (quote: Row) => {
     if (text(quote.status) !== "approved") {
@@ -7603,7 +7778,7 @@ function PriceQuotationWorkspace({
             const preparedBy = preparedByName(quote);
             const isLegacy = Boolean(quote.costing_source_id);
             const editable = !isLegacy && ["draft", "needs_revision"].includes(text(quote.status));
-            const revisionPending = pendingRevisionQuoteIds.has(text(quote.id));
+            const illustrationCount = store.quotation_items.filter((item) => item.quotation_id === quote.id && Boolean(text(item.image_url))).length;
             return (
               <tr key={text(quote.id)}>
                 <td className="px-5 py-3"><b>{text(quote.quotation_no)}</b><small>{day(quote.issue_date)}</small></td>
@@ -7622,11 +7797,12 @@ function PriceQuotationWorkspace({
                     <ActionIcon label="Unsubmit and return to draft" tone="amber" disabled={saving} onClick={() => void unsubmit(quote)}><RotateCcw size={15} /></ActionIcon>
                   )}
                   {role === "project_manager" && !isLegacy && text(quote.status) === "approved" && (
-                    <ActionIcon label={revisionPending ? "Revision request is awaiting General Manager approval" : "Request Price Quotation revision"} tone="amber" disabled={saving || revisionPending} onClick={() => void requestRevision(quote)}><RotateCcw size={15} /></ActionIcon>
+                    <ActionIcon label="Edit and resubmit Price Quotation" tone="amber" disabled={saving} onClick={() => void beginRevision(quote)}><RotateCcw size={15} /></ActionIcon>
                   )}
                   {isGeneralManager && ["draft", "pending"].includes(text(quote.status)) && (
                     <ActionIcon label="Review Price Quotation" onClick={() => setReviewing(quote)}><FileText size={15} /></ActionIcon>
                   )}
+                  {illustrationCount > 0 && <ActionIcon label="View quotation illustrations" confirm={false} onClick={() => setIllustrationQuote(quote)}><ImageIcon size={15} /></ActionIcon>}
                   {text(quote.status) === "approved" && <ActionIcon label="View Price Quotation PDF" onClick={() => openPdf(quote)}><FileText size={15} /></ActionIcon>}
                 </div></td>
               </tr>
@@ -7637,19 +7813,22 @@ function PriceQuotationWorkspace({
       </div>
       {editorOpen && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/30 p-4">
-          <section className="mx-auto my-4 w-full max-w-2xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
+          <section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
             <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">{editing ? "Edit Price Quotation" : "Add Price Quotation"}</h2><p className="mt-1 text-[12px] text-[#687386]">Add the requested materials and quantities. Selling prices are entered by the General Manager.</p></div><button type="button" onClick={resetEditor} aria-label="Close" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div>
             <label className="mt-5 block text-[12px] font-medium text-[#202938]">Lead / Project<select value={leadId} onChange={(event) => setLeadId(event.target.value)} className="input mt-1" required><option value="">Select a lead</option>{availableLeads.map((lead) => <option key={text(lead.id)} value={text(lead.id)}>{leadClientLabel(lead)} — {text(lead.project_name)}</option>)}</select></label>
+            <label className="mt-4 block text-[12px] font-medium text-[#202938]">Project Type<select value={projectType} onChange={(event) => setProjectType(event.target.value)} className={`input mt-1 ${projectType ? "text-[#151922]" : "text-[#8b92a1]"}`} required><option value="">Select project type</option>{PRICE_QUOTATION_PROJECT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
             <div className="mt-5">
               <div className="flex items-center justify-between"><div><h3 className="text-[14px] font-semibold text-[#202938]">Items</h3><p className="mt-1 text-[12px] text-[#687386]">List each material or production item required by the lead.</p></div></div>
-              <Table labels={["#", "Description", "Qty", ""]} minWidth={0} className="table-fixed" columnWidths={["8%", "68%", "16%", "8%"]}>
+              <Table labels={["#", "Description", "Qty", "Illustration", ""]} minWidth={0} className="table-fixed" columnWidths={["7%", "45%", "14%", "25%", "9%"]}>
                 {items.map((item, index) => <tr key={item.key}>
                   <td className="px-3 py-2 text-center font-medium">{index + 1}</td>
                   <td className="px-3 py-2"><textarea rows={2} aria-label={`Item ${index + 1} description`} value={item.description} onChange={(event) => setItems((current) => current.map((value) => value.key === item.key ? { ...value, description: titleCase(event.target.value) } : value))} className="input mt-0 min-h-[58px] resize-y" placeholder="Material or production item" /></td>
                   <td className="px-3 py-2"><input aria-label={`Item ${index + 1} quantity`} type="number" min="0.001" step="any" value={item.quantity} onChange={(event) => setItems((current) => current.map((value) => value.key === item.key ? { ...value, quantity: event.target.value } : value))} className="input mt-0 text-center" style={{ width: "6rem", marginInline: "auto" }} /></td>
+                  <td className="px-3 py-2"><div className="flex items-center justify-center gap-2">{(item.imagePreview || item.imageUrl) && <a href={item.imagePreview || item.imageUrl} target="_blank" rel="noreferrer" aria-label={`View illustration for item ${index + 1}`} className="overflow-hidden rounded-md border border-[#d9e0e9]"><img src={item.imagePreview || item.imageUrl} alt="" className="size-9 object-cover" /></a>}<label className="cursor-pointer"><span className="sr-only">Choose illustration for item {index + 1}</span><input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => { chooseIllustration(item.key, event.target.files?.[0]); event.currentTarget.value = ""; }} /><span className="inline-flex min-h-9 items-center rounded-lg border border-[#d9e0e9] px-2.5 text-[11px] font-medium text-[#344054] hover:bg-[#f7f9fc]">{item.imageUrl || item.imageFile ? "Change" : "Add image"}</span></label>{(item.imageUrl || item.imageFile) && <button type="button" aria-label={`Remove illustration for item ${index + 1}`} onClick={() => setItems((current) => current.map((value) => value.key === item.key ? { ...value, imageUrl: undefined, imageFile: undefined, imagePreview: undefined } : value))} className="grid size-8 place-items-center rounded-md text-[#8b92a1] hover:bg-[#fff1f1] hover:text-[#b42318]"><X size={15} /></button>}</div></td>
                   <td className="px-3 py-2 text-center"><ActionIcon label={`Remove item ${index + 1}`} tone="red" disabled={items.length === 1} onClick={() => setItems((current) => current.filter((value) => value.key !== item.key))}><Trash2 size={15} /></ActionIcon></td>
                 </tr>)}
               </Table>
+              <p className="mt-2 text-[11px] text-[#687386]">Upload up to five JPEG, PNG, or WebP illustrations (5 MB each). They are for viewing only and are not included in the Price Quotation PDF.</p>
               <div className="mt-3 flex justify-end"><Button secondary onClick={() => setItems((current) => [...current, { key: `item-${Date.now()}`, description: "", quantity: "1" }])}><Plus size={14} /> Add Item</Button></div>
             </div>
             <div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={resetEditor}>Cancel</Button><Button disabled={saving} onClick={() => void saveDraft()}>{editing ? "Save changes" : "Save draft"}</Button></div>
@@ -7662,6 +7841,15 @@ function PriceQuotationWorkspace({
             <div className="flex items-center justify-between gap-4"><div><h2 id="price-quotation-revision-note-title" className="text-[16px] font-semibold text-[#202938]">General Manager revision note</h2><p className="mt-1 text-[12px] text-[#687386]">{text(revisionNoteQuote.quotation_no, "Price Quotation")}</p></div><button type="button" onClick={() => setRevisionNoteQuote(null)} aria-label="Close revision note" className="rounded-md p-1 text-[#687386] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938]"><X size={18} /></button></div>
             <div className="mt-4 max-h-[50vh] overflow-y-auto whitespace-pre-wrap text-[13px] leading-5 text-[#303949]">{text(revisionNoteQuote.revision_note, "No revision note was provided.")}</div>
             <div className="mt-5 flex justify-end"><Button secondary onClick={() => setRevisionNoteQuote(null)}>Close</Button></div>
+          </section>
+        </div>
+      )}
+      {illustrationQuote && (
+        <div className="fixed inset-0 z-[70] grid place-items-center bg-[#151922]/40 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setIllustrationQuote(null); }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="price-quotation-illustrations-title" className="w-full max-w-2xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
+            <div className="flex items-start justify-between gap-4"><div><h2 id="price-quotation-illustrations-title" className="text-[16px] font-semibold text-[#202938]">Quotation illustrations</h2><p className="mt-1 text-[12px] text-[#687386]">{text(illustrationQuote.quotation_no, "Price Quotation")} · View-only; not included in the PDF.</p></div><button type="button" onClick={() => setIllustrationQuote(null)} aria-label="Close illustrations" className="rounded-md p-1 text-[#687386] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938]"><X size={18} /></button></div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">{store.quotation_items.filter((item) => item.quotation_id === illustrationQuote.id && Boolean(text(item.image_url))).map((item) => <a key={text(item.id)} href={text(item.image_url)} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><img src={text(item.image_url)} alt={text(item.description, "Quotation illustration")} className="h-44 w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{text(item.description)}</p></a>)}</div>
+            <div className="mt-5 flex justify-end"><Button secondary onClick={() => setIllustrationQuote(null)}>Close</Button></div>
           </section>
         </div>
       )}
@@ -8386,6 +8574,8 @@ function Submissions({
   const [selectedProjectEdit, setSelectedProjectEdit] = useState<Row | null>(null);
   const [selectedLeadChange, setSelectedLeadChange] = useState<Row | null>(null);
   const [selectedPriceQuotation, setSelectedPriceQuotation] = useState<Row | null>(null);
+  const [pdfQuote, setPdfQuote] = useState<Row | null>(null);
+  const [pdfWindow, setPdfWindow] = useState<Window | null>(null);
   const pendingPriceQuotations = store.quotations.filter(
     (quotation) =>
       text(quotation.status) === "pending" &&
@@ -8655,6 +8845,14 @@ function Submissions({
         ?.full_name,
       "Project Officer",
     );
+  const openQuotationPdf = (quotation?: Row) => {
+    if (!quotation) return notice("The Price Quotation for this project could not be found.");
+    const nextWindow = window.open("about:blank", "_blank");
+    if (!nextWindow) return notice("Allow pop-ups to open the quotation PDF.");
+    nextWindow.opener = null;
+    setPdfWindow(nextWindow);
+    setPdfQuote(quotation);
+  };
   return (
     <Panel
       title="General Manager Submissions"
@@ -8753,7 +8951,9 @@ function Submissions({
       ) : <Empty>No Costing Breakdown revisions are awaiting review.</Empty>)}
       {tab === "calendar_projects" && (pendingProjectSchedules.length ? (
         <Table labels={["Assigned Project Officer", "Quotation Code", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1140}>
-          {pendingProjectSchedules.map((schedule) => (
+          {pendingProjectSchedules.map((schedule) => {
+            const quotation = store.quotations.find((item) => item.id === schedule.quotation_id);
+            return (
             <tr key={text(schedule.id)}>
               <td className="px-5 py-3">{scheduleOfficerName(schedule)}</td>
               <td className="px-5 py-3">{text(schedule.quotation_no)}</td>
@@ -8763,9 +8963,10 @@ function Submissions({
               <td className="px-5 py-3">{day(schedule.start_date)}</td>
               <td className="px-5 py-3">{day(schedule.due_date)}</td>
               <td className="px-5 py-3"><Status value={schedule.status} /></td>
-              <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve project schedule" tone="green" disabled={savingId === schedule.id} onClick={() => void decideProjectSchedule(schedule, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project schedule" tone="red" disabled={savingId === schedule.id} onClick={() => void decideProjectSchedule(schedule, "rejected")}><X size={15} /></ActionIcon></div></td>
+              <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="View Price Quotation PDF" confirm={false} onClick={() => openQuotationPdf(quotation)}><FileText size={15} /></ActionIcon><ActionIcon label="Approve project schedule" tone="green" disabled={savingId === schedule.id} onClick={() => void decideProjectSchedule(schedule, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project schedule" tone="red" disabled={savingId === schedule.id} onClick={() => void decideProjectSchedule(schedule, "rejected")}><X size={15} /></ActionIcon></div></td>
             </tr>
-          ))}
+            );
+          })}
         </Table>
       ) : <Empty>No Project Calendar submissions are awaiting review.</Empty>)}
       {tab === "calendar_revisions" && (pendingProjectScheduleRevisions.length ? (
@@ -8881,6 +9082,7 @@ function Submissions({
           decide={(decision, note) => void decideLeadChange(selectedLeadChange, decision, note)}
         />
       )}
+      {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); notice(message); }} autoExportPdf pdfWindow={pdfWindow} hidden />}
     </Panel>
   );
 }
@@ -11367,10 +11569,9 @@ function SettingsView({
   notice: (m: string) => void;
   role: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const [values, setValues] = useState<Record<string, string>>({});
+  const [bankDetailsOpen, setBankDetailsOpen] = useState(false);
   const [defaultBankDetails, setDefaultBankDetails] = useState<BankDetail[]>([]);
-  const [saving, setSaving] = useState(false);
+  const [savingBankDetails, setSavingBankDetails] = useState(false);
   const setting = store.business_settings[0];
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileValues, setProfileValues] = useState<Record<string, string>>(
@@ -11460,88 +11661,29 @@ function SettingsView({
     notice("Project Manager account created.");
     await reload();
   };
-  const save = async () => {
-    setSaving(true);
-    const fields = [
-      "vat_rate",
-      "default_profit_margin",
-      "default_overhead_rate",
-      "default_buffer_margin",
-      "production_commission",
-      "sales_target_monthly",
-      "sales_target_annual",
-      "expense_approval_threshold",
-    ];
-    const payload: Record<string, unknown> = { ...values };
-    payload.default_bank_details = defaultBankDetails.filter((detail) => detail.bank_name || detail.account_name || detail.account_number);
-    fields.forEach((f) => (payload[f] = n(payload[f])));
+  const saveDefaultBankDetails = async () => {
+    setSavingBankDetails(true);
+    const payload = {
+      organization_id: orgId,
+      default_bank_details: defaultBankDetails.filter((detail) => detail.bank_name || detail.account_name || detail.account_number),
+    };
     const { error } = await createClient()
       .from("business_settings")
-      .upsert({ ...payload, organization_id: orgId });
-    setSaving(false);
+      .upsert(payload);
+    setSavingBankDetails(false);
     if (error) return notice(error.message);
-    setOpen(false);
-    notice("Business settings saved.");
+    setBankDetailsOpen(false);
+    notice("Default bank details saved.");
     await reload();
   };
   return (
     <div className="space-y-5">
       <Panel
-        title="Business settings"
-        detail="Default rates and terms for quotations, invoices, reports, and targets."
-        action={
-          <Button
-            onClick={() => {
-              setValues({
-                vat_rate: text(setting?.vat_rate, "12"),
-                default_profit_margin: text(
-                  setting?.default_profit_margin,
-                  "75",
-                ),
-                default_overhead_rate: text(
-                  setting?.default_overhead_rate,
-                  "0",
-                ),
-                default_buffer_margin: text(
-                  setting?.default_buffer_margin,
-                  "20",
-                ),
-                production_commission: text(
-                  setting?.production_commission,
-                  "5",
-                ),
-                quotation_prefix: text(setting?.quotation_prefix, "QT"),
-                invoice_prefix: text(setting?.invoice_prefix, "INV"),
-                sales_target_monthly: text(setting?.sales_target_monthly, "0"),
-                sales_target_annual: text(setting?.sales_target_annual, "0"),
-                expense_approval_threshold: text(
-                  setting?.expense_approval_threshold,
-                  "5000",
-                ),
-                company_policies: text(setting?.company_policies, ""),
-              });
-              setDefaultBankDetails(quotationBankDetails(setting?.default_bank_details));
-              setOpen(true);
-            }}
-          >
-            <Settings size={14} />
-            Edit settings
-          </Button>
-        }
+        title="Default bank details"
+        detail="Shown on new Price Quotations."
+        action={<Button secondary onClick={() => { setDefaultBankDetails(quotationBankDetails(setting?.default_bank_details)); setBankDetailsOpen(true); }}><Settings size={14} /> Edit bank details</Button>}
       >
-        <div className="grid grid-cols-2 gap-px border-t border-[#edf0f5] bg-[#edf0f5] sm:grid-cols-4">
-          {[
-            ["VAT", `${n(setting?.vat_rate)}%`],
-            ["Markup", `${n(setting?.default_profit_margin)}%`],
-            ["Buffer", `${n(setting?.default_buffer_margin)}%`],
-            ["Commission", `${n(setting?.production_commission)}%`],
-          ].map(([label, value]) => (
-            <div key={label} className="bg-white p-5">
-              <p className="text-[11px] text-[#8b92a1]">{label}</p>
-              <p className="mt-1 text-lg font-semibold">{value}</p>
-            </div>
-          ))}
-        </div>
+        {quotationBankDetails(setting?.default_bank_details).length ? <Table labels={["Bank", "Account name", "Account number"]}>{quotationBankDetails(setting?.default_bank_details).map((detail, index) => <tr key={`${detail.bank_name}-${detail.account_number}-${index}`}><td className="px-5 py-3 font-medium">{detail.bank_name}</td><td className="px-5 py-3">{detail.account_name}</td><td className="px-5 py-3">{detail.account_number}</td></tr>)}</Table> : <Empty>No default bank details added.</Empty>}
       </Panel>
       <Panel
         title="Business profile"
@@ -11667,63 +11809,19 @@ function SettingsView({
           )}
         </Panel>
       )}
-      {open && (
+      {bankDetailsOpen && (
         <Dialog
-          title="Business defaults"
-          fields={[
-            { key: "vat_rate", label: "VAT rate %", type: "number" },
-            {
-              key: "default_profit_margin",
-              label: "Default markup %",
-              type: "number",
-            },
-            {
-              key: "default_overhead_rate",
-              label: "Default overhead %",
-              type: "number",
-            },
-            {
-              key: "default_buffer_margin",
-              label: "Default buffer %",
-              type: "number",
-            },
-            {
-              key: "production_commission",
-              label: "Production commission %",
-              type: "number",
-            },
-            { key: "quotation_prefix", label: "Quotation prefix" },
-            { key: "invoice_prefix", label: "Invoice prefix" },
-            {
-              key: "sales_target_monthly",
-              label: "Monthly sales target",
-              type: "number",
-            },
-            {
-              key: "sales_target_annual",
-              label: "Annual sales target",
-              type: "number",
-            },
-            {
-              key: "expense_approval_threshold",
-              label: "Expense approval threshold",
-              type: "number",
-            },
-            {
-              key: "company_policies",
-              label: "Company policies",
-              type: "textarea",
-              hint: "Internal policies shown in the Company Profile settings.",
-            },
-          ]}
-          values={values}
-          setValues={setValues}
-          save={() => void save()}
-          close={() => setOpen(false)}
-          saving={saving}
+          title="Default bank details"
+          fields={[]}
+          values={{}}
+          setValues={() => undefined}
+          save={() => void saveDefaultBankDetails()}
+          close={() => setBankDetailsOpen(false)}
+          saving={savingBankDetails}
+          saveLabel="Save bank details"
         >
-          <section className="mt-5 border-t border-[#edf0f5] pt-5">
-            <div className="flex items-center justify-between gap-3"><div><h3 className="text-[14px] font-semibold text-[#202938]">Default Bank Details</h3><p className="mt-0.5 text-[12px] text-[#687386]">Used for every new Costing Breakdown and Price Quotation.</p></div><Button secondary onClick={() => setDefaultBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div>
+          <section className="border-t border-[#edf0f5] pt-5">
+            <div className="flex items-center justify-between gap-3"><div><h3 className="text-[14px] font-semibold text-[#202938]">Bank details</h3><p className="mt-0.5 text-[12px] text-[#687386]">Used for every new Price Quotation.</p></div><Button secondary onClick={() => setDefaultBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div>
             <div className="mt-3 space-y-2">{defaultBankDetails.map((detail, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Default bank ${index + 1} name`} value={detail.bank_name} onChange={(event) => setDefaultBankDetails((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, bank_name: event.target.value } : item))} placeholder="Bank name" className="input mt-0" /><input aria-label={`Default bank ${index + 1} account name`} value={detail.account_name} onChange={(event) => setDefaultBankDetails((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, account_name: event.target.value } : item))} placeholder="Account name" className="input mt-0" /><input aria-label={`Default bank ${index + 1} account number`} value={detail.account_number} onChange={(event) => setDefaultBankDetails((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, account_number: event.target.value } : item))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label="Remove default bank" onClick={() => setDefaultBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] transition-colors hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
           </section>
         </Dialog>

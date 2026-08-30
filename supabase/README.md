@@ -62,7 +62,12 @@
 60. Run `065_price_quotation_revision_approvals.sql` to require General Manager approval before a Sales Project Officer can revise an approved direct Price Quotation.
 61. Run `066_remove_price_quotation_expiry.sql` to remove Price Quotation expiry dates and the default Validity term.
 62. Run `067_fix_price_quotation_draft_totals_guard.sql` to let a Sales Project Officer save item-only revisions without bypassing General Manager price protection.
-63. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
+63. Run `068_exclusive_project_due_dates.sql` before migration 070 to install the initial project due-date integrity guard.
+64. Run `069_price_quotation_project_type.sql` to let Sales Project Officers save Project Type on direct Price Quotations.
+65. Run `070_project_due_dates_by_project_type.sql` to allow different Project Types on one due date while preventing duplicates of the same Project Type and due date.
+66. Run `071_price_quotation_illustrations_and_resubmission.sql` to add up to five view-only item illustrations, date-based direct quotation numbers, and the edit-then-resubmit Price Quotation revision workflow.
+67. Run `072_project_schedule_progress.sql` to add protected Project Officer progress percentage and remark updates.
+68. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 

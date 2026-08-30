@@ -16,6 +16,7 @@ export default function AuthPage() {
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (submitting) return;
     setSubmitting(true);
     setMessage("");
     const supabase = createClient();
@@ -92,7 +93,7 @@ export default function AuthPage() {
             <div className="pt-2">
               <button
                 disabled={submitting}
-                className="w-full rounded-lg bg-[#c43b43] px-3 py-2.5 text-[14px] font-semibold text-white transition-colors hover:bg-[#ab3038] disabled:opacity-60"
+                className="w-full rounded-lg bg-[#c43b43] px-3 py-2.5 text-[14px] font-semibold text-white transition-colors hover:bg-[#ab3038] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 {submitting ? "Signing in..." : "Sign in"}
               </button>
