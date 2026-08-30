@@ -58,7 +58,11 @@
 56. Run `062_chatbot_lead_intake_and_assignment.sql` before deploying chatbot lead intake. It adds idempotent chatbot lead receipt, lets the General Manager assign a lead to a Sales Project Officer, and limits each officer to their assigned leads.
 57. Run `063_enable_realtime_leads.sql` to enable the initial Leads real-time publication.
 58. Run `064_enable_workspace_realtime.sql` to update every workspace screen automatically when authorized data is created, changed, or deleted.
-59. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
+59. Run `063_price_quotation_preparation_workflow.sql` to activate the direct Price Quotation preparation and General Manager pricing workflow.
+60. Run `065_price_quotation_revision_approvals.sql` to require General Manager approval before a Sales Project Officer can revise an approved direct Price Quotation.
+61. Run `066_remove_price_quotation_expiry.sql` to remove Price Quotation expiry dates and the default Validity term.
+62. Run `067_fix_price_quotation_draft_totals_guard.sql` to let a Sales Project Officer save item-only revisions without bypassing General Manager price protection.
+63. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 

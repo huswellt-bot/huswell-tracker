@@ -83,6 +83,7 @@ PdfFont.register({
   family: "SF Pro Display",
   fonts: [
     { src: "/font/SFPRODISPLAYREGULAR.OTF", fontWeight: 400 },
+    { src: "/font/SFPRODISPLAYLIGHTITALIC.OTF", fontWeight: 400, fontStyle: "italic" },
     { src: "/font/SFPRODISPLAYMEDIUM.OTF", fontWeight: 500 },
     { src: "/font/SFPRODISPLAYBOLD.OTF", fontWeight: 700 },
   ],
@@ -140,6 +141,7 @@ type TableName =
   | "project_schedule_completion_requests"
   | "lead_change_requests"
   | "quotation_revision_requests"
+  | "price_quotation_revision_requests"
   | "project_schedules"
   | "activity_log"
   | "leads"
@@ -216,6 +218,7 @@ const tables: TableName[] = [
   "project_schedule_completion_requests",
   "lead_change_requests",
   "quotation_revision_requests",
+  "price_quotation_revision_requests",
   "project_schedules",
   "activity_log",
   "leads",
@@ -369,7 +372,6 @@ const DEFAULT_QUOTATION_TERMS = [
   "Prices: All prices quoted are VAT INCLUSIVE.",
   "Delivery: Pickup or delivery via a third-party courier. Delivery charges shall be shouldered by the client.",
   "Payment Terms: 50% downpayment is required upon approval of the quotation. The remaining 50% balance must be paid prior to release or delivery.",
-  "Validity: This quotation is valid for 7 days from the date of issuance.",
   "Cancellations: Orders cannot be cancelled once production has started",
   "Artwork Revisions: Any revisions or changes requested after the artwork has been approved may result in an adjustment of the production lead time. The revised delivery schedule will be based on the scope and timing of the requested changes.",
 ].join("\n");
@@ -555,6 +557,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "project_schedule_completion_requests",
     "lead_change_requests",
     "quotation_revision_requests",
+    "price_quotation_revision_requests",
     "project_schedules",
   ],
   sales: [
@@ -664,6 +667,7 @@ const workspaceViewTables = (
       "business_settings",
       "profiles",
       "quotation_revision_requests",
+      "price_quotation_revision_requests",
     ];
   if (view === "Suppliers & Materials")
     return [
@@ -716,11 +720,13 @@ const workspaceViewTables = (
   if (view === "Submissions")
     return [
       "quotations",
+      "quotation_items",
       "profiles",
       "project_edit_requests",
       "leads",
       "lead_change_requests",
       "quotation_revision_requests",
+      "price_quotation_revision_requests",
       "project_schedules",
       "project_schedule_revision_requests",
       "project_schedule_completion_requests",
@@ -782,13 +788,12 @@ const leads: Module = {
     "Register outbound client contacts using the same fields as the outbound tracker.",
   add: "Add lead",
   fields: [
-    { key: "date_sent", label: "Date sent", type: "date" },
+    { key: "date_sent", label: "Date sent", type: "date", required: true },
     { key: "contact_name", label: "Client name", required: true },
     { key: "client_name", label: "Company Name (Optional)" },
     { key: "email", label: "Email" },
     { key: "phone", label: "Viber" },
-    { key: "address", label: "Address", type: "textarea" },
-    { key: "date_contacted", label: "Date contacted", type: "date" },
+    { key: "date_contacted", label: "Date contacted", type: "date", required: true },
     {
       key: "contact_method",
       label: "Outbound method",
@@ -799,7 +804,6 @@ const leads: Module = {
       key: "evaluation_number",
       label: "Lead status",
       type: "select",
-      required: true,
       options: [...leadStatuses],
     },
     {
@@ -1505,12 +1509,117 @@ function PdfBankDetails({ details }: { details: BankDetail[] }) {
   return <PdfView style={generatedPdfStyles.bankTable}>{details.map((detail, index) => <PdfView key={`${detail.bank_name}-${detail.account_number}-${index}`} style={generatedPdfStyles.bankRow}><PdfView style={[generatedPdfStyles.bankCell, { width: "35%" }]}><PdfText>{detail.bank_name}</PdfText></PdfView><PdfView style={[generatedPdfStyles.bankCell, { width: "65%" }]}><PdfText>{[detail.account_name, detail.account_number].filter(Boolean).join(" - ")}</PdfText></PdfView></PdfView>)}</PdfView>;
 }
 
+const priceQuotationPdfStyles = PdfStyleSheet.create({
+  page: { paddingTop: 27, paddingRight: 24, paddingBottom: 23, paddingLeft: 24, fontFamily: "SF Pro Display", fontSize: 8.5, color: "#111" },
+  topHeader: { flexDirection: "row", alignItems: "stretch", borderBottomWidth: 1.4, borderColor: "#111", paddingBottom: 15 },
+  logoColumn: { width: "27%", justifyContent: "center", paddingRight: 8 }, logo: { width: 140, height: 48, objectFit: "contain" },
+  businessColumn: { width: "38%", justifyContent: "center", paddingHorizontal: 8 }, businessDetail: { fontSize: 7.6, lineHeight: 1.5, marginBottom: 3 },
+  quoteColumn: { width: "35%", borderLeftWidth: 1, borderColor: "#555", paddingLeft: 20 }, title: { color: "#c92f35", fontSize: 19, fontWeight: 700, marginBottom: 10 },
+  quoteMetaRow: { flexDirection: "row", marginBottom: 3 }, quoteMetaLabel: { width: 77, fontSize: 8.4 }, quoteMetaColon: { width: 10, fontSize: 8.4 }, quoteMetaValue: { flex: 1, fontSize: 8.4 },
+  clientGrid: { flexDirection: "row", marginTop: 13, marginBottom: 12 }, clientColumn: { width: "50%", paddingRight: 17 }, clientColumnRight: { width: "50%", borderLeftWidth: 1, borderColor: "#777", paddingLeft: 25 },
+  clientField: { flexDirection: "row", alignItems: "flex-end", minHeight: 20, marginBottom: 4 }, clientLabel: { width: 84, fontWeight: 700, fontSize: 8.5 }, clientColon: { width: 9, fontWeight: 700, fontSize: 8.5 }, clientValue: { flex: 1, borderBottomWidth: 0.7, borderColor: "#555", paddingBottom: 2, fontSize: 8.4 },
+  salutation: { fontSize: 9, fontStyle: "italic", marginBottom: 11 }, table: { borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" }, row: { flexDirection: "row", alignItems: "stretch" },
+  cell: { borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#111", paddingVertical: 6, paddingHorizontal: 5, justifyContent: "center", alignSelf: "stretch", textAlign: "center" }, tableHeader: { backgroundColor: "#efefef", fontWeight: 700 }, descriptionCell: { textAlign: "left" },
+  termsHeader: { borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#111", backgroundColor: "#efefef", paddingVertical: 6, paddingHorizontal: 8, fontSize: 9, fontWeight: 700 }, termsTable: { borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111", marginTop: 13 }, termNumber: { textAlign: "center" }, termTitle: { fontWeight: 700, textAlign: "left" }, termDescription: { textAlign: "left", lineHeight: 1.35 },
+  lowerSection: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginTop: 15 }, bankTable: { width: "52%", borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" }, totalTable: { width: "43%", borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" }, bankHeader: { fontWeight: 700, textAlign: "center" }, totalLabel: { fontSize: 8.5, fontWeight: 700, textAlign: "left" }, totalValue: { fontSize: 8.5, textAlign: "right" }, totalRow: { backgroundColor: "#efefef" }, totalLabelStrong: { fontSize: 8.5, fontWeight: 700, textAlign: "left" }, totalValueStrong: { fontSize: 8.5, fontWeight: 700, textAlign: "right" },
+  signatures: { flexDirection: "row", marginTop: 22 }, signatureColumn: { width: "50%", minHeight: 59, paddingRight: 18 }, signatureColumnRight: { width: "50%", minHeight: 59, borderLeftWidth: 1, borderColor: "#777", paddingLeft: 20 }, signatureLine: { flexDirection: "row", alignItems: "flex-end", minHeight: 22 }, signatureLabel: { width: 72, fontWeight: 700, fontSize: 8.5 }, signatureSignatory: { flex: 1, minHeight: 29, justifyContent: "flex-end" }, signatureImage: { width: 76, height: 27, objectFit: "contain", alignSelf: "center", marginBottom: -4 }, signatureName: { width: "100%", textAlign: "center", borderBottomWidth: 0.8, borderColor: "#111", paddingBottom: 2, fontSize: 8.5 }, signatureRole: { marginTop: 5, marginLeft: 72, fontSize: 8.3, textAlign: "center" },
+  footer: { borderTopWidth: 1, borderColor: "#111", marginTop: 15, paddingTop: 7 }, footerItalic: { textAlign: "center", fontSize: 8.2, fontStyle: "italic", lineHeight: 1.45 }, footerAddress: { textAlign: "center", fontSize: 7.8, marginTop: 5 },
+});
+
+function PriceQuotationPdfCell({ children, width, header = false, description = false, style }: { children: ReactNode; width: string; header?: boolean; description?: boolean; style?: React.ComponentProps<typeof PdfView>["style"] }) {
+  const plainText = typeof children === "string" || typeof children === "number";
+  return <PdfView style={[priceQuotationPdfStyles.cell, { width }, header ? priceQuotationPdfStyles.tableHeader : undefined, description ? priceQuotationPdfStyles.descriptionCell : undefined, style]}>{plainText ? <PdfText style={{ textAlign: description ? "left" : "center" }}>{children}</PdfText> : children}</PdfView>;
+}
+
+function PriceQuotationTermCell({ children, width, heading = false }: { children: string; width: string; heading?: boolean }) {
+  return <PdfView style={[priceQuotationPdfStyles.cell, { width, paddingVertical: 6, justifyContent: "center" }]}><PdfText style={{ fontSize: 8.5, textAlign: "left", fontWeight: heading ? 700 : 400 }}>{children}</PdfText></PdfView>;
+}
+
+function PriceQuotationSignature({ label, name, signatureSource }: { label: string; name: string; signatureSource?: string }) {
+  return <PdfView style={priceQuotationPdfStyles.signatureLine}><PdfText style={priceQuotationPdfStyles.signatureLabel}>{label}</PdfText><PdfView style={priceQuotationPdfStyles.signatureSignatory}>{signatureSource && <PdfImage src={signatureSource} style={priceQuotationPdfStyles.signatureImage} />}<PdfText style={priceQuotationPdfStyles.signatureName}>{name}</PdfText></PdfView></PdfView>;
+}
+
 function PriceQuotationPdf({ quote, store, origin }: { quote: Row; store: Store; origin: string }) {
   const customer = store.customers.find((item) => item.id === quote.customer_id);
   const lead = store.leads.find((item) => item.id === quote.lead_id);
   const lines = store.quotation_items.filter((item) => item.quotation_id === quote.id);
+  const formatDate = (value: unknown) => {
+    if (!value) return "-";
+    const parsed = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+    return Number.isNaN(parsed.getTime()) ? "-" : new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric" }).format(parsed);
+  };
+  const issueDate = formatDate(quote.issue_date);
+  const leadDate = formatDate(lead?.date_sent ?? lead?.created_at ?? quote.issue_date);
+  const terms = text(quote.terms_conditions, DEFAULT_QUOTATION_TERMS).split(/\r?\n+/).map((item) => item.trim().replace(/^\d+[.)]\s*/, "")).filter((item) => item && !item.toLowerCase().startsWith("validity:"));
+  const termRows = terms.map((term) => {
+    const [heading, ...description] = term.split(":");
+    return { heading: heading.trim(), description: description.join(":").trim() || heading.trim() };
+  });
+  const bankDetails = quotationBankDetails(quote.bank_details);
+  const currency = (value: number) => new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(value);
+  const approvedByName = text(quote.approved_by_name, "Marvin S. Tavarez");
+  const approvedByRole = quote.approved_by_name ? "General Manager" : "Proprietor";
+  const preparedBySignature = text(quote.prepared_by_signature_url, "") || undefined;
+  const approvedBySignature = text(quote.approved_by_signature_url, "") || (approvedByName === "Marvin S. Tavarez" ? `${origin}/marvin-tavarez-signature.png` : undefined);
+  // Direct Price Quotations are based on a Lead. The saved quotation values
+  // remain as a fallback for historical records where lead fields are absent.
+  const clientName = text(lead?.client_name ?? customer?.company_name ?? quote.client_name, "-");
+  const contactName = text(lead?.contact_name ?? customer?.contact_name ?? quote.client_contact_name, "-");
+  const contactNumber = text(lead?.phone ?? customer?.phone ?? quote.client_phone, "-");
+  const clientEmail = text(lead?.email ?? customer?.email, "-");
+  const subtotal = n(quote.subtotal);
+  const tax = n(quote.vat_amount);
+  const shipping = n(quote.shipping_handling);
+  const clientField = (label: string, value: string) => <PdfView key={label} style={priceQuotationPdfStyles.clientField}><PdfText style={priceQuotationPdfStyles.clientLabel}>{label}</PdfText><PdfText style={priceQuotationPdfStyles.clientColon}>:</PdfText><PdfText style={priceQuotationPdfStyles.clientValue}>{value}</PdfText></PdfView>;
+  return <PdfDocument title={`Price Quotation ${text(quote.quotation_no)}`}>
+    <PdfPage size={[612, 936]} style={priceQuotationPdfStyles.page}>
+      <PdfView style={priceQuotationPdfStyles.topHeader}>
+        <PdfView style={priceQuotationPdfStyles.logoColumn}><PdfImage src={`${origin}/huswell-quotation-logo.png`} style={priceQuotationPdfStyles.logo} /></PdfView>
+        <PdfView style={priceQuotationPdfStyles.businessColumn}>
+          <PdfText style={priceQuotationPdfStyles.businessDetail}>72 Adrian St., North Fairview Park Subd.,{`\n`}Brgy. North Fairview, Quezon City, Metro Manila</PdfText>
+          <PdfText style={priceQuotationPdfStyles.businessDetail}>(02) 456-7890</PdfText>
+          <PdfText style={priceQuotationPdfStyles.businessDetail}>info@huswelltrading.com</PdfText>
+          <PdfText style={priceQuotationPdfStyles.businessDetail}>www.huswelltrading.com</PdfText>
+        </PdfView>
+        <PdfView style={priceQuotationPdfStyles.quoteColumn}>
+          <PdfText style={priceQuotationPdfStyles.title}>PRICE QUOTATION</PdfText>
+          {[["Quotation No.", text(quote.quotation_no)], ["Quotation Date", issueDate], ["Prepared By", text(quote.representative, "Sales Project Officer")]].map(([label, value]) => <PdfView key={label} style={priceQuotationPdfStyles.quoteMetaRow}><PdfText style={priceQuotationPdfStyles.quoteMetaLabel}>{label}</PdfText><PdfText style={priceQuotationPdfStyles.quoteMetaColon}>:</PdfText><PdfText style={priceQuotationPdfStyles.quoteMetaValue}>{value}</PdfText></PdfView>)}
+        </PdfView>
+      </PdfView>
+      <PdfView style={priceQuotationPdfStyles.clientGrid}>
+        <PdfView style={priceQuotationPdfStyles.clientColumn}>{clientField("Company Name", clientName)}{clientField("Contact Person", contactName)}{clientField("Contact Number", contactNumber)}</PdfView>
+        <PdfView style={priceQuotationPdfStyles.clientColumnRight}>{clientField("Date", leadDate)}{clientField("Email", clientEmail)}</PdfView>
+      </PdfView>
+      <PdfText style={priceQuotationPdfStyles.salutation}>Dear Sir/Madam, Thank you for the opportunity to serve your requirements.</PdfText>
+      <PdfView style={priceQuotationPdfStyles.table} wrap>
+        <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="11%" header>ITEM</PriceQuotationPdfCell><PriceQuotationPdfCell width="37%" header>DESCRIPTION</PriceQuotationPdfCell><PriceQuotationPdfCell width="16%" header>QUANTITY</PriceQuotationPdfCell><PriceQuotationPdfCell width="21%" header>SELLING PRICE / UNIT</PriceQuotationPdfCell><PriceQuotationPdfCell width="15%" header>AMOUNT</PriceQuotationPdfCell></PdfView>
+        {lines.map((line, index) => { const quantity = n(line.quantity); return <PdfView key={text(line.id, String(index))} style={priceQuotationPdfStyles.row} wrap={false}><PriceQuotationPdfCell width="11%">{index + 1}</PriceQuotationPdfCell><PriceQuotationPdfCell width="37%" description>{text(line.description)}</PriceQuotationPdfCell><PriceQuotationPdfCell width="16%">{`${quantity} ${quantity === 1 ? "pc" : "pcs"}`}</PriceQuotationPdfCell><PriceQuotationPdfCell width="21%">{currency(n(line.unit_cost))}</PriceQuotationPdfCell><PriceQuotationPdfCell width="15%">{currency(n(line.line_total))}</PriceQuotationPdfCell></PdfView>; })}
+        {[["SUBTOTAL", currency(subtotal)], [`TAX (${n(quote.vat_rate)}%)`, currency(tax)], ["SHIPPING / HANDLING", currency(shipping)]].map(([label, value]) => <PdfView key={label} style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="85%" description style={priceQuotationPdfStyles.totalLabel}>{label}</PriceQuotationPdfCell><PriceQuotationPdfCell width="15%" style={priceQuotationPdfStyles.totalValue}>{value}</PriceQuotationPdfCell></PdfView>)}
+        <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="85%" description style={[priceQuotationPdfStyles.totalRow, priceQuotationPdfStyles.totalLabelStrong]}>TOTAL</PriceQuotationPdfCell><PriceQuotationPdfCell width="15%" style={[priceQuotationPdfStyles.totalRow, priceQuotationPdfStyles.totalValueStrong]}>{currency(n(quote.total_amount))}</PriceQuotationPdfCell></PdfView>
+      </PdfView>
+      <PdfView style={priceQuotationPdfStyles.termsTable} wrap>
+        <PdfView style={priceQuotationPdfStyles.termsHeader}><PdfText>TERMS AND CONDITIONS</PdfText></PdfView>
+        {termRows.map((term, index) => <PdfView key={`${term.heading}-${index}`} style={priceQuotationPdfStyles.row} wrap={false}><PriceQuotationTermCell width="32%" heading>{term.heading}</PriceQuotationTermCell><PriceQuotationTermCell width="68%">{term.description}</PriceQuotationTermCell></PdfView>)}
+      </PdfView>
+      <PdfView style={[priceQuotationPdfStyles.bankTable, { marginTop: 15 }]}>
+          <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="30%" header style={priceQuotationPdfStyles.bankHeader}>BANK</PriceQuotationPdfCell><PriceQuotationPdfCell width="70%" header style={priceQuotationPdfStyles.bankHeader}>ACCOUNT NAME / NUMBER</PriceQuotationPdfCell></PdfView>
+          {bankDetails.map((detail, index) => <PdfView key={`${detail.bank_name}-${detail.account_number}-${index}`} style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="30%" description>{detail.bank_name}</PriceQuotationPdfCell><PriceQuotationPdfCell width="70%" description>{[detail.account_name, detail.account_number].filter(Boolean).join(" - ")}</PriceQuotationPdfCell></PdfView>)}
+      </PdfView>
+      <PdfView style={priceQuotationPdfStyles.signatures}>
+        <PdfView style={priceQuotationPdfStyles.signatureColumn}><PriceQuotationSignature label="Prepared by:" name={text(quote.representative, "Sales Project Officer")} signatureSource={preparedBySignature} /><PdfText style={priceQuotationPdfStyles.signatureRole}>Sales Project Officer</PdfText></PdfView>
+        <PdfView style={priceQuotationPdfStyles.signatureColumnRight}><PriceQuotationSignature label="Approved by:" name={approvedByName} signatureSource={approvedBySignature} /><PdfText style={priceQuotationPdfStyles.signatureRole}>{approvedByRole}</PdfText><PdfView style={[priceQuotationPdfStyles.signatureLine, { marginTop: 5 }]}><PdfText style={priceQuotationPdfStyles.signatureLabel}>Conforme:</PdfText><PdfView style={priceQuotationPdfStyles.signatureSignatory}><PdfText style={priceQuotationPdfStyles.signatureName}> </PdfText></PdfView></PdfView><PdfView style={[priceQuotationPdfStyles.signatureLine, { marginTop: 5 }]}><PdfText style={priceQuotationPdfStyles.signatureLabel}>Date:</PdfText><PdfView style={priceQuotationPdfStyles.signatureSignatory}><PdfText style={priceQuotationPdfStyles.signatureName}> </PdfText></PdfView></PdfView></PdfView>
+      </PdfView>
+      <PdfView style={priceQuotationPdfStyles.footer}><PdfText style={priceQuotationPdfStyles.footerItalic}>Thank you for the opportunity to provide this quotation.{`\n`}We look forward to working with you.</PdfText><PdfText style={priceQuotationPdfStyles.footerAddress}>Business Address: 72 Adrian St., North Fairview Park Subd., Brgy. North Fairview, Quezon City, Metro Manila</PdfText></PdfView>
+    </PdfPage>
+  </PdfDocument>;
+}
+
+function PriceQuotationPdfLegacy({ quote, store, origin }: { quote: Row; store: Store; origin: string }) {
+  const customer = store.customers.find((item) => item.id === quote.customer_id);
+  const lead = store.leads.find((item) => item.id === quote.lead_id);
+  const lines = store.quotation_items.filter((item) => item.quotation_id === quote.id);
   const issueDate = quote.issue_date ? new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric" }).format(new Date(`${quote.issue_date}T00:00:00`)) : "—";
-  const terms = text(quote.terms_conditions, DEFAULT_QUOTATION_TERMS).split(/\r?\n+/).map((item) => item.trim().replace(/^\d+[.)]\s*/, "")).filter(Boolean);
+  const terms = text(quote.terms_conditions, DEFAULT_QUOTATION_TERMS).split(/\r?\n+/).map((item) => item.trim().replace(/^\d+[.)]\s*/, "")).filter((item) => item && !item.toLowerCase().startsWith("validity:"));
   const bankDetails = quotationBankDetails(quote.bank_details);
   const currency = (value: number) => new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(value);
   const approvedByName = text(quote.approved_by_name, "Marvin S. Tavarez");
@@ -1675,7 +1784,6 @@ function LeadWorkspaceTabs({
 }) {
   const tabs: { mode: LeadWorkspaceMode; label: string }[] = [
     { mode: "leads", label: "Leads" },
-    { mode: "quotation", label: "Price Quotations" },
   ];
   return (
     <nav
@@ -1915,12 +2023,14 @@ function Table({
   minWidth = 680,
   className,
   scrollable = true,
+  columnWidths,
 }: {
   labels: string[];
   children: ReactNode;
   minWidth?: number;
   className?: string;
   scrollable?: boolean;
+  columnWidths?: string[];
 }) {
   return (
     <div
@@ -1937,11 +2047,12 @@ function Table({
             className={`border-y border-[#102f61] bg-[#102f61] text-[12px] font-bold text-white ${scrollable ? "sticky top-0 z-10" : ""}`}
           >
             <tr>
-              {labels.map((l) => (
+              {labels.map((l, index) => (
                 <th
                   key={l}
                   scope="col"
-                  className={`whitespace-nowrap px-5 py-3 ${l.toLowerCase() === "actions" ? "text-center" : ""}`}
+                  className={`whitespace-nowrap px-5 py-3 ${l.toLowerCase() === "actions" ? "text-center" : ["amount", "total"].includes(l.toLowerCase()) ? "text-right" : ""}`}
+                  style={columnWidths?.[index] ? { width: columnWidths[index] } : undefined}
                 >
                   {titleCase(l)}
                 </th>
@@ -2830,7 +2941,7 @@ function Records({
             <div className={isPageLayout ? "modern-table-shell" : undefined}>
               <Table
                 labels={[...columns.map((c) => c.label), "Actions"]}
-                minWidth={module.table === "leads" ? 2265 : 680}
+                minWidth={module.table === "leads" ? 1650 : 680}
                 scrollable={isPageLayout}
                 className={
                   module.table === "leads"
@@ -3122,17 +3233,17 @@ function ProjectCalendar({
     const quotationId = values.quotation_id.split("|")[0];
     if (!quotationId || !values.start_date || !values.due_date)
       return notice("Select an approved price quotation, then enter the start and due dates.");
-    if (
-      !values.project_name.trim() ||
-      !values.client_name.trim() ||
-      !values.product_name.trim() ||
-      !values.quantity
-    )
-      return notice("The selected quotation is missing project details needed for scheduling.");
-    if (!Number.isFinite(Number(values.quantity)) || Number(values.quantity) <= 0)
-      return notice("Quantity must be greater than zero.");
     if (values.due_date < values.start_date)
       return notice("The deadline cannot be before the start date.");
+    const quotation = approvedQuotes.find((quote) => text(quote.id, "") === quotationId);
+    if (!quotation)
+      return notice("Select an approved Price Quotation before scheduling the project.");
+    const lead = store.leads.find((item) => item.id === quotation.lead_id);
+    const firstItem = store.quotation_items.find((item) => item.quotation_id === quotation.id);
+    const projectName = text(quotation.project_name ?? lead?.project_name ?? quotation.quotation_no, "Untitled project");
+    const clientName = text(quotation.client_name ?? lead?.client_name ?? lead?.contact_name, "Client");
+    const productName = text(firstItem?.description, projectName);
+    const quantity = n(firstItem?.quantity) > 0 ? n(firstItem?.quantity) : 1;
     setSaving(true);
     try {
       const client = createClient();
@@ -3144,10 +3255,10 @@ function ProjectCalendar({
           text(schedule.status, "") === "rejected",
       );
       const payload = {
-        project_name: values.project_name.trim(),
-        client_name: values.client_name.trim(),
-        product_name: values.product_name.trim(),
-        quantity: Number(values.quantity),
+        project_name: projectName,
+        client_name: clientName,
+        product_name: productName,
+        quantity,
         start_date: values.start_date,
         due_date: values.due_date,
       };
@@ -3295,12 +3406,12 @@ function ProjectCalendar({
             const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
             return (
               <section key={monthValue(calendarMonth)} className="overflow-hidden rounded-xl border border-[#d9e0e9] bg-white">
-                <h2 className="bg-[#102f61] px-3 py-2 text-center text-[13px] font-semibold uppercase tracking-[.06em] text-white">
+                <h2 className="border-b border-[#e4e8ef] bg-white px-3 py-2 text-center text-[13px] font-semibold uppercase tracking-[.06em] text-[#344054]">
                   {new Intl.DateTimeFormat("en-PH", { month: "long", year: "numeric" }).format(calendarMonth)}
                 </h2>
-                <div className="grid grid-cols-7 bg-[#c43b43] text-center text-[10px] font-semibold uppercase text-white">
+                <div className="grid grid-cols-7 bg-[#f2f4f7] text-center text-[10px] font-semibold uppercase text-[#667085]">
                   {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((weekday) => (
-                    <span key={weekday} className="border-r border-white/25 py-1.5 last:border-r-0">{weekday}</span>
+                    <span key={weekday} className="border-r border-[#dfe5ec] py-1.5 last:border-r-0">{weekday}</span>
                   ))}
                 </div>
                 <div className="grid grid-cols-7">
@@ -3377,31 +3488,31 @@ function ProjectCalendar({
         </div>
         <Table
           labels={[
-            ...(isGeneralManager ? ["Assigned Project Officer"] : []),
-            "Quotation code",
-            "Client's Name / Company",
-            "Quantity",
-            "Project type",
-            "Start date",
+            "Quotation No.",
+            "Client Name",
+            "Company Name",
+            "Start Date",
             "Due Date",
-            "Project status",
-            ...(showProjectActions ? ["Actions"] : []),
+            "Project Status",
+            ...(role !== "project_manager" ? ["Sales Project Officer"] : []),
+            "Actions",
           ]}
-          minWidth={isGeneralManager ? 1140 : 990}
+          minWidth={role === "project_manager" ? 900 : 1080}
           className="modern-page-table"
         >
-          {filteredTableSchedules.map((schedule) => (
-            <tr key={text(schedule.id)} className="hover:bg-[#fbfcff]">
-              {isGeneralManager && <td className="px-4 py-2">{officerName(schedule)}</td>}
-              <td className="px-4 py-2">{text(schedule.quotation_no)}</td>
-              <td className="px-4 py-2">{text(schedule.client_name)}</td>
-              <td className="px-4 py-2">{n(schedule.quantity).toLocaleString()}</td>
-              <td className="px-4 py-2">{text(schedule.product_name)}</td>
+          {filteredTableSchedules.map((schedule) => {
+            const quotation = store.quotations.find((quote) => quote.id === schedule.quotation_id);
+            const lead = store.leads.find((item) => item.id === quotation?.lead_id);
+            return <tr key={text(schedule.id)} className="hover:bg-[#fbfcff]">
+              <td className="px-4 py-2">{text(quotation?.quotation_no ?? schedule.quotation_no, "—")}</td>
+              <td className="px-4 py-2">{text(lead?.contact_name ?? quotation?.client_contact_name ?? schedule.client_name, "—")}</td>
+              <td className="px-4 py-2">{text(lead?.client_name ?? quotation?.client_name ?? schedule.client_name, "—")}</td>
               <td className="px-4 py-2">{day(schedule.start_date)}</td>
               <td className="px-4 py-2">{day(schedule.due_date)}</td>
               <td className="px-4 py-2"><Status value={schedule.completed_at ? "completed" : hasPendingScheduleCompletion(schedule) ? "completion pending" : "active"} /></td>
-              {showProjectActions && (
-                <td className="px-4 py-2">
+              {role !== "project_manager" && <td className="px-4 py-2">{officerName(schedule)}</td>}
+              <td className="px-4 py-2">
+                {showProjectActions ? <div className="flex items-center gap-1">
                   {canRequestScheduleCompletion(schedule) && (
                     <ActionIcon
                       label={
@@ -3437,10 +3548,10 @@ function ProjectCalendar({
                       <RotateCcw size={15} />
                     </ActionIcon>
                   )}
-                </td>
-              )}
-            </tr>
-          ))}
+                </div> : <span className="text-[#8b92a1]">—</span>}
+              </td>
+            </tr>;
+          })}
         </Table>
         {!filteredTableSchedules.length && (
           <Empty>
@@ -3517,16 +3628,9 @@ function ProjectCalendar({
           className="max-w-2xl"
           onFieldChange={(key, value, current) => {
             if (editingSchedule || key !== "quotation_id") return { ...current, [key]: value };
-            const quote = approvedQuotes.find(
-              (item) => text(item.id, "") === value.split("|")[0],
-            );
             return {
               ...current,
               quotation_id: value,
-              project_name: text(quote?.project_name),
-              client_name: text(quote?.client_name),
-              product_name: text(quote?.project_types),
-              quantity: quote?.project_quantity == null ? "" : String(quote.project_quantity),
             };
           }}
         />
@@ -4533,17 +4637,6 @@ function QuotationDocument({
         year: "numeric",
       }).format(new Date(`${quote.issue_date}T00:00:00`))
     : "—";
-  const validityDays =
-    quote.valid_until && quote.issue_date
-      ? Math.max(
-          1,
-          Math.round(
-            (new Date(`${quote.valid_until}T00:00:00`).getTime() -
-              new Date(`${quote.issue_date}T00:00:00`).getTime()) /
-              86_400_000,
-          ),
-        )
-      : 7;
   const plainAmount = (value: number) =>
     new Intl.NumberFormat("en-PH", { maximumFractionDigits: 2 }).format(value);
   const formatTerm = (term: string) => {
@@ -4684,7 +4777,6 @@ function QuotationDocument({
               <div style={{ fontWeight: 500, lineHeight: 1.32 }}>
                 <p>Quotation No.: {text(quote.quotation_no)}</p>
                 <p>Quotation Date: {fullIssueDate}</p>
-                <p>Validity: {validityDays} Days</p>
               </div>
               <div
                 style={{
@@ -5696,7 +5788,6 @@ function Quotations({
         ),
     },
     { key: "representative", label: "Sales Project Officer" },
-    { key: "valid_until", label: "Validity date", type: "date" },
     { key: "profit_margin_rate", label: "Declared markup %", type: "number" },
     { key: "overhead_rate", label: "Overhead %", type: "number" },
     { key: "buffer_margin_rate", label: "Buffer margin %", type: "number" },
@@ -7322,16 +7413,67 @@ function PriceQuotationWorkspace({
     { key: "item-1", description: "", quantity: "1" },
   ]);
   const [saving, setSaving] = useState(false);
+  const [quotationTab, setQuotationTab] = useState<"draft" | "pending" | "needs_revision" | "approved">(() => role === "project_manager" ? "draft" : "pending");
+  const [quotationQuery, setQuotationQuery] = useState("");
+  const [quotationMonth, setQuotationMonth] = useState("");
+  const [preparedByFilter, setPreparedByFilter] = useState("all");
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [pdfQuote, setPdfQuote] = useState<Row | null>(null);
   const [pdfWindow, setPdfWindow] = useState<Window | null>(null);
   const [reviewing, setReviewing] = useState<Row | null>(null);
+  const [revisionNoteQuote, setRevisionNoteQuote] = useState<Row | null>(null);
   const isGeneralManager = memberRole(role);
   const canPrepare = role === "project_manager" || isGeneralManager;
+  useEffect(() => {
+    let active = true;
+    void createClient().auth.getUser().then(({ data }) => {
+      if (active) setCurrentUserId(data.user?.id ?? null);
+    });
+    return () => { active = false; };
+  }, []);
   const quotations = store.quotations.filter(
     (quote) => text(quote.document_type) === "price_quotation",
   );
+  const preparedByKey = (quote: Row) =>
+    text(quote.prepared_by_user_id ?? quote.created_by ?? quote.representative);
+  const preparedByName = (quote: Row) =>
+    text(
+      store.profiles.find(
+        (profile) => profile.id === (quote.prepared_by_user_id ?? quote.created_by),
+      )?.full_name,
+      text(quote.representative, "Sales Project Officer"),
+    );
+  const quotationPreparers = Array.from(
+    new Map(quotations.map((quote) => [preparedByKey(quote), preparedByName(quote)])).entries(),
+  ).map(([id, name]) => ({ id, name })).filter((officer) => officer.id);
+  const filteredQuotations = quotations.filter((quote) => {
+    if (text(quote.status) !== quotationTab) return false;
+    if (preparedByFilter !== "all" && preparedByKey(quote) !== preparedByFilter) return false;
+    const quotationDate = text(
+      text(quote.status) === "approved"
+        ? quote.approved_at ?? quote.issue_date ?? quote.created_at
+        : quote.issue_date ?? quote.created_at,
+    );
+    if (quotationMonth && quotationDate.slice(0, 7) !== quotationMonth) return false;
+    const searchable = [
+      quote.quotation_no,
+      quote.client_name,
+      quote.project_name,
+      quote.representative,
+      preparedByName(quote),
+    ].map((value) => text(value).toLowerCase()).join(" ");
+    return searchable.includes(quotationQuery.trim().toLowerCase());
+  });
+  const pendingRevisionQuoteIds = new Set(
+    store.price_quotation_revision_requests
+      .filter((request) => text(request.status) === "pending")
+      .map((request) => text(request.quotation_id)),
+  );
   const availableLeads = store.leads.filter(
-    (lead) => !["won", "lost"].includes(text(lead.status)));
+    (lead) =>
+      !["won", "lost"].includes(text(lead.status)) &&
+      (role !== "project_manager" || Boolean(currentUserId) && lead.assigned_to === currentUserId),
+  );
   const resetEditor = () => {
     setEditorOpen(false);
     setEditing(null);
@@ -7389,12 +7531,36 @@ function PriceQuotationWorkspace({
     notice("Price Quotation submitted for General Manager review.");
     await reload();
   };
+  const unsubmit = async (quote: Row) => {
+    setSaving(true);
+    const { error } = await createClient().rpc("unsubmit_price_quotation", {
+      p_quotation_id: quote.id,
+    });
+    setSaving(false);
+    if (error) return notice(error.message);
+    notice("Price Quotation returned to draft.");
+    await reload();
+  };
+  const requestRevision = async (quote: Row) => {
+    setSaving(true);
+    const { error } = await createClient().rpc("request_price_quotation_revision", {
+      p_quotation_id: quote.id,
+    });
+    setSaving(false);
+    if (error) return notice(error.message);
+    notice("Price Quotation revision requested for General Manager approval.");
+    await reload();
+  };
   const openPdf = (quote: Row) => {
     if (text(quote.status) !== "approved") {
       return notice("Price Quotations can be opened after General Manager approval.");
     }
-    const nextWindow = window.open("", "_blank", "noopener,noreferrer");
+    // `noopener` can cause window.open to return null, leaving the PDF renderer
+    // without the tab it needs to populate. Open the blank tab from the click,
+    // then remove its opener before loading the generated blob URL.
+    const nextWindow = window.open("about:blank", "_blank");
     if (!nextWindow) return notice("Allow pop-ups to open the quotation PDF.");
+    nextWindow.opener = null;
     setPdfWindow(nextWindow);
     setPdfQuote(quote);
   };
@@ -7402,6 +7568,8 @@ function PriceQuotationWorkspace({
     <Panel
       title="Price Quotations"
       detail="Prepare a quotation from a lead, then submit it for General Manager pricing and approval."
+      variant="page"
+      hideHeading
       action={
         canPrepare ? (
           <Button onClick={openNew}>
@@ -7410,34 +7578,51 @@ function PriceQuotationWorkspace({
         ) : undefined
       }
     >
-      {quotations.length ? (
+      <div className="px-4 py-4 sm:px-5 lg:px-6">
+      <div className="mb-4">
+        <nav aria-label="Price quotation sections" className="flex gap-1 overflow-x-auto border-b border-[#e4e8ef]">
+          {(["draft", "pending", "needs_revision", "approved"] as const).map((tab) => {
+            const labels = { draft: "Draft", pending: "Pending Review", needs_revision: "Needs Revision", approved: "Approved" };
+            return <button key={tab} type="button" onClick={() => setQuotationTab(tab)} aria-current={quotationTab === tab ? "page" : undefined} className={`shrink-0 px-3 py-2 text-[12px] font-medium ${quotationTab === tab ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1] hover:text-[#4b5565]"}`}>{labels[tab]} ({quotations.filter((quote) => text(quote.status) === tab).length})</button>;
+          })}
+        </nav>
+        <div className="flex flex-wrap items-center gap-2 border-b border-[#edf0f5] py-3">
+          <label className="relative min-w-0 flex-1 sm:min-w-56 sm:max-w-sm" htmlFor="price-quotation-search"><Search className="pointer-events-none absolute left-3 top-2.5 text-[#8b92a1]" size={15} /><span className="sr-only">Search quotations</span><input id="price-quotation-search" type="search" value={quotationQuery} onChange={(event) => setQuotationQuery(event.target.value)} placeholder="Search quotations" className="w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]" /></label>
+          <label className="flex items-center gap-2 text-[12px] text-[#687386]"><span className="whitespace-nowrap">Month</span><input type="month" value={quotationMonth} onClick={(event) => event.currentTarget.showPicker?.()} onChange={(event) => setQuotationMonth(event.target.value)} className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px] text-[#202938] outline-none focus:border-[#c43b43]" /></label>
+          {role !== "project_manager" && <><label className="sr-only" htmlFor="price-quotation-officer">Sales Project Officer</label><select id="price-quotation-officer" value={preparedByFilter} onChange={(event) => setPreparedByFilter(event.target.value)} className={`min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${preparedByFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}><option value="all">All Sales Project Officers</option>{quotationPreparers.map((officer) => <option key={officer.id} value={officer.id}>{officer.name}</option>)}</select></>}
+        </div>
+      </div>
+      {filteredQuotations.length ? (
         <Table
-          labels={["Quotation", "Client / Project", "Prepared by", "Status", "Date", "Actions"]}
-          minWidth={860}
+          labels={role === "project_manager" ? ["Quotation", "Client / Project", "Status", "Date", "Actions"] : ["Quotation", "Client / Project", "Prepared by", "Status", "Date", "Actions"]}
+          minWidth={role === "project_manager" ? 720 : 860}
+          className="!w-full"
         >
-          {quotations.map((quote) => {
+          {filteredQuotations.map((quote) => {
             const lead = store.leads.find((item) => item.id === quote.lead_id);
-            const preparedBy = text(
-              store.profiles.find(
-                (profile) => profile.id === (quote.prepared_by_user_id ?? quote.created_by),
-              )?.full_name,
-              profileName,
-            );
+            const preparedBy = preparedByName(quote);
             const isLegacy = Boolean(quote.costing_source_id);
             const editable = !isLegacy && ["draft", "needs_revision"].includes(text(quote.status));
+            const revisionPending = pendingRevisionQuoteIds.has(text(quote.id));
             return (
               <tr key={text(quote.id)}>
                 <td className="px-5 py-3"><b>{text(quote.quotation_no)}</b><small>{day(quote.issue_date)}</small></td>
                 <td className="px-5 py-3"><b>{text(quote.client_name, text(lead?.client_name))}</b><small>{text(quote.project_name, text(lead?.project_name))}</small></td>
-                <td className="px-5 py-3">{preparedBy}</td>
-                <td className="px-5 py-3"><Status value={quote.status} /></td>
-                <td className="px-5 py-3">{text(quote.status) === "approved" ? `Valid until ${day(quote.valid_until)}` : day(quote.submitted_at)}</td>
+                {role !== "project_manager" && <td className="px-5 py-3">{preparedBy}</td>}
+                <td className="px-5 py-3"><div className="flex items-center gap-1.5"><Status value={quote.status} />{text(quote.status) === "needs_revision" && <ActionIcon label="View revision note" tone="amber" confirm={false} onClick={() => setRevisionNoteQuote(quote)}><MessageSquareText size={15} /></ActionIcon>}</div></td>
+                <td className="px-5 py-3">{text(quote.status) === "approved" ? day(quote.approved_at) : day(quote.submitted_at)}</td>
                 <td className="px-5 py-3"><div className="flex items-center gap-1">
                   {editable && canPrepare && (
                     <ActionIcon label="Edit Price Quotation" onClick={() => openEdit(quote)}><Pencil size={15} /></ActionIcon>
                   )}
                   {role === "project_manager" && editable && (
                     <ActionIcon label="Submit for General Manager review" tone="green" disabled={saving} onClick={() => void submit(quote)}><Send size={15} /></ActionIcon>
+                  )}
+                  {role === "project_manager" && text(quote.status) === "pending" && (
+                    <ActionIcon label="Unsubmit and return to draft" tone="amber" disabled={saving} onClick={() => void unsubmit(quote)}><RotateCcw size={15} /></ActionIcon>
+                  )}
+                  {role === "project_manager" && !isLegacy && text(quote.status) === "approved" && (
+                    <ActionIcon label={revisionPending ? "Revision request is awaiting General Manager approval" : "Request Price Quotation revision"} tone="amber" disabled={saving || revisionPending} onClick={() => void requestRevision(quote)}><RotateCcw size={15} /></ActionIcon>
                   )}
                   {isGeneralManager && ["draft", "pending"].includes(text(quote.status)) && (
                     <ActionIcon label="Review Price Quotation" onClick={() => setReviewing(quote)}><FileText size={15} /></ActionIcon>
@@ -7448,20 +7633,115 @@ function PriceQuotationWorkspace({
             );
           })}
         </Table>
-      ) : <Empty>No Price Quotations yet. Create one from a lead to begin.</Empty>}
+      ) : <Empty>{quotations.length ? "No Price Quotations match the selected filters." : "No Price Quotations yet. Create one from a lead to begin."}</Empty>}
+      </div>
       {editorOpen && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/30 p-4">
-          <section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
+          <section className="mx-auto my-4 w-full max-w-2xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
             <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">{editing ? "Edit Price Quotation" : "Add Price Quotation"}</h2><p className="mt-1 text-[12px] text-[#687386]">Add the requested materials and quantities. Selling prices are entered by the General Manager.</p></div><button type="button" onClick={resetEditor} aria-label="Close" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div>
             <label className="mt-5 block text-[12px] font-medium text-[#202938]">Lead / Project<select value={leadId} onChange={(event) => setLeadId(event.target.value)} className="input mt-1" required><option value="">Select a lead</option>{availableLeads.map((lead) => <option key={text(lead.id)} value={text(lead.id)}>{leadClientLabel(lead)} — {text(lead.project_name)}</option>)}</select></label>
-            <div className="mt-5"><div className="flex items-center justify-between"><div><h3 className="text-[14px] font-semibold text-[#202938]">Items</h3><p className="mt-1 text-[12px] text-[#687386]">List each material or production item required by the lead.</p></div></div><Table labels={["Item", "Description", "Quantity", "Actions"]} minWidth={0}>{items.map((item, index) => <tr key={item.key}><td className="px-4 py-3 text-center font-medium">{index + 1}</td><td className="px-4 py-2"><input aria-label={`Item ${index + 1} description`} value={item.description} onChange={(event) => setItems((current) => current.map((value) => value.key === item.key ? { ...value, description: titleCase(event.target.value) } : value))} className="input mt-0" placeholder="Material or production item" /></td><td className="px-4 py-2"><input aria-label={`Item ${index + 1} quantity`} type="number" min="0.001" step="any" value={item.quantity} onChange={(event) => setItems((current) => current.map((value) => value.key === item.key ? { ...value, quantity: event.target.value } : value))} className="input mt-0 text-right" /></td><td className="px-4 py-2 text-center"><ActionIcon label={`Remove item ${index + 1}`} tone="red" disabled={items.length === 1} onClick={() => setItems((current) => current.filter((value) => value.key !== item.key))}><Trash2 size={15} /></ActionIcon></td></tr>)}</Table><div className="mt-3 flex justify-end"><Button secondary onClick={() => setItems((current) => [...current, { key: `item-${Date.now()}`, description: "", quantity: "1" }])}><Plus size={14} /> Add Item</Button></div></div>
+            <div className="mt-5">
+              <div className="flex items-center justify-between"><div><h3 className="text-[14px] font-semibold text-[#202938]">Items</h3><p className="mt-1 text-[12px] text-[#687386]">List each material or production item required by the lead.</p></div></div>
+              <Table labels={["#", "Description", "Qty", ""]} minWidth={0} className="table-fixed" columnWidths={["8%", "68%", "16%", "8%"]}>
+                {items.map((item, index) => <tr key={item.key}>
+                  <td className="px-3 py-2 text-center font-medium">{index + 1}</td>
+                  <td className="px-3 py-2"><textarea rows={2} aria-label={`Item ${index + 1} description`} value={item.description} onChange={(event) => setItems((current) => current.map((value) => value.key === item.key ? { ...value, description: titleCase(event.target.value) } : value))} className="input mt-0 min-h-[58px] resize-y" placeholder="Material or production item" /></td>
+                  <td className="px-3 py-2"><input aria-label={`Item ${index + 1} quantity`} type="number" min="0.001" step="any" value={item.quantity} onChange={(event) => setItems((current) => current.map((value) => value.key === item.key ? { ...value, quantity: event.target.value } : value))} className="input mt-0 text-center" style={{ width: "6rem", marginInline: "auto" }} /></td>
+                  <td className="px-3 py-2 text-center"><ActionIcon label={`Remove item ${index + 1}`} tone="red" disabled={items.length === 1} onClick={() => setItems((current) => current.filter((value) => value.key !== item.key))}><Trash2 size={15} /></ActionIcon></td>
+                </tr>)}
+              </Table>
+              <div className="mt-3 flex justify-end"><Button secondary onClick={() => setItems((current) => [...current, { key: `item-${Date.now()}`, description: "", quantity: "1" }])}><Plus size={14} /> Add Item</Button></div>
+            </div>
             <div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={resetEditor}>Cancel</Button><Button disabled={saving} onClick={() => void saveDraft()}>{editing ? "Save changes" : "Save draft"}</Button></div>
           </section>
         </div>
       )}
-      {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); }} autoExportPdf pdfWindow={pdfWindow} hidden />}
+      {revisionNoteQuote && (
+        <div className="fixed inset-0 z-[70] grid place-items-center bg-[#151922]/40 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setRevisionNoteQuote(null); }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="price-quotation-revision-note-title" className="w-full max-w-lg rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
+            <div className="flex items-center justify-between gap-4"><div><h2 id="price-quotation-revision-note-title" className="text-[16px] font-semibold text-[#202938]">General Manager revision note</h2><p className="mt-1 text-[12px] text-[#687386]">{text(revisionNoteQuote.quotation_no, "Price Quotation")}</p></div><button type="button" onClick={() => setRevisionNoteQuote(null)} aria-label="Close revision note" className="rounded-md p-1 text-[#687386] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938]"><X size={18} /></button></div>
+            <div className="mt-4 max-h-[50vh] overflow-y-auto whitespace-pre-wrap text-[13px] leading-5 text-[#303949]">{text(revisionNoteQuote.revision_note, "No revision note was provided.")}</div>
+            <div className="mt-5 flex justify-end"><Button secondary onClick={() => setRevisionNoteQuote(null)}>Close</Button></div>
+          </section>
+        </div>
+      )}
+      {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); notice(message); }} autoExportPdf pdfWindow={pdfWindow} hidden />}
       {reviewing && <PriceQuotationReview quotation={reviewing} store={store} saving={saving} close={() => setReviewing(null)} notice={notice} reload={reload} />}
     </Panel>
+  );
+}
+
+function PriceQuotationReviewContentLegacy({ lines, prices, setPrices, subtotal, vatRate, setVatRate, tax, shipping, setShipping, total, terms, setTerms, bankDetails, setBankDetails, revisionNote, setRevisionNote, close, saving, working, review }: {
+  lines: Row[]; prices: Record<string, string>; setPrices: (next: Record<string, string> | ((current: Record<string, string>) => Record<string, string>)) => void; subtotal: number; vatRate: string; setVatRate: (value: string) => void; tax: number; shipping: string; setShipping: (value: string) => void; total: number; terms: string[]; setTerms: (next: string[] | ((current: string[]) => string[])) => void; bankDetails: BankDetail[]; setBankDetails: (next: BankDetail[] | ((current: BankDetail[]) => BankDetail[])) => void; revisionNote: string; setRevisionNote: (value: string) => void; close: () => void; saving: boolean; working: boolean; review: (decision: "approved" | "needs_revision") => Promise<void>;
+}) {
+  return <div className="mt-5 space-y-5"><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]} minWidth={0}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><Table labels={["Quotation Total", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section><section className="rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label><div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></div>;
+}
+
+type PriceQuotationReviewContentProps = {
+  lines: Row[];
+  prices: Record<string, string>;
+  setPrices: (next: Record<string, string> | ((current: Record<string, string>) => Record<string, string>)) => void;
+  subtotal: number;
+  vatRate: string;
+  setVatRate: (value: string) => void;
+  tax: number;
+  shipping: string;
+  setShipping: (value: string) => void;
+  total: number;
+  terms: string[];
+  setTerms: (next: string[] | ((current: string[]) => string[])) => void;
+  bankDetails: BankDetail[];
+  setBankDetails: (next: BankDetail[] | ((current: BankDetail[]) => BankDetail[])) => void;
+  revisionNote: string;
+  setRevisionNote: (value: string) => void;
+  close: () => void;
+  saving: boolean;
+  working: boolean;
+  review: (decision: "approved" | "needs_revision") => Promise<void>;
+};
+
+function PriceQuotationReviewContent({
+  lines, prices, setPrices, subtotal, vatRate, setVatRate, tax, shipping,
+  setShipping, total, terms, setTerms, bankDetails, setBankDetails,
+  revisionNote, setRevisionNote, close, saving, working, review,
+}: PriceQuotationReviewContentProps) {
+  return (
+    <div className="mt-5 space-y-5">
+      <section>
+        <Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]} minWidth={0}>
+          {lines.map((line, index) => {
+            const price = n(prices[text(line.id)]);
+            return <tr key={text(line.id)}>
+              <td className="px-4 py-3 text-center">{index + 1}</td>
+              <td className="px-4 py-3 font-medium">{text(line.description)}</td>
+              <td className="px-4 py-3 text-center">{n(line.quantity)}</td>
+              <td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0" /></td>
+              <td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td>
+            </tr>;
+          })}
+        </Table>
+        <div className="mt-3">
+        <Table labels={["Quotation Total", "Amount"]} minWidth={0}>
+          <tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr>
+          <tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr>
+          <tr><td className="px-4 py-2">Shipping / Handling <input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input" /></td><td className="px-4 py-3 text-right">{peso.format(n(shipping))}</td></tr>
+          <tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr>
+        </Table>
+        </div>
+      </section>
+      <section className="rounded-xl border border-[#e1e6ee] p-4">
+        <h3 className="text-[14px] font-semibold">Terms and Conditions</h3>
+        <div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
+        <div className="mt-3 flex justify-end"><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div>
+      </section>
+      <section className="rounded-xl border border-[#e1e6ee] p-4">
+        <h3 className="text-[14px] font-semibold">Bank Details</h3>
+        <div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
+        <div className="mt-3 flex justify-end"><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div>
+      </section>
+      <label className="block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label>
+      <div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div>
+    </div>
   );
 }
 
@@ -7492,7 +7772,7 @@ function PriceQuotationReview({
   const [terms, setTerms] = useState(
     text(quotation.terms_conditions, DEFAULT_QUOTATION_TERMS)
       .split(/\r?\n+/)
-      .filter(Boolean),
+      .filter((term) => term && !term.trim().toLowerCase().startsWith("validity:")),
   );
   const [bankDetails, setBankDetails] = useState<BankDetail[]>(() => quotationBankDetails(quotation.bank_details));
   const [revisionNote, setRevisionNote] = useState("");
@@ -7519,7 +7799,11 @@ function PriceQuotationReview({
     notice(decision === "approved" ? "Price Quotation approved." : "Price Quotation returned for revision.");
     await reload();
   };
+  /*
+  return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} shipping={shipping} setShipping={setShipping} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} · {text(quotation.client_name)} · Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><div className="mt-5 grid gap-5 lg:grid-cols-[1.45fr_.75fr]"><div><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><section className="mt-5 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="mt-4 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="mt-4 block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label></div><aside><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><div className="border-b border-[#edf0f5] px-4 py-3"><h3 className="text-[14px] font-semibold">Quotation Total</h3></div><Table labels={["Category", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section></aside></div><div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></section></div>;
+  */
+  return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} shipping={shipping} setShipping={setShipping} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
 }
 
 function GeneralManagerCostingReview({
@@ -7803,10 +8087,6 @@ function SubmissionReview({
           <div>
             <span className="text-[#8b92a1]">Sales Project Officer</span>
             <p className="mt-1 font-medium">{text(quotation.representative)}</p>
-          </div>
-          <div>
-            <span className="text-[#8b92a1]">Validity date</span>
-            <p className="mt-1 font-medium">{day(quotation.valid_until)}</p>
           </div>
           <div>
             <span className="text-[#8b92a1]">Status</span>
@@ -8102,7 +8382,7 @@ function Submissions({
 }) {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Row | null>(null);
-  const [tab, setTab] = useState<"quotations" | "costings" | "projects" | "leads" | "revisions" | "calendar_projects" | "calendar_revisions" | "calendar_completions">("quotations");
+  const [tab, setTab] = useState<"quotations" | "price_revisions" | "costings" | "projects" | "leads" | "revisions" | "calendar_projects" | "calendar_revisions" | "calendar_completions">("quotations");
   const [selectedProjectEdit, setSelectedProjectEdit] = useState<Row | null>(null);
   const [selectedLeadChange, setSelectedLeadChange] = useState<Row | null>(null);
   const [selectedPriceQuotation, setSelectedPriceQuotation] = useState<Row | null>(null);
@@ -8236,6 +8516,21 @@ function Submissions({
     );
     await reload();
   };
+  const decidePriceQuotationRevision = async (
+    request: Row,
+    decision: "approved" | "rejected",
+  ) => {
+    if (!request.id) return;
+    setSavingId(text(request.id));
+    const { error } = await createClient().rpc("review_price_quotation_revision", {
+      p_request_id: request.id,
+      p_decision: decision,
+    });
+    setSavingId(null);
+    if (error) return notice(error.message);
+    notice(decision === "approved" ? "Price Quotation reopened for revision." : "Price Quotation revision request rejected.");
+    await reload();
+  };
   const decideProjectSchedule = async (
     schedule: Row,
     decision: "approved" | "rejected",
@@ -8334,6 +8629,9 @@ function Submissions({
   const pendingQuotationRevisions = store.quotation_revision_requests.filter(
     (request) => text(request.status) === "pending",
   );
+  const pendingPriceQuotationRevisions = store.price_quotation_revision_requests.filter(
+    (request) => text(request.status) === "pending",
+  );
   const pendingProjectSchedules = store.project_schedules.filter(
     (schedule) => text(schedule.status) === "pending",
   );
@@ -8360,13 +8658,12 @@ function Submissions({
   return (
     <Panel
       title="General Manager Submissions"
-      detail="Review submitted Price Quotations, legacy records, project schedules, edits, and Lead change requests."
+      detail="Review submitted Price Quotations, project schedules, edits, and Lead change requests."
       hideHeading
     >
       <div className="flex gap-1 overflow-x-auto border-b border-[#e4e8ef] px-5">
         <button type="button" onClick={() => setTab("quotations")} className={`px-3 py-2 text-[12px] font-medium ${tab === "quotations" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Price Quotations ({pendingPriceQuotations.length})</button>
-        <button type="button" onClick={() => setTab("costings")} className={`px-3 py-2 text-[12px] font-medium ${tab === "costings" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Costing Reviews ({pendingCostings.length})</button>
-        <button type="button" onClick={() => setTab("revisions")} className={`px-3 py-2 text-[12px] font-medium ${tab === "revisions" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Costing Revisions ({pendingQuotationRevisions.length})</button>
+        <button type="button" onClick={() => setTab("price_revisions")} className={`px-3 py-2 text-[12px] font-medium ${tab === "price_revisions" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Quotation Revisions ({pendingPriceQuotationRevisions.length})</button>
         <button type="button" onClick={() => setTab("calendar_projects")} className={`px-3 py-2 text-[12px] font-medium ${tab === "calendar_projects" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Project Calendar ({pendingProjectSchedules.length})</button>
         <button type="button" onClick={() => setTab("calendar_revisions")} className={`px-3 py-2 text-[12px] font-medium ${tab === "calendar_revisions" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Project Revisions ({pendingProjectScheduleRevisions.length})</button>
         <button type="button" onClick={() => setTab("calendar_completions")} className={`px-3 py-2 text-[12px] font-medium ${tab === "calendar_completions" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Project Completion ({pendingProjectScheduleCompletions.length})</button>
@@ -8378,6 +8675,14 @@ function Submissions({
           {pendingPriceQuotations.map((quotation) => <tr key={text(quotation.id)}><td className="px-5 py-3"><b>{text(quotation.quotation_no)}</b><small>{text(quotation.project_name)}</small></td><td className="px-5 py-3 font-medium">{text(quotation.client_name)}</td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3"><ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>)}
         </Table>
       ) : <Empty>No Price Quotations are awaiting review.</Empty>)}
+      {tab === "price_revisions" && (pendingPriceQuotationRevisions.length ? (
+        <Table labels={["Price Quotation", "Client", "Project Officer", "Requested", "Review"]}>
+          {pendingPriceQuotationRevisions.map((request) => {
+            const quotation = store.quotations.find((item) => item.id === request.quotation_id);
+            return <tr key={text(request.id)}><td className="px-5 py-3"><b>{text(quotation?.quotation_no, "Price Quotation")}</b><small>{text(quotation?.project_name)}</small></td><td className="px-5 py-3">{text(quotation?.client_name)}</td><td className="px-5 py-3">{projectOfficerName(request)}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>;
+          })}
+        </Table>
+      ) : <Empty>No Price Quotation revisions are awaiting review.</Empty>)}
       {tab === "costings" && (pendingCostings.length ? (
         <Table
           labels={[
@@ -10370,14 +10675,10 @@ function FinanceReports({
 
 function ProjectOfficerSalesFunnel({
   store,
-  colorMode,
 }: {
   store: Store;
-  colorMode?: boolean;
 }) {
-  const [localColorMode, setLocalColorMode] = useState(true);
-  const isColorMode = colorMode ?? localColorMode;
-  const isColorModeControlled = colorMode !== undefined;
+  const isColorMode = true;
   const countUniqueLeads = (rows: Row[]) => new Set(rows.map((row) => text(row.lead_id, text(row.id, ""))).filter(Boolean)).size;
   const costingBreakdowns = store.quotations.filter((quotation) => text(quotation.document_type) === "costing_breakdown");
   const priceQuotations = store.quotations.filter((quotation) => text(quotation.document_type) === "price_quotation" && ["sent", "approved"].includes(text(quotation.status)));
@@ -10398,52 +10699,50 @@ function ProjectOfficerSalesFunnel({
   ];
   const percentage = (current: number, previous: number) => previous ? `${((current / previous) * 100).toFixed(2)}%` : "—";
   const overallPercentage = percentage(stages.at(-1)?.total ?? 0, stages[0].total);
+  const todayLabel = new Intl.DateTimeFormat("en-PH", {
+    month: "long",
+    year: "numeric",
+  }).format(new Date());
   const ink = isColorMode ? "#092d67" : "#000000";
   const border = isColorMode ? "#6e7480" : "#000000";
   const displayColor = (stage: (typeof stages)[number]) => isColorMode ? stage.color : "#000000";
 
   const StageIdentity = ({ stage }: { stage: (typeof stages)[number] }) => {
     const { Icon } = stage;
-    return <div className="flex min-w-0 items-center gap-2 px-2 py-1">
-      <span className="grid size-8 shrink-0 place-items-center rounded-sm" style={{ backgroundColor: isColorMode ? stage.color : "#ffffff", color: isColorMode ? "#ffffff" : "#000000" }}><Icon aria-hidden="true" size={19} strokeWidth={2.7} /></span>
-      <span className="text-[13px] font-black leading-tight" style={{ color: displayColor(stage) }}>{stage.label}</span>
+    return <div className="flex min-w-0 items-center gap-3">
+      <span className="grid size-8 shrink-0 place-items-center rounded-md text-white" style={{ backgroundColor: stage.color }}><Icon aria-hidden="true" size={16} strokeWidth={2.2} /></span>
+      <p className="text-[13px] font-semibold leading-tight text-[#202938]">{stage.label.replace(/^\d+\.\s*/, "")}</p>
     </div>;
   };
 
-  return <section
-    className="mx-auto w-full max-w-[1480px] bg-white px-3 pb-6 pt-5 sm:px-6 sm:pt-8"
-    style={{ fontFamily: '"SF Pro Display", Arial, Helvetica, sans-serif', fontSize: "13px" }}
-  >
-    <header className="relative mb-4 text-center sm:mb-5">
-      <h1 className="text-[28px] font-black leading-none tracking-[.045em] sm:text-[36px]" style={{ color: ink }}>OUTREACH SALES FUNNEL</h1>
-      <p className="mt-1 text-[13px] font-black tracking-[.13em]" style={{ color: ink }}>PROJECT OFFICER DASHBOARD</p>
-      {!isColorModeControlled && <button type="button" role="switch" aria-checked={isColorMode} aria-label="Switch sales funnel between color and black-and-white" onClick={() => setLocalColorMode((current) => !current)} className="mx-auto mt-3 inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[13px] font-bold shadow-sm transition hover:bg-[#f5f5f5] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2" style={{ borderColor: ink, color: ink }}>
-        <span>Black &amp; white</span><span className="relative inline-block h-5 w-9 shrink-0 rounded-full" style={{ backgroundColor: isColorMode ? "#0d4d9c" : "#606060" }} aria-hidden="true"><span className={`absolute left-0.5 top-0.5 size-4 rounded-full bg-white shadow transition-transform ${isColorMode ? "translate-x-4" : "translate-x-0"}`} /></span><span>Color</span>
-      </button>}
+  return <section className="space-y-5" style={{ fontFamily: '"SF Pro Display", Arial, Helvetica, sans-serif' }}>
+    <header className="flex flex-wrap items-end justify-between gap-3 border-b border-[#e4e8ef] pb-4">
+      <div><h1 className="text-[20px] font-semibold tracking-[-.02em] text-[#202938]">Sales pipeline</h1><p className="mt-1 text-[12px] text-[#687386]">Track leads from first contact through completed projects.</p></div>
+      <span className="inline-flex items-center gap-2 text-[12px] text-[#687386]"><CalendarDays size={15} className="text-[#c43b43]" />{todayLabel}</span>
     </header>
 
-    <div className="mx-auto hidden max-w-[1060px] overflow-hidden border-2 md:block" style={{ borderColor: border }}>
-      <div className="grid grid-cols-[1.35fr_1.2fr_.92fr_.95fr] text-center text-[13px] font-black leading-tight">
-        <div className={`border-r px-2 py-2 ${isColorMode ? "bg-[#0c4293] text-white" : "bg-white text-black"}`} style={{ borderColor: border }}>FUNNEL STAGE</div>
-        <div className={`border-r px-2 py-2 ${isColorMode ? "bg-[#1158b9] text-white" : "bg-white text-black"}`} style={{ borderColor: border }}>DESCRIPTION</div>
-        <div className={`border-r px-2 py-2 ${isColorMode ? "bg-[#38a944] text-white" : "bg-white text-black"}`} style={{ borderColor: border }}>TOTAL</div>
-        <div className={`px-2 py-2 ${isColorMode ? "bg-[#6023ae] text-white" : "bg-white text-black"}`}>CONVERSION</div>
+    <div className="hidden overflow-hidden rounded-lg border border-[#d6dee8] bg-white md:block">
+      <div className="grid grid-cols-[1.25fr_1.4fr_.55fr_.65fr] bg-[#16386d] text-[11px] font-semibold text-white">
+        <div className="px-4 py-3">Stage</div>
+        <div className="px-4 py-3">Description</div>
+        <div className="px-4 py-3 text-right">Total</div>
+        <div className="px-4 py-3 text-right">Conversion</div>
       </div>
       {stages.map((stage, index) => {
         const previous = stages[index - 1];
-        return <div className="grid grid-cols-[1.35fr_1.2fr_.92fr_.95fr]" key={stage.label}>
-          <div className="flex min-h-[52px] items-center border-r border-t" style={{ borderColor: border }}><StageIdentity stage={stage} /></div>
-          <div className="flex min-h-[52px] items-center border-r border-t px-3 text-[13px] font-medium leading-tight text-black" style={{ borderColor: border }}>{stage.description}</div>
-          <div className="flex min-h-[52px] items-center justify-center border-r border-t text-[13px] font-black tabular-nums" style={{ borderColor: border, color: displayColor(stage) }}>{stage.total.toLocaleString()}</div>
+        return <div className="grid grid-cols-[1.25fr_1.4fr_.55fr_.65fr] border-t border-[#e4e8ef]" key={stage.label}>
+          <div className="flex min-h-[58px] items-center px-4"><StageIdentity stage={stage} /></div>
+          <div className="flex min-h-[58px] items-center px-4 text-[12px] leading-snug text-[#687386]">{stage.description}</div>
+          <div className="flex min-h-[58px] items-center justify-end px-4 text-[13px] font-semibold tabular-nums text-[#202938]">{stage.total.toLocaleString()}</div>
           <div className="flex min-h-[52px] flex-col items-center justify-center border-t px-2 text-center" style={{ borderColor: border, color: displayColor(stage) }}><b className="text-[13px] leading-none tabular-nums">{index ? percentage(stage.total, previous.total) : "—"}</b>{index > 0 && <span className="mt-0.5 text-[13px] font-medium leading-none text-black">({stage.total.toLocaleString()} / {previous.total.toLocaleString()})</span>}</div>
         </div>;
       })}
     </div>
 
-    <div className="space-y-3 md:hidden">
+    <div className="space-y-2 md:hidden">
       {stages.map((stage, index) => {
         const previous = stages[index - 1];
-        return <article className="overflow-hidden border-2" style={{ borderColor: border }} key={stage.label}>
+        return <article className="overflow-hidden rounded-lg border border-[#dfe5ed] bg-white" key={stage.label}>
           <StageIdentity stage={stage} />
           <p className="border-t px-4 py-3 text-[13px] font-medium leading-snug text-black" style={{ borderColor: border }}>{stage.description}</p>
           <dl className="grid grid-cols-2 border-t" style={{ borderColor: border }}><div className="border-r p-3 text-center" style={{ borderColor: border }}><dt className="text-[13px] font-black">TOTAL (PROJECTS)</dt><dd className="mt-1 text-[13px] font-black tabular-nums" style={{ color: displayColor(stage) }}>{stage.total.toLocaleString()}</dd></div><div className="p-3 text-center"><dt className="text-[13px] font-black">CONVERSION</dt><dd className="mt-1 text-[13px] font-black tabular-nums" style={{ color: displayColor(stage) }}>{index ? percentage(stage.total, previous.total) : "—"}</dd>{index > 0 && <span className="text-[13px] text-black">({stage.total.toLocaleString()} / {previous.total.toLocaleString()})</span>}</div></dl>
@@ -10451,15 +10750,14 @@ function ProjectOfficerSalesFunnel({
       })}
     </div>
 
-    <footer className="mx-auto mt-5 grid max-w-[1120px] overflow-hidden border-2 sm:grid-cols-[1.2fr_1fr]" style={{ borderColor: ink, color: ink }}>
-      <div className="flex items-center justify-center gap-4 p-4 sm:border-r-2" style={{ borderColor: ink }}><Goal aria-hidden="true" size={55} strokeWidth={2.8} /><div><p className="text-center text-[13px] font-black">OVERALL CONVERSION RATE</p><p className="text-center text-[13px] font-black leading-none tabular-nums">{overallPercentage}</p></div></div>
-      <p className="border-t-2 px-5 py-4 text-center text-[13px] font-bold leading-snug sm:border-t-0" style={{ borderColor: ink }}>From Leads Generated<br />to Completed Projects <span className="block tabular-nums">({stages.at(-1)?.total.toLocaleString()} / {stages[0].total.toLocaleString()})</span></p>
+    <footer className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#dfe5ed] bg-[#f7f8fa] px-4 py-3">
+      <div className="flex items-center gap-2"><span className="grid size-8 place-items-center rounded-md bg-[#16386d] text-white"><Goal aria-hidden="true" size={16} /></span><p className="text-[12px] font-medium text-[#687386]">Lead-to-project conversion</p></div>
+      <p className="text-[16px] font-semibold tabular-nums text-[#202938]">{overallPercentage}<span className="ml-2 text-[11px] font-normal text-[#687386]">({stages.at(-1)?.total.toLocaleString()} / {stages[0].total.toLocaleString()})</span></p>
     </footer>
   </section>;
 }
 
 function GeneralManagerKpiDashboard({ store }: { store: Store }) {
-  const [isColorMode, setIsColorMode] = useState(true);
   const now = new Date();
   const currentMonth = now.getMonth();
   const currentYear = now.getFullYear();
@@ -10509,8 +10807,6 @@ function GeneralManagerKpiDashboard({ store }: { store: Store }) {
     if (length > 12) return "25px";
     return "30px";
   };
-  const ink = isColorMode ? "#061e52" : "#000000";
-  const accent = isColorMode ? "#0b63e6" : "#000000";
   const metricCards = [
     { title: "TOTAL SALES", value: totalSales, detail: "This month", compare: compare(totalSales, previousSales), previous: previousSales, Icon: TrendingUp, color: "#1262e7", tint: "#edf4ff" },
     { title: "COLLECTIONS RECEIVED", value: collections, detail: "This month", compare: compare(collections, previousCollections), previous: previousCollections, Icon: Wallet, color: "#087b19", tint: "#edf9ef" },
@@ -10518,37 +10814,31 @@ function GeneralManagerKpiDashboard({ store }: { store: Store }) {
     { title: "OVERDUE RECEIVABLES", value: overdue, detail: "As of today", compare: compare(overdue, previousOverdue), previous: previousOverdue, Icon: CalendarDays, color: "#e30719", tint: "#fff0f1" },
   ];
 
-  return <div className="space-y-7" style={{ fontFamily: '"SF Pro Display", Arial, Helvetica, sans-serif', fontSize: "13px" }}>
-    <section className="overflow-hidden rounded-2xl border bg-white" style={{ borderColor: isColorMode ? "#dfe5ed" : ink }}>
-      <header className="flex flex-col gap-4 px-5 py-5 text-white sm:px-8 lg:flex-row lg:items-center lg:justify-between" style={{ backgroundColor: ink }}>
-        <div className="flex items-center gap-3">
-          <span className="grid size-12 shrink-0 place-items-center rounded-full border-2 border-white/70"><Goal size={31} strokeWidth={2.7} /></span>
-          <div><h1 className="text-[28px] font-black leading-none sm:text-[36px]">HUSWELL TRADING KPI</h1><p className="mt-2 flex items-center gap-2 text-[13px] font-semibold"><CalendarDays size={16} /> As of {monthLabel}</p></div>
-        </div>
-        <div className="flex flex-wrap items-center gap-3 lg:justify-end">
-          <button type="button" role="switch" aria-checked={isColorMode} aria-label="Switch finance KPI between color and black-and-white" onClick={() => setIsColorMode((current) => !current)} className="inline-flex items-center gap-2 rounded-full border border-white/70 px-3 py-1.5 text-[13px] font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white focus-visible:ring-offset-2 focus-visible:ring-offset-[#061e52]"><span>Black &amp; white</span><span className="relative inline-block h-5 w-9 shrink-0 rounded-full bg-white/45" aria-hidden="true"><span className={`absolute left-0.5 top-0.5 size-4 rounded-full bg-white shadow transition-transform ${isColorMode ? "translate-x-4" : "translate-x-0"}`} /></span><span>Color</span></button>
-        </div>
+  return <div className="space-y-5" style={{ fontFamily: '"SF Pro Display", Arial, Helvetica, sans-serif', fontSize: "13px" }}>
+    <section className="overflow-hidden rounded-lg border border-[#dfe5ed] bg-white">
+      <header className="flex flex-wrap items-end justify-between gap-3 border-b border-[#e4e8ef] px-4 py-4 sm:px-5">
+        <div><h1 className="text-[20px] font-semibold tracking-[-.02em] text-[#202938]">KPI dashboard</h1><p className="mt-1 text-[12px] text-[#687386]">Sales, collections, and cash exposure at a glance.</p></div>
+        <span className="inline-flex items-center gap-2 text-[12px] text-[#687386]"><CalendarDays size={15} className="text-[#c43b43]" />{monthLabel}</span>
       </header>
-      <div className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4 sm:p-6">
-        {metricCards.map(({ title, value, detail, compare: change, previous, Icon, color, tint }) => <article key={title} className="min-w-0 rounded-2xl border p-4 text-center" style={{ borderColor: isColorMode ? "#e0e3e8" : ink }}>
-          <span className="mx-auto grid size-12 place-items-center rounded-full text-white" style={{ backgroundColor: isColorMode ? color : ink }}><Icon size={27} /></span>
-          <h2 className="mt-3 text-[13px] font-black" style={{ color: isColorMode ? color : ink }}>{title}</h2>
-          <p className="mt-4 whitespace-nowrap font-black leading-none tabular-nums" style={{ color: ink, fontSize: financeAmountSize(value) }}>{peso.format(value)}</p>
-          <p className="mt-1 text-[13px] font-medium" style={{ color: ink }}>{detail}</p>
-          {change && <div className="mt-4 flex items-center justify-between rounded-lg px-3 py-2 text-left" style={{ backgroundColor: isColorMode ? tint : "#f3f3f3", color: ink }}><span className="text-[13px] font-black">{change}</span><span className="text-right text-[13px]">Previous<br /><b>{peso.format(previous ?? 0)}</b></span></div>}
+      <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4 sm:p-5">
+        {metricCards.map(({ title, value, detail, compare: change, previous, Icon, color, tint }) => <article key={title} className="min-w-0 rounded-lg border border-[#dfe5ed] p-4">
+          <div className="flex items-start justify-between gap-3"><span className="grid size-8 place-items-center rounded-md text-white" style={{ backgroundColor: color }}><Icon size={16} /></span><span className="text-[11px] text-[#687386]">{detail}</span></div>
+          <h2 className="mt-4 text-[11px] font-medium text-[#687386]">{title}</h2>
+          <p className="mt-1 whitespace-nowrap font-semibold leading-none tabular-nums text-[#202938]" style={{ fontSize: financeAmountSize(value) }}>{peso.format(value)}</p>
+          {change && <div className="mt-4 flex items-center justify-between border-t border-[#edf0f5] pt-3 text-left text-[11px] text-[#687386]"><span className="font-medium text-[#202938]">{change}</span><span className="text-right">Previous <b className="text-[#202938]">{peso.format(previous ?? 0)}</b></span></div>}
         </article>)}
       </div>
-      <section className="mx-4 mb-5 overflow-hidden rounded-2xl border sm:mx-6 sm:mb-6" style={{ borderColor: isColorMode ? "#dfe5ed" : ink }}>
-        <h2 className="flex items-center gap-3 px-5 py-3 text-[13px] font-black text-white" style={{ backgroundColor: ink }}><Goal size={25} /> QUARTERLY SALES QUOTA</h2>
-        <div className="grid gap-6 p-5 sm:grid-cols-[.85fr_1.15fr] sm:items-center sm:p-7">
-          <div className="mx-auto grid size-44 place-items-center rounded-full" style={{ background: `conic-gradient(${accent} ${quotaProgress}%, #e5e7eb 0)` }}><div className="grid size-36 place-items-center rounded-full bg-white text-center" style={{ color: ink }}><b className="leading-none" style={{ fontSize: "38px" }}>{quotaProgress}%</b><span className="text-[13px] font-black">ACHIEVED</span></div></div>
-          <dl className="divide-y" style={{ borderColor: isColorMode ? "#dfe5ed" : ink }}>
-            {[{ label: `QUOTA (Q${quarter + 1} ${currentYear})`, value: quota, Icon: Goal }, { label: "ACHIEVED AMOUNT", value: quarterSales, Icon: Check }, { label: "REMAINING AMOUNT", value: Math.max(quota - quarterSales, 0), Icon: Wallet }].map(({ label, value, Icon }) => <div className="flex items-center gap-3 py-3" key={label}><span className="grid size-9 place-items-center rounded-full text-white" style={{ backgroundColor: accent }}><Icon size={20} /></span><div><dt className="text-[13px] font-black" style={{ color: accent }}>{label}</dt><dd className="font-black leading-tight tabular-nums" style={{ color: ink, fontSize: "28px" }}>{peso.format(value)}</dd></div></div>)}
+      <section className="mx-4 mb-4 overflow-hidden rounded-lg border border-[#dfe5ed] sm:mx-5 sm:mb-5">
+        <div className="flex items-center gap-2 border-b border-[#e4e8ef] px-4 py-3"><span className="grid size-8 place-items-center rounded-md bg-[#16386d] text-white"><Goal size={16} /></span><div><h2 className="text-[14px] font-semibold text-[#202938]">Quarterly sales quota</h2><p className="mt-0.5 text-[11px] text-[#687386]">Q{quarter + 1} {currentYear}</p></div></div>
+        <div className="grid gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-center">
+          <div><div className="flex items-end justify-between gap-3"><div><p className="text-[11px] font-medium text-[#687386]">Progress toward target</p><p className="mt-1 text-[24px] font-semibold leading-none tabular-nums text-[#202938]">{quotaProgress}%</p></div><p className="text-right text-[11px] text-[#687386]">{peso.format(quarterSales)} of<br /><span className="font-medium text-[#202938]">{peso.format(quota)}</span></p></div><div className="mt-4 h-2 overflow-hidden rounded-full bg-[#edf0f5]"><div className="h-full rounded-full bg-[#c43b43]" style={{ width: `${quotaProgress}%` }} /></div></div>
+          <dl className="divide-y divide-[#edf0f5]">
+            {[{ label: "Quarterly target", value: quota, Icon: Goal }, { label: "Achieved", value: quarterSales, Icon: Check }, { label: "Remaining", value: Math.max(quota - quarterSales, 0), Icon: Wallet }].map(({ label, value, Icon }) => <div className="flex items-center justify-between gap-3 py-2.5" key={label}><dt className="flex items-center gap-2 text-[12px] text-[#687386]"><Icon size={15} className="text-[#16386d]" />{label}</dt><dd className="text-[13px] font-semibold tabular-nums text-[#202938]">{peso.format(value)}</dd></div>)}
           </dl>
         </div>
       </section>
     </section>
-    <ProjectOfficerSalesFunnel store={store} colorMode={isColorMode} />
+    <ProjectOfficerSalesFunnel store={store} />
   </div>;
 }
 
@@ -11671,7 +11961,6 @@ export function HuswellWorkspace({
       "Leads",
       "Projects",
       "Price Quotations",
-      "Suppliers & Materials",
       "Finance",
       "Submissions",
       "Settings",
@@ -11681,7 +11970,6 @@ export function HuswellWorkspace({
       "Leads",
       "Projects",
       "Price Quotations",
-      "Suppliers & Materials",
       "Finance",
       "Submissions",
       "Settings",
@@ -11691,7 +11979,6 @@ export function HuswellWorkspace({
       "Leads",
       "Projects",
       "Price Quotations",
-      "Suppliers & Materials",
       "Finance",
       "Submissions",
       "Settings",
@@ -11701,7 +11988,6 @@ export function HuswellWorkspace({
       "Leads",
       "Projects",
       "Price Quotations",
-      "Suppliers & Materials",
     ],
     sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory"],
     warehouse: ["Dashboard", "Catalog", "Inventory", "Production"],
@@ -11729,8 +12015,8 @@ export function HuswellWorkspace({
       items: [
         { view: "Dashboard", icon: LayoutDashboard },
         { view: "Leads", icon: ClipboardCheck },
-        { view: "Projects", icon: ClipboardCheck },
         { view: "Price Quotations", icon: FileText },
+        { view: "Projects", icon: ClipboardCheck },
         { view: "Suppliers & Materials", icon: UsersRound },
       ],
     },
@@ -12048,7 +12334,9 @@ export function HuswellWorkspace({
                   const navigationLabel =
                     view === "Dashboard" && ["project_manager", "admin"].includes(role)
                       ? "KPI"
-                      : view;
+                      : view === "Submissions"
+                        ? "Submissions Approvals"
+                        : view;
                   return (
                     <button
                     key={view}
@@ -12178,7 +12466,7 @@ export function HuswellWorkspace({
             )}
           </div>
         </header>
-        <div className="workspace-content p-3 sm:p-4 lg:p-5">
+        <div className={`workspace-content ${["Projects", "Price Quotations"].includes(active) ? "p-0" : "p-3 sm:p-4 lg:p-5"}`}>
           {message && (
             <div className="fixed inset-0 z-[60] grid place-items-center bg-[#061426]/30 p-4">
               <section

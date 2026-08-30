@@ -14,6 +14,58 @@ alter table public.quotations
 
 create sequence if not exists public.price_quotation_number_seq;
 
+-- Permit an officer to withdraw only their own new-format quotation from the
+-- review queue; all other protected status transitions remain unchanged.
+create or replace function public.enforce_role_sensitive_transitions()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, private
+as $$
+begin
+  if pg_trigger_depth() > 1 then return new; end if;
+  if (select private.is_org_admin(new.organization_id)) then return new; end if;
+
+  if tg_table_name = 'quotations' and (
+    (tg_op = 'INSERT' and new.status::text not in ('draft', 'needs_revision', 'pending'))
+    or (
+      tg_op = 'UPDATE'
+      and new.status is distinct from old.status
+      and not (
+        new.document_type = 'price_quotation'
+        and new.costing_source_id is null
+        and old.status::text = 'pending'
+        and new.status::text = 'draft'
+      )
+      and (
+        new.status::text not in ('draft', 'needs_revision', 'pending')
+        or old.status::text not in ('draft', 'needs_revision')
+      )
+    )
+  ) then
+    raise exception 'Only an administrator can approve or finalize a quotation';
+  end if;
+
+  if tg_table_name = 'expenses' and (
+    (tg_op = 'INSERT' and new.status::text not in ('unfulfilled', 'fulfilled', 'pending_approval'))
+    or (tg_op = 'UPDATE' and new.status is distinct from old.status and (new.status::text not in ('unfulfilled', 'fulfilled', 'pending_approval') or old.status::text not in ('unfulfilled', 'fulfilled')))
+  ) then raise exception 'Only an administrator can approve, reject, or cancel an expense'; end if;
+  if tg_table_name = 'invoices' and (
+    (tg_op = 'INSERT' and new.status::text not in ('draft', 'issued', 'partial'))
+    or (tg_op = 'UPDATE' and new.status is distinct from old.status and (new.status::text not in ('draft', 'issued', 'partial') or old.status::text not in ('draft', 'issued', 'partial')))
+  ) then raise exception 'Only an administrator can set this invoice status directly'; end if;
+  if tg_table_name = 'payroll_periods' and (
+    (tg_op = 'INSERT' and new.status::text not in ('draft', 'in_review'))
+    or (tg_op = 'UPDATE' and new.status is distinct from old.status and (new.status::text not in ('draft', 'in_review') or old.status::text not in ('draft', 'in_review')))
+  ) then raise exception 'Only an administrator can approve or mark payroll paid'; end if;
+  if tg_table_name = 'cash_flow_entries' and (
+    (tg_op = 'INSERT' and new.status::text not in ('draft', 'pending'))
+    or (tg_op = 'UPDATE' and new.status is distinct from old.status and (new.status::text not in ('draft', 'pending') or old.status::text not in ('draft', 'pending')))
+  ) then raise exception 'Only an administrator can approve cash flow'; end if;
+  return new;
+end;
+$$;
+
 -- RLS protects rows; these triggers additionally prevent a Project Officer
 -- from writing GM-only monetary fields through a direct API request.
 create or replace function public.enforce_price_quotation_preparation()
@@ -33,7 +85,9 @@ begin
     ) then
       raise exception 'Only the General Manager can set quotation prices or totals';
     end if;
-    if tg_op = 'UPDATE' and (
+    -- Item changes recalculate quotation totals through the existing nested
+    -- quotation-items trigger. This is not a manual officer price update.
+    if tg_op = 'UPDATE' and pg_trigger_depth() = 1 and (
       new.vat_rate is distinct from old.vat_rate
       or new.shipping_handling is distinct from old.shipping_handling
       or new.total_cost is distinct from old.total_cost
@@ -133,7 +187,6 @@ declare
 Prices: All prices quoted are VAT INCLUSIVE.
 Delivery: Pickup or delivery via a third-party courier. Delivery charges shall be shouldered by the client.
 Payment Terms: 50% downpayment is required upon approval of the quotation. The Purchase Order (PO) plus 50% downpayment is required before production. The remaining 50% balance must be settled before delivery/release of the order. Production will commence only upon receipt of the required downpayment. PO alone will not be considered as payment assurance.
-Validity: This quotation is valid for 7 days from the date of issuance.
 Cancellations: Orders cannot be cancelled once production has started.
 Artwork Revisions: Any revisions or changes requested after the artwork has been approved may result in an adjustment of the production lead time. The revised delivery schedule will be based on the scope and timing of the requested changes.';
   v_banks jsonb;
@@ -177,7 +230,7 @@ begin
       client_contact_name, client_phone, client_address, project_name,
       representative, prepared_by_user_id, prepared_by_signature_url,
       terms_conditions, bank_details, vat_rate, shipping_handling, status,
-      created_by, issue_date, valid_until
+      created_by, issue_date
     ) values (
       v_lead.organization_id,
       format('QTN-%s', lpad(nextval('public.price_quotation_number_seq')::text, 4, '0')),
@@ -185,7 +238,7 @@ begin
       v_lead.contact_name, v_lead.phone, v_lead.address, v_lead.project_name,
       coalesce((select full_name from public.profiles where id = (select auth.uid())), 'Sales Project Officer'),
       (select auth.uid()), v_signature, v_terms, v_banks, 0, 0,
-      'draft', (select auth.uid()), current_date, current_date + 7
+      'draft', (select auth.uid()), current_date
     ) returning * into v_quote;
   else
     select * into v_quote from public.quotations where id = p_quotation_id for update;
@@ -266,6 +319,41 @@ begin
 end;
 $$;
 
+create or replace function public.unsubmit_price_quotation(p_quotation_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public, private
+as $$
+declare
+  v_quote public.quotations%rowtype;
+begin
+  select * into v_quote from public.quotations where id = p_quotation_id for update;
+  if not found or v_quote.document_type <> 'price_quotation' or v_quote.costing_source_id is not null then
+    raise exception 'Price Quotation not found';
+  end if;
+  if v_quote.status::text <> 'pending' then
+    raise exception 'Only submitted Price Quotations can be unsubmitted';
+  end if;
+  if not private.has_text_role(v_quote.organization_id, array['project_manager']) then
+    raise exception 'Only a Sales Project Officer can unsubmit a Price Quotation';
+  end if;
+  if v_quote.prepared_by_user_id is distinct from (select auth.uid())
+    and v_quote.created_by is distinct from (select auth.uid())
+    and v_quote.submitted_by is distinct from (select auth.uid()) then
+    raise exception 'Only the Project Officer who prepared this quotation can unsubmit it';
+  end if;
+
+  update public.quotations
+  set status = 'draft', submitted_by = null, submitted_at = null
+  where id = v_quote.id;
+  delete from public.approval_requests
+  where organization_id = v_quote.organization_id
+    and resource_type = 'quotation' and resource_id = v_quote.id
+    and status::text = 'pending';
+end;
+$$;
+
 create or replace function public.review_price_quotation(
   p_quotation_id uuid,
   p_decision text,
@@ -338,7 +426,6 @@ begin
       bank_details = coalesce(p_bank_details, bank_details),
       status = p_decision::public.quotation_status,
       issue_date = case when p_decision = 'approved' then current_date else issue_date end,
-      valid_until = case when p_decision = 'approved' then current_date + 7 else valid_until end,
       revision_note = case when p_decision = 'needs_revision' then v_note else null end,
       revision_requested_by = case when p_decision = 'needs_revision' then (select auth.uid()) else null end,
       revision_requested_at = case when p_decision = 'needs_revision' then now() else null end,
@@ -373,6 +460,10 @@ drop policy if exists "quotations: workflow read" on public.quotations;
 drop policy if exists "quotations: workflow insert" on public.quotations;
 drop policy if exists "quotations: workflow update" on public.quotations;
 drop policy if exists "quotations: workflow delete" on public.quotations;
+drop policy if exists "quotations: price workflow read" on public.quotations;
+drop policy if exists "quotations: price workflow insert" on public.quotations;
+drop policy if exists "quotations: price workflow update" on public.quotations;
+drop policy if exists "quotations: price workflow delete" on public.quotations;
 create policy "quotations: price workflow read" on public.quotations for select to authenticated using (
   (select private.has_text_role(organization_id, array['super_admin', 'owner', 'admin']))
   or created_by = (select auth.uid())
@@ -407,6 +498,8 @@ drop policy if exists "quotation items: role read" on public.quotation_items;
 drop policy if exists "quotation items: role insert" on public.quotation_items;
 drop policy if exists "quotation items: role update" on public.quotation_items;
 drop policy if exists "quotation items: role delete" on public.quotation_items;
+drop policy if exists "quotation items: price workflow read" on public.quotation_items;
+drop policy if exists "quotation items: price workflow write" on public.quotation_items;
 create policy "quotation items: price workflow read" on public.quotation_items for select to authenticated using (
   exists (select 1 from public.quotations quote where quote.id = quotation_id and (
     (select private.has_text_role(quote.organization_id, array['super_admin', 'owner', 'admin']))
@@ -432,9 +525,11 @@ create policy "quotation items: price workflow write" on public.quotation_items 
 
 revoke all on function public.save_price_quotation_draft(uuid, uuid, jsonb) from public;
 revoke all on function public.submit_price_quotation(uuid) from public;
+revoke all on function public.unsubmit_price_quotation(uuid) from public;
 revoke all on function public.review_price_quotation(uuid, text, numeric, numeric, text, jsonb, jsonb, text) from public;
 grant execute on function public.save_price_quotation_draft(uuid, uuid, jsonb) to authenticated;
 grant execute on function public.submit_price_quotation(uuid) to authenticated;
+grant execute on function public.unsubmit_price_quotation(uuid) to authenticated;
 grant execute on function public.review_price_quotation(uuid, text, numeric, numeric, text, jsonb, jsonb, text) to authenticated;
 
 commit;
