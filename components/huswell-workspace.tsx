@@ -43,6 +43,7 @@ import {
   Printer,
   ReceiptText,
   RotateCcw,
+  Save,
   Search,
   Send,
   Settings,
@@ -3632,11 +3633,11 @@ function ProjectCalendar({
               <td className="px-4 py-2"><Status value={schedule.completed_at ? "completed" : hasPendingScheduleCompletion(schedule) ? "completion pending" : "active"} /></td>
               <td className="px-4 py-2"><span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full" style={{ backgroundColor: calendarColorForProjectType(scheduleProjectType(schedule)) }} aria-hidden="true" />{scheduleProjectType(schedule)}</span></td>
               <td className="px-4 py-2">{role === "project_manager" && !schedule.completed_at ? <input aria-label={`Progress percentage for ${text(schedule.project_name, text(schedule.quotation_no))}`} type="number" min="0" max="100" step="0.01" value={projectProgress(schedule).percentage} onChange={(event) => setProgressDrafts((current) => ({ ...current, [text(schedule.id)]: { ...projectProgress(schedule), percentage: event.target.value } }))} className="input mt-0 w-20 text-center" /> : `${n(schedule.progress_percentage)}%`}</td>
-              <td className="px-4 py-2">{role === "project_manager" && !schedule.completed_at ? <input aria-label={`Progress remark for ${text(schedule.project_name, text(schedule.quotation_no))}`} value={projectProgress(schedule).remark} onChange={(event) => setProgressDrafts((current) => ({ ...current, [text(schedule.id)]: { ...projectProgress(schedule), remark: event.target.value } }))} placeholder="Add remark" maxLength={1000} className="input mt-0 min-w-44" /> : text(schedule.progress_remark, "â€”")}</td>
+              <td className="px-4 py-2">{role === "project_manager" && !schedule.completed_at ? <textarea aria-label={`Project note for ${text(schedule.project_name, text(schedule.quotation_no))}`} rows={2} value={projectProgress(schedule).remark} onChange={(event) => setProgressDrafts((current) => ({ ...current, [text(schedule.id)]: { ...projectProgress(schedule), remark: event.target.value } }))} placeholder="Add project note" maxLength={1000} className="input mt-0 min-w-48 resize-y" /> : text(schedule.progress_remark, "â€”")}</td>
               {role !== "project_manager" && <td className="px-4 py-2">{officerName(schedule)}</td>}
               <td className="px-4 py-2">
                 {showProjectActions ? <div className="flex items-center gap-1">
-                  {role === "project_manager" && !schedule.completed_at && <ActionIcon label="Save project progress" tone="green" disabled={savingProgressId === schedule.id} onClick={() => void saveProgress(schedule)}><Check size={15} /></ActionIcon>}
+                  {role === "project_manager" && !schedule.completed_at && <ActionIcon label="Save project progress" tone="green" disabled={savingProgressId === schedule.id} onClick={() => void saveProgress(schedule)}><Save size={15} /></ActionIcon>}
                   {canRequestScheduleCompletion(schedule) && (
                     <ActionIcon
                       label={
@@ -7673,10 +7674,31 @@ function PriceQuotationWorkspace({
       })),
       p_has_illustrations: savedItems.some((item) => Boolean(item.imageUrl)),
     });
+    if (error) {
+      setSaving(false);
+      return notice(error.message);
+    }
+    const resubmitRevision =
+      role === "project_manager" &&
+      text(editing?.status) === "needs_revision";
+    if (resubmitRevision) {
+      const { error: submitError } = await client.rpc("submit_price_quotation", {
+        p_quotation_id: text(data),
+      });
+      if (submitError) {
+        setSaving(false);
+        return notice(`Changes were saved as a draft, but could not be submitted: ${submitError.message}`);
+      }
+    }
     setSaving(false);
-    if (error) return notice(error.message);
     resetEditor();
-    notice(editing ? "Price Quotation updated." : "Price Quotation draft created.");
+    notice(
+      resubmitRevision
+        ? "Price Quotation updated and submitted for General Manager review."
+        : editing
+          ? "Price Quotation updated."
+          : "Price Quotation draft created.",
+    );
     await reload();
     return data;
   };
