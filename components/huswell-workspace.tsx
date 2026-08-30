@@ -811,7 +811,7 @@ const leads: Module = {
     { key: "client_name", label: "Company Name (Optional)" },
     { key: "email", label: "Email" },
     { key: "phone", label: "Viber" },
-    { key: "date_contacted", label: "Date contacted", type: "date", required: true },
+    { key: "date_contacted", label: "Date contacted", type: "date" },
     {
       key: "contact_method",
       label: "Outbound method",
