@@ -787,6 +787,7 @@ const leads: Module = {
     { key: "client_name", label: "Company Name (Optional)" },
     { key: "email", label: "Email" },
     { key: "phone", label: "Viber" },
+    { key: "address", label: "Address", type: "textarea" },
     { key: "date_contacted", label: "Date contacted", type: "date" },
     {
       key: "contact_method",
@@ -1508,35 +1509,51 @@ function PriceQuotationPdf({ quote, store, origin }: { quote: Row; store: Store;
   const customer = store.customers.find((item) => item.id === quote.customer_id);
   const lead = store.leads.find((item) => item.id === quote.lead_id);
   const lines = store.quotation_items.filter((item) => item.quotation_id === quote.id);
-  const totalAmount = n(quote.total_amount);
-  const totalCost = n(quote.total_cost);
   const issueDate = quote.issue_date ? new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric" }).format(new Date(`${quote.issue_date}T00:00:00`)) : "—";
   const terms = text(quote.terms_conditions, DEFAULT_QUOTATION_TERMS).split(/\r?\n+/).map((item) => item.trim().replace(/^\d+[.)]\s*/, "")).filter(Boolean);
   const bankDetails = quotationBankDetails(quote.bank_details);
-  const paymentTermIndex = terms.findIndex((term) => /^payment terms:/i.test(term));
-  const termsBeforeBank = paymentTermIndex < 0 ? terms : terms.slice(0, paymentTermIndex + 1);
-  const termsAfterBank = paymentTermIndex < 0 ? [] : terms.slice(paymentTermIndex + 1);
   const currency = (value: number) => new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(value);
   const approvedByName = text(quote.approved_by_name, "Marvin S. Tavarez");
   const approvedBySignature = text(quote.approved_by_signature_url, "") || (quote.approved_by_name ? undefined : `${origin}/marvin-tavarez-signature.png`);
   const approvedByRole = quote.approved_by_name ? "General Manager" : "Proprietor";
+  const clientName = text(customer?.company_name ?? lead?.client_name ?? quote.client_name, "—");
+  const contactName = text(customer?.contact_name ?? lead?.contact_name ?? quote.client_contact_name, "—");
+  const contactNumber = text(customer?.phone ?? lead?.phone ?? quote.client_phone, "—");
+  const clientAddress = text(customer?.billing_address ?? lead?.address ?? quote.client_address, "—");
+  const clientEmail = text(customer?.email ?? lead?.email, "—");
+  const subtotal = n(quote.subtotal);
+  const tax = n(quote.vat_amount);
+  const shipping = n(quote.shipping_handling);
   return <PdfDocument title={`Price Quotation ${text(quote.quotation_no)}`}>
     <PdfPage size={[612, 936]} style={generatedPdfStyles.page}>
       <PdfView style={generatedPdfStyles.header}>
         <PdfView><PdfImage src={`${origin}/huswell-quotation-logo.png`} style={generatedPdfStyles.logo} /><PdfText>72 Adrian St. North Fairview Park Subd.</PdfText><PdfText>Brgy. North Fairview, Quezon City</PdfText><PdfText>09171697153</PdfText><PdfText>saleshuswell@gmail.com</PdfText></PdfView>
         <PdfView style={generatedPdfStyles.quotationHeader}><PdfText style={generatedPdfStyles.quotationTitle}>PRICE QUOTATION</PdfText><PdfView style={generatedPdfStyles.quotationDetails}><PdfText style={generatedPdfStyles.quotationDetail}>Quotation No.: {text(quote.quotation_no)}</PdfText><PdfText style={generatedPdfStyles.quotationDetail}>Quotation Date: {issueDate}</PdfText><PdfText style={generatedPdfStyles.quotationDetail}>Prepared For: {text(customer?.company_name ?? lead?.client_name ?? quote.client_name, "—")}</PdfText><PdfText style={generatedPdfStyles.quotationDetail}>Attention: {text(customer?.contact_name ?? lead?.contact_name ?? quote.client_contact_name, "—")}</PdfText></PdfView></PdfView>
       </PdfView>
-      <PdfText style={generatedPdfStyles.sectionTitle}>OPTION 1</PdfText>
+      <PdfView style={{ marginTop: 14 }}>
+        <PdfText>Company Name: {clientName}</PdfText>
+        <PdfText>Contact Person: {contactName}</PdfText>
+        <PdfText>Contact Number: {contactNumber}</PdfText>
+        <PdfText>Address: {clientAddress}</PdfText>
+        <PdfText>Email: {clientEmail}</PdfText>
+      </PdfView>
+      <PdfText style={[generatedPdfStyles.terms, { marginTop: 12, fontStyle: "italic" }]}>Dear Sir/Madam, Thank you for the opportunity to serve your requirements.</PdfText>
       <PdfView style={generatedPdfStyles.table} wrap>
-        <PdfView style={generatedPdfStyles.row}><PdfCell width="19%" header>ITEM</PdfCell><PdfCell width="36%" header>DESCRIPTION</PdfCell><PdfCell width="14%" header>QUANTITY</PdfCell><PdfCell width="17%" header>SELLING PRICE / UNIT</PdfCell><PdfCell width="14%" header>AMOUNT</PdfCell></PdfView>
-        {lines.map((line, index) => { const quantity = n(line.quantity); const amount = quantity && totalCost ? Math.round(quantity * n(line.unit_cost) * (totalAmount / totalCost) * 100) / 100 : n(line.line_total); const imageUrl = text(line.image_url, ""); const source = imageUrl.startsWith("/") ? `${origin}${imageUrl}` : imageUrl; return <PdfView key={text(line.id, String(index))} style={generatedPdfStyles.row} wrap={false}><PdfCell width="19%">{source ? <PdfImage src={source} style={{ width: "100%", height: 54, objectFit: "contain" }} /> : <PdfText>{index + 1}</PdfText>}</PdfCell><PdfCell width="36%" description><PdfText style={{ fontWeight: 700 }}>{text(line.description).split(/\r?\n/)[0]}</PdfText><PdfText>{text(line.details, "") || text(line.description).split(/\r?\n/).slice(1).join("\n")}</PdfText></PdfCell><PdfCell width="14%">{`${quantity} ${quantity === 1 ? "pc" : "pcs"}`}</PdfCell><PdfCell width="17%">{currency(quantity ? amount / quantity : 0)}</PdfCell><PdfCell width="14%">{currency(amount)}</PdfCell></PdfView>; })}
-        <PdfView style={generatedPdfStyles.row}><PdfCell width="86%" total>TOTAL ESTIMATED COGS</PdfCell><PdfCell width="14%" total>{currency(totalAmount)}</PdfCell></PdfView>
+        <PdfView style={generatedPdfStyles.row}><PdfCell width="11%" header>ITEM</PdfCell><PdfCell width="37%" header>DESCRIPTION</PdfCell><PdfCell width="16%" header>QUANTITY</PdfCell><PdfCell width="21%" header>SELLING PRICE / UNIT</PdfCell><PdfCell width="15%" header>AMOUNT</PdfCell></PdfView>
+        {lines.map((line, index) => { const quantity = n(line.quantity); return <PdfView key={text(line.id, String(index))} style={generatedPdfStyles.row} wrap={false}><PdfCell width="11%">{index + 1}</PdfCell><PdfCell width="37%" description>{text(line.description)}</PdfCell><PdfCell width="16%">{`${quantity} ${quantity === 1 ? "pc" : "pcs"}`}</PdfCell><PdfCell width="21%">{currency(n(line.unit_cost))}</PdfCell><PdfCell width="15%">{currency(n(line.line_total))}</PdfCell></PdfView>; })}
+        <PdfView style={generatedPdfStyles.row}><PdfCell width="85%" total>SUBTOTAL</PdfCell><PdfCell width="15%" total>{currency(subtotal)}</PdfCell></PdfView>
+        <PdfView style={generatedPdfStyles.row}><PdfCell width="85%" total>{`TAX (${n(quote.vat_rate)}%)`}</PdfCell><PdfCell width="15%" total>{currency(tax)}</PdfCell></PdfView>
+        <PdfView style={generatedPdfStyles.row}><PdfCell width="85%" total>SHIPPING / HANDLING</PdfCell><PdfCell width="15%" total>{currency(shipping)}</PdfCell></PdfView>
+        <PdfView style={generatedPdfStyles.row}><PdfCell width="85%" total>TOTAL</PdfCell><PdfCell width="15%" total>{currency(n(quote.total_amount))}</PdfCell></PdfView>
       </PdfView>
       <PdfText style={generatedPdfStyles.sectionTitle}>TERMS AND CONDITIONS</PdfText>
-      <PdfText style={generatedPdfStyles.terms}>{termsBeforeBank.map((term, index) => `${index + 1}. ${term}`).join("\n")}</PdfText>
+      <PdfText style={generatedPdfStyles.terms}>{terms.map((term, index) => `${index + 1}. ${term}`).join("\n")}</PdfText>
       <PdfBankDetails details={bankDetails} />
-      {termsAfterBank.length > 0 && <PdfText style={generatedPdfStyles.terms}>{termsAfterBank.map((term, index) => `${index + termsBeforeBank.length + 1}. ${term}`).join("\n")}</PdfText>}
       <PdfView style={generatedPdfStyles.signatureRow}><PdfSignatureBlock label="Prepared by:" name={text(quote.representative)} role="Sales Project Officer" signatureSource={text(quote.prepared_by_signature_url, "") || undefined} /><PdfSignatureBlock label="Approved by:" name={approvedByName} role={approvedByRole} signatureSource={approvedBySignature} /></PdfView>
+      <PdfText style={[generatedPdfStyles.terms, { marginTop: 10 }]}>Conforme: ______________________________</PdfText>
+      <PdfText style={[generatedPdfStyles.terms, { marginTop: 14, textAlign: "center", fontStyle: "italic" }]}>Thank you for the opportunity to provide this quotation.</PdfText>
+      <PdfText style={[generatedPdfStyles.terms, { textAlign: "center" }]}>We look forward to working with you.</PdfText>
+      <PdfText style={[generatedPdfStyles.terms, { marginTop: 8, textAlign: "center" }]}>Business Address: 72 Adrian St., North Fairview Park Subd., Brgy. North Fairview, Quezon City, Metro Manila</PdfText>
     </PdfPage>
   </PdfDocument>;
 }
@@ -1658,7 +1675,6 @@ function LeadWorkspaceTabs({
 }) {
   const tabs: { mode: LeadWorkspaceMode; label: string }[] = [
     { mode: "leads", label: "Leads" },
-    { mode: "costing", label: "Costing Breakdown" },
     { mode: "quotation", label: "Price Quotations" },
   ];
   return (
@@ -6247,7 +6263,7 @@ function Quotations({
                 isCosting ? "Costing Breakdown" : "Price Quotation",
                 isCosting ? "Client's Name / Company" : "Customer / project",
                 "Estimated COGS",
-                "Submitted by",
+                "Prepared by",
                 isCosting ? "Approval" : "GM approval",
                 isCosting ? "Approval date" : "GM approval date",
                 "Actions",
@@ -7283,6 +7299,229 @@ function Quotations({
   );
 }
 
+function PriceQuotationWorkspace({
+  store,
+  orgId,
+  reload,
+  notice,
+  role,
+  profileName,
+}: {
+  store: Store;
+  orgId: string;
+  reload: () => Promise<void>;
+  notice: (message: string) => void;
+  role: string;
+  profileName: string;
+}) {
+  type DraftItem = { key: string; description: string; quantity: string };
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editing, setEditing] = useState<Row | null>(null);
+  const [leadId, setLeadId] = useState("");
+  const [items, setItems] = useState<DraftItem[]>([
+    { key: "item-1", description: "", quantity: "1" },
+  ]);
+  const [saving, setSaving] = useState(false);
+  const [pdfQuote, setPdfQuote] = useState<Row | null>(null);
+  const [pdfWindow, setPdfWindow] = useState<Window | null>(null);
+  const [reviewing, setReviewing] = useState<Row | null>(null);
+  const isGeneralManager = memberRole(role);
+  const canPrepare = role === "project_manager" || isGeneralManager;
+  const quotations = store.quotations.filter(
+    (quote) => text(quote.document_type) === "price_quotation",
+  );
+  const availableLeads = store.leads.filter(
+    (lead) => !["won", "lost"].includes(text(lead.status)));
+  const resetEditor = () => {
+    setEditorOpen(false);
+    setEditing(null);
+    setLeadId("");
+    setItems([{ key: `item-${Date.now()}`, description: "", quantity: "1" }]);
+  };
+  const openNew = () => {
+    setEditing(null);
+    setLeadId("");
+    setItems([{ key: `item-${Date.now()}`, description: "", quantity: "1" }]);
+    setEditorOpen(true);
+  };
+  const openEdit = (quote: Row) => {
+    const quoteItems = store.quotation_items.filter(
+      (item) => item.quotation_id === quote.id,
+    );
+    setEditing(quote);
+    setLeadId(text(quote.lead_id));
+    setItems(
+      quoteItems.length
+        ? quoteItems.map((item, index) => ({
+            key: text(item.id, `item-${index}`),
+            description: text(item.description),
+            quantity: text(item.quantity, "1"),
+          }))
+        : [{ key: "item-1", description: "", quantity: "1" }],
+    );
+    setEditorOpen(true);
+  };
+  const saveDraft = async () => {
+    if (!leadId) return notice("Select a lead before saving the quotation.");
+    setSaving(true);
+    const { data, error } = await createClient().rpc("save_price_quotation_draft", {
+      p_quotation_id: editing?.id ?? null,
+      p_lead_id: leadId,
+      p_items: items.map((item) => ({
+        description: item.description,
+        quantity: n(item.quantity),
+      })),
+    });
+    setSaving(false);
+    if (error) return notice(error.message);
+    resetEditor();
+    notice(editing ? "Price Quotation updated." : "Price Quotation draft created.");
+    await reload();
+    return data;
+  };
+  const submit = async (quote: Row) => {
+    setSaving(true);
+    const { error } = await createClient().rpc("submit_price_quotation", {
+      p_quotation_id: quote.id,
+    });
+    setSaving(false);
+    if (error) return notice(error.message);
+    notice("Price Quotation submitted for General Manager review.");
+    await reload();
+  };
+  const openPdf = (quote: Row) => {
+    if (text(quote.status) !== "approved") {
+      return notice("Price Quotations can be opened after General Manager approval.");
+    }
+    const nextWindow = window.open("", "_blank", "noopener,noreferrer");
+    if (!nextWindow) return notice("Allow pop-ups to open the quotation PDF.");
+    setPdfWindow(nextWindow);
+    setPdfQuote(quote);
+  };
+  return (
+    <Panel
+      title="Price Quotations"
+      detail="Prepare a quotation from a lead, then submit it for General Manager pricing and approval."
+      action={
+        canPrepare ? (
+          <Button onClick={openNew}>
+            <Plus size={14} /> Add Price Quotation
+          </Button>
+        ) : undefined
+      }
+    >
+      {quotations.length ? (
+        <Table
+          labels={["Quotation", "Client / Project", "Prepared by", "Status", "Date", "Actions"]}
+          minWidth={860}
+        >
+          {quotations.map((quote) => {
+            const lead = store.leads.find((item) => item.id === quote.lead_id);
+            const preparedBy = text(
+              store.profiles.find(
+                (profile) => profile.id === (quote.prepared_by_user_id ?? quote.created_by),
+              )?.full_name,
+              profileName,
+            );
+            const isLegacy = Boolean(quote.costing_source_id);
+            const editable = !isLegacy && ["draft", "needs_revision"].includes(text(quote.status));
+            return (
+              <tr key={text(quote.id)}>
+                <td className="px-5 py-3"><b>{text(quote.quotation_no)}</b><small>{day(quote.issue_date)}</small></td>
+                <td className="px-5 py-3"><b>{text(quote.client_name, text(lead?.client_name))}</b><small>{text(quote.project_name, text(lead?.project_name))}</small></td>
+                <td className="px-5 py-3">{preparedBy}</td>
+                <td className="px-5 py-3"><Status value={quote.status} /></td>
+                <td className="px-5 py-3">{text(quote.status) === "approved" ? `Valid until ${day(quote.valid_until)}` : day(quote.submitted_at)}</td>
+                <td className="px-5 py-3"><div className="flex items-center gap-1">
+                  {editable && canPrepare && (
+                    <ActionIcon label="Edit Price Quotation" onClick={() => openEdit(quote)}><Pencil size={15} /></ActionIcon>
+                  )}
+                  {role === "project_manager" && editable && (
+                    <ActionIcon label="Submit for General Manager review" tone="green" disabled={saving} onClick={() => void submit(quote)}><Send size={15} /></ActionIcon>
+                  )}
+                  {isGeneralManager && ["draft", "pending"].includes(text(quote.status)) && (
+                    <ActionIcon label="Review Price Quotation" onClick={() => setReviewing(quote)}><FileText size={15} /></ActionIcon>
+                  )}
+                  {text(quote.status) === "approved" && <ActionIcon label="View Price Quotation PDF" onClick={() => openPdf(quote)}><FileText size={15} /></ActionIcon>}
+                </div></td>
+              </tr>
+            );
+          })}
+        </Table>
+      ) : <Empty>No Price Quotations yet. Create one from a lead to begin.</Empty>}
+      {editorOpen && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/30 p-4">
+          <section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
+            <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">{editing ? "Edit Price Quotation" : "Add Price Quotation"}</h2><p className="mt-1 text-[12px] text-[#687386]">Add the requested materials and quantities. Selling prices are entered by the General Manager.</p></div><button type="button" onClick={resetEditor} aria-label="Close" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div>
+            <label className="mt-5 block text-[12px] font-medium text-[#202938]">Lead / Project<select value={leadId} onChange={(event) => setLeadId(event.target.value)} className="input mt-1" required><option value="">Select a lead</option>{availableLeads.map((lead) => <option key={text(lead.id)} value={text(lead.id)}>{leadClientLabel(lead)} — {text(lead.project_name)}</option>)}</select></label>
+            <div className="mt-5"><div className="flex items-center justify-between"><div><h3 className="text-[14px] font-semibold text-[#202938]">Items</h3><p className="mt-1 text-[12px] text-[#687386]">List each material or production item required by the lead.</p></div></div><Table labels={["Item", "Description", "Quantity", "Actions"]} minWidth={0}>{items.map((item, index) => <tr key={item.key}><td className="px-4 py-3 text-center font-medium">{index + 1}</td><td className="px-4 py-2"><input aria-label={`Item ${index + 1} description`} value={item.description} onChange={(event) => setItems((current) => current.map((value) => value.key === item.key ? { ...value, description: titleCase(event.target.value) } : value))} className="input mt-0" placeholder="Material or production item" /></td><td className="px-4 py-2"><input aria-label={`Item ${index + 1} quantity`} type="number" min="0.001" step="any" value={item.quantity} onChange={(event) => setItems((current) => current.map((value) => value.key === item.key ? { ...value, quantity: event.target.value } : value))} className="input mt-0 text-right" /></td><td className="px-4 py-2 text-center"><ActionIcon label={`Remove item ${index + 1}`} tone="red" disabled={items.length === 1} onClick={() => setItems((current) => current.filter((value) => value.key !== item.key))}><Trash2 size={15} /></ActionIcon></td></tr>)}</Table><div className="mt-3 flex justify-end"><Button secondary onClick={() => setItems((current) => [...current, { key: `item-${Date.now()}`, description: "", quantity: "1" }])}><Plus size={14} /> Add Item</Button></div></div>
+            <div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={resetEditor}>Cancel</Button><Button disabled={saving} onClick={() => void saveDraft()}>{editing ? "Save changes" : "Save draft"}</Button></div>
+          </section>
+        </div>
+      )}
+      {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); }} autoExportPdf pdfWindow={pdfWindow} hidden />}
+      {reviewing && <PriceQuotationReview quotation={reviewing} store={store} saving={saving} close={() => setReviewing(null)} notice={notice} reload={reload} />}
+    </Panel>
+  );
+}
+
+function PriceQuotationReview({
+  quotation,
+  store,
+  saving,
+  close,
+  notice,
+  reload,
+}: {
+  quotation: Row;
+  store: Store;
+  saving: boolean;
+  close: () => void;
+  notice: (message: string) => void;
+  reload: () => Promise<void>;
+}) {
+  const [prices, setPrices] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      store.quotation_items
+        .filter((item) => item.quotation_id === quotation.id)
+        .map((item) => [text(item.id), text(item.unit_cost, "")]),
+    ),
+  );
+  const [vatRate, setVatRate] = useState(text(quotation.vat_rate, "12"));
+  const [shipping, setShipping] = useState(text(quotation.shipping_handling, "0"));
+  const [terms, setTerms] = useState(
+    text(quotation.terms_conditions, DEFAULT_QUOTATION_TERMS)
+      .split(/\r?\n+/)
+      .filter(Boolean),
+  );
+  const [bankDetails, setBankDetails] = useState<BankDetail[]>(() => quotationBankDetails(quotation.bank_details));
+  const [revisionNote, setRevisionNote] = useState("");
+  const [working, setWorking] = useState(false);
+  const lines = store.quotation_items.filter((item) => item.quotation_id === quotation.id);
+  const subtotal = lines.reduce((sum, line) => sum + n(line.quantity) * n(prices[text(line.id)]), 0);
+  const tax = Math.round(subtotal * n(vatRate)) / 100;
+  const total = subtotal + tax + n(shipping);
+  const review = async (decision: "approved" | "needs_revision") => {
+    setWorking(true);
+    const { error } = await createClient().rpc("review_price_quotation", {
+      p_quotation_id: quotation.id,
+      p_decision: decision,
+      p_vat_rate: n(vatRate),
+      p_shipping_handling: n(shipping),
+      p_terms_conditions: terms.filter((term) => term.trim()).join("\n"),
+      p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
+      p_line_prices: lines.map((line) => ({ id: line.id, unit_cost: n(prices[text(line.id)]) })),
+      p_revision_note: revisionNote,
+    });
+    setWorking(false);
+    if (error) return notice(error.message);
+    close();
+    notice(decision === "approved" ? "Price Quotation approved." : "Price Quotation returned for revision.");
+    await reload();
+  };
+  return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} · {text(quotation.client_name)} · Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><div className="mt-5 grid gap-5 lg:grid-cols-[1.45fr_.75fr]"><div><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><section className="mt-5 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="mt-4 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="mt-4 block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label></div><aside><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><div className="border-b border-[#edf0f5] px-4 py-3"><h3 className="text-[14px] font-semibold">Quotation Total</h3></div><Table labels={["Category", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section></aside></div><div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></section></div>;
+}
+
 function GeneralManagerCostingReview({
   quotation,
   store,
@@ -7863,9 +8102,16 @@ function Submissions({
 }) {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Row | null>(null);
-  const [tab, setTab] = useState<"costings" | "projects" | "leads" | "revisions" | "calendar_projects" | "calendar_revisions" | "calendar_completions">("costings");
+  const [tab, setTab] = useState<"quotations" | "costings" | "projects" | "leads" | "revisions" | "calendar_projects" | "calendar_revisions" | "calendar_completions">("quotations");
   const [selectedProjectEdit, setSelectedProjectEdit] = useState<Row | null>(null);
   const [selectedLeadChange, setSelectedLeadChange] = useState<Row | null>(null);
+  const [selectedPriceQuotation, setSelectedPriceQuotation] = useState<Row | null>(null);
+  const pendingPriceQuotations = store.quotations.filter(
+    (quotation) =>
+      text(quotation.status) === "pending" &&
+      text(quotation.document_type) === "price_quotation" &&
+      !quotation.costing_source_id,
+  );
   const pendingCostings = store.quotations.filter(
     (quotation) =>
       text(quotation.status) === "pending" &&
@@ -8114,10 +8360,11 @@ function Submissions({
   return (
     <Panel
       title="General Manager Submissions"
-      detail="Review Costing Breakdowns, revisions, project schedules, edits, and Lead change requests."
+      detail="Review submitted Price Quotations, legacy records, project schedules, edits, and Lead change requests."
       hideHeading
     >
       <div className="flex gap-1 overflow-x-auto border-b border-[#e4e8ef] px-5">
+        <button type="button" onClick={() => setTab("quotations")} className={`px-3 py-2 text-[12px] font-medium ${tab === "quotations" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Price Quotations ({pendingPriceQuotations.length})</button>
         <button type="button" onClick={() => setTab("costings")} className={`px-3 py-2 text-[12px] font-medium ${tab === "costings" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Costing Reviews ({pendingCostings.length})</button>
         <button type="button" onClick={() => setTab("revisions")} className={`px-3 py-2 text-[12px] font-medium ${tab === "revisions" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Costing Revisions ({pendingQuotationRevisions.length})</button>
         <button type="button" onClick={() => setTab("calendar_projects")} className={`px-3 py-2 text-[12px] font-medium ${tab === "calendar_projects" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Project Calendar ({pendingProjectSchedules.length})</button>
@@ -8126,6 +8373,11 @@ function Submissions({
         <button type="button" onClick={() => setTab("projects")} className={`px-3 py-2 text-[12px] font-medium ${tab === "projects" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Project Edits ({pendingProjectEdits.length})</button>
         <button type="button" onClick={() => setTab("leads")} className={`px-3 py-2 text-[12px] font-medium ${tab === "leads" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Lead Changes ({pendingLeadChanges.length})</button>
       </div>
+      {tab === "quotations" && (pendingPriceQuotations.length ? (
+        <Table labels={["Price Quotation", "Client", "Prepared by", "Submitted", "Review"]}>
+          {pendingPriceQuotations.map((quotation) => <tr key={text(quotation.id)}><td className="px-5 py-3"><b>{text(quotation.quotation_no)}</b><small>{text(quotation.project_name)}</small></td><td className="px-5 py-3 font-medium">{text(quotation.client_name)}</td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3"><ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>)}
+        </Table>
+      ) : <Empty>No Price Quotations are awaiting review.</Empty>)}
       {tab === "costings" && (pendingCostings.length ? (
         <Table
           labels={[
@@ -8294,6 +8546,16 @@ function Submissions({
           saving={savingId === selected.id}
           close={() => setSelected(null)}
           decide={(status, changes, revisionNote) => void decide(selected, status, changes, revisionNote)}
+        />
+      )}
+      {selectedPriceQuotation && (
+        <PriceQuotationReview
+          quotation={selectedPriceQuotation}
+          store={store}
+          saving={savingId === selectedPriceQuotation.id}
+          close={() => setSelectedPriceQuotation(null)}
+          notice={notice}
+          reload={reload}
         />
       )}
       {selectedProjectEdit && (
@@ -11258,11 +11520,15 @@ export function HuswellWorkspace({
   );
   const selectLeadWorkspaceMode = useCallback((mode: LeadWorkspaceMode) => {
     setLeadMode(mode);
-    setActive("Leads");
+    setActive(mode === "quotation" ? "Price Quotations" : "Leads");
   }, []);
   const navigate = useCallback((view: View) => {
     if (view === "Costing Breakdown") return selectLeadWorkspaceMode("costing");
-    if (view === "Price Quotations") return selectLeadWorkspaceMode("quotation");
+    if (view === "Price Quotations") {
+      setLeadMode("quotation");
+      setActive("Price Quotations");
+      return;
+    }
     if (view === "Projects") {
       setLeadMode("projects");
       setActive("Projects");
@@ -11404,7 +11670,6 @@ export function HuswellWorkspace({
       "Dashboard",
       "Leads",
       "Projects",
-      "Costing Breakdown",
       "Price Quotations",
       "Suppliers & Materials",
       "Finance",
@@ -11415,7 +11680,6 @@ export function HuswellWorkspace({
       "Dashboard",
       "Leads",
       "Projects",
-      "Costing Breakdown",
       "Price Quotations",
       "Suppliers & Materials",
       "Finance",
@@ -11426,7 +11690,6 @@ export function HuswellWorkspace({
       "Dashboard",
       "Leads",
       "Projects",
-      "Costing Breakdown",
       "Price Quotations",
       "Suppliers & Materials",
       "Finance",
@@ -11437,7 +11700,6 @@ export function HuswellWorkspace({
       "Dashboard",
       "Leads",
       "Projects",
-      "Costing Breakdown",
       "Price Quotations",
       "Suppliers & Materials",
     ],
@@ -11468,6 +11730,7 @@ export function HuswellWorkspace({
         { view: "Dashboard", icon: LayoutDashboard },
         { view: "Leads", icon: ClipboardCheck },
         { view: "Projects", icon: ClipboardCheck },
+        { view: "Price Quotations", icon: FileText },
         { view: "Suppliers & Materials", icon: UsersRound },
       ],
     },
@@ -11515,7 +11778,7 @@ export function HuswellWorkspace({
     "Price Quotations": {
       title: "Price Quotations",
       detail:
-        "Generated after General Manager approval. View or print the client Price Quotation.",
+        "Prepare quotations from leads, then submit them for General Manager pricing and approval.",
     },
     "Materials List": {
       title: "Materials List",
@@ -11532,7 +11795,7 @@ export function HuswellWorkspace({
     Quotations: {
       title: "Quotation workflow moved",
       detail:
-        "Price Quotations are generated only after General Manager approval of a Costing Breakdown.",
+        "Use Price Quotations to prepare, submit, and manage client quotations.",
     },
     Production: {
       title: "Production jobs",
@@ -11577,7 +11840,7 @@ export function HuswellWorkspace({
     },
     Submissions: {
       title: "General Manager Submissions",
-      detail: "Review Costing Breakdowns, revisions, project edits, and Lead change requests.",
+      detail: "Review submitted Price Quotations, project edits, and Lead change requests.",
     },
     Settings: {
       title: "Business settings",
@@ -11629,21 +11892,16 @@ export function HuswellWorkspace({
         notice={setMessage}
         role={role}
       />
-    ) : ["Leads", "Costing Breakdown", "Price Quotations"].includes(active) ? (
-      activeLeadWorkspaceMode === "costing" || activeLeadWorkspaceMode === "quotation" ? (
-        <Quotations
+    ) : active === "Price Quotations" ? (
+        <PriceQuotationWorkspace
           store={store}
           orgId={organizationId}
           reload={reload}
           notice={setMessage}
           role={role}
           profileName={profileName}
-          mode={activeLeadWorkspaceMode === "costing" ? "costing" : "quotation"}
-          pageLayout
-          leadWorkspaceMode={activeLeadWorkspaceMode}
-          onLeadWorkspaceModeChange={selectLeadWorkspaceMode}
         />
-      ) : (
+    ) : active === "Leads" ? (
         <Records
           module={leads}
           store={store}
@@ -11654,7 +11912,6 @@ export function HuswellWorkspace({
           leadMode={activeLeadWorkspaceMode}
           onLeadModeChange={selectLeadWorkspaceMode}
         />
-      )
     ) : active === "Suppliers & Materials" ? (
       <SupplierMaterials
         store={store}
