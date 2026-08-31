@@ -233,6 +233,11 @@ const peso = new Intl.NumberFormat("en-PH", {
   currency: "PHP",
   maximumFractionDigits: 2,
 });
+const wholePeso = new Intl.NumberFormat("en-PH", {
+  style: "currency",
+  currency: "PHP",
+  maximumFractionDigits: 0,
+});
 const n = (value: unknown) =>
   Number.isFinite(Number(value)) ? Number(value) : 0;
 const text = (value: unknown, fallback = "—") =>
@@ -7532,6 +7537,7 @@ function PriceQuotationWorkspace({
 }) {
   type DraftItem = {
     key: string;
+    id?: string;
     description: string;
     quantity: string;
     imageUrl?: string;
@@ -7628,9 +7634,10 @@ function PriceQuotationWorkspace({
       quoteItems.length
         ? quoteItems.map((item, index) => ({
             key: text(item.id, `item-${index}`),
+            id: text(item.id, "") || undefined,
             description: text(item.description),
             quantity: text(item.quantity, "1"),
-            imageUrl: text(item.image_url) || undefined,
+            imageUrl: text(item.image_url, "") || undefined,
           }))
         : [{ key: "item-1", description: "", quantity: "1" }],
     );
@@ -7668,6 +7675,7 @@ function PriceQuotationWorkspace({
       p_lead_id: leadId,
       p_project_type: projectType.trim(),
       p_items: savedItems.map((item) => ({
+        id: item.id ?? null,
         description: item.description,
         quantity: n(item.quantity),
         image_url: item.imageUrl ?? "",
@@ -7800,7 +7808,7 @@ function PriceQuotationWorkspace({
             const preparedBy = preparedByName(quote);
             const isLegacy = Boolean(quote.costing_source_id);
             const editable = !isLegacy && ["draft", "needs_revision"].includes(text(quote.status));
-            const illustrationCount = store.quotation_items.filter((item) => item.quotation_id === quote.id && Boolean(text(item.image_url))).length;
+            const illustrationCount = store.quotation_items.filter((item) => item.quotation_id === quote.id && Boolean(text(item.image_url, ""))).length;
             return (
               <tr key={text(quote.id)}>
                 <td className="px-5 py-3"><b>{text(quote.quotation_no)}</b><small>{day(quote.issue_date)}</small></td>
@@ -7870,7 +7878,7 @@ function PriceQuotationWorkspace({
         <div className="fixed inset-0 z-[70] grid place-items-center bg-[#151922]/40 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setIllustrationQuote(null); }}>
           <section role="dialog" aria-modal="true" aria-labelledby="price-quotation-illustrations-title" className="w-full max-w-2xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
             <div className="flex items-start justify-between gap-4"><div><h2 id="price-quotation-illustrations-title" className="text-[16px] font-semibold text-[#202938]">Quotation illustrations</h2><p className="mt-1 text-[12px] text-[#687386]">{text(illustrationQuote.quotation_no, "Price Quotation")} · View-only; not included in the PDF.</p></div><button type="button" onClick={() => setIllustrationQuote(null)} aria-label="Close illustrations" className="rounded-md p-1 text-[#687386] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938]"><X size={18} /></button></div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">{store.quotation_items.filter((item) => item.quotation_id === illustrationQuote.id && Boolean(text(item.image_url))).map((item) => <a key={text(item.id)} href={text(item.image_url)} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><img src={text(item.image_url)} alt={text(item.description, "Quotation illustration")} className="h-44 w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{text(item.description)}</p></a>)}</div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">{store.quotation_items.filter((item) => item.quotation_id === illustrationQuote.id && Boolean(text(item.image_url, ""))).map((item) => <a key={text(item.id)} href={text(item.image_url, "")} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><img src={text(item.image_url, "")} alt={text(item.description, "Quotation illustration")} className="h-44 w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{text(item.description)}</p></a>)}</div>
             <div className="mt-5 flex justify-end"><Button secondary onClick={() => setIllustrationQuote(null)}>Close</Button></div>
           </section>
         </div>
@@ -7889,6 +7897,8 @@ function PriceQuotationReviewContentLegacy({ lines, prices, setPrices, subtotal,
 
 type PriceQuotationReviewContentProps = {
   lines: Row[];
+  projectType: string;
+  illustrations: { id: string; description: string; imageUrl: string }[];
   prices: Record<string, string>;
   setPrices: (next: Record<string, string> | ((current: Record<string, string>) => Record<string, string>)) => void;
   subtotal: number;
@@ -7911,12 +7921,20 @@ type PriceQuotationReviewContentProps = {
 };
 
 function PriceQuotationReviewContent({
-  lines, prices, setPrices, subtotal, vatRate, setVatRate, tax, shipping,
+  lines, projectType, illustrations, prices, setPrices, subtotal, vatRate, setVatRate, tax, shipping,
   setShipping, total, terms, setTerms, bankDetails, setBankDetails,
   revisionNote, setRevisionNote, close, saving, working, review,
 }: PriceQuotationReviewContentProps) {
   return (
     <div className="mt-5 space-y-5">
+      <section className="rounded-xl border border-[#e1e6ee] p-4">
+        <h3 className="text-[14px] font-semibold">Project details</h3>
+        <dl className="mt-3 grid gap-1 text-[13px] sm:grid-cols-[120px_1fr]">
+          <dt className="text-[#687386]">Project type</dt>
+          <dd className="font-medium text-[#202938]">{projectType || "—"}</dd>
+        </dl>
+        {illustrations.length > 0 && <div className="mt-4"><p className="text-[12px] font-medium text-[#687386]">Illustrations</p><div className="mt-2 grid gap-3 sm:grid-cols-2">{illustrations.map((illustration) => <a key={illustration.id} href={illustration.imageUrl} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><img src={illustration.imageUrl} alt={illustration.description || "Quotation illustration"} className="h-36 w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{illustration.description}</p></a>)}</div></div>}
+      </section>
       <section>
         <Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]} minWidth={0}>
           {lines.map((line, index) => {
@@ -7926,7 +7944,7 @@ function PriceQuotationReviewContent({
               <td className="px-4 py-3 font-medium">{text(line.description)}</td>
               <td className="px-4 py-3 text-center">{n(line.quantity)}</td>
               <td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0" /></td>
-              <td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td>
+              <td className="px-4 py-3 text-right font-semibold">{wholePeso.format(n(line.quantity) * price)}</td>
             </tr>;
           })}
         </Table>
@@ -7988,6 +8006,10 @@ function PriceQuotationReview({
   const [revisionNote, setRevisionNote] = useState("");
   const [working, setWorking] = useState(false);
   const lines = store.quotation_items.filter((item) => item.quotation_id === quotation.id);
+  const illustrations = lines.flatMap((line) => {
+    const imageUrl = text(line.image_url, "");
+    return imageUrl ? [{ id: text(line.id), description: text(line.description, "Quotation illustration"), imageUrl }] : [];
+  });
   const subtotal = lines.reduce((sum, line) => sum + n(line.quantity) * n(prices[text(line.id)]), 0);
   const tax = Math.round(subtotal * n(vatRate)) / 100;
   const total = subtotal + tax + n(shipping);
@@ -8013,7 +8035,7 @@ function PriceQuotationReview({
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} shipping={shipping} setShipping={setShipping} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} · {text(quotation.client_name)} · Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><div className="mt-5 grid gap-5 lg:grid-cols-[1.45fr_.75fr]"><div><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><section className="mt-5 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="mt-4 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="mt-4 block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label></div><aside><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><div className="border-b border-[#edf0f5] px-4 py-3"><h3 className="text-[14px] font-semibold">Quotation Total</h3></div><Table labels={["Category", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section></aside></div><div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></section></div>;
   */
-  return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} shipping={shipping} setShipping={setShipping} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
+  return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectType={text(quotation.project_types, "")} illustrations={illustrations} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} shipping={shipping} setShipping={setShipping} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
 }
 
 function GeneralManagerCostingReview({
