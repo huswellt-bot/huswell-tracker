@@ -3280,6 +3280,7 @@ function ProjectCalendar({
   const [projectOfficerFilter, setProjectOfficerFilter] = useState("all");
   const [progressDrafts, setProgressDrafts] = useState<Record<string, { percentage: string; remark: string }>>({});
   const [savingProgressId, setSavingProgressId] = useState<string | null>(null);
+  const [remarkSchedule, setRemarkSchedule] = useState<Row | null>(null);
   const schedules = store.project_schedules.slice().sort((a, b) =>
     text(a.start_date, "").localeCompare(text(b.start_date, "")),
   );
@@ -3805,7 +3806,7 @@ function ProjectCalendar({
               <td className="px-4 py-2"><Status value={schedule.completed_at ? "completed" : hasPendingScheduleCompletion(schedule) ? "completion pending" : "active"} /></td>
               <td className="px-4 py-2"><span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full" style={{ backgroundColor: calendarColorForProjectType(scheduleProjectType(schedule)) }} aria-hidden="true" />{scheduleProjectType(schedule)}</span></td>
               <td className="px-4 py-2">{role === "project_manager" && !schedule.completed_at ? <input aria-label={`Progress percentage for ${text(schedule.project_name, text(schedule.quotation_no))}`} type="number" min="0" max="100" step="0.01" value={projectProgress(schedule).percentage} onChange={(event) => setProgressDrafts((current) => ({ ...current, [text(schedule.id)]: { ...projectProgress(schedule), percentage: event.target.value } }))} className="input mt-0 w-20 text-center" /> : `${n(schedule.progress_percentage)}%`}</td>
-              <td className="px-4 py-2">{role === "project_manager" && !schedule.completed_at ? <textarea aria-label={`Project note for ${text(schedule.project_name, text(schedule.quotation_no))}`} rows={2} value={projectProgress(schedule).remark} onChange={(event) => setProgressDrafts((current) => ({ ...current, [text(schedule.id)]: { ...projectProgress(schedule), remark: event.target.value } }))} placeholder="Add project note" maxLength={1000} className="input mt-0 min-w-48 resize-y" /> : text(schedule.progress_remark, "â€”")}</td>
+              <td className="px-4 py-2">{role === "project_manager" ? (!schedule.completed_at ? <textarea aria-label={`Project note for ${text(schedule.project_name, text(schedule.quotation_no))}`} rows={2} value={projectProgress(schedule).remark} onChange={(event) => setProgressDrafts((current) => ({ ...current, [text(schedule.id)]: { ...projectProgress(schedule), remark: event.target.value } }))} placeholder="Add project note" maxLength={1000} className="input mt-0 min-w-48 resize-y" /> : text(schedule.progress_remark, "â€”")) : <ActionIcon label="View project remark" confirm={false} onClick={() => setRemarkSchedule(schedule)}><MessageSquareText size={15} /></ActionIcon>}</td>
               {role !== "project_manager" && <td className="px-4 py-2">{officerName(schedule)}</td>}
               <td className="px-4 py-2">
                 {showProjectActions ? <div className="flex items-center gap-1">
@@ -3856,6 +3857,26 @@ function ProjectCalendar({
               ? "No active projects are due in the selected month."
               : "No completed projects match the selected month."}
           </Empty>
+        )}
+        {remarkSchedule && (
+          <div className="fixed inset-0 z-[70] grid place-items-center bg-[#151922]/40 p-4">
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="project-remark-title"
+              className="w-full max-w-lg rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"
+            >
+              <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4">
+                <div>
+                  <h2 id="project-remark-title" className="text-[17px] font-semibold text-[#202938]">Project remark</h2>
+                  <p className="mt-1 text-[12px] text-[#687386]">{text(remarkSchedule.project_name, text(remarkSchedule.quotation_no, "Project"))}</p>
+                </div>
+                <button type="button" onClick={() => setRemarkSchedule(null)} aria-label="Close project remark" className="grid size-8 place-items-center rounded-md text-[#8a95a6] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938]"><X size={18} /></button>
+              </div>
+              <p className="mt-5 whitespace-pre-wrap break-words text-[13px] leading-6 text-[#303949]">{text(remarkSchedule.progress_remark, "No project remark was added.")}</p>
+              <div className="mt-6 flex justify-end"><Button secondary onClick={() => setRemarkSchedule(null)}>Close</Button></div>
+            </section>
+          </div>
         )}
         {role === "project_manager" && myScheduleRequests.length > 0 && (
           <div className="mt-5 rounded-xl border border-[#e4e8ef] bg-[#fafbfe] p-4">
