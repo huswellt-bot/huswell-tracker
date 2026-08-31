@@ -69,7 +69,11 @@
 67. Run `072_project_schedule_progress.sql` to add protected Project Officer progress percentage and remark updates.
 68. Run `073_extend_workspace_realtime.sql` to deliver newer Price Quotation revision updates automatically to open workspaces.
 69. Run `074_preserve_price_quotation_resubmission_prices.sql` to retain selling prices on existing items when an approved direct Price Quotation is revised and resubmitted.
-70. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
+70. Run `075_retire_costing_breakdown_workflow.sql` to disable the legacy Costing Breakdown workflow while preserving its historical records.
+71. Run `076_return_project_and_lead_edits_for_revision.sql` to let General Managers return Project and Lead edits for officer revision before resubmission.
+72. Run `077_officer_unsubmit_pending_requests.sql` to let Project Officers withdraw their own pending edit, revision, and completion requests before General Manager review.
+73. Run `078_general_manager_management_workflow_boundaries.sql` to preserve GM lead management while keeping quotation and project submission work officer-owned.
+74. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 

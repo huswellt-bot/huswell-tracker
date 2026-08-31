@@ -240,10 +240,23 @@ const wholePeso = new Intl.NumberFormat("en-PH", {
 });
 const n = (value: unknown) =>
   Number.isFinite(Number(value)) ? Number(value) : 0;
-const text = (value: unknown, fallback = "—") =>
-  value === null || value === undefined || value === ""
-    ? fallback
-    : String(value);
+const normalizeDisplayText = (value: string) =>
+  value
+    .replaceAll("â€”", "-")
+    .replaceAll("â€“", "-")
+    .replaceAll("Â·", " - ")
+    .replaceAll("Â ", " ")
+    .replaceAll("â€™", "'")
+    .replaceAll("â€˜", "'")
+    .replaceAll("â€œ", "\"")
+    .replaceAll("â€", "\"")
+    .replaceAll("â€¦", "...");
+const text = (value: unknown, fallback = "-") =>
+  normalizeDisplayText(
+    value === null || value === undefined || value === ""
+      ? fallback
+      : String(value),
+  );
 const projectOfficerOptions = (store: Store) =>
   store.organization_members
     .filter((member) => text(member.role, "") === "project_manager")
@@ -392,12 +405,12 @@ const PRICE_QUOTATION_PROJECT_TYPES = [
 ] as const;
 
 const projectTypeCalendarColors: Record<string, string> = {
-  "Premium Rigid Box": "#2f855a",
-  "Regular Rigid Box": "#c48200",
-  Corrugated: "#c45d1a",
-  Offset: "#805ad5",
-  Digital: "#168c83",
-  "Mock Up": "#64748b",
+  "Premium Rigid Box": "#4CAF50",
+  "Regular Rigid Box": "#FFD54F",
+  Corrugated: "#F48FB1",
+  Offset: "#FB8C00",
+  Digital: "#03A9F4",
+  "Mock Up": "#7E57C2",
 };
 
 type BankDetail = {
@@ -665,7 +678,10 @@ const workspaceViewTables = (
     return role === "project_manager"
       ? ["leads", "quotations", "project_schedules"]
       : ["invoices", "payments", "target_goals", "quotations", "leads"];
-  if (view === "Leads" && leadMode === "leads")
+  if (
+    view === "Leads" &&
+    (leadMode === "leads" || leadMode === "lead_change_requests")
+  )
     return ["leads", "profiles", "organization_members", "lead_change_requests"];
   if (view === "Projects")
     return [
@@ -678,9 +694,8 @@ const workspaceViewTables = (
       "project_schedule_completion_requests",
     ];
   if (
-    view === "Costing Breakdown" ||
     view === "Price Quotations" ||
-    (view === "Leads" && ["costing", "quotation"].includes(leadMode))
+    (view === "Leads" && leadMode === "quotation")
   )
     return [
       "quotations",
@@ -690,7 +705,6 @@ const workspaceViewTables = (
       "inventory_items",
       "business_settings",
       "profiles",
-      "quotation_revision_requests",
       "price_quotation_revision_requests",
     ];
   if (view === "Suppliers & Materials")
@@ -749,7 +763,6 @@ const workspaceViewTables = (
       "project_edit_requests",
       "leads",
       "lead_change_requests",
-      "quotation_revision_requests",
       "price_quotation_revision_requests",
       "project_schedules",
       "project_schedule_revision_requests",
@@ -878,7 +891,7 @@ const leads: Module = {
 const supplierDirectory: Module = {
   table: "suppliers",
   title: "Suppliers",
-  detail: "Maintain the vendors used for materials, costing, and quotations.",
+  detail: "Maintain the vendors used for materials and Price Quotations.",
   add: "Add supplier",
   fields: [
     { key: "company_name", label: "Company name", required: true },
@@ -1784,7 +1797,7 @@ function Panel({
         </header>
       )}
       {hideHeading && action && (
-        <div className="fixed left-16 top-3 z-40 flex gap-2 sm:top-4 lg:left-[17rem]">
+        <div className="workspace-floating-action fixed left-16 top-3 z-40 flex gap-2 sm:top-4 lg:left-[17rem]">
           {action}
         </div>
       )}
@@ -1795,19 +1808,24 @@ function Panel({
 type LeadWorkspaceMode =
   | "leads"
   | "projects"
-  | "costing"
+  | "lead_change_requests"
   | "quotation";
 function LeadWorkspaceTabs({
   active,
   onChange,
   className = "",
+  showLeadChangeRequests = false,
 }: {
   active: LeadWorkspaceMode;
   onChange: (mode: LeadWorkspaceMode) => void;
   className?: string;
+  showLeadChangeRequests?: boolean;
 }) {
   const tabs: { mode: LeadWorkspaceMode; label: string }[] = [
     { mode: "leads", label: "Leads" },
+    ...(showLeadChangeRequests
+      ? [{ mode: "lead_change_requests" as const, label: "My Lead Change Requests" }]
+      : []),
   ];
   return (
     <nav
@@ -2429,11 +2447,15 @@ function Records({
   const [monthFilter, setMonthFilter] = useState(currentMonth);
   const [projectOfficerFilter, setProjectOfficerFilter] = useState("all");
   const isProjectsPage = module.table === "leads" && leadMode === "projects";
-  const isGeneralManager = role === "admin";
+  const isLeadChangeRequestsPage =
+    module.table === "leads" && leadMode === "lead_change_requests";
+  const isGeneralManager = memberRole(role);
   const canFilterByProjectOfficer = isGeneralManager && !isProjectsPage;
   const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
   const canCreate =
-    !isProjectsPage && canAccess(role, module.table, "create");
+    !isProjectsPage &&
+    !isLeadChangeRequestsPage &&
+    canAccess(role, module.table, "create");
   const canUpdate = canAccess(role, module.table, "update");
   const canArchive = canAccess(role, module.table, "archive");
   const ownProjectEditRequests =
@@ -2443,7 +2465,7 @@ function Records({
         )
       : [];
   const ownLeadChangeRequests =
-    module.table === "leads" && !isProjectsPage && role === "project_manager"
+    isLeadChangeRequestsPage && role === "project_manager"
       ? store.lead_change_requests.filter(
           (request) => text(request.submitted_by, "") === currentUserId,
         )
@@ -2604,7 +2626,7 @@ function Records({
             options: projectOfficers.map(
               (officer) => `${officer.id}|${officer.name}`,
             ),
-            hint: "Leave blank to keep this chatbot lead unassigned.",
+            hint: "Select an officer, or leave this lead unassigned until it is ready to allocate.",
           },
         ]
       : visibleFields;
@@ -2654,7 +2676,11 @@ function Records({
       )
         payload.created_by =
           (await client.auth.getUser()).data.user?.id ?? null;
-    if (module.table === "leads" && !payload.assigned_to)
+    if (
+      module.table === "leads" &&
+      !payload.assigned_to &&
+      role === "project_manager"
+    )
       payload.assigned_to = payload.created_by;
     if (module.table === "leads" && !payload.project_name)
         payload.project_name = payload.client_name || payload.contact_name || null;
@@ -2765,6 +2791,21 @@ function Records({
     notice("Lead deletion submitted for General Manager approval.");
     await reload();
   };
+  const unsubmitRequest = async (
+    request: Row,
+    rpc: "unsubmit_lead_change" | "unsubmit_project_edit",
+    label: string,
+  ) => {
+    if (!request.id) return;
+    setSaving(true);
+    const { error } = await createClient().rpc(rpc, {
+      p_request_id: request.id,
+    });
+    setSaving(false);
+    if (error) return notice(error.message);
+    notice(`${label} unsubmitted. You can edit and submit it again.`);
+    await reload();
+  };
   const canDeleteLead = (row: Row) =>
     module.table === "leads" &&
     memberRole(role);
@@ -2780,6 +2821,77 @@ function Records({
       text(row.assigned_to ?? row.created_by, "") === currentUserId);
   const isPageLayout = module.table === "leads";
   const contentPadding = isPageLayout ? "px-4 sm:px-6 lg:px-7" : "px-4 sm:px-5";
+  if (isLeadChangeRequestsPage && onLeadModeChange) {
+    return (
+      <div className="-m-3 min-h-[calc(100vh-76px)] bg-white sm:-m-4 sm:min-h-[calc(100vh-84px)] lg:-m-5">
+        <Panel
+          title={module.title}
+          detail={module.detail}
+          variant="page"
+          hideHeading
+        >
+          <LeadWorkspaceTabs
+            active={leadMode}
+            onChange={onLeadModeChange}
+            className={contentPadding}
+            showLeadChangeRequests={role === "project_manager"}
+          />
+          <header className={`${contentPadding} border-t border-[#edf0f5] py-4`}>
+            <h2 className="text-[15px] font-semibold text-[#202938]">My Lead Change Requests</h2>
+            <p className="mt-1 text-[12px] text-[#8b92a1]">
+              Track submitted changes and use Edit from the Leads tab to revise and resubmit returned requests.
+            </p>
+          </header>
+          {ownLeadChangeRequests.length ? (
+            <div className="lead-change-request-shell">
+              <Table
+                labels={["Lead", "Requested changes", "Review", "Actions"]}
+                minWidth={760}
+                scrollable
+                columnWidths={["28%", "31%", "29%", "12%"]}
+                className="lead-change-request-table modern-page-table"
+              >
+                {ownLeadChangeRequests.map((request) => {
+                  const lead = store.leads.find((item) => item.id === request.lead_id);
+                  const changes = request.proposed_changes && typeof request.proposed_changes === "object"
+                    ? Object.keys(request.proposed_changes as Record<string, unknown>)
+                    : [];
+                  const labels = changes.map((change) => change.replaceAll("_", " "));
+                  const changeSummary = text(request.change_type, "") === "delete"
+                    ? "Deletion request"
+                    : labels.length <= 2
+                      ? labels.join(", ")
+                      : `${labels.slice(0, 2).join(", ")} +${labels.length - 2} more`;
+                  return (
+                    <tr key={text(request.id)} className="hover:bg-[#fbfcff]">
+                      <td className="px-5 py-3"><b>{text(lead?.project_name)}</b><small>{text(lead?.client_name)} - {text(lead?.contact_name)}</small></td>
+                      <td className="px-5 py-3"><span>{changeSummary || "-"}</span><small>Submitted {day(request.submitted_at)}</small></td>
+                      <td className="px-5 py-3"><Status value={request.status} />{text(request.decision_note, "") && <small>{text(request.decision_note)}</small>}</td>
+                      <td className="px-5 py-3">
+                        {text(request.status) === "pending" && (
+                          <ActionIcon
+                            label="Unsubmit lead change"
+                            tone="amber"
+                            disabled={saving}
+                            confirm
+                            onClick={() => void unsubmitRequest(request, "unsubmit_lead_change", "Lead change")}
+                          >
+                            <RotateCcw size={15} />
+                          </ActionIcon>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </Table>
+            </div>
+          ) : (
+            <Empty>No lead change requests yet.</Empty>
+          )}
+        </Panel>
+      </div>
+    );
+  }
   return (
     <div
       className={
@@ -2789,21 +2901,34 @@ function Records({
       }
     >
       {isProjectsPage && role === "project_manager" && ownProjectEditRequests.length > 0 && (
-        <Panel title="My Project Edit Requests" detail="Project changes take effect only after General Manager approval.">
-          <Table labels={["Project", "Submitted", "Status", "General Manager note"]} minWidth={640}>
+        <Panel title="My Project Edit Requests" detail="Edit the project, submit it for review, and use Edit again if the General Manager returns it for revision.">
+          <Table labels={["Project", "Submitted", "Status", "General Manager note", "Actions"]} minWidth={720}>
             {ownProjectEditRequests.map((request) => (
               <tr key={text(request.id)}>
                 <td className="px-4 py-3">{text(store.leads.find((lead) => lead.id === request.project_id)?.project_name)}</td>
                 <td className="px-4 py-3">{day(request.submitted_at)}</td>
                 <td className="px-4 py-3"><Status value={request.status} /></td>
                 <td className="px-4 py-3">{text(request.decision_note)}</td>
+                <td className="px-4 py-3">
+                  {text(request.status) === "pending" && (
+                    <ActionIcon
+                      label="Unsubmit project edit"
+                      tone="amber"
+                      disabled={saving}
+                      confirm
+                      onClick={() => void unsubmitRequest(request, "unsubmit_project_edit", "Project edit")}
+                    >
+                      <RotateCcw size={15} />
+                    </ActionIcon>
+                  )}
+                </td>
               </tr>
             ))}
           </Table>
         </Panel>
       )}
       {!isProjectsPage && role === "project_manager" && ownLeadChangeRequests.length > 0 && (
-        <Panel title="My Lead Change Requests" detail="Lead edits and deletions take effect only after General Manager approval.">
+        <Panel title="My Lead Change Requests" detail="Edit the lead, submit it for review, and use Edit again if the General Manager returns it for revision.">
           <Table labels={["Lead", "Requested", "Change", "Status", "General Manager note"]} minWidth={720}>
             {ownLeadChangeRequests.map((request) => {
               const lead = store.leads.find((item) => item.id === request.lead_id);
@@ -2833,7 +2958,9 @@ function Records({
                 setEditing(null);
                 setValues({
                   ...initial(),
-                  ...(module.table === "leads" && currentUserId
+                  ...(module.table === "leads" &&
+                  role === "project_manager" &&
+                  currentUserId
                     ? { assigned_to: currentUserId }
                     : {}),
                   ...(isProjectsPage
@@ -2854,7 +2981,15 @@ function Records({
             active={leadMode}
             onChange={onLeadModeChange}
             className={contentPadding}
+            showLeadChangeRequests={role === "project_manager"}
           />
+        )}
+        {module.table === "leads" && isGeneralManager && !isProjectsPage && (
+          <div className={`${contentPadding} border-t border-[#edf0f5] py-3`}>
+            <p className="text-[12px] text-[#687386]">
+              Manage all leads, add new opportunities, and assign each lead to a Sales Project Officer. Officer changes are reviewed from Submissions Approvals.
+            </p>
+          </div>
         )}
         {!isProjectsPage && module.table === "leads" && (
           <div className={`${contentPadding} border-t border-[#edf0f5] py-2.5`}>
@@ -3096,6 +3231,11 @@ function Records({
             setEditing(null);
           }}
           saving={saving}
+          saveLabel={
+            editing && module.table === "leads" && role === "project_manager"
+              ? "Submit for review"
+              : undefined
+          }
         />
       )}
     </div>
@@ -3211,8 +3351,8 @@ function ProjectCalendar({
       text(quote.status, "") === "approved" &&
       !scheduledQuoteIds.has(text(quote.id, "")),
   );
-  const canCreateSchedule = ["project_manager", "admin"].includes(role);
-  const isGeneralManager = role === "admin";
+  const canCreateSchedule = role === "project_manager";
+  const isGeneralManager = memberRole(role);
   const scheduleProjectType = (schedule: Row) =>
     text(
       store.quotations.find((quote) => quote.id === schedule.quotation_id)
@@ -3380,6 +3520,32 @@ function ProjectCalendar({
       setSaving(false);
     }
   };
+  const unsubmitScheduleRequest = async (
+    request: Row,
+    rpc:
+      | "unsubmit_project_schedule_revision"
+      | "unsubmit_project_schedule_completion",
+    label: string,
+  ) => {
+    if (!request.id) return;
+    setSaving(true);
+    try {
+      const { error } = await createClient().rpc(rpc, {
+        p_request_id: request.id,
+      });
+      if (error) throw error;
+      await reload();
+      notice(`${label} unsubmitted. You can submit it again when ready.`);
+    } catch (error) {
+      notice(
+        error instanceof Error
+          ? error.message
+          : `${label} could not be unsubmitted.`,
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
   const schedulesDueOnDay = (key: string) =>
     approvedSchedules.filter(
       (schedule) =>
@@ -3399,27 +3565,24 @@ function ProjectCalendar({
   const canRequestScheduleRevision = (schedule: Row) =>
     !schedule.completed_at &&
     !hasPendingScheduleCompletion(schedule) &&
-    (isGeneralManager ||
-      (role === "project_manager" &&
-        text(schedule.assigned_to, "") === currentUserId &&
-        text(schedule.created_by, "") === currentUserId));
+    role === "project_manager" &&
+    text(schedule.assigned_to, "") === currentUserId &&
+    text(schedule.created_by, "") === currentUserId;
   const hasPendingScheduleRevision = (schedule: Row) =>
     store.project_schedule_revision_requests.some(
       (request) =>
         text(request.schedule_id, "") === text(schedule.id, "") &&
         text(request.status, "") === "pending",
     );
-  const showScheduleRevisionActions =
-    isGeneralManager || role === "project_manager";
+  const showScheduleRevisionActions = role === "project_manager";
   const showProjectActions =
     showScheduleRevisionActions && projectStatusTab === "active";
   const canRequestScheduleCompletion = (schedule: Row) =>
     !schedule.completed_at &&
     !hasPendingScheduleRevision(schedule) &&
-    (isGeneralManager ||
-      (role === "project_manager" &&
-        text(schedule.assigned_to, "") === currentUserId &&
-        text(schedule.created_by, "") === currentUserId));
+    role === "project_manager" &&
+    text(schedule.assigned_to, "") === currentUserId &&
+    text(schedule.created_by, "") === currentUserId;
   const hasPendingScheduleCompletion = (schedule: Row) =>
     store.project_schedule_completion_requests.some(
       (request) =>
@@ -3460,8 +3623,12 @@ function ProjectCalendar({
   };
   return (
     <Panel
-      title="Project calendar"
-      detail="Approved Price Quotations scheduled for production."
+      title={isGeneralManager ? "Project oversight" : "Project calendar"}
+      detail={
+        isGeneralManager
+          ? "Monitor all scheduled projects. Review new schedules, revisions, and completion requests from Submissions Approvals."
+          : "Approved Price Quotations scheduled for production."
+      }
       variant="page"
       hideHeading
       action={
@@ -3717,6 +3884,20 @@ function ProjectCalendar({
                     <p className="mt-0.5 text-[#687386]">{day(request.proposed_start_date)} – {day(request.proposed_due_date)}</p>
                     <div className="mt-1"><Status value={text(request.status, "pending")} /></div>
                     {text(request.decision_note) && <p className="mt-1 text-[#687386]">{text(request.decision_note)}</p>}
+                    {text(request.status) === "pending" && (
+                      <div className="mt-2">
+                        <Button
+                          secondary
+                          confirm
+                          confirmationText="Unsubmit this schedule revision? The General Manager will no longer be able to review it."
+                          disabled={saving}
+                          onClick={() => void unsubmitScheduleRequest(request, "unsubmit_project_schedule_revision", "Schedule revision")}
+                        >
+                          <RotateCcw size={14} />
+                          Unsubmit
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -3735,6 +3916,20 @@ function ProjectCalendar({
                     <p className="mt-0.5 text-[#687386]">Requested {day(request.submitted_at)}</p>
                     <div className="mt-1"><Status value={text(request.status, "pending")} /></div>
                     {text(request.decision_note) && <p className="mt-1 text-[#687386]">{text(request.decision_note)}</p>}
+                    {text(request.status) === "pending" && (
+                      <div className="mt-2">
+                        <Button
+                          secondary
+                          confirm
+                          confirmationText="Unsubmit this project completion request? The General Manager will no longer be able to review it."
+                          disabled={saving}
+                          onClick={() => void unsubmitScheduleRequest(request, "unsubmit_project_schedule_completion", "Project completion")}
+                        >
+                          <RotateCcw size={14} />
+                          Unsubmit
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -4125,7 +4320,7 @@ function MaterialsList({
   return (
     <Panel
       title="Materials List"
-      detail="Maintain the available material choices used in Costing Breakdowns. Click Edit to change a row."
+      detail="Maintain the available material choices used in Price Quotations. Click Edit to change a row."
       action={canManage ? (
         <Button
           disabled={
@@ -4479,7 +4674,7 @@ function SuppliersList({
   return (
     <Panel
       title="Suppliers"
-      detail="Maintain the vendors used for materials, costing, and quotations."
+      detail="Maintain the vendors used for materials and Price Quotations."
       action={
         canManage ? (
           <Button
@@ -7563,7 +7758,7 @@ function PriceQuotationWorkspace({
   const [revisionNoteQuote, setRevisionNoteQuote] = useState<Row | null>(null);
   const [illustrationQuote, setIllustrationQuote] = useState<Row | null>(null);
   const isGeneralManager = memberRole(role);
-  const canPrepare = role === "project_manager" || isGeneralManager;
+  const canPrepare = role === "project_manager";
   useEffect(() => {
     let active = true;
     void createClient().auth.getUser().then(({ data }) => {
@@ -7730,6 +7925,18 @@ function PriceQuotationWorkspace({
     notice("Price Quotation returned to draft.");
     await reload();
   };
+  const unsubmitRevisionRequest = async (request: Row) => {
+    if (!request.id) return;
+    setSaving(true);
+    const { error } = await createClient().rpc(
+      "unsubmit_price_quotation_revision",
+      { p_request_id: request.id },
+    );
+    setSaving(false);
+    if (error) return notice(error.message);
+    notice("Price Quotation revision request unsubmitted.");
+    await reload();
+  };
   const beginRevision = async (quote: Row) => {
     setSaving(true);
     const { error } = await createClient().rpc("begin_price_quotation_revision", {
@@ -7771,8 +7978,12 @@ function PriceQuotationWorkspace({
   };
   return (
     <Panel
-      title="Price Quotations"
-      detail="Prepare a quotation from a lead, then submit it for General Manager pricing and approval."
+      title={isGeneralManager ? "Price Quotation Review" : "Price Quotations"}
+      detail={
+        isGeneralManager
+          ? "Review officer-submitted quotations, set commercial terms and pricing, then approve or return them for revision."
+          : "Prepare a quotation from a lead, then submit it for General Manager pricing and approval."
+      }
       variant="page"
       hideHeading
       action={
@@ -7808,13 +8019,18 @@ function PriceQuotationWorkspace({
             const preparedBy = preparedByName(quote);
             const isLegacy = Boolean(quote.costing_source_id);
             const editable = !isLegacy && ["draft", "needs_revision"].includes(text(quote.status));
+            const priceRevisionRequest = store.price_quotation_revision_requests.find(
+              (request) =>
+                request.quotation_id === quote.id &&
+                text(request.status) === "pending",
+            );
             const illustrationCount = store.quotation_items.filter((item) => item.quotation_id === quote.id && Boolean(text(item.image_url, ""))).length;
             return (
               <tr key={text(quote.id)}>
                 <td className="px-5 py-3"><b>{text(quote.quotation_no)}</b><small>{day(quote.issue_date)}</small></td>
                 <td className="px-5 py-3"><b>{text(quote.client_name, text(lead?.client_name))}</b><small>{text(quote.project_name, text(lead?.project_name))}</small></td>
                 {role !== "project_manager" && <td className="px-5 py-3">{preparedBy}</td>}
-                <td className="px-5 py-3"><div className="flex items-center gap-1.5"><Status value={quote.status} />{text(quote.status) === "needs_revision" && <ActionIcon label="View revision note" tone="amber" confirm={false} onClick={() => setRevisionNoteQuote(quote)}><MessageSquareText size={15} /></ActionIcon>}</div></td>
+                <td className="px-5 py-3"><div className="flex items-center gap-1.5"><Status value={quote.status} />{priceRevisionRequest && <span className="text-[11px] text-[#a76605]">Revision requested</span>}{text(quote.status) === "needs_revision" && <ActionIcon label="View revision note" tone="amber" confirm={false} onClick={() => setRevisionNoteQuote(quote)}><MessageSquareText size={15} /></ActionIcon>}</div></td>
                 <td className="px-5 py-3">{text(quote.status) === "approved" ? day(quote.approved_at) : day(quote.submitted_at)}</td>
                 <td className="px-5 py-3"><div className="flex items-center gap-1">
                   {editable && canPrepare && (
@@ -7826,10 +8042,21 @@ function PriceQuotationWorkspace({
                   {role === "project_manager" && text(quote.status) === "pending" && (
                     <ActionIcon label="Unsubmit and return to draft" tone="amber" disabled={saving} onClick={() => void unsubmit(quote)}><RotateCcw size={15} /></ActionIcon>
                   )}
-                  {role === "project_manager" && !isLegacy && text(quote.status) === "approved" && (
-                    <ActionIcon label="Edit and resubmit Price Quotation" tone="amber" disabled={saving} onClick={() => void beginRevision(quote)}><RotateCcw size={15} /></ActionIcon>
+                  {role === "project_manager" && priceRevisionRequest && (
+                    <ActionIcon
+                      label="Unsubmit Price Quotation revision request"
+                      tone="amber"
+                      disabled={saving}
+                      confirm
+                      onClick={() => void unsubmitRevisionRequest(priceRevisionRequest)}
+                    >
+                      <RotateCcw size={15} />
+                    </ActionIcon>
                   )}
-                  {isGeneralManager && ["draft", "pending"].includes(text(quote.status)) && (
+                  {role === "project_manager" && !isLegacy && text(quote.status) === "approved" && (
+                    <ActionIcon label="Edit and resubmit Price Quotation" tone="amber" disabled={saving || Boolean(priceRevisionRequest)} onClick={() => void beginRevision(quote)}><RotateCcw size={15} /></ActionIcon>
+                  )}
+                  {isGeneralManager && text(quote.status) === "pending" && (
                     <ActionIcon label="Review Price Quotation" onClick={() => setReviewing(quote)}><FileText size={15} /></ActionIcon>
                   )}
                   {illustrationCount > 0 && <ActionIcon label="View quotation illustrations" confirm={false} onClick={() => setIllustrationQuote(quote)}><ImageIcon size={15} /></ActionIcon>}
@@ -8450,7 +8677,7 @@ function ProjectEditRequestReview({
   store: Store;
   saving: boolean;
   close: () => void;
-  decide: (decision: "approved" | "rejected", note: string) => void;
+  decide: (decision: "approved" | "needs_revision", note: string) => void;
 }) {
   const [note, setNote] = useState("");
   const project = store.leads.find((item) => item.id === request.project_id);
@@ -8490,12 +8717,12 @@ function ProjectEditRequestReview({
           ))}
         </Table>
         <label className="mt-4 block text-[12px] font-medium text-[#202938]">
-          Decision note
-          <textarea rows={3} value={note} onChange={(event) => setNote(titleCaseEntry(event.target.value, "note"))} className="input mt-1 min-h-[76px] resize-y" placeholder="Optional note for the Project Officer" />
+          Revision note
+          <textarea rows={3} value={note} onChange={(event) => setNote(titleCaseEntry(event.target.value, "note"))} className="input mt-1 min-h-[76px] resize-y" placeholder="Required when returning for revision" />
         </label>
         <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-[#edf0f5] pt-4">
           <Button secondary onClick={close}>Close</Button>
-          <Button secondary disabled={saving} onClick={() => decide("rejected", note)}><X size={14} /> Reject</Button>
+          <Button secondary disabled={saving || !note.trim()} onClick={() => decide("needs_revision", note)}><RotateCcw size={14} /> Return for revision</Button>
           <Button tone="green" disabled={saving} onClick={() => decide("approved", note)}><Check size={14} /> Approve edit</Button>
         </div>
       </section>
@@ -8514,7 +8741,7 @@ function LeadChangeRequestReview({
   store: Store;
   saving: boolean;
   close: () => void;
-  decide: (decision: "approved" | "rejected", note: string) => void;
+  decide: (decision: "approved" | "needs_revision" | "rejected", note: string) => void;
 }) {
   const [note, setNote] = useState("");
   const lead = store.leads.find((item) => item.id === request.lead_id);
@@ -8579,12 +8806,16 @@ function LeadChangeRequestReview({
           </Table>
         )}
         <label className="mt-4 block text-[12px] font-medium text-[#202938]">
-          Decision note
-          <textarea rows={3} value={note} onChange={(event) => setNote(titleCaseEntry(event.target.value, "note"))} className="input mt-1 min-h-[76px] resize-y" placeholder="Optional note for the Sales Project Officer" />
+          {isDeletion ? "Decision note" : "Revision note"}
+          <textarea rows={3} value={note} onChange={(event) => setNote(titleCaseEntry(event.target.value, "note"))} className="input mt-1 min-h-[76px] resize-y" placeholder={isDeletion ? "Optional note for the Sales Project Officer" : "Required when returning for revision"} />
         </label>
         <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-[#edf0f5] pt-4">
           <Button secondary onClick={close}>Close</Button>
-          <Button secondary disabled={saving} onClick={() => decide("rejected", note)}><X size={14} /> Reject</Button>
+          {isDeletion ? (
+            <Button secondary disabled={saving} onClick={() => decide("rejected", note)}><X size={14} /> Reject deletion</Button>
+          ) : (
+            <Button secondary disabled={saving || !note.trim()} onClick={() => decide("needs_revision", note)}><RotateCcw size={14} /> Return for revision</Button>
+          )}
           <Button
             tone="green"
             disabled={saving}
@@ -8690,7 +8921,7 @@ function Submissions({
   };
   const decideProjectEdit = async (
     request: Row,
-    decision: "approved" | "rejected",
+    decision: "approved" | "needs_revision",
     note: string,
   ) => {
     if (!request.id) return;
@@ -8703,12 +8934,16 @@ function Submissions({
     setSavingId(null);
     if (error) return notice(error.message);
     setSelectedProjectEdit(null);
-    notice(decision === "approved" ? "Project edit approved." : "Project edit rejected.");
+    notice(
+      decision === "approved"
+        ? "Project edit approved."
+        : "Project edit returned for revision.",
+    );
     await reload();
   };
   const decideLeadChange = async (
     request: Row,
-    decision: "approved" | "rejected",
+    decision: "approved" | "needs_revision" | "rejected",
     note: string,
   ) => {
     if (!request.id) return;
@@ -8727,7 +8962,9 @@ function Submissions({
         ? isDeletion
           ? "Lead deletion approved."
           : "Lead edit approved."
-        : "Lead change request rejected.",
+        : decision === "needs_revision"
+          ? "Lead edit returned for revision."
+          : "Lead deletion rejected.",
     );
     await reload();
   };
@@ -9078,11 +9315,17 @@ function Submissions({
             const lead = store.leads.find((item) => item.id === request.lead_id);
             const changes = request.proposed_changes && typeof request.proposed_changes === "object" ? Object.keys(request.proposed_changes as Record<string, unknown>) : [];
             const isDeletion = text(request.change_type, "") === "delete";
+            const changeLabels = changes.map((change) => change.replaceAll("_", " "));
+            const changeSummary = isDeletion
+              ? "Deletion request"
+              : changeLabels.length <= 2
+                ? changeLabels.join(", ")
+                : `${changeLabels.slice(0, 2).join(", ")} +${changeLabels.length - 2} more`;
             return <tr key={text(request.id)}>
               <td className="px-5 py-3"><b>{text(lead?.project_name)}</b><small>{text(lead?.client_name)} · {text(lead?.contact_name)}</small></td>
               <td className="px-5 py-3">{projectOfficerName(request)}</td>
               <td className="px-5 py-3">{day(request.submitted_at)}</td>
-              <td className="px-5 py-3">{isDeletion ? "Deletion request" : changes.map((change) => change.replaceAll("_", " ")).join(", ")}</td>
+              <td className="px-5 py-3">{changeSummary || "-"}</td>
               <td className="px-5 py-3"><ActionIcon label="Review lead change" confirm={false} onClick={() => setSelectedLeadChange(request)}><FileText size={15} /></ActionIcon></td>
             </tr>;
           })}
@@ -10926,7 +11169,6 @@ function ProjectOfficerSalesFunnel({
 }) {
   const isColorMode = true;
   const countUniqueLeads = (rows: Row[]) => new Set(rows.map((row) => text(row.lead_id, text(row.id, ""))).filter(Boolean)).size;
-  const costingBreakdowns = store.quotations.filter((quotation) => text(quotation.document_type) === "costing_breakdown");
   const priceQuotations = store.quotations.filter((quotation) => text(quotation.document_type) === "price_quotation" && ["sent", "approved"].includes(text(quotation.status)));
   const doneDeals = store.leads.filter((lead) => n(lead.evaluation_number) === 7);
   const completedProjects = store.project_schedules.filter(
@@ -10936,12 +11178,11 @@ function ProjectOfficerSalesFunnel({
   const stages = [
     { label: "1. Leads Generated", description: "All potential leads collected", total: store.leads.length, color: "#0863c4", Icon: UsersRound },
     { label: "2. Leads Contacted", description: "Leads that were successfully contacted", total: store.leads.filter((lead) => Boolean(text(lead.date_contacted, ""))).length, color: "#08aabd", Icon: MessageSquareText },
-    { label: "3. Costing Breakdown", description: "Leads with costing information shared", total: countUniqueLeads(costingBreakdowns), color: "#43a717", Icon: ReceiptText },
-    { label: "4. Price Quotation", description: "Quotation provided to interested leads", total: countUniqueLeads(priceQuotations), color: "#ee9500", Icon: FileText },
-    { label: "5. Paid Clients", description: "Leads who made a payment / became clients", total: completedAt(6), color: "#e74408", Icon: PhilippinePeso },
-    { label: "6. Mock-Up / Sample Approval", description: "Samples approved by the client", total: completedAt(5), color: "#d32971", Icon: ClipboardCheck },
-    { label: "7. Purchase Order received", description: "Official PO received from the client", total: completedAt(4), color: "#6330bd", Icon: FileText },
-    { label: "8. Completed Projects", description: "General Manager-approved finished projects", total: completedProjects, color: "#075fc3", Icon: Check },
+    { label: "3. Price Quotation", description: "Quotation provided to interested leads", total: countUniqueLeads(priceQuotations), color: "#ee9500", Icon: FileText },
+    { label: "4. Paid Clients", description: "Leads who made a payment / became clients", total: completedAt(6), color: "#e74408", Icon: PhilippinePeso },
+    { label: "5. Mock-Up / Sample Approval", description: "Samples approved by the client", total: completedAt(5), color: "#d32971", Icon: ClipboardCheck },
+    { label: "6. Purchase Order received", description: "Official PO received from the client", total: completedAt(4), color: "#6330bd", Icon: FileText },
+    { label: "7. Completed Projects", description: "General Manager-approved finished projects", total: completedProjects, color: "#075fc3", Icon: Check },
   ];
   const percentage = (current: number, previous: number) => previous ? `${((current / previous) * 100).toFixed(2)}%` : "—";
   const overallPercentage = percentage(stages.at(-1)?.total ?? 0, stages[0].total);
@@ -11522,7 +11763,7 @@ function Approvals({
   const decide = async (r: Row, status: "approved" | "rejected") => {
     if (r.resource_type === "quotation") {
       return notice(
-        "Review Costing Breakdown submissions from General Manager Submissions.",
+            "Review submitted Price Quotations from General Manager Submissions.",
       );
     }
     const client = createClient();
@@ -11722,6 +11963,7 @@ function SettingsView({
   };
   return (
     <div className="space-y-5">
+      <AccountProfileDialog open embedded fullWidth role={role} />
       <Panel
         title="Default bank details"
         detail="Shown on new Price Quotations."
@@ -11744,6 +11986,7 @@ function SettingsView({
           here.
         </div>
       </Panel>
+      {isSuperAdmin && (
       <Panel
         title="Staff access"
         detail="Each person uses their own account; assign every Project Officer and Accountant separately."
@@ -11812,6 +12055,7 @@ function SettingsView({
           ))}
         </Table>
       </Panel>
+      )}
       {isSuperAdmin && (
         <Panel
           title="Project Manager Accounts"
@@ -11931,10 +12175,13 @@ export function HuswellWorkspace({
   initialView?: View;
 }) {
   const [active, setActive] = useState<View>(
-    initialView ?? (role === "accountant" ? "Finance" : "Dashboard"),
+    initialView === "Costing Breakdown"
+      ? "Price Quotations"
+      : initialView ?? (role === "accountant" ? "Finance" : "Dashboard"),
   );
   const [leadMode, setLeadMode] = useState<LeadWorkspaceMode>("leads");
   const [mobile, setMobile] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [store, setStore] = useState<Store>(blank);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
@@ -11955,7 +12202,7 @@ export function HuswellWorkspace({
     setActive(mode === "quotation" ? "Price Quotations" : "Leads");
   }, []);
   const navigate = useCallback((view: View) => {
-    if (view === "Costing Breakdown") return selectLeadWorkspaceMode("costing");
+    if (view === "Costing Breakdown") return selectLeadWorkspaceMode("quotation");
     if (view === "Price Quotations") {
       setLeadMode("quotation");
       setActive("Price Quotations");
@@ -12148,10 +12395,34 @@ export function HuswellWorkspace({
       "Targets",
     ],
   };
+  const isManagementRole = memberRole(role);
   const navBase: {
     label: string;
     items: { view: View; icon: typeof LayoutDashboard }[];
-  }[] = [
+  }[] = isManagementRole ? [
+    {
+      label: "Management",
+      items: [
+        { view: "Dashboard", icon: LayoutDashboard },
+        { view: "Leads", icon: ClipboardCheck },
+        { view: "Projects", icon: ClipboardCheck },
+      ],
+    },
+    {
+      label: "Reviews",
+      items: [
+        { view: "Price Quotations", icon: FileText },
+        { view: "Submissions", icon: ClipboardCheck },
+      ],
+    },
+    {
+      label: "Business",
+      items: [
+        { view: "Finance", icon: Wallet },
+        { view: "Settings", icon: Settings },
+      ],
+    },
+  ] : [
     {
       label: "Project operations",
       items: [
@@ -12187,16 +12458,20 @@ export function HuswellWorkspace({
       title: role === "project_manager" || role === "admin" ? "KPI Dashboard" : "Dashboard",
       detail:
         role === "project_manager"
-          ? "Track your lead, costing, quotation, and supplier key performance indicators."
+          ? "Track your lead, quotation, and supplier key performance indicators."
           : "Monitor business performance and current work.",
     },
     Leads: {
-      title: leads.title,
-      detail: leads.detail,
+      title: isManagementRole ? "Lead management" : leads.title,
+      detail: isManagementRole
+        ? "Add and assign leads, then review officer-submitted lead changes from Submissions Approvals."
+        : leads.detail,
     },
     Projects: {
-      title: projects.title,
-      detail: projects.detail,
+      title: isManagementRole ? "Project oversight" : projects.title,
+      detail: isManagementRole
+        ? "Monitor all project schedules and review officer submissions."
+        : projects.detail,
     },
     "Costing Breakdown": {
       title: "Costing Breakdown",
@@ -12204,17 +12479,18 @@ export function HuswellWorkspace({
         "Build material and production costs, then submit them for General Manager review.",
     },
     "Price Quotations": {
-      title: "Price Quotations",
-      detail:
-        "Prepare quotations from leads, then submit them for General Manager pricing and approval.",
+      title: isManagementRole ? "Price Quotation Review" : "Price Quotations",
+      detail: isManagementRole
+        ? "Review officer-submitted quotations, set commercial terms and pricing, then approve or return them for revision."
+        : "Prepare quotations from leads, then submit them for General Manager pricing and approval.",
     },
     "Materials List": {
       title: "Materials List",
-      detail: "Maintain the material choices used in Costing Breakdowns.",
+      detail: "Maintain the material choices used in Price Quotations.",
     },
     "Suppliers & Materials": {
       title: "Suppliers & Materials",
-      detail: "Maintain the vendors and materials used for costing and quotations.",
+      detail: "Maintain the vendors and materials used for Price Quotations.",
     },
     Suppliers: {
       title: "Suppliers",
@@ -12267,7 +12543,7 @@ export function HuswellWorkspace({
       detail: "Review approval requests and activity history.",
     },
     Submissions: {
-      title: "General Manager Submissions",
+      title: "Submissions Approvals",
       detail: "Review submitted Price Quotations, project edits, and Lead change requests.",
     },
     Settings: {
@@ -12283,9 +12559,7 @@ export function HuswellWorkspace({
   const activeLeadWorkspaceMode: LeadWorkspaceMode =
     active === "Projects"
       ? "projects"
-      : active === "Costing Breakdown"
-        ? "costing"
-        : active === "Price Quotations"
+      : active === "Price Quotations"
           ? "quotation"
           : leadMode;
   const content =
@@ -12351,9 +12625,9 @@ export function HuswellWorkspace({
     ) : active === "Quotations" ? (
       <Panel
         title="Quotation workflow moved"
-        detail="Price Quotations are generated only after General Manager approval of a Costing Breakdown."
+        detail="Use Price Quotations to prepare, submit, and manage client quotations."
       >
-        <Empty>Use Costing Breakdown and Price Quotations to follow the current workflow.</Empty>
+        <Empty>Use Price Quotations to follow the current workflow.</Empty>
       </Panel>
     ) : active === "Production" ? (
       <Production
@@ -12433,9 +12707,9 @@ export function HuswellWorkspace({
     ) : active === "Approvals" ? (
       <Panel
         title="Approvals moved"
-        detail="Costing Breakdowns are reviewed from Submissions so pricing, terms, and the generated Price Quotation remain together."
+        detail="Price Quotations are reviewed from Submissions."
       >
-        <Empty>Use Submissions to review Costing Breakdowns.</Empty>
+        <Empty>Use Submissions to review Price Quotations.</Empty>
       </Panel>
     ) : active === "Submissions" ? (
       <Submissions
@@ -12454,19 +12728,46 @@ export function HuswellWorkspace({
       />
     );
   return (
-    <div className="huswell-workspace min-h-screen bg-[#fafafa] text-[#151922]">
+    <div className={`huswell-workspace min-h-screen bg-[#fafafa] text-[#151922] ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside
-        className={`${mobile ? "translate-x-0" : "-translate-x-full"} sidebar-shell fixed inset-y-0 z-30 flex w-64 flex-col border-r border-[#e2e7ef] bg-white p-4 text-[#475467] transition-transform lg:translate-x-0`}
+        className={`${mobile ? "translate-x-0" : "-translate-x-full"} sidebar-shell fixed inset-y-0 z-40 flex w-64 flex-col border-r border-[#e2e7ef] bg-white p-4 text-[#475467] transition-[transform,width,padding] lg:translate-x-0 ${sidebarCollapsed ? "lg:w-[72px] lg:px-2" : "lg:w-64"}`}
       >
-        <div className="mb-5 flex flex-col items-center px-1">
-          <Image
-            src="https://www.huswelltrading.com/logo/huswell-logo.png"
-            alt="Huswell Trading"
-            width={112}
-            height={52}
-            priority
-            className="huswell-sidebar-logo h-auto w-24"
-          />
+        <button
+          type="button"
+          className="absolute -right-4 top-5 hidden size-8 place-items-center rounded-full border border-[#d9e0e9] bg-white text-[#626b7a] shadow-sm transition-colors hover:bg-[#f7f7f8] hover:text-[#202124] lg:grid"
+          onClick={() => setSidebarCollapsed((current) => !current)}
+          aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-pressed={!sidebarCollapsed}
+          title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+        >
+          {sidebarCollapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
+        </button>
+        <div className="mb-5 flex items-center justify-between px-1">
+          <div className="flex min-w-0 flex-1 justify-center">
+            <Image
+              src="https://huswelltrading.com/favicon.ico"
+              alt="Huswell Trading"
+              width={36}
+              height={36}
+              className={`hidden size-9 rounded-full ${sidebarCollapsed ? "lg:block" : ""}`}
+            />
+            <Image
+              src="https://www.huswelltrading.com/logo/huswell-logo.png"
+              alt="Huswell Trading"
+              width={112}
+              height={52}
+              priority
+              className={`huswell-sidebar-logo h-auto w-24 ${sidebarCollapsed ? "lg:hidden" : ""}`}
+            />
+          </div>
+          <button
+            type="button"
+            className="grid size-9 place-items-center rounded-lg text-[#626b7a] transition-colors hover:bg-[#f1f3f4] hover:text-[#202124] lg:hidden"
+            onClick={() => setMobile(false)}
+            aria-label="Close navigation"
+          >
+            <X size={18} />
+          </button>
         </div>
         <nav className="sidebar-scroll flex-1 space-y-px overflow-y-auto">
           {nav.map((group) => (
@@ -12476,9 +12777,15 @@ export function HuswellWorkspace({
                   const navigationLabel =
                     view === "Dashboard" && ["project_manager", "admin"].includes(role)
                       ? "KPI"
-                      : view === "Submissions"
-                        ? "Submissions Approvals"
-                        : view;
+                      : isManagementRole && view === "Leads"
+                        ? "Lead Management"
+                        : isManagementRole && view === "Projects"
+                          ? "Project Oversight"
+                          : isManagementRole && view === "Price Quotations"
+                            ? "Price Quotation Review"
+                            : view === "Submissions"
+                              ? "Submissions Approvals"
+                              : view;
                   return (
                     <button
                     key={view}
@@ -12486,18 +12793,20 @@ export function HuswellWorkspace({
                       navigate(view);
                       setMobile(false);
                     }}
+                    title={navigationLabel}
+                    aria-label={navigationLabel}
                     style={{
                       fontSize: "14px",
                       lineHeight: "20px",
                     }}
                     aria-current={active === view ? "page" : undefined}
-                    className={`${active === view ? "bg-[#c43b43] font-medium text-white" : "text-[#202124] hover:bg-[#f1f3f4]"} group flex min-h-9 w-full items-center gap-2.5 rounded-lg px-3 py-1 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c43b43] focus-visible:ring-offset-2 focus-visible:ring-offset-white`}
+                    className={`${active === view ? "bg-[#c43b43] font-medium text-white" : "text-[#202124] hover:bg-[#f1f3f4]"} group flex min-h-9 w-full items-center gap-2.5 rounded-lg px-3 py-1 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c43b43] focus-visible:ring-offset-2 focus-visible:ring-offset-white ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
                   >
                     <Icon
                       size={17}
                       className={`${active === view ? "text-white" : "text-[#5f6368] group-focus-visible:text-[#202124]"} shrink-0 transition-colors`}
                     />
-                    <span className="min-w-0 flex-1 truncate">{navigationLabel}</span>
+                    <span className={`min-w-0 flex-1 truncate ${sidebarCollapsed ? "lg:hidden" : ""}`}>{navigationLabel}</span>
                   </button>
                   );
                 })}
@@ -12506,21 +12815,21 @@ export function HuswellWorkspace({
           ))}
         </nav>
         <div className="mt-4 border-t border-[#e2e7ef] pt-4">
-          {canEditOwnProfile && (
+          {canEditOwnProfile && !isManagementRole && (
             <a
               href="/profile"
-              className="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-[#202124] transition-colors hover:bg-[#f1f3f4]"
+              className={`mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-[#202124] transition-colors hover:bg-[#f1f3f4] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
             >
               <UserRound size={17} />
-              Profile
+              <span className={sidebarCollapsed ? "lg:sr-only" : ""}>Profile</span>
             </a>
           )}
           <button
             onClick={() => setSignOutOpen(true)}
-            className="mt-4 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-[#202124] transition-colors hover:bg-[#f1f3f4]"
+            className={`mt-4 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-[#202124] transition-colors hover:bg-[#f1f3f4] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
           >
             <LogOut size={17} />
-            Sign out
+            <span className={sidebarCollapsed ? "lg:sr-only" : ""}>Sign out</span>
           </button>
         </div>
       </aside>
@@ -12572,7 +12881,7 @@ export function HuswellWorkspace({
           aria-label="Close navigation"
         />
       )}
-      <main className="min-h-screen bg-[#fafafa] lg:pl-64">
+      <main className={`min-h-screen bg-[#fafafa] transition-[padding] ${sidebarCollapsed ? "lg:pl-[72px]" : "lg:pl-64"}`}>
         <header className="sticky top-0 z-30 flex min-h-[64px] items-center justify-between gap-3 border-b border-[#dfe5ed] bg-white px-4 py-3 sm:min-h-[72px] sm:px-5 lg:px-6">
           <div className="flex min-w-0 items-center gap-3">
             <button
@@ -12593,7 +12902,16 @@ export function HuswellWorkspace({
                 year: "numeric",
               }).format(navigationDate)}
             </span>
-            {canEditOwnProfile ? (
+            {canEditOwnProfile && isManagementRole ? (
+              <button
+                type="button"
+                onClick={() => navigate("Settings")}
+                aria-label="Open settings"
+                className="grid size-9 place-items-center rounded-full bg-[#fceced] text-[11px] font-semibold text-[#ab3038] transition-colors hover:bg-[#f6d8da]"
+              >
+                {profileName.slice(0, 2).toUpperCase()}
+              </button>
+            ) : canEditOwnProfile ? (
               <a
                 href="/profile"
                 aria-label="Edit profile"

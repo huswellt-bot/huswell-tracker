@@ -45,7 +45,7 @@ export async function POST(request: Request) {
   if (
     typeof documentId !== "string" ||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(documentId) ||
-    (documentType !== "costing_breakdown" && documentType !== "price_quotation")
+    documentType !== "price_quotation"
   ) {
     return Response.json({ error: "A valid document reference is required." }, { status: 400 });
   }
@@ -61,31 +61,13 @@ export async function POST(request: Request) {
   if (documentError || !document) {
     return Response.json({ error: "You do not have access to this document." }, { status: 403 });
   }
-  if (documentType === "costing_breakdown") {
-    if (document.status !== "approved") {
-      return Response.json(
-        { error: "Costing Breakdown PDFs are available after General Manager approval." },
-        { status: 403 },
-      );
-    }
-    const { data: membership } = await supabase
-      .from("organization_members")
-      .select("role")
-      .eq("organization_id", document.organization_id)
-      .eq("user_id", user.id)
-      .maybeSingle();
-    if (!membership || !["owner", "admin"].includes(String(membership.role))) {
-      return Response.json({ error: "Only the General Manager can generate Costing Breakdown PDFs." }, { status: 403 });
-    }
-  }
-
   try {
     const pdf = await createPdf(html);
     const body = new Uint8Array(pdf);
     return new Response(body.buffer, {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `inline; filename="${documentType === "costing_breakdown" ? "Costing Breakdown" : "Price Quotation"}.pdf"`,
+        "Content-Disposition": "inline; filename=Price Quotation.pdf",
         "Cache-Control": "no-store",
       },
     });

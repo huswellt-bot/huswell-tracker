@@ -4,6 +4,9 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Huswell Trading | Business Workspace",
   description: "Operations and finance workspace for Huswell Trading.",
+  icons: {
+    icon: "https://huswelltrading.com/favicon.ico",
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

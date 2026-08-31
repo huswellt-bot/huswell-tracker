@@ -21,6 +21,7 @@ export function AccountProfileDialog({
   onSaved = () => undefined,
   page = false,
   embedded = false,
+  fullWidth = false,
   role = "",
   backHref = "/",
 }: {
@@ -29,6 +30,7 @@ export function AccountProfileDialog({
   onSaved?: (fullName: string) => void;
   page?: boolean;
   embedded?: boolean;
+  fullWidth?: boolean;
   role?: string;
   backHref?: string;
 }) {
@@ -143,7 +145,7 @@ export function AccountProfileDialog({
           embedded
             ? editing
               ? "w-full max-w-md rounded-2xl border border-[#dfe5ed] bg-white p-5 shadow-2xl"
-              : "mx-auto w-full max-w-2xl rounded-2xl border border-[#dfe5ed] bg-white p-5 shadow-none"
+              : `w-full rounded-2xl border border-[#dfe5ed] bg-white p-5 shadow-none ${fullWidth ? "" : "mx-auto max-w-2xl"}`
             : `w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl ${page ? "mx-auto border border-[#dfe5ed]" : ""}`
         }
       >

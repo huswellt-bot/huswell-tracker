@@ -454,6 +454,20 @@ select:not([multiple]) {
 .huswell-workspace .modern-table-shell {
   margin-top: 8px;
 }
+.huswell-workspace .lead-change-request-shell {
+  width: calc(100% - 48px);
+  max-width: calc(100% - 32px);
+  margin: 8px auto 0;
+}
+.huswell-workspace .lead-change-request-table {
+  table-layout: fixed;
+  width: 100% !important;
+  min-width: 760px !important;
+}
+.huswell-workspace .lead-change-request-table :is(th, td) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .huswell-workspace .modern-table-footer {
   margin-top: 0;
 }
@@ -660,6 +674,11 @@ select option[value=""] {
 }
 .sidebar-shell:hover .sidebar-scroll::-webkit-scrollbar-track {
   background: transparent;
+}
+@media (min-width: 1024px) {
+  .huswell-workspace.sidebar-collapsed .workspace-floating-action {
+    left: 5.5rem !important;
+  }
 }
 .auth-card {
   box-shadow: none;
