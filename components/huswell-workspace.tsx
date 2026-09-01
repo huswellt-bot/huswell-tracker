@@ -3303,7 +3303,15 @@ function MockupWorkspace({
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
   const [values, setValues] = useState<Record<string, string>>({});
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const isGeneralManager = memberRole(role);
+  useEffect(() => {
+    let active = true;
+    void createClient().auth.getUser().then(({ data }) => {
+      if (active) setCurrentUserId(data.user?.id ?? null);
+    });
+    return () => { active = false; };
+  }, []);
   const tasks = store.mockup_tasks.slice().sort((left, right) =>
     text(left.due_date, "9999-12-31").localeCompare(text(right.due_date, "9999-12-31")),
   );
@@ -3332,7 +3340,9 @@ function MockupWorkspace({
     return search.includes(query.trim().toLowerCase());
   });
   const availableLeads = store.leads.filter(
-    (lead) => !["won", "lost"].includes(text(lead.status, "")),
+    (lead) =>
+      !["won", "lost"].includes(text(lead.status, "")) &&
+      (role !== "project_manager" || Boolean(currentUserId) && lead.assigned_to === currentUserId),
   );
   const officerName = (task: Row) =>
     text(
