@@ -2677,6 +2677,13 @@ function Records({
           text(values.evaluation_number, "").split("|")[0] !== "7"
         ? fields.filter((field) => field.key !== "done_deal_status")
         : fields;
+  const isOfficerSettingDroppedClient =
+    module.table === "leads" &&
+    !isProjectsPage &&
+    role === "project_manager" &&
+    Boolean(editing?.id) &&
+    text(values.evaluation_number, "").split("|")[0] === "3" &&
+    n(editing?.evaluation_number) !== 3;
   const dialogFields =
     module.table === "leads" && isGeneralManager && !isProjectsPage
       ? [
@@ -2691,7 +2698,20 @@ function Records({
             hint: "Select an officer, or leave this lead unassigned until it is ready to allocate.",
           },
         ]
-      : visibleFields;
+      : [
+          ...visibleFields,
+          ...(isOfficerSettingDroppedClient
+            ? [
+                {
+                  key: "request_note",
+                  label: "Reason for dropping this client",
+                  type: "textarea" as const,
+                  required: true,
+                  placeholder: "Explain why this client was dropped",
+                },
+              ]
+            : []),
+        ];
   const initial = (row?: Row) =>
     Object.fromEntries(
       module.fields.map((f) => [
@@ -2702,7 +2722,9 @@ function Records({
   const save = async () => {
     setSaving(true);
     const client = createClient();
+    const requestNote = text(values.request_note, "").trim();
     const payload: Record<string, unknown> = { ...values };
+    delete payload.request_note;
     module.fields
       .filter((f) => f.type === "number")
       .forEach((f) => (payload[f.key] = n(payload[f.key])));
@@ -2766,10 +2788,15 @@ function Records({
       !isProjectsPage &&
       role === "project_manager"
     ) {
+      if (isOfficerSettingDroppedClient && !requestNote) {
+        setSaving(false);
+        return notice("Enter a reason for dropping this client.");
+      }
       const { error } = await client.rpc("request_lead_change", {
         p_lead_id: editing.id,
         p_change_type: "update",
         p_proposed_changes: payload,
+        p_request_note: requestNote,
       });
       setSaving(false);
       if (error) return notice(error.message);
@@ -9292,6 +9319,16 @@ function LeadChangeRequestReview({
               </tr>
             ))}
           </Table>
+        )}
+        {!isDeletion && text(request.request_note, "") && (
+          <section className="mt-4 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3">
+            <h3 className="text-[12px] font-semibold text-[#344054]">
+              Sales Project Officer note
+            </h3>
+            <p className="mt-1 whitespace-pre-wrap text-[13px] leading-5 text-[#4b5565]">
+              {text(request.request_note)}
+            </p>
+          </section>
         )}
         <label className="mt-4 block text-[12px] font-medium text-[#202938]">
           {isDeletion ? "Decision note" : "Revision note"}
