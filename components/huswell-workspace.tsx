@@ -94,6 +94,7 @@ type View =
   | "Dashboard"
   | "Leads"
   | "Projects"
+  | "Mockups"
   | "Costing Breakdown"
   | "Price Quotations"
   | "Materials List"
@@ -144,6 +145,7 @@ type TableName =
   | "quotation_revision_requests"
   | "price_quotation_revision_requests"
   | "project_schedules"
+  | "mockup_tasks"
   | "activity_log"
   | "leads"
   | "supplier_payables"
@@ -221,6 +223,7 @@ const tables: TableName[] = [
   "quotation_revision_requests",
   "price_quotation_revision_requests",
   "project_schedules",
+  "mockup_tasks",
   "activity_log",
   "leads",
   "supplier_payables",
@@ -412,6 +415,14 @@ const projectTypeCalendarColors: Record<string, string> = {
   Digital: "#03A9F4",
   "Mock Up": "#7E57C2",
 };
+const MOCKUP_STATUSES = [
+  "requested",
+  "in_progress",
+  "sent_to_client",
+  "revision_requested",
+  "client_approved",
+  "cancelled",
+] as const;
 
 type BankDetail = {
   bank_name: string;
@@ -505,10 +516,11 @@ const rolePermissions: Record<
       "quotations",
       "quotation_items",
       "project_schedules",
+      "mockup_tasks",
       "production_material_usage",
       "expenses",
     ],
-    update: ["leads", "customers", "suppliers", "quotations"],
+    update: ["leads", "customers", "suppliers", "quotations", "mockup_tasks"],
     archive: ["customers", "suppliers"],
     request: ["quotations"],
   },
@@ -596,6 +608,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "quotation_revision_requests",
     "price_quotation_revision_requests",
     "project_schedules",
+    "mockup_tasks",
   ],
   sales: [
     "business_settings",
@@ -693,6 +706,8 @@ const workspaceViewTables = (
       "project_schedule_revision_requests",
       "project_schedule_completion_requests",
     ];
+  if (view === "Mockups")
+    return ["mockup_tasks", "leads", "profiles", "organization_members"];
   if (
     view === "Price Quotations" ||
     (view === "Leads" && leadMode === "quotation")
@@ -3268,6 +3283,175 @@ const monthStartFromValue = (value: string) => {
 };
 const monthValue = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+
+function MockupWorkspace({
+  store,
+  orgId,
+  reload,
+  notice,
+  role,
+}: {
+  store: Store;
+  orgId: string;
+  reload: () => Promise<void>;
+  notice: (message: string) => void;
+  role: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Row | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("active");
+  const [values, setValues] = useState<Record<string, string>>({});
+  const isGeneralManager = memberRole(role);
+  const tasks = store.mockup_tasks.slice().sort((left, right) =>
+    text(left.due_date, "9999-12-31").localeCompare(text(right.due_date, "9999-12-31")),
+  );
+  const isActive = (task: Row) =>
+    !["client_approved", "cancelled"].includes(text(task.status, "requested"));
+  const activeCount = tasks.filter(isActive).length;
+  const overdueCount = tasks.filter(
+    (task) => isActive(task) && text(task.due_date, "") < isoToday(),
+  ).length;
+  const dueTodayCount = tasks.filter(
+    (task) => isActive(task) && text(task.due_date, "") === isoToday(),
+  ).length;
+  const filteredTasks = tasks.filter((task) => {
+    if (statusFilter === "active" && !isActive(task)) return false;
+    if (statusFilter === "overdue" && !(isActive(task) && text(task.due_date, "") < isoToday())) return false;
+    if (statusFilter !== "all" && statusFilter !== "active" && statusFilter !== "overdue" && text(task.status) !== statusFilter) return false;
+    const officer = store.profiles.find((profile) => text(profile.id, "") === text(task.assigned_to, ""));
+    const search = [
+      task.mockup_name,
+      task.project_name,
+      task.client_name,
+      task.company_name,
+      officer?.full_name,
+      task.notes,
+    ].map((value) => text(value).toLowerCase()).join(" ");
+    return search.includes(query.trim().toLowerCase());
+  });
+  const availableLeads = store.leads.filter(
+    (lead) => !["won", "lost"].includes(text(lead.status, "")),
+  );
+  const officerName = (task: Row) =>
+    text(
+      store.profiles.find((profile) => text(profile.id, "") === text(task.assigned_to, ""))?.full_name,
+      "Project Officer",
+    );
+  const close = () => {
+    setOpen(false);
+    setEditing(null);
+    setValues({});
+  };
+  const openNew = () => {
+    setEditing(null);
+    setValues({
+      lead_id: "",
+      mockup_name: "",
+      pieces: "1",
+      due_date: isoToday(),
+      notes: "",
+    });
+    setOpen(true);
+  };
+  const openEdit = (task: Row) => {
+    setEditing(task);
+    setValues({
+      mockup_name: text(task.mockup_name, ""),
+      pieces: text(task.pieces, "1"),
+      due_date: text(task.due_date, ""),
+      status: text(task.status, "requested"),
+      notes: text(task.notes, ""),
+    });
+    setOpen(true);
+  };
+  const save = async () => {
+    const mockupName = titleCase(values.mockup_name?.trim() ?? "");
+    const pieces = n(values.pieces);
+    if (!mockupName || !values.due_date || pieces <= 0)
+      return notice("Enter a mockup name, pieces, and due date.");
+    if (!editing && !values.lead_id)
+      return notice("Select the assigned lead before creating a mockup.");
+
+    setSaving(true);
+    const payload = {
+      mockup_name: mockupName,
+      pieces,
+      due_date: values.due_date,
+      status: editing ? values.status : "requested",
+      notes: values.notes?.trim() || null,
+    };
+    const client = createClient();
+    const { error } = editing?.id
+      ? await client.from("mockup_tasks").update(payload).eq("id", editing.id)
+      : await client.from("mockup_tasks").insert({
+          ...payload,
+          organization_id: orgId,
+          lead_id: values.lead_id,
+        });
+    setSaving(false);
+    if (error) return notice(error.message);
+    close();
+    notice(editing ? "Mockup updated." : "Mockup created.");
+    await reload();
+  };
+  const dialogFields: Field[] = editing ? [
+    { key: "mockup_name", label: "Mockup name", required: true },
+    { key: "pieces", label: "Pieces", type: "number", required: true },
+    { key: "due_date", label: "Due date", type: "date", required: true },
+    { key: "status", label: "Status", type: "select", required: true, options: [...MOCKUP_STATUSES] },
+    { key: "notes", label: "Update / notes", type: "textarea", hint: "Visible to the General Manager in real time." },
+  ] : [
+    {
+      key: "lead_id",
+      label: "Assigned lead",
+      type: "select",
+      required: true,
+      options: availableLeads.map((lead) => `${text(lead.id)}|${leadClientLabel(lead)} - ${text(lead.project_name, "Untitled project")}`),
+    },
+    { key: "mockup_name", label: "Mockup name", required: true, placeholder: "e.g. Product box layout" },
+    { key: "pieces", label: "Pieces", type: "number", required: true },
+    { key: "due_date", label: "Due date", type: "date", required: true },
+    { key: "notes", label: "Request details / notes", type: "textarea" },
+  ];
+
+  return (
+    <Panel
+      title={isGeneralManager ? "Mockup oversight" : "Mockups"}
+      detail={isGeneralManager ? "Monitor ongoing mockups across all Project Officers in real time." : "Track pre-quotation client mockups for your assigned leads."}
+      variant="page"
+      hideHeading
+      action={!isGeneralManager ? <Button onClick={openNew} disabled={!availableLeads.length}><Plus size={14} /> Add mockup</Button> : undefined}
+    >
+      <section className="grid gap-3 border-b border-[#e4e8ef] px-4 py-4 sm:grid-cols-3 sm:px-5 lg:px-6">
+        {[
+          ["Ongoing mockups", activeCount, "text-[#344054]"],
+          ["Due today", dueTodayCount, "text-[#a76605]"],
+          ["Overdue", overdueCount, "text-[#b42318]"],
+        ].map(([label, count, color]) => <div key={String(label)} className="rounded-xl border border-[#dfe5ec] bg-white px-4 py-3"><p className="text-[11px] font-medium uppercase tracking-[.05em] text-[#7b8494]">{label}</p><p className={`mt-1 text-2xl font-semibold ${color}`}>{count}</p></div>)}
+      </section>
+      <section className="flex flex-wrap items-center gap-2 border-b border-[#e4e8ef] px-4 py-3 sm:px-5 lg:px-6">
+        <label className="flex h-9 min-w-52 flex-1 items-center gap-2 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[#687386]"><Search size={15} /><span className="sr-only">Search mockups</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search client, company, project…" className="min-w-0 flex-1 border-0 bg-transparent text-[12px] outline-none" /></label>
+        <label className="flex h-9 items-center rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px]"><span className="sr-only">Mockup status</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="border-0 bg-transparent outline-none"><option value="active">Ongoing</option><option value="overdue">Overdue</option><option value="all">All statuses</option>{MOCKUP_STATUSES.map((status) => <option key={status} value={status}>{titleCase(status.replaceAll("_", " "))}</option>)}</select></label>
+      </section>
+      <Table labels={["Mockup / Project", "Client / Company", "Pieces", "Due date", "Status", ...(isGeneralManager ? ["Project Officer"] : []), "Updated", ...(!isGeneralManager ? ["Actions"] : [])]} minWidth={isGeneralManager ? 980 : 850}>
+        {filteredTasks.map((task) => <tr key={text(task.id)}>
+          <td className="px-4 py-3"><b>{text(task.mockup_name)}</b><small>{text(task.project_name)}</small></td>
+          <td className="px-4 py-3"><b>{text(task.client_name, "—")}</b><small>{text(task.company_name, "—")}</small></td>
+          <td className="px-4 py-3 text-center">{n(task.pieces).toLocaleString()}</td>
+          <td className={`px-4 py-3 ${isActive(task) && text(task.due_date, "") < isoToday() ? "font-semibold text-[#b42318]" : ""}`}>{day(task.due_date)}</td>
+          <td className="px-4 py-3"><Status value={task.status} /></td>
+          {isGeneralManager && <td className="px-4 py-3">{officerName(task)}</td>}
+          <td className="px-4 py-3">{day(task.updated_at)}</td>
+          {!isGeneralManager && <td className="px-4 py-3"><ActionIcon label={`Edit ${text(task.mockup_name)}`} confirm={false} onClick={() => openEdit(task)}><Pencil size={15} /></ActionIcon></td>}
+        </tr>)}
+      </Table>
+      {!filteredTasks.length && <Empty>{statusFilter === "active" ? "No ongoing mockups." : "No mockups match these filters."}</Empty>}
+      {open && <Dialog title={editing ? "Update mockup" : "Add mockup"} fields={dialogFields} values={values} setValues={setValues} save={() => void save()} close={close} saving={saving} saveLabel={editing ? "Save update" : "Create mockup"} />}
+    </Panel>
+  );
+}
 
 function ProjectCalendar({
   store,
@@ -12419,6 +12603,7 @@ export function HuswellWorkspace({
       "Dashboard",
       "Leads",
       "Projects",
+      "Mockups",
       "Price Quotations",
       "Finance",
       "Submissions",
@@ -12428,6 +12613,7 @@ export function HuswellWorkspace({
       "Dashboard",
       "Leads",
       "Projects",
+      "Mockups",
       "Price Quotations",
       "Finance",
       "Submissions",
@@ -12437,6 +12623,7 @@ export function HuswellWorkspace({
       "Dashboard",
       "Leads",
       "Projects",
+      "Mockups",
       "Price Quotations",
       "Finance",
       "Submissions",
@@ -12446,6 +12633,7 @@ export function HuswellWorkspace({
       "Dashboard",
       "Leads",
       "Projects",
+      "Mockups",
       "Price Quotations",
     ],
     sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory"],
@@ -12476,6 +12664,7 @@ export function HuswellWorkspace({
         { view: "Dashboard", icon: LayoutDashboard },
         { view: "Leads", icon: ClipboardCheck },
         { view: "Projects", icon: ClipboardCheck },
+        { view: "Mockups", icon: ImageIcon },
       ],
     },
     {
@@ -12500,6 +12689,7 @@ export function HuswellWorkspace({
         { view: "Leads", icon: ClipboardCheck },
         { view: "Price Quotations", icon: FileText },
         { view: "Projects", icon: ClipboardCheck },
+        { view: "Mockups", icon: ImageIcon },
         { view: "Suppliers & Materials", icon: UsersRound },
       ],
     },
@@ -12542,6 +12732,12 @@ export function HuswellWorkspace({
       detail: isManagementRole
         ? "Monitor all project schedules and review officer submissions."
         : projects.detail,
+    },
+    Mockups: {
+      title: isManagementRole ? "Mockup oversight" : "Mockups",
+      detail: isManagementRole
+        ? "Monitor all active mockups, deadlines, and officer updates in real time."
+        : "Create and update mockups for your assigned leads.",
     },
     "Costing Breakdown": {
       title: "Costing Breakdown",
@@ -12638,17 +12834,17 @@ export function HuswellWorkspace({
     ) : loading ? (
       <Panel
         title={
-          active === "Leads" ? leads.title : active === "Projects" ? projects.title : "Loading workspace"
+          active === "Leads" ? leads.title : active === "Projects" ? projects.title : active === "Mockups" ? "Mockups" : "Loading workspace"
         }
         detail={
-          active === "Leads" || active === "Projects"
-            ? (active === "Projects" ? projects.detail : leads.detail)
+          active === "Leads" || active === "Projects" || active === "Mockups"
+            ? (active === "Projects" ? projects.detail : active === "Mockups" ? "Track mockup deadlines and status updates." : leads.detail)
             : "Loading business data."
         }
       >
         <div
           className={
-            active === "Leads" || active === "Projects" ? "min-h-[280px]" : undefined
+            active === "Leads" || active === "Projects" || active === "Mockups" ? "min-h-[280px]" : undefined
           }
         >
           <Empty>Loading records…</Empty>
@@ -12658,6 +12854,14 @@ export function HuswellWorkspace({
       <Dashboard store={store} go={navigate} role={role} orgId={organizationId} />
     ) : active === "Projects" ? (
       <ProjectCalendar
+        store={store}
+        orgId={organizationId}
+        reload={reload}
+        notice={setMessage}
+        role={role}
+      />
+    ) : active === "Mockups" ? (
+      <MockupWorkspace
         store={store}
         orgId={organizationId}
         reload={reload}

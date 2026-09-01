@@ -75,7 +75,8 @@
 73. Run `078_general_manager_management_workflow_boundaries.sql` to preserve GM lead management while keeping quotation and project submission work officer-owned.
 74. Run `086_fix_price_quotation_resubmission_prices.sql` after 085 to preserve General Manager selling prices when an officer revises and resubmits a direct Price Quotation.
 75. Run `087_preserve_price_quotation_revision_items.sql` to retain existing priced item records during an officer revision, while requiring the General Manager to price every new item.
-76. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
+76. Run `088_mockup_workflow.sql` to add the separate Mockups workspace with Sales Project Officer updates and real-time, read-only General Manager oversight.
+77. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 
