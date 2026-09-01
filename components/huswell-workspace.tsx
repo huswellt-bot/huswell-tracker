@@ -872,9 +872,7 @@ const leads: Module = {
       value: (r) => (
         <>
           <b>{text(r.project_name)}</b>
-          <small>
-            {text(r.lead_no)} · {text(r.client_name)}
-          </small>
+          <small>{text(r.client_name)}</small>
         </>
       ),
     },
@@ -2583,17 +2581,7 @@ function Records({
   });
   const leadColumns =
     module.table === "leads"
-      ? module.columns.filter(
-          (column) =>
-            role !== "project_manager" || column.label !== "Outbound caller",
-        ).map((column) =>
-          column.label === "Lead / project"
-            ? {
-                label: "Lead ID",
-                value: (row: Row) => text(row.lead_no, "—"),
-              }
-            : column,
-        )
+      ? module.columns.filter((column) => column.label !== "Outbound caller")
       : module.columns;
   const assignmentColumn = {
     label: "Sales Project Officer",
