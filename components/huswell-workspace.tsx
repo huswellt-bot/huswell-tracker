@@ -3162,6 +3162,11 @@ function Records({
                                 : "Request lead deletion"
                             }
                             tone="red"
+                            confirmationDescription={
+                              canDeleteLead(row)
+                                ? "This permanently deletes the Lead and every linked quotation, invoice, payment, production record, stock-in, project schedule, and related request. This cannot be undone."
+                                : undefined
+                            }
                           >
                             <Trash2 size={15} />
                           </ActionIcon>
