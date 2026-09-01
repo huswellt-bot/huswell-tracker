@@ -2773,11 +2773,10 @@ function Records({
   const deleteLead = async (row: Row) => {
     if (!row.id) return;
     setSaving(true);
-    const { error } = await createClient()
-      .from("leads")
-      .delete()
-      .eq("id", row.id)
-      .eq("organization_id", orgId);
+    const { error } = await createClient().rpc(
+      "delete_lead_as_general_manager",
+      { p_lead_id: row.id },
+    );
     setSaving(false);
     if (error) return notice(error.message);
     notice("Lead / project deleted.");
