@@ -2831,6 +2831,81 @@ function Records({
       text(row.assigned_to ?? row.created_by, "") === currentUserId);
   const isPageLayout = module.table === "leads";
   const contentPadding = isPageLayout ? "px-4 sm:px-6 lg:px-7" : "px-4 sm:px-5";
+  const rowActions = (row: Row) => (
+    <td className="whitespace-nowrap px-5 py-3">
+      <div className="flex gap-2">
+        {canEditRow(row) && (
+          <ActionIcon
+            onClick={() => {
+              setEditing(row);
+              setValues({
+                ...initial(row),
+                ...(module.table === "leads"
+                  ? { assigned_to: text(row.assigned_to, "") }
+                  : {}),
+              });
+              setOpen(true);
+            }}
+            label="Edit record"
+          >
+            <Pencil size={15} />
+          </ActionIcon>
+        )}
+        {onPrint && (
+          <ActionIcon
+            onClick={() => onPrint(row)}
+            label="View record PDF"
+          >
+            <Printer size={15} />
+          </ActionIcon>
+        )}
+        {(canDeleteLead(row) || canRequestLeadDeletion(row)) && (
+          <ActionIcon
+            disabled={saving}
+            onClick={() =>
+              void (
+                canDeleteLead(row)
+                  ? deleteLead(row)
+                  : requestLeadDeletion(row)
+              )
+            }
+            label={
+              canDeleteLead(row)
+                ? "Delete lead / project"
+                : "Request lead deletion"
+            }
+            tone="red"
+            confirmationDescription={
+              canDeleteLead(row)
+                ? "This permanently deletes the Lead and every linked quotation, invoice, payment, production record, stock-in, project schedule, and related request. This cannot be undone."
+                : undefined
+            }
+          >
+            <Trash2 size={15} />
+          </ActionIcon>
+        )}
+        {(
+          [
+            "customers",
+            "suppliers",
+            "employees",
+            "inventory_items",
+            "expenses",
+            "quotations",
+          ] as TableName[]
+        ).includes(module.table) &&
+          canArchive && (
+            <ActionIcon
+              onClick={() => archive(row)}
+              label="Archive record"
+              tone="red"
+            >
+              <Archive size={15} />
+            </ActionIcon>
+          )}
+      </div>
+    </td>
+  );
   if (isLeadChangeRequestsPage && onLeadModeChange) {
     return (
       <div className="-m-3 min-h-[calc(100vh-76px)] bg-white sm:-m-4 sm:min-h-[calc(100vh-84px)] lg:-m-5">
@@ -3121,7 +3196,7 @@ function Records({
           <>
             <div className={isPageLayout ? "modern-table-shell" : undefined}>
               <Table
-                labels={[...columns.map((c) => c.label), "Actions"]}
+                labels={module.table === "leads" ? ["Actions", ...columns.map((c) => c.label)] : [...columns.map((c) => c.label), "Actions"]}
                 minWidth={module.table === "leads" ? 1650 : 680}
                 scrollable={isPageLayout}
                 className={
@@ -3132,84 +3207,13 @@ function Records({
               >
                 {shown.map((row) => (
                   <tr key={text(row.id)} className="hover:bg-[#fbfcff]">
+                    {module.table === "leads" && rowActions(row)}
                     {columns.map((c) => (
                       <td key={c.label} className="px-5 py-3 align-middle">
                         {c.value(row, store)}
                       </td>
                     ))}
-                    <td className="whitespace-nowrap px-5 py-3">
-                      <div className="flex gap-2">
-                        {canEditRow(row) && (
-                          <ActionIcon
-                            onClick={() => {
-                              setEditing(row);
-                              setValues({
-                                ...initial(row),
-                                ...(module.table === "leads"
-                                  ? { assigned_to: text(row.assigned_to, "") }
-                                  : {}),
-                              });
-                              setOpen(true);
-                            }}
-                            label="Edit record"
-                          >
-                            <Pencil size={15} />
-                          </ActionIcon>
-                        )}
-                        {onPrint && (
-                          <ActionIcon
-                            onClick={() => onPrint(row)}
-                            label="View record PDF"
-                          >
-                            <Printer size={15} />
-                          </ActionIcon>
-                        )}
-                        {(canDeleteLead(row) || canRequestLeadDeletion(row)) && (
-                          <ActionIcon
-                            disabled={saving}
-                            onClick={() =>
-                              void (
-                                canDeleteLead(row)
-                                  ? deleteLead(row)
-                                  : requestLeadDeletion(row)
-                              )
-                            }
-                            label={
-                              canDeleteLead(row)
-                                ? "Delete lead / project"
-                                : "Request lead deletion"
-                            }
-                            tone="red"
-                            confirmationDescription={
-                              canDeleteLead(row)
-                                ? "This permanently deletes the Lead and every linked quotation, invoice, payment, production record, stock-in, project schedule, and related request. This cannot be undone."
-                                : undefined
-                            }
-                          >
-                            <Trash2 size={15} />
-                          </ActionIcon>
-                        )}
-                        {(
-                          [
-                            "customers",
-                            "suppliers",
-                            "employees",
-                            "inventory_items",
-                            "expenses",
-                            "quotations",
-                          ] as TableName[]
-                        ).includes(module.table) &&
-                          canArchive && (
-                            <ActionIcon
-                              onClick={() => archive(row)}
-                              label="Archive record"
-                              tone="red"
-                            >
-                              <Archive size={15} />
-                            </ActionIcon>
-                          )}
-                      </div>
-                    </td>
+                    {module.table !== "leads" && rowActions(row)}
                   </tr>
                 ))}
               </Table>
