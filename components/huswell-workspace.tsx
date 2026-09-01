@@ -1546,21 +1546,24 @@ function PdfBankDetails({ details }: { details: BankDetail[] }) {
   return <PdfView style={generatedPdfStyles.bankTable}>{details.map((detail, index) => <PdfView key={`${detail.bank_name}-${detail.account_number}-${index}`} style={generatedPdfStyles.bankRow}><PdfView style={[generatedPdfStyles.bankCell, { width: "35%" }]}><PdfText>{detail.bank_name}</PdfText></PdfView><PdfView style={[generatedPdfStyles.bankCell, { width: "65%" }]}><PdfText>{[detail.account_name, detail.account_number].filter(Boolean).join(" - ")}</PdfText></PdfView></PdfView>)}</PdfView>;
 }
 
+const LONG_BOND_PORTRAIT: [number, number] = [612, 936];
+
 const priceQuotationPdfStyles = PdfStyleSheet.create({
-  page: { paddingTop: 27, paddingRight: 24, paddingBottom: 23, paddingLeft: 24, fontFamily: "SF Pro Display", fontSize: 8.5, color: "#111" },
-  topHeader: { flexDirection: "row", alignItems: "stretch", borderBottomWidth: 1.4, borderColor: "#111", paddingBottom: 15 },
-  logoColumn: { width: "27%", justifyContent: "center", paddingRight: 8 }, logo: { width: 140, height: 48, objectFit: "contain" },
-  businessColumn: { width: "38%", justifyContent: "center", paddingHorizontal: 8 }, businessDetail: { fontSize: 7.6, lineHeight: 1.5, marginBottom: 3 },
-  quoteColumn: { width: "35%", borderLeftWidth: 1, borderColor: "#555", paddingLeft: 20 }, title: { color: "#c92f35", fontSize: 19, fontWeight: 700, marginBottom: 10 },
-  quoteMetaRow: { flexDirection: "row", marginBottom: 3 }, quoteMetaLabel: { width: 77, fontSize: 8.4 }, quoteMetaColon: { width: 10, fontSize: 8.4 }, quoteMetaValue: { flex: 1, fontSize: 8.4 },
-  clientGrid: { flexDirection: "row", marginTop: 13, marginBottom: 12 }, clientColumn: { width: "50%", paddingRight: 17 }, clientColumnRight: { width: "50%", borderLeftWidth: 1, borderColor: "#777", paddingLeft: 25 },
-  clientField: { flexDirection: "row", alignItems: "flex-end", minHeight: 20, marginBottom: 4 }, clientLabel: { width: 84, fontWeight: 700, fontSize: 8.5 }, clientColon: { width: 9, fontWeight: 700, fontSize: 8.5 }, clientValue: { flex: 1, borderBottomWidth: 0.7, borderColor: "#555", paddingBottom: 2, fontSize: 8.4 },
-  salutation: { fontSize: 9, fontStyle: "italic", marginBottom: 11 }, table: { borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" }, row: { flexDirection: "row", alignItems: "stretch" },
-  cell: { borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#111", paddingVertical: 6, paddingHorizontal: 5, justifyContent: "center", alignSelf: "stretch", textAlign: "center" }, tableHeader: { backgroundColor: "#efefef", fontWeight: 700 }, descriptionCell: { textAlign: "left" },
-  termsHeader: { borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#111", backgroundColor: "#efefef", paddingVertical: 6, paddingHorizontal: 8, fontSize: 9, fontWeight: 700 }, termsTable: { borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111", marginTop: 13 }, termNumber: { textAlign: "center" }, termTitle: { fontWeight: 700, textAlign: "left" }, termDescription: { textAlign: "left", lineHeight: 1.35 },
-  lowerSection: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginTop: 15 }, bankTable: { width: "52%", borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" }, totalTable: { width: "43%", borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" }, bankHeader: { fontWeight: 700, textAlign: "center" }, totalLabel: { fontSize: 8.5, fontWeight: 700, textAlign: "left" }, totalValue: { fontSize: 8.5, textAlign: "right" }, totalRow: { backgroundColor: "#efefef" }, totalLabelStrong: { fontSize: 8.5, fontWeight: 700, textAlign: "left" }, totalValueStrong: { fontSize: 8.5, fontWeight: 700, textAlign: "right" },
-  signatures: { flexDirection: "row", marginTop: 22 }, signatureColumn: { width: "50%", minHeight: 59, paddingRight: 18 }, signatureColumnRight: { width: "50%", minHeight: 59, borderLeftWidth: 1, borderColor: "#777", paddingLeft: 20 }, signatureLine: { flexDirection: "row", alignItems: "flex-end", minHeight: 22 }, signatureLabel: { width: 72, fontWeight: 700, fontSize: 8.5 }, signatureSignatory: { flex: 1, minHeight: 29, justifyContent: "flex-end" }, signatureImage: { width: 76, height: 27, objectFit: "contain", alignSelf: "center", marginBottom: -4 }, signatureName: { width: "100%", textAlign: "center", borderBottomWidth: 0.8, borderColor: "#111", paddingBottom: 2, fontSize: 8.5 }, signatureRole: { marginTop: 5, marginLeft: 72, fontSize: 8.3, textAlign: "center" },
-  footer: { borderTopWidth: 1, borderColor: "#111", marginTop: 15, paddingTop: 7 }, footerItalic: { textAlign: "center", fontSize: 8.2, fontStyle: "italic", lineHeight: 1.45 }, footerAddress: { textAlign: "center", fontSize: 7.8, marginTop: 5 },
+  // 8.5 × 13 in (long bond paper) at React PDF's 72 points per inch.
+  page: { paddingTop: 18, paddingRight: 22, paddingBottom: 16, paddingLeft: 22, fontFamily: "SF Pro Display", fontSize: 7.5, color: "#111" },
+  topHeader: { flexDirection: "row", alignItems: "stretch", borderBottomWidth: 1.2, borderColor: "#111", paddingBottom: 8 },
+  logoColumn: { width: "27%", justifyContent: "center", paddingRight: 7 }, logo: { width: 126, height: 42, objectFit: "contain" },
+  businessColumn: { width: "38%", justifyContent: "center", paddingHorizontal: 7 }, businessDetail: { fontSize: 6.8, lineHeight: 1.25, marginBottom: 1 },
+  quoteColumn: { width: "35%", borderLeftWidth: 1, borderColor: "#555", paddingLeft: 15 }, title: { color: "#c92f35", fontSize: 16, fontWeight: 700, marginBottom: 5 },
+  quoteMetaRow: { flexDirection: "row", marginBottom: 1 }, quoteMetaLabel: { width: 69, fontSize: 7.2 }, quoteMetaColon: { width: 8, fontSize: 7.2 }, quoteMetaValue: { flex: 1, fontSize: 7.2 },
+  clientGrid: { flexDirection: "row", marginTop: 8, marginBottom: 7 }, clientColumn: { width: "50%", paddingRight: 12 }, clientColumnRight: { width: "50%", borderLeftWidth: 1, borderColor: "#777", paddingLeft: 16 },
+  clientField: { flexDirection: "row", alignItems: "flex-end", minHeight: 15, marginBottom: 2 }, clientLabel: { width: 73, fontWeight: 700, fontSize: 7.3 }, clientColon: { width: 8, fontWeight: 700, fontSize: 7.3 }, clientValue: { flex: 1, borderBottomWidth: 0.7, borderColor: "#555", paddingBottom: 1, fontSize: 7.2 },
+  salutation: { fontSize: 7.6, fontStyle: "italic", marginBottom: 7 }, table: { borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" }, row: { flexDirection: "row", alignItems: "stretch" },
+  cell: { borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#111", paddingVertical: 3, paddingHorizontal: 4, justifyContent: "center", alignSelf: "stretch", textAlign: "center", fontSize: 7.2, lineHeight: 1.15 }, tableHeader: { backgroundColor: "#efefef", fontWeight: 700 }, descriptionCell: { textAlign: "left" },
+  termsHeader: { borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#111", backgroundColor: "#efefef", paddingVertical: 4, paddingHorizontal: 6, fontSize: 7.5, fontWeight: 700 }, termsTable: { borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111", marginTop: 8 }, termNumber: { textAlign: "center" }, termTitle: { fontWeight: 700, textAlign: "left" }, termDescription: { textAlign: "left", lineHeight: 1.15 },
+  lowerSection: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginTop: 8 }, bankTable: { width: "52%", borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" }, totalTable: { width: "43%", borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" }, bankHeader: { fontWeight: 700, textAlign: "center" }, totalLabel: { fontSize: 7.2, fontWeight: 700, textAlign: "left" }, totalValue: { fontSize: 7.2, textAlign: "right" }, totalRow: { backgroundColor: "#efefef" }, totalLabelStrong: { fontSize: 7.2, fontWeight: 700, textAlign: "left" }, totalValueStrong: { fontSize: 7.2, fontWeight: 700, textAlign: "right" },
+  signatures: { flexDirection: "row", marginTop: 10 }, signatureColumn: { width: "50%", minHeight: 43, paddingRight: 13 }, signatureColumnRight: { width: "50%", minHeight: 43, borderLeftWidth: 1, borderColor: "#777", paddingLeft: 15 }, signatureLine: { flexDirection: "row", alignItems: "flex-end", minHeight: 16 }, signatureLabel: { width: 62, fontWeight: 700, fontSize: 7.3 }, signatureSignatory: { flex: 1, minHeight: 20, justifyContent: "flex-end" }, signatureImage: { width: 60, height: 22, objectFit: "contain", alignSelf: "center", marginBottom: -3 }, signatureName: { width: "100%", textAlign: "center", borderBottomWidth: 0.8, borderColor: "#111", paddingBottom: 1, fontSize: 7.3 }, signatureRole: { marginTop: 3, marginLeft: 62, fontSize: 7.1, textAlign: "center" },
+  footer: { borderTopWidth: 1, borderColor: "#111", marginTop: 8, paddingTop: 4 }, footerItalic: { textAlign: "center", fontSize: 7, fontStyle: "italic", lineHeight: 1.2 }, footerAddress: { textAlign: "center", fontSize: 6.6, marginTop: 3 },
 });
 
 function PriceQuotationPdfCell({ children, width, header = false, description = false, style }: { children: ReactNode; width: string; header?: boolean; description?: boolean; style?: React.ComponentProps<typeof PdfView>["style"] }) {
@@ -1569,7 +1572,7 @@ function PriceQuotationPdfCell({ children, width, header = false, description = 
 }
 
 function PriceQuotationTermCell({ children, width, heading = false }: { children: string; width: string; heading?: boolean }) {
-  return <PdfView style={[priceQuotationPdfStyles.cell, { width, paddingVertical: 6, justifyContent: "center" }]}><PdfText style={{ fontSize: 8.5, textAlign: "left", fontWeight: heading ? 700 : 400 }}>{children}</PdfText></PdfView>;
+  return <PdfView style={[priceQuotationPdfStyles.cell, { width, justifyContent: "center" }]}><PdfText style={{ fontSize: 7.1, lineHeight: 1.15, textAlign: "left", fontWeight: heading ? 700 : 400 }}>{children}</PdfText></PdfView>;
 }
 
 function PriceQuotationSignature({ label, name, signatureSource }: { label: string; name: string; signatureSource?: string }) {
@@ -1609,7 +1612,7 @@ function PriceQuotationPdf({ quote, store, origin }: { quote: Row; store: Store;
   const shipping = n(quote.shipping_handling);
   const clientField = (label: string, value: string) => <PdfView key={label} style={priceQuotationPdfStyles.clientField}><PdfText style={priceQuotationPdfStyles.clientLabel}>{label}</PdfText><PdfText style={priceQuotationPdfStyles.clientColon}>:</PdfText><PdfText style={priceQuotationPdfStyles.clientValue}>{value}</PdfText></PdfView>;
   return <PdfDocument title={`Price Quotation ${text(quote.quotation_no)}`}>
-    <PdfPage size={[612, 936]} style={priceQuotationPdfStyles.page}>
+    <PdfPage size={LONG_BOND_PORTRAIT} style={priceQuotationPdfStyles.page} wrap={false}>
       <PdfView style={priceQuotationPdfStyles.topHeader}>
         <PdfView style={priceQuotationPdfStyles.logoColumn}><PdfImage src={`${origin}/huswell-quotation-logo.png`} style={priceQuotationPdfStyles.logo} /></PdfView>
         <PdfView style={priceQuotationPdfStyles.businessColumn}>
@@ -1638,7 +1641,7 @@ function PriceQuotationPdf({ quote, store, origin }: { quote: Row; store: Store;
         <PdfView style={priceQuotationPdfStyles.termsHeader}><PdfText>TERMS AND CONDITIONS</PdfText></PdfView>
         {termRows.map((term, index) => <PdfView key={`${term.heading}-${index}`} style={priceQuotationPdfStyles.row} wrap={false}><PriceQuotationTermCell width="32%" heading>{term.heading}</PriceQuotationTermCell><PriceQuotationTermCell width="68%">{term.description}</PriceQuotationTermCell></PdfView>)}
       </PdfView>
-      <PdfView style={[priceQuotationPdfStyles.bankTable, { marginTop: 15 }]}>
+      <PdfView style={[priceQuotationPdfStyles.bankTable, { marginTop: 8 }]}>
           <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="30%" header style={priceQuotationPdfStyles.bankHeader}>BANK</PriceQuotationPdfCell><PriceQuotationPdfCell width="70%" header style={priceQuotationPdfStyles.bankHeader}>ACCOUNT NAME / NUMBER</PriceQuotationPdfCell></PdfView>
           {bankDetails.map((detail, index) => <PdfView key={`${detail.bank_name}-${detail.account_number}-${index}`} style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="30%" description>{detail.bank_name}</PriceQuotationPdfCell><PriceQuotationPdfCell width="70%" description>{[detail.account_name, detail.account_number].filter(Boolean).join(" - ")}</PriceQuotationPdfCell></PdfView>)}
       </PdfView>
