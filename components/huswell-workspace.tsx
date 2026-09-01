@@ -3208,7 +3208,13 @@ function Records({
                     ? [
                         "112px",
                         ...columns.map((column) =>
-                          column.label === "Email" ? "250px" : "auto",
+                          column.label === "Email"
+                            ? "250px"
+                            : column.label === "Date contacted"
+                              ? "135px"
+                              : column.label === "Outbound method"
+                                ? "145px"
+                                : "auto",
                         ),
                       ]
                     : undefined
