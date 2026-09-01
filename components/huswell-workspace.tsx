@@ -1452,6 +1452,7 @@ function ActionIcon({
   disabled = false,
   tone = "primary",
   confirm = true,
+  confirmationDescription,
 }: {
   label: string;
   children: ReactNode;
@@ -1459,6 +1460,7 @@ function ActionIcon({
   disabled?: boolean;
   tone?: "primary" | "green" | "amber" | "red";
   confirm?: boolean;
+  confirmationDescription?: string;
 }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const colors = {
@@ -1483,7 +1485,7 @@ function ActionIcon({
       {confirm && <ConfirmationDialog
         open={confirmOpen}
         title="Confirm action"
-        description={`Are you sure you want to ${label.charAt(0).toLowerCase()}${label.slice(1)}?`}
+        description={confirmationDescription ?? `Are you sure you want to ${label.charAt(0).toLowerCase()}${label.slice(1)}?`}
         onCancel={() => setConfirmOpen(false)}
         onConfirm={() => {
           setConfirmOpen(false);
@@ -7972,6 +7974,23 @@ function PriceQuotationWorkspace({
     openEdit({ ...quote, status: "needs_revision" });
     notice("Update the Price Quotation, then submit it for General Manager review.");
   };
+  const canDeletePriceQuotation = (quote: Row) =>
+    !quote.costing_source_id &&
+    (isGeneralManager ||
+      (role === "project_manager" &&
+        quote.created_by === currentUserId &&
+        ["draft", "needs_revision"].includes(text(quote.status))));
+  const deletePriceQuotation = async (quote: Row) => {
+    if (!quote.id || !canDeletePriceQuotation(quote)) return;
+    setSaving(true);
+    const { error } = await createClient().rpc("delete_price_quotation", {
+      p_quotation_id: quote.id,
+    });
+    setSaving(false);
+    if (error) return notice(error.message);
+    notice("Price Quotation deleted.");
+    await reload();
+  };
   const chooseIllustration = (itemKey: string, file?: File) => {
     if (!file) return;
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
@@ -8082,6 +8101,18 @@ function PriceQuotationWorkspace({
                   )}
                   {isGeneralManager && text(quote.status) === "pending" && (
                     <ActionIcon label="Review Price Quotation" onClick={() => setReviewing(quote)}><FileText size={15} /></ActionIcon>
+                  )}
+                  {canDeletePriceQuotation(quote) && (
+                    <ActionIcon
+                      label="Delete Price Quotation"
+                      tone="red"
+                      disabled={saving}
+                      confirm
+                      confirmationDescription="This permanently deletes the Price Quotation and its linked invoices, payments, production jobs, stock-ins, schedules, and related requests. This cannot be undone."
+                      onClick={() => void deletePriceQuotation(quote)}
+                    >
+                      <Trash2 size={15} />
+                    </ActionIcon>
                   )}
                   {illustrationCount > 0 && <ActionIcon label="View quotation illustrations" confirm={false} onClick={() => setIllustrationQuote(quote)}><ImageIcon size={15} /></ActionIcon>}
                   {text(quote.status) === "approved" && <ActionIcon label="View Price Quotation PDF" onClick={() => openPdf(quote)}><FileText size={15} /></ActionIcon>}
