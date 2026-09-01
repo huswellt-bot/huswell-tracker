@@ -2581,7 +2581,11 @@ function Records({
   });
   const leadColumns =
     module.table === "leads"
-      ? module.columns.filter((column) => column.label !== "Outbound caller")
+      ? module.columns.filter(
+          (column) =>
+            column.label !== "Outbound caller" &&
+            (isProjectsPage || column.label !== "Lead / project"),
+        )
       : module.columns;
   const assignmentColumn = {
     label: "Sales Project Officer",
