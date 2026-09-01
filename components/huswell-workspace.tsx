@@ -2538,7 +2538,9 @@ function Records({
             module.table !== "leads" ||
             isProjectsPage ||
             evaluationFilter === "all" ||
-            text(r.evaluation_number, "") === evaluationFilter,
+            (evaluationFilter === "unassigned"
+              ? !text(r.assigned_to, "")
+              : text(r.evaluation_number, "") === evaluationFilter),
         )
         .filter(
           (r) =>
@@ -3068,6 +3070,9 @@ function Records({
                   className={`lead-filter-select min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${evaluationFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}
                 >
                   <option value="all">Filter By Lead Status</option>
+                  {isGeneralManager && (
+                    <option value="unassigned">Unassigned</option>
+                  )}
                   {evaluationStatuses
                     .filter((status) => !status.startsWith("7|"))
                     .map((status) => (
