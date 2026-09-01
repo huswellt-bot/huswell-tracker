@@ -2522,7 +2522,9 @@ function Records({
             module.table !== "leads" ||
             !canFilterByProjectOfficer ||
             projectOfficerFilter === "all" ||
-            text(r.assigned_to ?? r.created_by, "") === projectOfficerFilter,
+            (projectOfficerFilter === "unassigned"
+              ? !text(r.assigned_to, "")
+              : text(r.assigned_to ?? r.created_by, "") === projectOfficerFilter),
         )
         .filter(
           (r) =>
@@ -2569,6 +2571,46 @@ function Records({
   const shown =
     module.table === "leads" ? rows : rows.slice(page * 10, page * 10 + 10);
   const totalLeadCount = rows.length;
+  const leadOfficerDistribution = useMemo(() => {
+    if (!canFilterByProjectOfficer || projectOfficerFilter !== "all") return [];
+    const totals = new Map(
+      projectOfficers.map((officer) => [
+        officer.id,
+        { id: officer.id, name: officer.name, count: 0 },
+      ]),
+    );
+    let unassignedCount = 0;
+    rows.forEach((lead) => {
+      const assignedTo = text(lead.assigned_to, "");
+      if (!assignedTo) {
+        unassignedCount += 1;
+        return;
+      }
+      const existing = totals.get(assignedTo);
+      if (existing) {
+        existing.count += 1;
+        return;
+      }
+      const profile = store.profiles.find((item) => item.id === assignedTo);
+      totals.set(assignedTo, {
+        id: assignedTo,
+        name: text(profile?.full_name, "Sales Project Officer"),
+        count: 1,
+      });
+    });
+    return [
+      ...Array.from(totals.values()).sort(
+        (left, right) => right.count - left.count || left.name.localeCompare(right.name),
+      ),
+      { id: "unassigned", name: "Unassigned", count: unassignedCount },
+    ];
+  }, [
+    canFilterByProjectOfficer,
+    projectOfficerFilter,
+    projectOfficers,
+    rows,
+    store.profiles,
+  ]);
   const fields = module.fields.map((field) => {
     if (field.key === "supplier_id")
       return {
@@ -3119,6 +3161,7 @@ function Records({
                   className={`lead-filter-select min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${projectOfficerFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}
                 >
                   <option value="all">All Project Officers</option>
+                  <option value="unassigned">Unassigned</option>
                   {projectOfficers.map((officer) => (
                     <option key={officer.id} value={officer.id}>
                       {officer.name}
@@ -3196,6 +3239,38 @@ function Records({
             </Button>
           )}
         </div>
+        {leadOfficerDistribution.length > 0 && (
+          <section
+            aria-label="Lead distribution by Sales Project Officer"
+            className={`${contentPadding} border-t border-[#edf0f5] py-3`}
+          >
+            <div className="mb-2 flex items-baseline justify-between gap-3">
+              <h3 className="text-[12px] font-semibold text-[#344054]">
+                Lead distribution by Sales Project Officer
+              </h3>
+              <span className="text-[11px] text-[#8b92a1]">
+                Matching current filters
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {leadOfficerDistribution.map((officer) => (
+                <button
+                  key={officer.id}
+                  type="button"
+                  onClick={() => {
+                    setProjectOfficerFilter(officer.id);
+                    setPage(0);
+                  }}
+                  className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-[#d9e0e9] bg-[#f8faff] px-3 text-left text-[12px] text-[#344054] transition-colors hover:border-[#c43b43] hover:bg-[#fff7f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c43b43] focus-visible:ring-offset-2"
+                  aria-label={`Show ${officer.name}'s ${officer.count} matching leads`}
+                >
+                  <span className="max-w-44 truncate">{officer.name}</span>
+                  <b className="text-[13px] text-[#151922]">{officer.count}</b>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
         {shown.length ? (
           <>
             <div className={isPageLayout ? "modern-table-shell" : undefined}>
