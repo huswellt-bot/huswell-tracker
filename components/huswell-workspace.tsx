@@ -705,9 +705,10 @@ const workspaceViewTables = (
       "project_edit_requests",
       "project_schedule_revision_requests",
       "project_schedule_completion_requests",
+      "mockup_tasks",
     ];
   if (view === "Mockups")
-    return ["mockup_tasks", "leads", "profiles", "organization_members"];
+    return ["mockup_tasks", "quotations", "leads", "profiles", "organization_members"];
   if (
     view === "Price Quotations" ||
     (view === "Leads" && leadMode === "quotation")
@@ -3284,6 +3285,25 @@ const monthStartFromValue = (value: string) => {
 const monthValue = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 
+function MockupIllustration({ path, label }: { path: unknown; label: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    const illustrationPath = text(path, "");
+    if (!illustrationPath) {
+      setUrl(null);
+      return;
+    }
+    let active = true;
+    void createClient().storage.from("mockup-images").createSignedUrl(illustrationPath, 3600)
+      .then(({ data }) => {
+        if (active) setUrl(data?.signedUrl ?? null);
+      });
+    return () => { active = false; };
+  }, [path]);
+  if (!url) return <span className="text-[#8b92a1]">No image</span>;
+  return <a href={url} target="_blank" rel="noreferrer" className="block w-fit"><img src={url} alt={`Mockup illustration: ${label}`} className="size-12 rounded-md border border-[#d9e0e9] bg-white object-cover" /></a>;
+}
+
 function MockupWorkspace({
   store,
   orgId,
@@ -3301,9 +3321,14 @@ function MockupWorkspace({
   const [editing, setEditing] = useState<Row | null>(null);
   const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("active");
+  const [statusFilter, setStatusFilter] = useState("pending");
   const [values, setValues] = useState<Record<string, string>>({});
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [illustrationFile, setIllustrationFile] = useState<File | null>(null);
+  const [illustrationPreview, setIllustrationPreview] = useState<string | null>(null);
+  const [reviewing, setReviewing] = useState<Row | null>(null);
+  const [revisionNote, setRevisionNote] = useState("");
+  const [reviewingSaving, setReviewingSaving] = useState(false);
   const isGeneralManager = memberRole(role);
   useEffect(() => {
     let active = true;
@@ -3317,17 +3342,12 @@ function MockupWorkspace({
   );
   const isActive = (task: Row) =>
     !["client_approved", "cancelled"].includes(text(task.status, "requested"));
-  const activeCount = tasks.filter(isActive).length;
-  const overdueCount = tasks.filter(
-    (task) => isActive(task) && text(task.due_date, "") < isoToday(),
-  ).length;
-  const dueTodayCount = tasks.filter(
-    (task) => isActive(task) && text(task.due_date, "") === isoToday(),
-  ).length;
+  const approvalStatus = (task: Row) => text(task.approval_status, "pending");
+  const pendingCount = tasks.filter((task) => approvalStatus(task) === "pending").length;
+  const revisionCount = tasks.filter((task) => approvalStatus(task) === "needs_revision").length;
+  const approvedCount = tasks.filter((task) => approvalStatus(task) === "approved").length;
   const filteredTasks = tasks.filter((task) => {
-    if (statusFilter === "active" && !isActive(task)) return false;
-    if (statusFilter === "overdue" && !(isActive(task) && text(task.due_date, "") < isoToday())) return false;
-    if (statusFilter !== "all" && statusFilter !== "active" && statusFilter !== "overdue" && text(task.status) !== statusFilter) return false;
+    if (statusFilter !== "all" && approvalStatus(task) !== statusFilter) return false;
     const officer = store.profiles.find((profile) => text(profile.id, "") === text(task.assigned_to, ""));
     const search = [
       task.mockup_name,
@@ -3339,11 +3359,16 @@ function MockupWorkspace({
     ].map((value) => text(value).toLowerCase()).join(" ");
     return search.includes(query.trim().toLowerCase());
   });
-  const availableLeads = store.leads.filter(
-    (lead) =>
-      !["won", "lost"].includes(text(lead.status, "")) &&
-      (role !== "project_manager" || Boolean(currentUserId) && lead.assigned_to === currentUserId),
-  );
+  const quoteIdsWithMockups = new Set(tasks.map((task) => text(task.quotation_id, "")));
+  const availableQuotes = store.quotations.filter((quote) => {
+    const lead = store.leads.find((item) => text(item.id, "") === text(quote.lead_id, ""));
+    return text(quote.document_type) === "price_quotation"
+      && !quote.costing_source_id
+      && text(quote.status) === "approved"
+      && Boolean(currentUserId)
+      && lead?.assigned_to === currentUserId
+      && !quoteIdsWithMockups.has(text(quote.id, ""));
+  });
   const officerName = (task: Row) =>
     text(
       store.profiles.find((profile) => text(profile.id, "") === text(task.assigned_to, ""))?.full_name,
@@ -3352,12 +3377,14 @@ function MockupWorkspace({
   const close = () => {
     setOpen(false);
     setEditing(null);
+    setIllustrationFile(null);
+    setIllustrationPreview(null);
     setValues({});
   };
   const openNew = () => {
     setEditing(null);
     setValues({
-      lead_id: "",
+      quotation_id: "",
       mockup_name: "",
       pieces: "1",
       due_date: isoToday(),
@@ -3367,6 +3394,8 @@ function MockupWorkspace({
   };
   const openEdit = (task: Row) => {
     setEditing(task);
+    setIllustrationFile(null);
+    setIllustrationPreview(null);
     setValues({
       mockup_name: text(task.mockup_name, ""),
       pieces: text(task.pieces, "1"),
@@ -3381,29 +3410,68 @@ function MockupWorkspace({
     const pieces = n(values.pieces);
     if (!mockupName || !values.due_date || pieces <= 0)
       return notice("Enter a mockup name, pieces, and due date.");
-    if (!editing && !values.lead_id)
-      return notice("Select the assigned lead before creating a mockup.");
+    if (!editing && !values.quotation_id)
+      return notice("Select an approved Price Quotation before creating a mockup.");
+    if (!editing && !illustrationFile)
+      return notice("Upload a mockup illustration before submitting it.");
+    if (editing && !illustrationFile && !editing.illustration_path)
+      return notice("Upload a mockup illustration before resubmitting it.");
+    if (!currentUserId)
+      return notice("Please wait for your account to load, then try again.");
 
     setSaving(true);
-    const payload = {
-      mockup_name: mockupName,
-      pieces,
-      due_date: values.due_date,
-      status: editing ? values.status : "requested",
-      notes: values.notes?.trim() || null,
-    };
     const client = createClient();
-    const { error } = editing?.id
-      ? await client.from("mockup_tasks").update(payload).eq("id", editing.id)
-      : await client.from("mockup_tasks").insert({
-          ...payload,
-          organization_id: orgId,
-          lead_id: values.lead_id,
-        });
+    let uploadedPath: string | null = null;
+    let nextIllustrationPath = text(editing?.illustration_path, "") || null;
+    try {
+      if (illustrationFile) {
+        const optimized = await optimizeQuotationImage(illustrationFile);
+        const extension = optimized.type === "image/png" ? "png" : optimized.type === "image/webp" ? "webp" : "jpg";
+        uploadedPath = `${orgId}/mockups/${currentUserId}/${crypto.randomUUID()}.${extension}`;
+        const { error: uploadError } = await client.storage.from("mockup-images").upload(uploadedPath, optimized, { contentType: optimized.type, upsert: false });
+        if (uploadError) throw uploadError;
+        nextIllustrationPath = uploadedPath;
+      }
+      const payload = {
+        mockup_name: mockupName,
+        pieces,
+        due_date: values.due_date,
+        status: editing ? values.status : "requested",
+        notes: values.notes?.trim() || null,
+        illustration_path: nextIllustrationPath,
+        ...(editing ? { approval_status: "pending" } : {}),
+      };
+      const { error } = editing?.id
+        ? await client.from("mockup_tasks").update(payload).eq("id", editing.id)
+        : await client.from("mockup_tasks").insert({
+            ...payload,
+            organization_id: orgId,
+            quotation_id: values.quotation_id,
+          });
+      if (error) throw error;
+    } catch (error) {
+      if (uploadedPath) await client.storage.from("mockup-images").remove([uploadedPath]);
+      setSaving(false);
+      return notice(error instanceof Error ? error.message : "Mockup could not be submitted.");
+    }
     setSaving(false);
-    if (error) return notice(error.message);
     close();
-    notice(editing ? "Mockup updated." : "Mockup created.");
+    notice(editing ? "Mockup revised and resubmitted for General Manager approval." : "Mockup submitted for General Manager approval.");
+    await reload();
+  };
+  const review = async (task: Row, decision: "approved" | "needs_revision", note = "") => {
+    if (decision === "needs_revision" && !note.trim()) return notice("Enter revision notes before returning this mockup.");
+    setReviewingSaving(true);
+    const { error } = await createClient().rpc("review_mockup_task", {
+      p_mockup_id: task.id,
+      p_decision: decision,
+      p_revision_note: note.trim() || null,
+    });
+    setReviewingSaving(false);
+    if (error) return notice(error.message);
+    setReviewing(null);
+    setRevisionNote("");
+    notice(decision === "approved" ? "Mockup approved. The project can now be scheduled." : "Mockup returned to the Project Officer for revision.");
     await reload();
   };
   const dialogFields: Field[] = editing ? [
@@ -3414,11 +3482,11 @@ function MockupWorkspace({
     { key: "notes", label: "Update / notes", type: "textarea", hint: "Visible to the General Manager in real time." },
   ] : [
     {
-      key: "lead_id",
-      label: "Assigned lead",
       type: "select",
       required: true,
-      options: availableLeads.map((lead) => `${text(lead.id)}|${leadClientLabel(lead)} - ${text(lead.project_name, "Untitled project")}`),
+      key: "quotation_id",
+      label: "Approved Price Quotation",
+      options: availableQuotes.map((quote) => `${text(quote.id)}|${text(quote.quotation_no)} - ${text(quote.client_name)} - ${text(quote.project_name, "Untitled project")}`),
     },
     { key: "mockup_name", label: "Mockup name", required: true, placeholder: "e.g. Product box layout" },
     { key: "pieces", label: "Pieces", type: "number", required: true },
@@ -3432,33 +3500,36 @@ function MockupWorkspace({
       detail={isGeneralManager ? "Monitor ongoing mockups across all Project Officers in real time." : "Track pre-quotation client mockups for your assigned leads."}
       variant="page"
       hideHeading
-      action={!isGeneralManager ? <Button onClick={openNew} disabled={!availableLeads.length}><Plus size={14} /> Add mockup</Button> : undefined}
+      action={!isGeneralManager ? <Button onClick={openNew} disabled={!currentUserId || !availableQuotes.length}><Plus size={14} /> Add mockup</Button> : undefined}
     >
       <section className="grid gap-3 border-b border-[#e4e8ef] px-4 py-4 sm:grid-cols-3 sm:px-5 lg:px-6">
         {[
-          ["Ongoing mockups", activeCount, "text-[#344054]"],
-          ["Due today", dueTodayCount, "text-[#a76605]"],
-          ["Overdue", overdueCount, "text-[#b42318]"],
+          ["Pending review", pendingCount, "text-[#a76605]"],
+          ["Needs revision", revisionCount, "text-[#b42318]"],
+          ["GM approved", approvedCount, "text-[#218b55]"],
         ].map(([label, count, color]) => <div key={String(label)} className="rounded-xl border border-[#dfe5ec] bg-white px-4 py-3"><p className="text-[11px] font-medium uppercase tracking-[.05em] text-[#7b8494]">{label}</p><p className={`mt-1 text-2xl font-semibold ${color}`}>{count}</p></div>)}
       </section>
       <section className="flex flex-wrap items-center gap-2 border-b border-[#e4e8ef] px-4 py-3 sm:px-5 lg:px-6">
         <label className="flex h-9 min-w-52 flex-1 items-center gap-2 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[#687386]"><Search size={15} /><span className="sr-only">Search mockups</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search client, company, project…" className="min-w-0 flex-1 border-0 bg-transparent text-[12px] outline-none" /></label>
-        <label className="flex h-9 items-center rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px]"><span className="sr-only">Mockup status</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="border-0 bg-transparent outline-none"><option value="active">Ongoing</option><option value="overdue">Overdue</option><option value="all">All statuses</option>{MOCKUP_STATUSES.map((status) => <option key={status} value={status}>{titleCase(status.replaceAll("_", " "))}</option>)}</select></label>
+        <label className="flex h-9 items-center rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px]"><span className="sr-only">Mockup approval status</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="border-0 bg-transparent outline-none"><option value="pending">Pending review</option><option value="needs_revision">Needs revision</option><option value="approved">GM approved</option><option value="all">All approval statuses</option></select></label>
       </section>
-      <Table labels={["Mockup / Project", "Client / Company", "Pieces", "Due date", "Status", ...(isGeneralManager ? ["Project Officer"] : []), "Updated", ...(!isGeneralManager ? ["Actions"] : [])]} minWidth={isGeneralManager ? 980 : 850}>
+      <Table labels={["Mockup / Project", "Illustration", "Client / Company", "Pieces", "Due date", "Approval", "Status", ...(isGeneralManager ? ["Project Officer"] : []), "Updated", "Actions"]} minWidth={isGeneralManager ? 1120 : 980}>
         {filteredTasks.map((task) => <tr key={text(task.id)}>
           <td className="px-4 py-3"><b>{text(task.mockup_name)}</b><small>{text(task.project_name)}</small></td>
+          <td className="px-4 py-3"><MockupIllustration path={task.illustration_path} label={text(task.mockup_name)} /></td>
           <td className="px-4 py-3"><b>{text(task.client_name, "—")}</b><small>{text(task.company_name, "—")}</small></td>
           <td className="px-4 py-3 text-center">{n(task.pieces).toLocaleString()}</td>
           <td className={`px-4 py-3 ${isActive(task) && text(task.due_date, "") < isoToday() ? "font-semibold text-[#b42318]" : ""}`}>{day(task.due_date)}</td>
+          <td className="px-4 py-3"><Status value={approvalStatus(task)} /></td>
           <td className="px-4 py-3"><Status value={task.status} /></td>
           {isGeneralManager && <td className="px-4 py-3">{officerName(task)}</td>}
           <td className="px-4 py-3">{day(task.updated_at)}</td>
-          {!isGeneralManager && <td className="px-4 py-3"><ActionIcon label={`Edit ${text(task.mockup_name)}`} confirm={false} onClick={() => openEdit(task)}><Pencil size={15} /></ActionIcon></td>}
+          <td className="px-4 py-3">{isGeneralManager ? (approvalStatus(task) === "pending" ? <div className="flex items-center gap-1"><ActionIcon label={`Approve ${text(task.mockup_name)}`} tone="green" onClick={() => void review(task, "approved")}><Check size={15} /></ActionIcon><ActionIcon label={`Return ${text(task.mockup_name)} for revision`} tone="amber" confirm={false} onClick={() => { setReviewing(task); setRevisionNote(""); }}><RotateCcw size={15} /></ActionIcon></div> : <span className="text-[#8b92a1]">—</span>) : (approvalStatus(task) === "needs_revision" ? <ActionIcon label={`Revise ${text(task.mockup_name)}`} confirm={false} onClick={() => openEdit(task)}><Pencil size={15} /></ActionIcon> : <span className="text-[#8b92a1]">Awaiting GM</span>)}</td>
         </tr>)}
       </Table>
-      {!filteredTasks.length && <Empty>{statusFilter === "active" ? "No ongoing mockups." : "No mockups match these filters."}</Empty>}
-      {open && <Dialog title={editing ? "Update mockup" : "Add mockup"} fields={dialogFields} values={values} setValues={setValues} save={() => void save()} close={close} saving={saving} saveLabel={editing ? "Save update" : "Create mockup"} />}
+      {!filteredTasks.length && <Empty>{statusFilter === "pending" ? "No mockups are awaiting General Manager review." : "No mockups match these filters."}</Empty>}
+      {open && <Dialog title={editing ? "Revise mockup" : "Add mockup"} fields={dialogFields} values={values} setValues={setValues} save={() => void save()} close={close} saving={saving} saveLabel={editing ? "Resubmit mockup" : "Submit mockup"}><label className="mt-4 block text-[12px] font-medium text-[#202938]">Mockup illustration<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { const file = event.target.files?.[0] ?? null; setIllustrationFile(file); setIllustrationPreview(file ? URL.createObjectURL(file) : null); }} className="mt-1 block w-full text-[12px]" />{illustrationPreview ? <img src={illustrationPreview} alt="New mockup preview" className="mt-3 h-32 rounded-lg border border-[#d9e0e9] object-contain" /> : editing?.illustration_path ? <p className="mt-1 text-[11px] text-[#687386]">Current illustration is retained unless you upload a replacement.</p> : <p className="mt-1 text-[11px] text-[#687386]">An illustration is required before submission.</p>}</label></Dialog>}
+      {reviewing && <Dialog title="Return mockup for revision" fields={[{ key: "revision_note", label: "Revision notes", type: "textarea", required: true, hint: "Explain the changes required before the officer resubmits." }]} values={{ revision_note: revisionNote }} setValues={(next) => setRevisionNote(next.revision_note ?? "")} save={() => void review(reviewing, "needs_revision", revisionNote)} close={() => setReviewing(null)} saving={reviewingSaving} saveLabel="Return for revision" />}
     </Panel>
   );
 }
@@ -3558,10 +3629,16 @@ function ProjectCalendar({
       .filter((schedule) => text(schedule.status, "approved") !== "rejected")
       .map((schedule) => text(schedule.quotation_id, "")),
   );
+  const mockupApprovedQuoteIds = new Set(
+    store.mockup_tasks
+      .filter((mockup) => text(mockup.approval_status, "pending") === "approved")
+      .map((mockup) => text(mockup.quotation_id, "")),
+  );
   const approvedQuotes = store.quotations.filter(
     (quote) =>
       text(quote.document_type, "") === "price_quotation" &&
       text(quote.status, "") === "approved" &&
+      mockupApprovedQuoteIds.has(text(quote.id, "")) &&
       !scheduledQuoteIds.has(text(quote.id, "")),
   );
   const canCreateSchedule = role === "project_manager";
