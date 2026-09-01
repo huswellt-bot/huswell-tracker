@@ -7779,7 +7779,7 @@ function PriceQuotationWorkspace({
   const [saving, setSaving] = useState(false);
   const [quotationTab, setQuotationTab] = useState<"draft" | "pending" | "needs_revision" | "approved">(() => role === "project_manager" ? "draft" : "pending");
   const [quotationQuery, setQuotationQuery] = useState("");
-  const [quotationMonth, setQuotationMonth] = useState("");
+  const [quotationMonth, setQuotationMonth] = useState(currentMonth);
   const [preparedByFilter, setPreparedByFilter] = useState("all");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [pdfQuote, setPdfQuote] = useState<Row | null>(null);
