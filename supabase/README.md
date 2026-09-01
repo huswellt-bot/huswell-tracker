@@ -74,7 +74,8 @@
 72. Run `077_officer_unsubmit_pending_requests.sql` to let Project Officers withdraw their own pending edit, revision, and completion requests before General Manager review.
 73. Run `078_general_manager_management_workflow_boundaries.sql` to preserve GM lead management while keeping quotation and project submission work officer-owned.
 74. Run `086_fix_price_quotation_resubmission_prices.sql` after 085 to preserve General Manager selling prices when an officer revises and resubmits a direct Price Quotation.
-75. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
+75. Run `087_preserve_price_quotation_revision_items.sql` to retain existing priced item records during an officer revision, while requiring the General Manager to price every new item.
+76. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 
