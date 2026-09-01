@@ -3203,6 +3203,16 @@ function Records({
                 labels={module.table === "leads" ? ["Actions", ...columns.map((c) => c.label)] : [...columns.map((c) => c.label), "Actions"]}
                 minWidth={module.table === "leads" ? 1650 : 680}
                 scrollable={isPageLayout}
+                columnWidths={
+                  module.table === "leads"
+                    ? [
+                        "112px",
+                        ...columns.map((column) =>
+                          column.label === "Email" ? "250px" : "auto",
+                        ),
+                      ]
+                    : undefined
+                }
                 className={
                   module.table === "leads"
                     ? "leads-table modern-page-table"
@@ -8414,7 +8424,7 @@ function PriceQuotationWorkspace({
         <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/30 p-4">
           <section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
             <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">{editing ? "Edit Price Quotation" : "Add Price Quotation"}</h2><p className="mt-1 text-[12px] text-[#687386]">Add the requested materials and quantities. Selling prices are entered by the General Manager.</p></div><button type="button" onClick={resetEditor} aria-label="Close" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div>
-            <label className="mt-5 block text-[12px] font-medium text-[#202938]">Lead / Project<select value={leadId} onChange={(event) => setLeadId(event.target.value)} className="input mt-1" required><option value="">Select a lead</option>{availableLeads.map((lead) => <option key={text(lead.id)} value={text(lead.id)}>{leadClientLabel(lead)} — {text(lead.project_name)}</option>)}</select></label>
+            <label className="mt-5 block text-[12px] font-medium text-[#202938]">Client&apos;s Name - Company Name<select value={leadId} onChange={(event) => setLeadId(event.target.value)} className="input mt-1" required><option value="">Select a lead</option>{availableLeads.map((lead) => <option key={text(lead.id)} value={text(lead.id)}>{leadClientLabel(lead)}</option>)}</select></label>
             <label className="mt-4 block text-[12px] font-medium text-[#202938]">Project Type<select value={projectType} onChange={(event) => setProjectType(event.target.value)} className={`input mt-1 ${projectType ? "text-[#151922]" : "text-[#8b92a1]"}`} required><option value="">Select project type</option>{PRICE_QUOTATION_PROJECT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
             <div className="mt-5">
               <div className="flex items-center justify-between"><div><h3 className="text-[14px] font-semibold text-[#202938]">Items</h3><p className="mt-1 text-[12px] text-[#687386]">List each material or production item required by the lead.</p></div></div>
