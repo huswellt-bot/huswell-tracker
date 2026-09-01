@@ -124,6 +124,7 @@ type TableName =
   | "inventory_movements"
   | "quotations"
   | "quotation_items"
+  | "price_quotation_illustrations"
   | "production_jobs"
   | "production_material_usage"
   | "production_job_activity"
@@ -202,6 +203,7 @@ const tables: TableName[] = [
   "inventory_movements",
   "quotations",
   "quotation_items",
+  "price_quotation_illustrations",
   "production_jobs",
   "production_material_usage",
   "production_job_activity",
@@ -601,6 +603,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "inventory_items",
     "quotations",
     "quotation_items",
+    "price_quotation_illustrations",
     "project_edit_requests",
     "project_schedule_revision_requests",
     "project_schedule_completion_requests",
@@ -716,6 +719,7 @@ const workspaceViewTables = (
     return [
       "quotations",
       "quotation_items",
+      "price_quotation_illustrations",
       "leads",
       "customers",
       "inventory_items",
@@ -8213,6 +8217,12 @@ function PriceQuotationWorkspace({
     imageFile?: File;
     imagePreview?: string;
   };
+  type QuotationIllustrationDraft = {
+    key: string;
+    imageUrl?: string;
+    imageFile?: File;
+    imagePreview?: string;
+  };
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<Row | null>(null);
   const [leadId, setLeadId] = useState("");
@@ -8220,6 +8230,9 @@ function PriceQuotationWorkspace({
   const [items, setItems] = useState<DraftItem[]>([
     { key: "item-1", description: "", quantity: "1" },
   ]);
+  const [quotationIllustrations, setQuotationIllustrations] = useState<
+    QuotationIllustrationDraft[]
+  >([]);
   const [saving, setSaving] = useState(false);
   const [quotationTab, setQuotationTab] = useState<"draft" | "pending" | "needs_revision" | "approved">(() => role === "project_manager" ? "draft" : "pending");
   const [quotationQuery, setQuotationQuery] = useState("");
@@ -8284,12 +8297,14 @@ function PriceQuotationWorkspace({
     setLeadId("");
     setProjectType("");
     setItems([{ key: `item-${Date.now()}`, description: "", quantity: "1" }]);
+    setQuotationIllustrations([]);
   };
   const openNew = () => {
     setEditing(null);
     setLeadId("");
     setProjectType("");
     setItems([{ key: `item-${Date.now()}`, description: "", quantity: "1" }]);
+    setQuotationIllustrations([]);
     setEditorOpen(true);
   };
   const openEdit = (quote: Row) => {
@@ -8310,6 +8325,15 @@ function PriceQuotationWorkspace({
           }))
         : [{ key: "item-1", description: "", quantity: "1" }],
     );
+    setQuotationIllustrations(
+      store.price_quotation_illustrations
+        .filter((illustration) => illustration.quotation_id === quote.id)
+        .sort((left, right) => n(left.sort_order) - n(right.sort_order))
+        .map((illustration, index) => ({
+          key: text(illustration.id, `illustration-${index}`),
+          imageUrl: text(illustration.image_url, "") || undefined,
+        })),
+    );
     setEditorOpen(true);
   };
   const saveDraft = async () => {
@@ -8321,6 +8345,7 @@ function PriceQuotationWorkspace({
     setSaving(true);
     const client = createClient();
     const savedItems: DraftItem[] = [];
+    const savedQuotationIllustrations: { image_url: string }[] = [];
     try {
       for (const item of items) {
         let imageUrl = item.imageUrl;
@@ -8334,6 +8359,19 @@ function PriceQuotationWorkspace({
           imageUrl = client.storage.from("quotation-images").getPublicUrl(path).data.publicUrl;
         }
         savedItems.push({ ...item, imageUrl });
+      }
+      for (const illustration of quotationIllustrations) {
+        let imageUrl = illustration.imageUrl;
+        if (illustration.imageFile) {
+          const extension = illustration.imageFile.type === "image/png" ? "png" : illustration.imageFile.type === "image/webp" ? "webp" : "jpg";
+          const path = `${orgId}/price-quotation-illustrations/${crypto.randomUUID()}.${extension}`;
+          const { error: uploadError } = await client.storage
+            .from("quotation-images")
+            .upload(path, illustration.imageFile, { contentType: illustration.imageFile.type, upsert: false });
+          if (uploadError) throw uploadError;
+          imageUrl = client.storage.from("quotation-images").getPublicUrl(path).data.publicUrl;
+        }
+        if (imageUrl) savedQuotationIllustrations.push({ image_url: imageUrl });
       }
     } catch (error) {
       setSaving(false);
@@ -8349,7 +8387,10 @@ function PriceQuotationWorkspace({
         quantity: n(item.quantity),
         image_url: item.imageUrl ?? "",
       })),
-      p_has_illustrations: savedItems.some((item) => Boolean(item.imageUrl)),
+      p_has_illustrations:
+        savedItems.some((item) => Boolean(item.imageUrl)) ||
+        savedQuotationIllustrations.length > 0,
+      p_quotation_illustrations: savedQuotationIllustrations,
     });
     if (error) {
       setSaving(false);
@@ -8454,6 +8495,29 @@ function PriceQuotationWorkspace({
     }
     setItems((current) => current.map((value) => value.key === itemKey ? { ...value, imageFile: file, imagePreview: URL.createObjectURL(file) } : value));
   };
+  const addQuotationIllustrations = (files?: FileList | File[]) => {
+    const selected = Array.from(files ?? []);
+    if (!selected.length) return;
+    if (quotationIllustrations.length + selected.length > 5) {
+      return notice("A Price Quotation can have a maximum of five illustrations.");
+    }
+    const invalidFile = selected.find(
+      (file) =>
+        !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
+        file.size > 5 * 1024 * 1024,
+    );
+    if (invalidFile) {
+      return notice("Illustrations must be JPEG, PNG, or WebP images no larger than 5 MB each.");
+    }
+    setQuotationIllustrations((current) => [
+      ...current,
+      ...selected.map((file) => ({
+        key: `quotation-illustration-${crypto.randomUUID()}`,
+        imageFile: file,
+        imagePreview: URL.createObjectURL(file),
+      })),
+    ]);
+  };
   const openPdf = (quote: Row) => {
     if (text(quote.status) !== "approved") {
       return notice("Price Quotations can be opened after General Manager approval.");
@@ -8515,7 +8579,14 @@ function PriceQuotationWorkspace({
                 request.quotation_id === quote.id &&
                 text(request.status) === "pending",
             );
-            const illustrationCount = store.quotation_items.filter((item) => item.quotation_id === quote.id && Boolean(text(item.image_url, ""))).length;
+            const illustrationCount =
+              store.price_quotation_illustrations.filter(
+                (illustration) => illustration.quotation_id === quote.id,
+              ).length +
+              store.quotation_items.filter(
+                (item) =>
+                  item.quotation_id === quote.id && Boolean(text(item.image_url, "")),
+              ).length;
             return (
               <tr key={text(quote.id)}>
                 <td className="px-5 py-3"><b>{text(quote.quotation_no)}</b><small>{day(quote.issue_date)}</small></td>
@@ -8579,18 +8650,23 @@ function PriceQuotationWorkspace({
             <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">{editing ? "Edit Price Quotation" : "Add Price Quotation"}</h2><p className="mt-1 text-[12px] text-[#687386]">Add the requested materials and quantities. Selling prices are entered by the General Manager.</p></div><button type="button" onClick={resetEditor} aria-label="Close" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div>
             <label className="mt-5 block text-[12px] font-medium text-[#202938]">Client&apos;s Name - Company Name<select value={leadId} onChange={(event) => setLeadId(event.target.value)} className="input mt-1" required><option value="">Select a lead</option>{availableLeads.map((lead) => <option key={text(lead.id)} value={text(lead.id)}>{leadClientLabel(lead)}</option>)}</select></label>
             <label className="mt-4 block text-[12px] font-medium text-[#202938]">Project Type<select value={projectType} onChange={(event) => setProjectType(event.target.value)} className={`input mt-1 ${projectType ? "text-[#151922]" : "text-[#8b92a1]"}`} required><option value="">Select project type</option>{PRICE_QUOTATION_PROJECT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+            <section className="mt-5 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div><h3 className="text-[14px] font-semibold text-[#202938]">Illustrations</h3><p className="mt-1 text-[12px] text-[#687386]">Upload up to five JPEG, PNG, or WebP reference images (5 MB each). They are view-only and are not included in the PDF.</p></div>
+                <label className={`inline-flex min-h-9 cursor-pointer items-center rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium text-[#344054] hover:bg-[#f7f9fc] ${quotationIllustrations.length >= 5 ? "pointer-events-none opacity-50" : ""}`}><input type="file" accept="image/jpeg,image/png,image/webp" multiple className="sr-only" disabled={quotationIllustrations.length >= 5} onChange={(event) => { addQuotationIllustrations(event.target.files ?? undefined); event.currentTarget.value = ""; }} />Add images ({quotationIllustrations.length}/5)</label>
+              </div>
+              {quotationIllustrations.length > 0 && <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">{quotationIllustrations.map((illustration, index) => <div key={illustration.key} className="relative overflow-hidden rounded-lg border border-[#d9e0e9] bg-white"><a href={illustration.imagePreview || illustration.imageUrl} target="_blank" rel="noreferrer" className="block aspect-square"><img src={illustration.imagePreview || illustration.imageUrl} alt={`Quotation illustration ${index + 1}`} className="size-full object-cover" /></a><button type="button" aria-label={`Remove illustration ${index + 1}`} onClick={() => setQuotationIllustrations((current) => current.filter((item) => item.key !== illustration.key))} className="absolute right-1 top-1 grid size-7 place-items-center rounded-md bg-white/90 text-[#8b92a1] shadow-sm hover:bg-[#fff1f1] hover:text-[#b42318]"><X size={14} /></button><span className="absolute bottom-1 left-1 rounded bg-[#151922]/75 px-1.5 py-0.5 text-[10px] font-medium text-white">{index + 1}</span></div>)}</div>}
+            </section>
             <div className="mt-5">
               <div className="flex items-center justify-between"><div><h3 className="text-[14px] font-semibold text-[#202938]">Items</h3><p className="mt-1 text-[12px] text-[#687386]">List each material or production item required by the lead.</p></div></div>
-              <Table labels={["#", "Description", "Qty", "Illustration", ""]} minWidth={0} className="table-fixed" columnWidths={["7%", "45%", "14%", "25%", "9%"]}>
+              <Table labels={["#", "Description", "Qty", ""]} minWidth={0} className="table-fixed" columnWidths={["8%", "64%", "18%", "10%"]}>
                 {items.map((item, index) => <tr key={item.key}>
                   <td className="px-3 py-2 text-center font-medium">{index + 1}</td>
                   <td className="px-3 py-2"><textarea rows={2} aria-label={`Item ${index + 1} description`} value={item.description} onChange={(event) => setItems((current) => current.map((value) => value.key === item.key ? { ...value, description: titleCase(event.target.value) } : value))} className="input mt-0 min-h-[58px] resize-y" placeholder="Material or production item" /></td>
                   <td className="px-3 py-2"><input aria-label={`Item ${index + 1} quantity`} type="number" min="0.001" step="any" value={item.quantity} onChange={(event) => setItems((current) => current.map((value) => value.key === item.key ? { ...value, quantity: event.target.value } : value))} className="input mt-0 text-center" style={{ width: "6rem", marginInline: "auto" }} /></td>
-                  <td className="px-3 py-2"><div className="flex items-center justify-center gap-2">{(item.imagePreview || item.imageUrl) && <a href={item.imagePreview || item.imageUrl} target="_blank" rel="noreferrer" aria-label={`View illustration for item ${index + 1}`} className="overflow-hidden rounded-md border border-[#d9e0e9]"><img src={item.imagePreview || item.imageUrl} alt="" className="size-9 object-cover" /></a>}<label className="cursor-pointer"><span className="sr-only">Choose illustration for item {index + 1}</span><input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => { chooseIllustration(item.key, event.target.files?.[0]); event.currentTarget.value = ""; }} /><span className="inline-flex min-h-9 items-center rounded-lg border border-[#d9e0e9] px-2.5 text-[11px] font-medium text-[#344054] hover:bg-[#f7f9fc]">{item.imageUrl || item.imageFile ? "Change" : "Add image"}</span></label>{(item.imageUrl || item.imageFile) && <button type="button" aria-label={`Remove illustration for item ${index + 1}`} onClick={() => setItems((current) => current.map((value) => value.key === item.key ? { ...value, imageUrl: undefined, imageFile: undefined, imagePreview: undefined } : value))} className="grid size-8 place-items-center rounded-md text-[#8b92a1] hover:bg-[#fff1f1] hover:text-[#b42318]"><X size={15} /></button>}</div></td>
                   <td className="px-3 py-2 text-center"><ActionIcon label={`Remove item ${index + 1}`} tone="red" disabled={items.length === 1} onClick={() => setItems((current) => current.filter((value) => value.key !== item.key))}><Trash2 size={15} /></ActionIcon></td>
                 </tr>)}
               </Table>
-              <p className="mt-2 text-[11px] text-[#687386]">Upload up to five JPEG, PNG, or WebP illustrations (5 MB each). They are for viewing only and are not included in the Price Quotation PDF.</p>
               <div className="mt-3 flex justify-end"><Button secondary onClick={() => setItems((current) => [...current, { key: `item-${Date.now()}`, description: "", quantity: "1" }])}><Plus size={14} /> Add Item</Button></div>
             </div>
             <div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={resetEditor}>Cancel</Button><Button disabled={saving} onClick={() => void saveDraft()}>{editing ? "Save changes" : "Save draft"}</Button></div>
@@ -8610,7 +8686,15 @@ function PriceQuotationWorkspace({
         <div className="fixed inset-0 z-[70] grid place-items-center bg-[#151922]/40 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setIllustrationQuote(null); }}>
           <section role="dialog" aria-modal="true" aria-labelledby="price-quotation-illustrations-title" className="w-full max-w-2xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
             <div className="flex items-start justify-between gap-4"><div><h2 id="price-quotation-illustrations-title" className="text-[16px] font-semibold text-[#202938]">Quotation illustrations</h2><p className="mt-1 text-[12px] text-[#687386]">{text(illustrationQuote.quotation_no, "Price Quotation")} · View-only; not included in the PDF.</p></div><button type="button" onClick={() => setIllustrationQuote(null)} aria-label="Close illustrations" className="rounded-md p-1 text-[#687386] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938]"><X size={18} /></button></div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">{store.quotation_items.filter((item) => item.quotation_id === illustrationQuote.id && Boolean(text(item.image_url, ""))).map((item) => <a key={text(item.id)} href={text(item.image_url, "")} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><img src={text(item.image_url, "")} alt={text(item.description, "Quotation illustration")} className="h-44 w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{text(item.description)}</p></a>)}</div>
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">{[
+              ...store.price_quotation_illustrations
+                .filter((illustration) => illustration.quotation_id === illustrationQuote.id)
+                .sort((left, right) => n(left.sort_order) - n(right.sort_order))
+                .map((illustration, index) => ({ id: text(illustration.id, `quotation-illustration-${index}`), imageUrl: text(illustration.image_url, ""), description: `Illustration ${index + 1}` })),
+              ...store.quotation_items
+                .filter((item) => item.quotation_id === illustrationQuote.id && Boolean(text(item.image_url, "")))
+                .map((item) => ({ id: text(item.id), imageUrl: text(item.image_url, ""), description: text(item.description, "Quotation illustration") })),
+            ].map((illustration) => <a key={illustration.id} href={illustration.imageUrl} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><img src={illustration.imageUrl} alt={illustration.description} className="h-44 w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{illustration.description}</p></a>)}</div>
             <div className="mt-5 flex justify-end"><Button secondary onClick={() => setIllustrationQuote(null)}>Close</Button></div>
           </section>
         </div>
@@ -8673,7 +8757,7 @@ function PriceQuotationReviewContent({
             const price = n(prices[text(line.id)]);
             return <tr key={text(line.id)}>
               <td className="px-4 py-3 text-center">{index + 1}</td>
-              <td className="px-4 py-3 font-medium">{text(line.description)}</td>
+              <td className="whitespace-pre-wrap break-words px-4 py-3 font-medium">{text(line.description)}</td>
               <td className="px-4 py-3 text-center">{n(line.quantity)}</td>
               <td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0" /></td>
               <td className="px-4 py-3 text-right font-semibold">{wholePeso.format(n(line.quantity) * price)}</td>
@@ -8738,10 +8822,20 @@ function PriceQuotationReview({
   const [revisionNote, setRevisionNote] = useState("");
   const [working, setWorking] = useState(false);
   const lines = store.quotation_items.filter((item) => item.quotation_id === quotation.id);
-  const illustrations = lines.flatMap((line) => {
-    const imageUrl = text(line.image_url, "");
-    return imageUrl ? [{ id: text(line.id), description: text(line.description, "Quotation illustration"), imageUrl }] : [];
-  });
+  const illustrations = [
+    ...store.price_quotation_illustrations
+      .filter((illustration) => illustration.quotation_id === quotation.id)
+      .sort((left, right) => n(left.sort_order) - n(right.sort_order))
+      .map((illustration, index) => ({
+        id: text(illustration.id, `quotation-illustration-${index}`),
+        description: `Illustration ${index + 1}`,
+        imageUrl: text(illustration.image_url, ""),
+      })),
+    ...lines.flatMap((line) => {
+      const imageUrl = text(line.image_url, "");
+      return imageUrl ? [{ id: text(line.id), description: text(line.description, "Quotation illustration"), imageUrl }] : [];
+    }),
+  ];
   const subtotal = lines.reduce((sum, line) => sum + n(line.quantity) * n(prices[text(line.id)]), 0);
   const tax = Math.round(subtotal * n(vatRate)) / 100;
   const total = subtotal + tax + n(shipping);
