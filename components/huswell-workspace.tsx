@@ -3503,7 +3503,10 @@ function MockupWorkspace({
       required: true,
       key: "quotation_id",
       label: "Approved Price Quotation",
-      options: availableQuotes.map((quote) => `${text(quote.id)}|${text(quote.quotation_no)} - ${text(quote.client_name)} - ${text(quote.project_name, "Untitled project")}`),
+      options: availableQuotes.map(
+        (quote) =>
+          `${text(quote.id)}|${text(quote.quotation_no)} - ${text(quote.client_name, "Client")}`,
+      ),
     },
     { key: "mockup_name", label: "Mockup name", required: true, placeholder: "e.g. Product box layout" },
     { key: "pieces", label: "Pieces", type: "number", required: true },
@@ -3689,7 +3692,7 @@ function ProjectCalendar({
       required: true,
       options: approvedQuotes.map(
         (quote) =>
-          `${text(quote.id)}|${text(quote.quotation_no)} · ${text(quote.project_name, text(quote.client_name, "Untitled project"))}`,
+          `${text(quote.id)}|${text(quote.quotation_no)} - ${text(quote.client_name, "Client")}`,
       ),
     },
     { key: "start_date", label: "Start date", type: "date", required: true },
