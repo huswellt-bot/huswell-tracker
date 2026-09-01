@@ -2332,6 +2332,7 @@ function Dialog({
                 </div>
               ) : f.type === "textarea" ? (
                 <textarea
+                  required={f.required}
                   value={values[f.key] ?? ""}
                   onChange={(e) =>
                     setValues({
@@ -2465,6 +2466,10 @@ function Records({
   const [doneDealStatusFilter, setDoneDealStatusFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState(currentMonth);
   const [projectOfficerFilter, setProjectOfficerFilter] = useState("all");
+  const [deletionRequestLead, setDeletionRequestLead] = useState<Row | null>(null);
+  const [deletionRequestValues, setDeletionRequestValues] = useState<Record<string, string>>({
+    request_note: "",
+  });
   const isProjectsPage = module.table === "leads" && leadMode === "projects";
   const isLeadChangeRequestsPage =
     module.table === "leads" && leadMode === "lead_change_requests";
@@ -2834,16 +2839,19 @@ function Records({
     notice("Lead / project deleted.");
     await reload();
   };
-  const requestLeadDeletion = async (row: Row) => {
+  const requestLeadDeletion = async (row: Row, requestNote: string) => {
     if (!row.id) return;
     setSaving(true);
     const { error } = await createClient().rpc("request_lead_change", {
       p_lead_id: row.id,
       p_change_type: "delete",
       p_proposed_changes: {},
+      p_request_note: requestNote.trim(),
     });
     setSaving(false);
     if (error) return notice(error.message);
+    setDeletionRequestLead(null);
+    setDeletionRequestValues({ request_note: "" });
     notice("Lead deletion submitted for General Manager approval.");
     await reload();
   };
@@ -2908,19 +2916,21 @@ function Records({
         {(canDeleteLead(row) || canRequestLeadDeletion(row)) && (
           <ActionIcon
             disabled={saving}
-            onClick={() =>
-              void (
-                canDeleteLead(row)
-                  ? deleteLead(row)
-                  : requestLeadDeletion(row)
-              )
-            }
+            onClick={() => {
+              if (canDeleteLead(row)) {
+                void deleteLead(row);
+                return;
+              }
+              setDeletionRequestLead(row);
+              setDeletionRequestValues({ request_note: "" });
+            }}
             label={
               canDeleteLead(row)
                 ? "Delete lead / project"
                 : "Request lead deletion"
             }
             tone="red"
+            confirm={canDeleteLead(row)}
             confirmationDescription={
               canDeleteLead(row)
                 ? "This permanently deletes the Lead and every linked quotation, invoice, payment, production record, stock-in, project schedule, and related request. This cannot be undone."
@@ -3363,6 +3373,38 @@ function Records({
               : undefined
           }
         />
+      )}
+      {deletionRequestLead && (
+        <Dialog
+          title="Request Lead Deletion"
+          fields={[
+            {
+              key: "request_note",
+              label: "Reason for deletion",
+              type: "textarea",
+              required: true,
+              placeholder: "Explain why this lead should be deleted",
+            },
+          ]}
+          values={deletionRequestValues}
+          setValues={setDeletionRequestValues}
+          save={() =>
+            void requestLeadDeletion(
+              deletionRequestLead,
+              deletionRequestValues.request_note ?? "",
+            )
+          }
+          close={() => {
+            setDeletionRequestLead(null);
+            setDeletionRequestValues({ request_note: "" });
+          }}
+          saving={saving}
+          saveLabel="Submit deletion request"
+        >
+          <p className="rounded-lg border border-[#fed7d7] bg-[#fff5f5] p-3 text-[12px] leading-5 text-[#9b1c1c]">
+            The General Manager must approve this request before the lead and its linked workflow records are permanently deleted.
+          </p>
+        </Dialog>
       )}
     </div>
   );
@@ -9221,9 +9263,19 @@ function LeadChangeRequestReview({
           </button>
         </div>
         {isDeletion ? (
-          <p className="mt-4 rounded-lg border border-[#fed7d7] bg-[#fff5f5] p-3 text-[13px] leading-5 text-[#9b1c1c]">
-            Approving this request permanently deletes the Lead. Linked quotations keep their records, but no longer reference this Lead.
-          </p>
+          <>
+            <p className="mt-4 rounded-lg border border-[#fed7d7] bg-[#fff5f5] p-3 text-[13px] leading-5 text-[#9b1c1c]">
+              Approving this request permanently deletes the Lead and every linked workflow record. This cannot be undone.
+            </p>
+            <section className="mt-4 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3">
+              <h3 className="text-[12px] font-semibold text-[#344054]">
+                Sales Project Officer reason
+              </h3>
+              <p className="mt-1 whitespace-pre-wrap text-[13px] leading-5 text-[#4b5565]">
+                {text(request.request_note, "No reason provided.")}
+              </p>
+            </section>
+          </>
         ) : (
           <Table labels={["Field", "Current", "Requested"]} minWidth={0}>
             {Object.entries(changes).map(([key, value]) => (
