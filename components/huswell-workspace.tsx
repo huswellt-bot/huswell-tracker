@@ -7979,11 +7979,11 @@ function PriceQuotationWorkspace({
     notice("Update the Price Quotation, then submit it for General Manager review.");
   };
   const canDeletePriceQuotation = (quote: Row) =>
-    !quote.costing_source_id &&
-    (isGeneralManager ||
-      (role === "project_manager" &&
-        quote.created_by === currentUserId &&
-        ["draft", "needs_revision"].includes(text(quote.status))));
+    isGeneralManager ||
+    (role === "project_manager" &&
+      !quote.costing_source_id &&
+      quote.created_by === currentUserId &&
+      ["draft", "needs_revision"].includes(text(quote.status)));
   const deletePriceQuotation = async (quote: Row) => {
     if (!quote.id || !canDeletePriceQuotation(quote)) return;
     setSaving(true);
@@ -8112,7 +8112,9 @@ function PriceQuotationWorkspace({
                       tone="red"
                       disabled={saving}
                       confirm
-                      confirmationDescription="This permanently deletes the Price Quotation and its linked invoices, payments, production jobs, stock-ins, schedules, and related requests. This cannot be undone."
+                      confirmationDescription={quote.costing_source_id
+                        ? "This permanently deletes the historical Price Quotation, its Costing Breakdown, any quotations derived from it, and all linked invoices, payments, production jobs, stock-ins, schedules, and related requests. This cannot be undone."
+                        : "This permanently deletes the Price Quotation and its linked invoices, payments, production jobs, stock-ins, schedules, and related requests. This cannot be undone."}
                       onClick={() => void deletePriceQuotation(quote)}
                     >
                       <Trash2 size={15} />
