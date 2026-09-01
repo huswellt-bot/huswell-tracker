@@ -38,7 +38,8 @@ async function createPdf(html: string) {
 }
 
 export async function POST(request: Request) {
-  const { html, documentId, documentType } = (await request.json()) as PdfRequest;
+  const payload = (await request.json().catch(() => null)) as PdfRequest | null;
+  const { html, documentId, documentType } = payload ?? {};
   if (typeof html !== "string" || html.length === 0 || html.length > 2_000_000) {
     return Response.json({ error: "A valid quotation document is required." }, { status: 400 });
   }

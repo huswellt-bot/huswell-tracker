@@ -253,7 +253,7 @@ export function SuperAdminConsole({
   };
   const actionCopy =
     pendingAction?.action === "delete"
-      ? `Delete ${pendingAction.user.full_name}'s account permanently? This cannot be undone.`
+      ? `Deactivate ${pendingAction.user.full_name}'s account? Their workspace access will be removed and workflow history retained.`
       : pendingAction?.action === "ban"
         ? `Ban ${pendingAction?.user.full_name}? They will no longer be able to sign in.`
         : `Unban ${pendingAction?.user.full_name}? They will be able to sign in again.`;
@@ -410,14 +410,14 @@ export function SuperAdminConsole({
                               </button>
                             </FixedIconTooltip>
                           )}
-                          <FixedIconTooltip label="Delete account">
+                          <FixedIconTooltip label="Deactivate account">
                             <button
                               type="button"
                               disabled={saving}
                               onClick={() =>
                                 setPendingAction({ user, action: "delete" })
                               }
-                              aria-label={`Delete ${user.full_name}`}
+                              aria-label={`Deactivate ${user.full_name}`}
                               className="table-action table-action--danger disabled:opacity-50"
                             >
                               <Trash2 size={16} />

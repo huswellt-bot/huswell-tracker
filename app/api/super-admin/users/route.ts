@@ -319,7 +319,25 @@ export async function DELETE(request: Request) {
   if (!managed.admin || !managed.role || managed.error)
     return json({ error: managed.error ?? "Unable to delete the user." }, 400);
 
-  const { error } = await managed.admin.auth.admin.deleteUser(userId);
+  const { error: membershipError } = await managed.admin
+    .from("organization_members")
+    .delete()
+    .eq("organization_id", organizationId)
+    .eq("user_id", userId);
+  if (membershipError) return json({ error: membershipError.message }, 500);
+
+  const { error: profileError } = await managed.admin
+    .from("profiles")
+    .delete()
+    .eq("id", userId);
+  if (profileError) return json({ error: profileError.message }, 500);
+
+  // A soft delete prevents sign-in without deleting workflow approvals and
+  // audit history that still reference this account.
+  const { error } = await managed.admin.auth.admin.deleteUser(userId, true);
   if (error) return json({ error: error.message }, 500);
-  return Response.json({ message: "User account deleted." });
+  return Response.json({
+    message:
+      "User account deactivated and removed from this workspace. Workflow history was retained.",
+  });
 }
