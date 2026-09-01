@@ -3091,6 +3091,15 @@ function Records({
                   className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px] text-[#202938] outline-none focus:border-[#c43b43]"
                 />
               </label>
+              <Button
+                secondary
+                onClick={() => {
+                  setMonthFilter("");
+                  setPage(0);
+                }}
+              >
+                All months
+              </Button>
             </>
           ) : (
             <Button secondary onClick={() => setPage(0)}>
