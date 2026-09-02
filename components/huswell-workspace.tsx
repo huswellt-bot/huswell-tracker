@@ -3862,13 +3862,9 @@ function PriceQuotationMockups({
     >
       {approvedQuotations.length ? (
         <div className="px-4 py-4 sm:px-5 lg:px-6">
-          <div className="mb-4 flex items-center gap-2 border-b border-[#edf0f5] pb-3 text-[12px] text-[#687386]">
-            <ImageIcon size={14} /> Only approved price quotations can have mockups.
-          </div>
-          <Table labels={["Price Quotation", "Client", "Approved", "Mockup Status", "Images", ""]} minWidth={760} className="!w-full">
+          <Table labels={["Price Quotation", "Client", "Approved", "Mockup Status", "Actions"]} minWidth={700} className="!w-full">
             {approvedQuotations.map((quote) => {
               const lead = store.leads.find((item) => item.id === quote.lead_id);
-              const images = mockupImagesFor(text(quote.id));
               const mockupStatus = mockupStatusFor(text(quote.id));
               return (
                 <tr key={text(quote.id)}>
@@ -3877,18 +3873,8 @@ function PriceQuotationMockups({
                   <td className="px-5 py-3">{day(quote.approved_at ?? quote.issue_date)}</td>
                   <td className="px-5 py-3"><MockupStatusBadge value={mockupStatus} /></td>
                   <td className="px-5 py-3">
-                    <span className="flex items-center gap-2">
-                      {images.length > 0 ? (
-                        <img src={images[0]} alt="Mockup preview" className="size-8 rounded-md border border-[#d9e0e9] object-cover" />
-                      ) : (
-                        <span className="grid size-8 place-items-center rounded-md border border-dashed border-[#ccd5e0] text-[#c4ccd8]"><ImageIcon size={14} /></span>
-                      )}
-                      <span className="text-[12px] text-[#344054]">{images.length}/20</span>
-                    </span>
-                  </td>
-                  <td className="px-5 py-3">
                     <span className="flex items-center gap-1">
-                      <ActionIcon label="View mockup images" confirm={false} onClick={() => setViewQuoteId(text(quote.id))}><Eye size={15} /></ActionIcon>
+                      <ActionIcon label="View mockup images" confirm={false} onClick={() => setViewQuoteId(text(quote.id))}><ImageIcon size={15} /></ActionIcon>
                       {canEdit && <ActionIcon label="Edit mockup" onClick={() => openEdit(text(quote.id))}><Pencil size={15} /></ActionIcon>}
                     </span>
                   </td>
@@ -3904,110 +3890,105 @@ function PriceQuotationMockups({
       )}
 
       {canEdit && editorOpen && (
-        <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4">
-          <section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
-            <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4">
-              <div>
-                <h2 className="text-[17px] font-semibold text-[#202938]">{editingQuoteId ? "Edit Mockup" : "Add Mockup"}</h2>
-                <p className="mt-1 text-[12px] text-[#687386]">Upload production mockup images for an approved Price Quotation.</p>
-              </div>
-              <button type="button" onClick={closeEditor} aria-label="Close" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button>
-            </div>
+        <Dialog
+          title={editingQuoteId ? "Edit Mockup" : "Add Mockup"}
+          fields={[]}
+          values={{}}
+          setValues={() => undefined}
+          save={() => void save()}
+          close={closeEditor}
+          saving={saving}
+          saveLabel="Save Mockup"
+          className="max-w-3xl"
+        >
+          <div>
+            <label className="block text-[12px] font-medium text-[#202938]">Price Quotation</label>
+            {editingQuoteId ? (
+              <p className="mt-1 text-[13px] font-medium text-[#202938]">{text(editorQuote?.quotation_no)} — {text(editorQuote?.client_name)}</p>
+            ) : (
+              <select
+                value={editingQuoteId ?? ""}
+                onChange={(event) => setEditingQuoteId(event.target.value || null)}
+                className="input mt-1"
+              >
+                <option value="">Select an approved Price Quotation</option>
+                {approvedQuotations.map((quote) => (
+                  <option key={text(quote.id)} value={text(quote.id)}>{text(quote.quotation_no)} — {text(quote.client_name, "Client")}</option>
+                ))}
+              </select>
+            )}
+          </div>
 
-            <div className="mt-4">
-              <label className="block text-[12px] font-medium text-[#202938]">Price Quotation</label>
-              {editingQuoteId ? (
-                <p className="mt-1 text-[13px] font-medium text-[#202938]">{text(editorQuote?.quotation_no)} — {text(editorQuote?.client_name)}</p>
-              ) : (
-                <select
-                  value={editingQuoteId ?? ""}
-                  onChange={(event) => setEditingQuoteId(event.target.value || null)}
-                  className="input mt-1"
-                >
-                  <option value="">Select an approved Price Quotation</option>
-                  {approvedQuotations.map((quote) => (
-                    <option key={text(quote.id)} value={text(quote.id)}>{text(quote.quotation_no)} — {text(quote.client_name, "Client")}</option>
-                  ))}
-                </select>
+          {editorQuote && (
+            <div className="mt-4 grid gap-4 rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4 sm:grid-cols-2">
+              <div><p className="text-[11px] font-medium uppercase tracking-wide text-[#7b8494]">Client</p><p className="mt-1 text-[13px] font-medium text-[#202938]">{text(editorQuote.client_name, "—")}</p></div>
+              <div><p className="text-[11px] font-medium uppercase tracking-wide text-[#7b8494]">Project Type</p><p className="mt-1 text-[13px] font-medium text-[#202938]">{text(editorLead?.project_type, "—")}</p></div>
+              {editorItems.length > 0 && (
+                <div className="sm:col-span-2 overflow-x-auto">
+                  <Table labels={["#", "Description", "Qty"]} minWidth={0} compact className="table-fixed">
+                    {editorItems.map((item, index) => (
+                      <tr key={text(item.id)}>
+                        <td className="px-3 py-2 text-center">{index + 1}</td>
+                        <td className="px-3 py-2 text-[12px]">{text(item.description)}</td>
+                        <td className="px-3 py-2 text-center">{n(item.quantity).toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </Table>
+                </div>
               )}
             </div>
+          )}
 
-            {editorQuote && (
-              <div className="mt-4 grid gap-4 rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4 sm:grid-cols-2">
-                <div><p className="text-[11px] font-medium uppercase tracking-wide text-[#7b8494]">Client</p><p className="mt-1 text-[13px] font-medium text-[#202938]">{text(editorQuote.client_name, "—")}</p></div>
-                <div><p className="text-[11px] font-medium uppercase tracking-wide text-[#7b8494]">Project Type</p><p className="mt-1 text-[13px] font-medium text-[#202938]">{text(editorLead?.project_type, "—")}</p></div>
-                {editorItems.length > 0 && (
-                  <div className="sm:col-span-2 overflow-x-auto">
-                    <Table labels={["#", "Description", "Qty"]} minWidth={0} compact className="table-fixed">
-                      {editorItems.map((item, index) => (
-                        <tr key={text(item.id)}>
-                          <td className="px-3 py-2 text-center">{index + 1}</td>
-                          <td className="px-3 py-2 text-[12px]">{text(item.description)}</td>
-                          <td className="px-3 py-2 text-center">{n(item.quantity).toLocaleString()}</td>
-                        </tr>
-                      ))}
-                    </Table>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {editorQuote && (
-              <div className="mt-5">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <h3 className="text-[13px] font-semibold text-[#202938]">Mockup Images ({editorTotal}/20)</h3>
-                    <p className="mt-0.5 text-[11px] text-[#687386]">Upload JPEG, PNG, or WebP images up to 10 MB each.</p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <label className="flex h-8 cursor-pointer items-center rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium text-[#344054] hover:bg-[#f5f7fa]">
-                      <Plus size={13} className="mr-1" /> Add Images
-                      <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={(event) => { addImages(event.target.files); event.target.value = ""; }} />
-                    </label>
-                    <label className="flex h-8 items-center gap-2 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium text-[#344054]">
-                      Status
-                      <select value={mockupStatus} onChange={(event) => setMockupStatus(event.target.value)} className="border-0 bg-transparent text-[12px] outline-none">
-                        <option value="ongoing">Ongoing</option>
-                        <option value="completed">Completed</option>
-                        <option value="cancelled">Cancelled</option>
-                      </select>
-                    </label>
-                  </div>
+          {editorQuote && (
+            <div className="mt-5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-[13px] font-semibold text-[#202938]">Mockup Images ({editorTotal}/20)</h3>
+                  <p className="mt-0.5 text-[11px] text-[#687386]">Upload JPEG, PNG, or WebP images up to 10 MB each.</p>
                 </div>
-
-                {(existingImages.length > 0 || imagePreviews.length > 0) && (
-                  <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
-                    {existingImages.map((img) => (
-                      <div key={img.id} className="group relative overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc]">
-                        <img src={img.image_url} alt="Mockup" className="aspect-square w-full object-cover" />
-                        <button type="button" onClick={() => removeExistingImage(existingImages.indexOf(img))} className="absolute right-1 top-1 grid size-6 place-items-center rounded-full bg-[#151922]/60 text-white opacity-0 transition-opacity hover:bg-[#151922]/80 group-hover:opacity-100" aria-label="Remove saved image"><X size={12} /></button>
-                      </div>
-                    ))}
-                    {imagePreviews.map((preview, index) => (
-                      <div key={preview} className="group relative overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc]">
-                        <img src={preview} alt={`Upload ${index + 1}`} className="aspect-square w-full object-cover" />
-                        <button type="button" onClick={() => removeNewImage(index)} className="absolute right-1 top-1 grid size-6 place-items-center rounded-full bg-[#151922]/60 text-white opacity-0 transition-opacity hover:bg-[#151922]/80 group-hover:opacity-100" aria-label="Remove new image"><X size={12} /></button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {editorTotal === 0 && (
-                  <div className="mt-4 rounded-xl border border-dashed border-[#ccd5e0] bg-white py-8 text-center">
-                    <ImageIcon className="mx-auto text-[#c4ccd8]" size={28} />
-                    <p className="mt-2 text-[12px] text-[#687386]">No mockup images uploaded yet.</p>
-                    <p className="mt-1 text-[11px] text-[#8b92a1]">Click &quot;Add Images&quot; to upload production mockups.</p>
-                  </div>
-                )}
-
-                <div className="mt-5 flex justify-end gap-2 border-t border-[#edf0f5] pt-4">
-                  <Button secondary onClick={closeEditor}>Cancel</Button>
-                  <Button onClick={() => void save()} disabled={saving}><Save size={14} /> {saving ? "Saving..." : "Save Mockup"}</Button>
+                <div className="flex items-center gap-3">
+                  <label className="flex h-8 cursor-pointer items-center rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium text-[#344054] hover:bg-[#f5f7fa]">
+                    <Plus size={13} className="mr-1" /> Add Images
+                    <input type="file" accept="image/jpeg,image/png,image/webp" multiple className="hidden" onChange={(event) => { addImages(event.target.files); event.target.value = ""; }} />
+                  </label>
+                  <label className="flex h-8 items-center gap-2 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium text-[#344054]">
+                    Status
+                    <select value={mockupStatus} onChange={(event) => setMockupStatus(event.target.value)} className="border-0 bg-transparent text-[12px] outline-none">
+                      <option value="ongoing">Ongoing</option>
+                      <option value="completed">Completed</option>
+                      <option value="cancelled">Cancelled</option>
+                    </select>
+                  </label>
                 </div>
               </div>
-            )}
-          </section>
-        </div>
+
+              {(existingImages.length > 0 || imagePreviews.length > 0) && (
+                <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5">
+                  {existingImages.map((img) => (
+                    <div key={img.id} className="group relative overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc]">
+                      <img src={img.image_url} alt="Mockup" className="aspect-square w-full object-cover" />
+                      <button type="button" onClick={() => removeExistingImage(existingImages.indexOf(img))} className="absolute right-1 top-1 grid size-6 place-items-center rounded-full bg-[#151922]/60 text-white opacity-0 transition-opacity hover:bg-[#151922]/80 group-hover:opacity-100" aria-label="Remove saved image"><X size={12} /></button>
+                    </div>
+                  ))}
+                  {imagePreviews.map((preview, index) => (
+                    <div key={preview} className="group relative overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc]">
+                      <img src={preview} alt={`Upload ${index + 1}`} className="aspect-square w-full object-cover" />
+                      <button type="button" onClick={() => removeNewImage(index)} className="absolute right-1 top-1 grid size-6 place-items-center rounded-full bg-[#151922]/60 text-white opacity-0 transition-opacity hover:bg-[#151922]/80 group-hover:opacity-100" aria-label="Remove new image"><X size={12} /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {editorTotal === 0 && (
+                <div className="mt-4 rounded-xl border border-dashed border-[#ccd5e0] bg-white py-8 text-center">
+                  <ImageIcon className="mx-auto text-[#c4ccd8]" size={28} />
+                  <p className="mt-2 text-[12px] text-[#687386]">No mockup images uploaded yet.</p>
+                  <p className="mt-1 text-[11px] text-[#8b92a1]">Click &quot;Add Images&quot; to upload production mockups.</p>
+                </div>
+              )}
+            </div>
+          )}
+        </Dialog>
       )}
 
       {viewQuote && viewImages.length > 0 && (
