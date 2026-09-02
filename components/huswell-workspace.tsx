@@ -3925,7 +3925,7 @@ function PriceQuotationMockups({
               <div><p className="text-[11px] font-medium uppercase tracking-wide text-[#7b8494]">Project Type</p><p className="mt-1 text-[13px] font-medium text-[#202938]">{text(editorLead?.project_type, "—")}</p></div>
               {editorItems.length > 0 && (
                 <div className="sm:col-span-2 overflow-x-auto">
-                  <Table labels={["#", "Description", "Qty"]} minWidth={0} compact className="table-fixed">
+                  <Table labels={["#", "Description", "Qty"]} minWidth={0} compact className="table-fixed" columnWidths={["8%", "74%", "18%"]}>
                     {editorItems.map((item, index) => (
                       <tr key={text(item.id)}>
                         <td className="px-3 py-2 text-center">{index + 1}</td>
