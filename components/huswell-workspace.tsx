@@ -189,8 +189,11 @@ const newProductCostingDraft = (quotationItemId: string): ProductCostingDraft =>
     },
   ],
   markups: [
-    { key: `markup-${crypto.randomUUID()}`, label: "Company declared markup", rate: "0" },
-    { key: `markup-${crypto.randomUUID()}`, label: "Ms. Cath third-party markup", rate: "15" },
+    { key: `markup-${crypto.randomUUID()}`, label: "Profit Margin", rate: "0" },
+    { key: `markup-${crypto.randomUUID()}`, label: "Overhead Expense", rate: "0" },
+    { key: `markup-${crypto.randomUUID()}`, label: "Buffer Margin", rate: "0" },
+    { key: `markup-${crypto.randomUUID()}`, label: "Production Commission", rate: "0" },
+    { key: `markup-${crypto.randomUUID()}`, label: "Declared Markup", rate: "15" },
   ],
 });
 const productCostingTotals = (costing: ProductCostingDraft, productQuantity: number, vatRate: number) => {
