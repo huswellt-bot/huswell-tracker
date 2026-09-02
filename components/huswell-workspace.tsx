@@ -8761,7 +8761,7 @@ function PriceQuotationReviewContent({
         <Table
           labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]}
           minWidth={0}
-          className="table-fixed"
+          className="price-quotation-review-items table-fixed"
           columnWidths={["7%", "43%", "11%", "22%", "17%"]}
         >
           {lines.map((line, index) => {
@@ -8832,10 +8832,28 @@ function PriceQuotationReview({
   const [bankDetails, setBankDetails] = useState<BankDetail[]>(() => quotationBankDetails(quotation.bank_details));
   const [revisionNote, setRevisionNote] = useState("");
   const [working, setWorking] = useState(false);
+  const [galleryIllustrations, setGalleryIllustrations] = useState<Row[]>(() =>
+    store.price_quotation_illustrations.filter(
+      (illustration) => illustration.quotation_id === quotation.id,
+    ),
+  );
+  useEffect(() => {
+    let active = true;
+    void createClient()
+      .from("price_quotation_illustrations")
+      .select("*")
+      .eq("quotation_id", quotation.id)
+      .order("sort_order", { ascending: true })
+      .then(({ data }) => {
+        if (active && data) setGalleryIllustrations(data as Row[]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [quotation.id]);
   const lines = store.quotation_items.filter((item) => item.quotation_id === quotation.id);
   const illustrations = [
-    ...store.price_quotation_illustrations
-      .filter((illustration) => illustration.quotation_id === quotation.id)
+    ...galleryIllustrations
       .sort((left, right) => n(left.sort_order) - n(right.sort_order))
       .map((illustration, index) => ({
         id: text(illustration.id, `quotation-illustration-${index}`),

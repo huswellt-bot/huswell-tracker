@@ -255,6 +255,12 @@ textarea {
 .app-table .material-description-cell {
   white-space: pre-line;
 }
+.huswell-workspace .price-quotation-review-items td:nth-child(2) {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  vertical-align: top;
+}
 /* Keep all visual emphasis on SF Pro Display Medium. */
 .font-semibold,
 .font-bold,
