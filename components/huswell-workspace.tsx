@@ -8474,18 +8474,10 @@ function PriceQuotationSubmissions({
   reload: () => Promise<void>;
   notice: (message: string) => void;
 }) {
-  const [tab, setTab] = useState<"pending" | "approved">("pending");
   const [selectedPriceQuotation, setSelectedPriceQuotation] = useState<Row | null>(null);
-  const [revising, setRevising] = useState<string | null>(null);
   const pendingPriceQuotations = store.quotations.filter(
     (quotation) =>
       text(quotation.status) === "pending" &&
-      text(quotation.document_type) === "price_quotation" &&
-      !quotation.costing_source_id,
-  );
-  const approvedPriceQuotations = store.quotations.filter(
-    (quotation) =>
-      text(quotation.status) === "approved" &&
       text(quotation.document_type) === "price_quotation" &&
       !quotation.costing_source_id,
   );
@@ -8497,70 +8489,32 @@ function PriceQuotationSubmissions({
       )?.full_name,
       "Project Officer",
     );
-  const beginRevision = async (quotation: Row) => {
-    if (!quotation.id) return;
-    setRevising(text(quotation.id));
-    const { error } = await createClient().rpc("begin_price_quotation_revision", {
-      p_quotation_id: quotation.id,
-    });
-    setRevising(null);
-    if (error) return notice(error.message);
-    notice("Price Quotation returned for revision. It will appear once the Sales Project Officer resubmits it.");
-    await reload();
-  };
-  const labels: Record<typeof tab, string> = { pending: "Pending Review", approved: "Approved" };
   return (
     <Panel
       title="Price Quotation Submissions"
-      detail="Review submitted Price Quotations from the Sales Project Officers and approve, return them for revision, or revise approved Price Quotations."
+      detail="Review submitted Price Quotations from the Sales Project Officers and approve or return them for revision."
       variant="page"
       hideHeading
     >
-      <nav aria-label="Price quotation sections" className="mb-4 flex gap-1 overflow-x-auto border-b border-[#e4e8ef]">
-        {(["pending", "approved"] as const).map((key) => (
-          <button key={key} type="button" onClick={() => setTab(key)} aria-current={tab === key ? "page" : undefined} className={`shrink-0 px-3 py-2 text-[12px] font-medium ${tab === key ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1] hover:text-[#4b5565]"}`}>{labels[key]} ({key === "pending" ? pendingPriceQuotations.length : approvedPriceQuotations.length})</button>
-        ))}
-      </nav>
-      {tab === "pending" ? (
-        pendingPriceQuotations.length ? (
-          <Table labels={["Price Quotation", "Client", "Prepared by", "Submitted", "Review"]}>
-            {pendingPriceQuotations.map((quotation) => {
-              const lead = store.leads.find((item) => item.id === quotation.lead_id);
-              return (
-                <tr key={text(quotation.id)}>
-                  <td className="px-5 py-3"><b>{text(quotation.quotation_no)}</b><small>{text(quotation.project_name, text(lead?.project_name))}</small></td>
-                  <td className="px-5 py-3 font-medium">{text(quotation.client_name, text(lead?.client_name))}</td>
-                  <td className="px-5 py-3">{officerName(quotation)}</td>
-                  <td className="px-5 py-3">{day(quotation.submitted_at)}</td>
-                  <td className="px-5 py-3">
-                    <ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon>
-                  </td>
-                </tr>
-              );
-            })}
-          </Table>
-        ) : (
-          <Empty>No Price Quotations are awaiting review.</Empty>
-        )
-      ) : approvedPriceQuotations.length ? (
-        <Table labels={["Price Quotation", "Client", "Prepared by", "Approved", "Revise"]}>
-          {approvedPriceQuotations.map((quotation) => {
+      {pendingPriceQuotations.length ? (
+        <Table labels={["Price Quotation", "Client", "Prepared by", "Submitted", "Review"]}>
+          {pendingPriceQuotations.map((quotation) => {
             const lead = store.leads.find((item) => item.id === quotation.lead_id);
             return (
               <tr key={text(quotation.id)}>
                 <td className="px-5 py-3"><b>{text(quotation.quotation_no)}</b><small>{text(quotation.project_name, text(lead?.project_name))}</small></td>
                 <td className="px-5 py-3 font-medium">{text(quotation.client_name, text(lead?.client_name))}</td>
                 <td className="px-5 py-3">{officerName(quotation)}</td>
-                <td className="px-5 py-3">{day(quotation.approved_at ?? quotation.issue_date)}</td>
+                <td className="px-5 py-3">{day(quotation.submitted_at)}</td>
                 <td className="px-5 py-3">
-                  <ActionIcon label="Revise Price Quotation" tone="amber" disabled={revising === text(quotation.id)} confirm onClick={() => void beginRevision(quotation)}><RotateCcw size={15} /></ActionIcon>
+                  <ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon>
                 </td>
               </tr>
             );
           })}
         </Table>
       ) : (
-        <Empty>No approved Price Quotations to revise.</Empty>
+        <Empty>No Price Quotations are awaiting review.</Empty>
       )}
       {selectedPriceQuotation && (
         <PriceQuotationReview
