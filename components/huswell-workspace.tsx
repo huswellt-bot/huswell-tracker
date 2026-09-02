@@ -125,6 +125,9 @@ type TableName =
   | "quotations"
   | "quotation_items"
   | "price_quotation_illustrations"
+  | "price_quotation_product_costings"
+  | "price_quotation_costing_lines"
+  | "price_quotation_costing_markups"
   | "production_jobs"
   | "production_material_usage"
   | "production_job_activity"
@@ -162,6 +165,56 @@ type PendingCostLine = {
   line_total: number;
   image_url?: string;
   details?: string;
+};
+type ProductCostingDraft = {
+  key: string;
+  quotationItemId: string;
+  costLines: {
+    key: string;
+    description: string;
+    quantity: string;
+    unitCost: string;
+  }[];
+  markups: { key: string; label: string; rate: string }[];
+};
+const newProductCostingDraft = (quotationItemId: string): ProductCostingDraft => ({
+  key: `product-costing-${crypto.randomUUID()}`,
+  quotationItemId,
+  costLines: [
+    {
+      key: `cost-line-${crypto.randomUUID()}`,
+      description: "",
+      quantity: "1",
+      unitCost: "0",
+    },
+  ],
+  markups: [
+    { key: `markup-${crypto.randomUUID()}`, label: "Company declared markup", rate: "0" },
+    { key: `markup-${crypto.randomUUID()}`, label: "Ms. Cath third-party markup", rate: "15" },
+  ],
+});
+const productCostingTotals = (costing: ProductCostingDraft, productQuantity: number, vatRate: number) => {
+  const rounded = (value: number) => Math.round(value * 100) / 100;
+  const cogs = costing.costLines.reduce(
+    (sum, line) => sum + rounded(n(line.quantity) * n(line.unitCost)),
+    0,
+  );
+  const markupTotal = costing.markups.reduce(
+    (sum, markup) => sum + rounded(cogs * n(markup.rate) / 100),
+    0,
+  );
+  const sellingExVat = cogs + markupTotal;
+  const vat = sellingExVat * vatRate / 100;
+  const sellingIncVat = sellingExVat + vat;
+  return {
+    cogs,
+    markupTotal,
+    sellingExVat,
+    vat,
+    sellingIncVat,
+    unitExVat: productQuantity > 0 ? sellingExVat / productQuantity : 0,
+    unitIncVat: productQuantity > 0 ? sellingIncVat / productQuantity : 0,
+  };
 };
 type Field = {
   key: string;
@@ -204,6 +257,9 @@ const tables: TableName[] = [
   "quotations",
   "quotation_items",
   "price_quotation_illustrations",
+  "price_quotation_product_costings",
+  "price_quotation_costing_lines",
+  "price_quotation_costing_markups",
   "production_jobs",
   "production_material_usage",
   "production_job_activity",
@@ -720,6 +776,9 @@ const workspaceViewTables = (
       "quotations",
       "quotation_items",
       "price_quotation_illustrations",
+      "price_quotation_product_costings",
+      "price_quotation_costing_lines",
+      "price_quotation_costing_markups",
       "leads",
       "customers",
       "inventory_items",
@@ -1584,6 +1643,7 @@ const priceQuotationPdfStyles = PdfStyleSheet.create({
   lowerSection: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginTop: 8 }, bankTable: { width: "52%", borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" }, totalTable: { width: "43%", borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" }, bankHeader: { fontWeight: 700, textAlign: "center" }, totalLabel: { fontSize: 7.2, fontWeight: 700, textAlign: "left" }, totalValue: { fontSize: 7.2, textAlign: "right" }, totalRow: { backgroundColor: "#efefef" }, totalLabelStrong: { fontSize: 7.2, fontWeight: 700, textAlign: "left" }, totalValueStrong: { fontSize: 7.2, fontWeight: 700, textAlign: "right" },
   signatures: { flexDirection: "row", marginTop: 10 }, signatureColumn: { width: "50%", minHeight: 43, paddingRight: 13 }, signatureColumnRight: { width: "50%", minHeight: 43, borderLeftWidth: 1, borderColor: "#777", paddingLeft: 15 }, signatureLine: { flexDirection: "row", alignItems: "flex-end", minHeight: 16 }, signatureLabel: { width: 62, fontWeight: 700, fontSize: 7.3 }, signatureSignatory: { flex: 1, minHeight: 20, justifyContent: "flex-end" }, signatureImage: { width: 60, height: 22, objectFit: "contain", alignSelf: "center", marginBottom: -3 }, signatureName: { width: "100%", textAlign: "center", borderBottomWidth: 0.8, borderColor: "#111", paddingBottom: 1, fontSize: 7.3 }, signatureRole: { marginTop: 3, marginLeft: 62, fontSize: 7.1, textAlign: "center" },
   footer: { borderTopWidth: 1, borderColor: "#111", marginTop: 8, paddingTop: 4 }, footerItalic: { textAlign: "center", fontSize: 7, fontStyle: "italic", lineHeight: 1.2 }, footerAddress: { textAlign: "center", fontSize: 6.6, marginTop: 3 },
+  internalTitle: { color: "#9d1f25", fontSize: 14, fontWeight: 700, marginBottom: 3 }, internalNote: { color: "#555", fontSize: 7.5, marginBottom: 10 }, internalProductTitle: { fontSize: 8.5, fontWeight: 700, marginTop: 9, marginBottom: 4 }, internalSummary: { marginTop: 4, marginLeft: "42%", borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" },
 });
 
 function PriceQuotationPdfCell({ children, width, header = false, description = false, style }: { children: ReactNode; width: string; header?: boolean; description?: boolean; style?: React.ComponentProps<typeof PdfView>["style"] }) {
@@ -1599,7 +1659,7 @@ function PriceQuotationSignature({ label, name, signatureSource }: { label: stri
   return <PdfView style={priceQuotationPdfStyles.signatureLine}><PdfText style={priceQuotationPdfStyles.signatureLabel}>{label}</PdfText><PdfView style={priceQuotationPdfStyles.signatureSignatory}>{signatureSource && <PdfImage src={signatureSource} style={priceQuotationPdfStyles.signatureImage} />}<PdfText style={priceQuotationPdfStyles.signatureName}>{name}</PdfText></PdfView></PdfView>;
 }
 
-function PriceQuotationPdf({ quote, store, origin }: { quote: Row; store: Store; origin: string }) {
+function PriceQuotationPdf({ quote, store, origin, showInternalCosting = false }: { quote: Row; store: Store; origin: string; showInternalCosting?: boolean }) {
   const customer = store.customers.find((item) => item.id === quote.customer_id);
   const lead = store.leads.find((item) => item.id === quote.lead_id);
   const lines = store.quotation_items.filter((item) => item.quotation_id === quote.id);
@@ -1630,6 +1690,9 @@ function PriceQuotationPdf({ quote, store, origin }: { quote: Row; store: Store;
   const subtotal = n(quote.subtotal);
   const tax = n(quote.vat_amount);
   const shipping = n(quote.shipping_handling);
+  const productCostings = showInternalCosting
+    ? store.price_quotation_product_costings.filter((costing) => costing.quotation_id === quote.id)
+    : [];
   const clientField = (label: string, value: string) => <PdfView key={label} style={priceQuotationPdfStyles.clientField}><PdfText style={priceQuotationPdfStyles.clientLabel}>{label}</PdfText><PdfText style={priceQuotationPdfStyles.clientColon}>:</PdfText><PdfText style={priceQuotationPdfStyles.clientValue}>{value}</PdfText></PdfView>;
   return <PdfDocument title={`Price Quotation ${text(quote.quotation_no)}`}>
     <PdfPage size={LONG_BOND_PORTRAIT} style={priceQuotationPdfStyles.page} wrap={false}>
@@ -1671,6 +1734,35 @@ function PriceQuotationPdf({ quote, store, origin }: { quote: Row; store: Store;
       </PdfView>
       <PdfView style={priceQuotationPdfStyles.footer}><PdfText style={priceQuotationPdfStyles.footerItalic}>Thank you for the opportunity to provide this quotation.{`\n`}We look forward to working with you.</PdfText><PdfText style={priceQuotationPdfStyles.footerAddress}>Business Address: 72 Adrian St., North Fairview Park Subd., Brgy. North Fairview, Quezon City, Metro Manila</PdfText></PdfView>
     </PdfPage>
+    {showInternalCosting && productCostings.length > 0 && <PdfPage size={LONG_BOND_PORTRAIT} style={priceQuotationPdfStyles.page}>
+      <PdfText style={priceQuotationPdfStyles.internalTitle}>INTERNAL PRODUCT COSTINGS</PdfText>
+      <PdfText style={priceQuotationPdfStyles.internalNote}>General Manager confidential — do not share with the client or Sales Project Officer.</PdfText>
+      {productCostings.map((costing, costingIndex) => {
+        const product = lines.find((line) => line.id === costing.quotation_item_id);
+        const costLines = store.price_quotation_costing_lines.filter((line) => line.product_costing_id === costing.id).sort((a, b) => n(a.sort_order) - n(b.sort_order));
+        const markups = store.price_quotation_costing_markups.filter((markup) => markup.product_costing_id === costing.id).sort((a, b) => n(a.sort_order) - n(b.sort_order));
+        const rounded = (value: number) => Math.round(value * 100) / 100;
+        const cogs = costLines.reduce((sum, line) => sum + rounded(n(line.quantity) * n(line.unit_cost)), 0);
+        const markupTotal = markups.reduce((sum, markup) => sum + rounded(cogs * n(markup.rate) / 100), 0);
+        const sellingExVat = cogs + markupTotal;
+        const vat = sellingExVat * n(quote.vat_rate) / 100;
+        const quantity = n(product?.quantity);
+        return <PdfView key={text(costing.id, String(costingIndex))} wrap>
+          <PdfText style={priceQuotationPdfStyles.internalProductTitle}>{`${costingIndex + 1}. ${text(product?.description, "Quotation product")} — ${quantity} ${quantity === 1 ? "pc" : "pcs"}`}</PdfText>
+          <PdfView style={priceQuotationPdfStyles.table}>
+            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="49%" header description>INTERNAL COST</PriceQuotationPdfCell><PriceQuotationPdfCell width="15%" header>QTY</PriceQuotationPdfCell><PriceQuotationPdfCell width="18%" header>UNIT COST</PriceQuotationPdfCell><PriceQuotationPdfCell width="18%" header>AMOUNT</PriceQuotationPdfCell></PdfView>
+            {costLines.map((line, index) => <PdfView key={text(line.id, String(index))} style={priceQuotationPdfStyles.row} wrap={false}><PriceQuotationPdfCell width="49%" description>{text(line.description)}</PriceQuotationPdfCell><PriceQuotationPdfCell width="15%">{n(line.quantity)}</PriceQuotationPdfCell><PriceQuotationPdfCell width="18%">{currency(n(line.unit_cost))}</PriceQuotationPdfCell><PriceQuotationPdfCell width="18%">{currency(rounded(n(line.quantity) * n(line.unit_cost)))}</PriceQuotationPdfCell></PdfView>)}
+          </PdfView>
+          <PdfView style={priceQuotationPdfStyles.internalSummary}>
+            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>TOTAL COGS</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(cogs)}</PriceQuotationPdfCell></PdfView>
+            {markups.map((markup, index) => <PdfView key={text(markup.id, String(index))} style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>{`${text(markup.label)} (${n(markup.rate)}%)`}</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(rounded(cogs * n(markup.rate) / 100))}</PriceQuotationPdfCell></PdfView>)}
+            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>SELLING EX-VAT</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(sellingExVat)}</PriceQuotationPdfCell></PdfView>
+            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>{`VAT (${n(quote.vat_rate)}%)`}</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(vat)}</PriceQuotationPdfCell></PdfView>
+            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={[priceQuotationPdfStyles.totalRow, priceQuotationPdfStyles.totalLabelStrong]}>PRICE / PIECE (VAT INC.)</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={[priceQuotationPdfStyles.totalRow, priceQuotationPdfStyles.totalValueStrong]}>{currency(quantity > 0 ? (sellingExVat + vat) / quantity : 0)}</PriceQuotationPdfCell></PdfView>
+          </PdfView>
+        </PdfView>;
+      })}
+    </PdfPage>}
   </PdfDocument>;
 }
 
@@ -5327,6 +5419,7 @@ function QuotationDocument({
   pdfWindow = null,
   printAfterOpen = false,
   hidden = false,
+  showInternalCosting = false,
 }: {
   quote: Row;
   store: Store;
@@ -5336,6 +5429,7 @@ function QuotationDocument({
   pdfWindow?: Window | null;
   printAfterOpen?: boolean;
   hidden?: boolean;
+  showInternalCosting?: boolean;
 }) {
   const documentRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -5363,7 +5457,7 @@ function QuotationDocument({
         .quotation-print-document .text-\\[34px\\] { font-size: 36px !important; line-height: 36px !important; }
       `;
       const pdfBlob = await pdf(
-        <PriceQuotationPdf quote={quote} store={store} origin={window.location.origin} />,
+        <PriceQuotationPdf quote={quote} store={store} origin={window.location.origin} showInternalCosting={showInternalCosting} />,
       ).toBlob();
       if (pdfBlob.size === 0 || pdfBlob.type !== "application/pdf") {
         throw new Error("Unable to open the quotation PDF.");
@@ -5397,6 +5491,7 @@ function QuotationDocument({
     pdfWindow,
     printAfterOpen,
     quote,
+    showInternalCosting,
     store,
   ]);
   const customer = store.customers.find((c) => c.id === quote.customer_id);
@@ -8642,7 +8737,7 @@ function PriceQuotationWorkspace({
                     </ActionIcon>
                   )}
                   {illustrationCount > 0 && <ActionIcon label="View quotation illustrations" confirm={false} onClick={() => setIllustrationQuote(quote)}><ImageIcon size={15} /></ActionIcon>}
-                  {text(quote.status) === "approved" && <ActionIcon label="View Price Quotation PDF" onClick={() => openPdf(quote)}><FileText size={15} /></ActionIcon>}
+                  {text(quote.status) === "approved" && <ActionIcon label={isGeneralManager ? "View Internal Costing PDF" : "View Price Quotation PDF"} onClick={() => openPdf(quote)}><FileText size={15} /></ActionIcon>}
                 </div></td>
               </tr>
             );
@@ -8664,11 +8759,11 @@ function PriceQuotationWorkspace({
               {quotationIllustrations.length > 0 && <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">{quotationIllustrations.map((illustration, index) => <div key={illustration.key} className="relative overflow-hidden rounded-lg border border-[#d9e0e9] bg-white"><a href={illustration.imagePreview || illustration.imageUrl} target="_blank" rel="noreferrer" className="block aspect-square"><img src={illustration.imagePreview || illustration.imageUrl} alt={`Quotation illustration ${index + 1}`} className="size-full object-cover" /></a><button type="button" aria-label={`Remove illustration ${index + 1}`} onClick={() => setQuotationIllustrations((current) => current.filter((item) => item.key !== illustration.key))} className="absolute right-1 top-1 grid size-7 place-items-center rounded-md bg-white/90 text-[#8b92a1] shadow-sm hover:bg-[#fff1f1] hover:text-[#b42318]"><X size={14} /></button><span className="absolute bottom-1 left-1 rounded bg-[#151922]/75 px-1.5 py-0.5 text-[10px] font-medium text-white">{index + 1}</span></div>)}</div>}
             </section>
             <div className="mt-5">
-              <div className="flex items-center justify-between"><div><h3 className="text-[14px] font-semibold text-[#202938]">Items</h3><p className="mt-1 text-[12px] text-[#687386]">List each material or production item required by the lead.</p></div></div>
+              <div className="flex items-center justify-between"><div><h3 className="text-[14px] font-semibold text-[#202938]">Finished products</h3><p className="mt-1 text-[12px] text-[#687386]">List each product requested by the client. The General Manager adds its internal material, labor, and production costs during review.</p></div></div>
               <Table labels={["#", "Description", "Qty", ""]} minWidth={0} className="table-fixed" columnWidths={["8%", "64%", "18%", "10%"]}>
                 {items.map((item, index) => <tr key={item.key}>
                   <td className="px-3 py-2 text-center font-medium">{index + 1}</td>
-                  <td className="px-3 py-2"><textarea rows={2} aria-label={`Item ${index + 1} description`} value={item.description} onChange={(event) => setItems((current) => current.map((value) => value.key === item.key ? { ...value, description: titleCase(event.target.value) } : value))} className="input mt-0 min-h-[58px] resize-y" placeholder="Material or production item" /></td>
+                  <td className="px-3 py-2"><textarea rows={2} aria-label={`Item ${index + 1} description`} value={item.description} onChange={(event) => setItems((current) => current.map((value) => value.key === item.key ? { ...value, description: titleCase(event.target.value) } : value))} className="input mt-0 min-h-[58px] resize-y" placeholder="Finished product description" /></td>
                   <td className="px-3 py-2"><input aria-label={`Item ${index + 1} quantity`} type="number" min="0.001" step="any" value={item.quantity} onChange={(event) => setItems((current) => current.map((value) => value.key === item.key ? { ...value, quantity: event.target.value } : value))} className="input mt-0 text-center" style={{ width: "6rem", marginInline: "auto" }} /></td>
                   <td className="px-3 py-2 text-center"><ActionIcon label={`Remove item ${index + 1}`} tone="red" disabled={items.length === 1} onClick={() => setItems((current) => current.filter((value) => value.key !== item.key))}><Trash2 size={15} /></ActionIcon></td>
                 </tr>)}
@@ -8705,7 +8800,7 @@ function PriceQuotationWorkspace({
           </section>
         </div>
       )}
-      {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); notice(message); }} autoExportPdf pdfWindow={pdfWindow} hidden />}
+      {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); notice(message); }} autoExportPdf pdfWindow={pdfWindow} hidden showInternalCosting={isGeneralManager} />}
       {reviewing && <PriceQuotationReview quotation={reviewing} store={store} saving={saving} close={() => setReviewing(null)} notice={notice} reload={reload} />}
     </Panel>
   );
@@ -8717,10 +8812,53 @@ function PriceQuotationReviewContentLegacy({ lines, prices, setPrices, subtotal,
   return <div className="mt-5 space-y-5"><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]} minWidth={0}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><Table labels={["Quotation Total", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section><section className="rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label><div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></div>;
 }
 
+function ProductCostingsSection({
+  lines,
+  vatRate,
+  costings,
+  setCostings,
+}: {
+  lines: Row[];
+  vatRate: string;
+  costings: ProductCostingDraft[];
+  setCostings: (next: ProductCostingDraft[] | ((current: ProductCostingDraft[]) => ProductCostingDraft[])) => void;
+}) {
+  const updateCosting = (key: string, update: (costing: ProductCostingDraft) => ProductCostingDraft) =>
+    setCostings((current) => current.map((costing) => costing.key === key ? update(costing) : costing));
+  const canAddCosting = costings.length < lines.length;
+  return (
+    <section className="rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div><h3 className="text-[14px] font-semibold text-[#202938]">Internal product costings</h3><p className="mt-1 text-[12px] text-[#687386]">General Manager only. Add one costing table for each finished product; all internal costs and markups calculate the quotation price automatically.</p></div>
+        <Button secondary disabled={!canAddCosting} onClick={() => {
+          const nextLine = lines.find((line) => !costings.some((costing) => costing.quotationItemId === line.id));
+          if (nextLine?.id) setCostings((current) => [...current, newProductCostingDraft(text(nextLine.id))]);
+        }}><Plus size={14} /> Add costing table</Button>
+      </div>
+      {costings.length === 0 ? <p className="mt-4 rounded-lg border border-dashed border-[#ccd5e0] bg-white px-3 py-3 text-[12px] text-[#687386]">No internal costing table has been added. You can still use the existing manual price review for historical quotations.</p> : <div className="mt-4 space-y-4">{costings.map((costing, costingIndex) => {
+        const product = lines.find((line) => line.id === costing.quotationItemId);
+        const totals = productCostingTotals(costing, n(product?.quantity), n(vatRate));
+        return <article key={costing.key} className="rounded-lg border border-[#d9e0e9] bg-white p-3">
+          <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[#edf0f5] pb-3">
+            <label className="min-w-64 flex-1 text-[12px] font-medium text-[#202938]">Finished product<select value={costing.quotationItemId} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, quotationItemId: event.target.value }))} className="input mt-1"><option value="">Select quotation product</option>{lines.map((line) => <option key={text(line.id)} value={text(line.id)} disabled={costings.some((other) => other.key !== costing.key && other.quotationItemId === line.id)}>{text(line.description)} — {n(line.quantity)} pcs</option>)}</select></label>
+            <Button secondary onClick={() => setCostings((current) => current.filter((item) => item.key !== costing.key))}><Trash2 size={14} /> Remove table</Button>
+          </div>
+          <div className="mt-3"><div className="flex items-center justify-between gap-3"><h4 className="text-[12px] font-semibold text-[#344054]">Internal costs</h4><Button secondary compact onClick={() => updateCosting(costing.key, (current) => ({ ...current, costLines: [...current.costLines, { key: `cost-line-${crypto.randomUUID()}`, description: "", quantity: "1", unitCost: "0" }] }))}><Plus size={13} /> Add cost</Button></div>
+            <Table labels={["Description", "Quantity", "Unit Cost", "Amount", ""]} minWidth={0} className="table-fixed" columnWidths={["42%", "16%", "18%", "18%", "6%"]}>{costing.costLines.map((line, lineIndex) => <tr key={line.key}><td className="px-2 py-2"><input aria-label={`Cost ${lineIndex + 1} description`} value={line.description} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, description: event.target.value } : item) }))} className="input mt-0" placeholder="Material, labor, logistics" /></td><td className="px-2 py-2"><input aria-label={`Cost ${lineIndex + 1} quantity`} type="number" min="0.001" step="any" value={line.quantity} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, quantity: event.target.value } : item) }))} className="input mt-0 text-center" /></td><td className="px-2 py-2"><input aria-label={`Cost ${lineIndex + 1} unit cost`} type="number" min="0" step="any" value={line.unitCost} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, unitCost: event.target.value } : item) }))} className="input mt-0 text-right" /></td><td className="px-2 py-2 text-right font-medium">{peso.format(n(line.quantity) * n(line.unitCost))}</td><td className="px-1 py-2 text-center"><ActionIcon label={`Remove cost ${lineIndex + 1}`} tone="red" disabled={costing.costLines.length === 1} onClick={() => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.filter((item) => item.key !== line.key) }))}><Trash2 size={14} /></ActionIcon></td></tr>)}</Table></div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]"><div><div className="flex items-center justify-between gap-3"><h4 className="text-[12px] font-semibold text-[#344054]">Confidential markups</h4><Button secondary compact onClick={() => updateCosting(costing.key, (current) => ({ ...current, markups: [...current.markups, { key: `markup-${crypto.randomUUID()}`, label: "Additional markup", rate: "0" }] }))}><Plus size={13} /> Add markup</Button></div><div className="mt-2 space-y-2">{costing.markups.map((markup, markupIndex) => <div key={markup.key} className="grid grid-cols-[minmax(0,1fr)_110px_auto] gap-2"><input aria-label={`Markup ${markupIndex + 1} name`} value={markup.label} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, markups: current.markups.map((item) => item.key === markup.key ? { ...item, label: event.target.value } : item) }))} className="input mt-0" placeholder="Markup name" /><div className="relative"><input aria-label={`${markup.label || "Markup"} percentage`} type="number" min="0" step="any" value={markup.rate} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, markups: current.markups.map((item) => item.key === markup.key ? { ...item, rate: event.target.value } : item) }))} className="input mt-0 pr-6 text-right" /><span className="pointer-events-none absolute right-2 top-2 text-[12px] text-[#687386]">%</span></div><ActionIcon label={`Remove markup ${markupIndex + 1}`} tone="red" disabled={costing.markups.length === 1} onClick={() => updateCosting(costing.key, (current) => ({ ...current, markups: current.markups.filter((item) => item.key !== markup.key) }))}><Trash2 size={14} /></ActionIcon></div>)}</div></div>
+            <dl className="overflow-hidden rounded-lg border border-[#d9e0e9] text-[12px]"><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Total COGS</dt><dd className="font-medium">{peso.format(totals.cogs)}</dd></div><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>All markups</dt><dd>{peso.format(totals.markupTotal)}</dd></div><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Selling ex-VAT</dt><dd>{peso.format(totals.sellingExVat)}</dd></div><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>VAT ({n(vatRate)}%)</dt><dd>{peso.format(totals.vat)}</dd></div><div className="flex justify-between bg-[#eff7f1] px-3 py-2 font-semibold text-[#176b40]"><dt>Price / piece</dt><dd>{peso.format(totals.unitIncVat)}</dd></div><div className="flex justify-between bg-[#f8fbff] px-3 py-2"><dt>Ex-VAT / piece</dt><dd>{peso.format(totals.unitExVat)}</dd></div></dl></div>
+        </article>;
+      })}</div>}
+    </section>
+  );
+}
+
 type PriceQuotationReviewContentProps = {
   lines: Row[];
   projectType: string;
   illustrations: { id: string; description: string; imageUrl: string }[];
+  productCostings: ProductCostingDraft[];
+  setProductCostings: (next: ProductCostingDraft[] | ((current: ProductCostingDraft[]) => ProductCostingDraft[])) => void;
   prices: Record<string, string>;
   setPrices: (next: Record<string, string> | ((current: Record<string, string>) => Record<string, string>)) => void;
   subtotal: number;
@@ -8741,12 +8879,13 @@ type PriceQuotationReviewContentProps = {
 };
 
 function PriceQuotationReviewContent({
-  lines, projectType, illustrations, prices, setPrices, subtotal, vatRate, setVatRate, tax,
+  lines, projectType, illustrations, productCostings, setProductCostings, prices, setPrices, subtotal, vatRate, setVatRate, tax,
   total, terms, setTerms, bankDetails, setBankDetails,
   revisionNote, setRevisionNote, close, saving, working, review,
 }: PriceQuotationReviewContentProps) {
   return (
     <div className="mt-5 space-y-5">
+      <ProductCostingsSection lines={lines} vatRate={vatRate} costings={productCostings} setCostings={setProductCostings} />
       <section className="rounded-xl border border-[#e1e6ee] p-4">
         <h3 className="text-[14px] font-semibold">Project details</h3>
         <dl className="mt-3 grid gap-1 text-[13px] sm:grid-cols-[120px_1fr]">
@@ -8764,11 +8903,12 @@ function PriceQuotationReviewContent({
         >
           {lines.map((line, index) => {
             const price = n(prices[text(line.id)]);
+            const productCosting = productCostings.find((costing) => costing.quotationItemId === line.id);
             return <tr key={text(line.id)}>
               <td className="px-4 py-3 text-center">{index + 1}</td>
               <td className="whitespace-pre-wrap break-words px-4 py-3 font-medium">{text(line.description)}</td>
               <td className="px-4 py-3 text-center">{n(line.quantity)}</td>
-              <td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0" /></td>
+              <td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} readOnly={Boolean(productCosting)} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className={`input mt-0 ${productCosting ? "bg-[#f5f7fa]" : ""}`} /></td>
               <td className="px-4 py-3 text-right font-semibold">{wholePeso.format(n(line.quantity) * price)}</td>
             </tr>;
           })}
@@ -8828,6 +8968,31 @@ function PriceQuotationReview({
   const [bankDetails, setBankDetails] = useState<BankDetail[]>(() => quotationBankDetails(quotation.bank_details));
   const [revisionNote, setRevisionNote] = useState("");
   const [working, setWorking] = useState(false);
+  const [productCostings, setProductCostings] = useState<ProductCostingDraft[]>(() =>
+    store.price_quotation_product_costings
+      .filter((costing) => costing.quotation_id === quotation.id)
+      .map((costing, costingIndex) => ({
+        key: text(costing.id, `product-costing-${costingIndex}`),
+        quotationItemId: text(costing.quotation_item_id),
+        costLines: store.price_quotation_costing_lines
+          .filter((line) => line.product_costing_id === costing.id)
+          .sort((left, right) => n(left.sort_order) - n(right.sort_order))
+          .map((line, lineIndex) => ({
+            key: text(line.id, `cost-line-${lineIndex}`),
+            description: text(line.description),
+            quantity: text(line.quantity, "1"),
+            unitCost: text(line.unit_cost, "0"),
+          })),
+        markups: store.price_quotation_costing_markups
+          .filter((markup) => markup.product_costing_id === costing.id)
+          .sort((left, right) => n(left.sort_order) - n(right.sort_order))
+          .map((markup, markupIndex) => ({
+            key: text(markup.id, `markup-${markupIndex}`),
+            label: text(markup.label),
+            rate: text(markup.rate, "0"),
+          })),
+      })),
+  );
   const [galleryIllustrations, setGalleryIllustrations] = useState<Row[]>(() =>
     store.price_quotation_illustrations.filter(
       (illustration) => illustration.quotation_id === quotation.id,
@@ -8848,6 +9013,27 @@ function PriceQuotationReview({
     };
   }, [quotation.id]);
   const lines = store.quotation_items.filter((item) => item.quotation_id === quotation.id);
+  useEffect(() => {
+    if (!productCostings.length) return;
+    setPrices((current) => {
+      const next = { ...current };
+      let changed = false;
+      productCostings.forEach((costing) => {
+        const product = lines.find((line) => line.id === costing.quotationItemId);
+        if (!product) return;
+        const unitExVat = productCostingTotals(
+          costing,
+          n(product.quantity),
+          n(vatRate),
+        ).unitExVat.toFixed(2);
+        if (next[text(product.id)] !== unitExVat) {
+          next[text(product.id)] = unitExVat;
+          changed = true;
+        }
+      });
+      return changed ? next : current;
+    });
+  }, [lines, productCostings, vatRate]);
   const illustrations = [
     ...galleryIllustrations
       .sort((left, right) => n(left.sort_order) - n(right.sort_order))
@@ -8865,17 +9051,42 @@ function PriceQuotationReview({
   const tax = Math.round(subtotal * n(vatRate)) / 100;
   const total = subtotal + tax;
   const review = async (decision: "approved" | "needs_revision") => {
+    if (productCostings.length > 0 && productCostings.length !== lines.length) {
+      return notice("Add one costing table for every quotation product before reviewing.");
+    }
     setWorking(true);
-    const { error } = await createClient().rpc("review_price_quotation", {
-      p_quotation_id: quotation.id,
-      p_decision: decision,
-      p_vat_rate: n(vatRate),
-      p_shipping_handling: 0,
-      p_terms_conditions: terms.filter((term) => term.trim()).join("\n"),
-      p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
-      p_line_prices: lines.map((line) => ({ id: line.id, unit_cost: n(prices[text(line.id)]) })),
-      p_revision_note: revisionNote,
-    });
+    const costingsPayload = productCostings.map((costing) => ({
+      quotation_item_id: costing.quotationItemId,
+      cost_lines: costing.costLines.map((line) => ({
+        description: line.description,
+        quantity: n(line.quantity),
+        unit_cost: n(line.unitCost),
+      })),
+      markups: costing.markups.map((markup) => ({
+        label: markup.label,
+        rate: n(markup.rate),
+      })),
+    }));
+    const { error } = productCostings.length > 0
+      ? await createClient().rpc("review_price_quotation_with_product_costings", {
+          p_quotation_id: quotation.id,
+          p_decision: decision,
+          p_vat_rate: n(vatRate),
+          p_terms_conditions: terms.filter((term) => term.trim()).join("\n"),
+          p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
+          p_costings: costingsPayload,
+          p_revision_note: revisionNote,
+        })
+      : await createClient().rpc("review_price_quotation", {
+          p_quotation_id: quotation.id,
+          p_decision: decision,
+          p_vat_rate: n(vatRate),
+          p_shipping_handling: 0,
+          p_terms_conditions: terms.filter((term) => term.trim()).join("\n"),
+          p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
+          p_line_prices: lines.map((line) => ({ id: line.id, unit_cost: n(prices[text(line.id)]) })),
+          p_revision_note: revisionNote,
+        });
     setWorking(false);
     if (error) return notice(error.message);
     close();
@@ -8886,7 +9097,7 @@ function PriceQuotationReview({
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} shipping={shipping} setShipping={setShipping} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} · {text(quotation.client_name)} · Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><div className="mt-5 grid gap-5 lg:grid-cols-[1.45fr_.75fr]"><div><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><section className="mt-5 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="mt-4 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="mt-4 block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label></div><aside><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><div className="border-b border-[#edf0f5] px-4 py-3"><h3 className="text-[14px] font-semibold">Quotation Total</h3></div><Table labels={["Category", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section></aside></div><div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></section></div>;
   */
-  return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectType={text(quotation.project_types, "")} illustrations={illustrations} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
+  return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectType={text(quotation.project_types, "")} illustrations={illustrations} productCostings={productCostings} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
 }
 
 function GeneralManagerCostingReview({
@@ -10013,7 +10224,7 @@ function Submissions({
           decide={(decision, note) => void decideLeadChange(selectedLeadChange, decision, note)}
         />
       )}
-      {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); notice(message); }} autoExportPdf pdfWindow={pdfWindow} hidden />}
+      {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); notice(message); }} autoExportPdf pdfWindow={pdfWindow} hidden showInternalCosting />}
     </Panel>
   );
 }
