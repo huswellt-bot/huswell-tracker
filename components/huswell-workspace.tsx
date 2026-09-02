@@ -8885,7 +8885,6 @@ function PriceQuotationReviewContent({
 }: PriceQuotationReviewContentProps) {
   return (
     <div className="mt-5 space-y-5">
-      <ProductCostingsSection lines={lines} vatRate={vatRate} costings={productCostings} setCostings={setProductCostings} />
       <section className="rounded-xl border border-[#e1e6ee] p-4">
         <h3 className="text-[14px] font-semibold">Project details</h3>
         <dl className="mt-3 grid gap-1 text-[13px] sm:grid-cols-[120px_1fr]">
@@ -8894,6 +8893,7 @@ function PriceQuotationReviewContent({
         </dl>
         {illustrations.length > 0 && <div className="mt-4"><p className="text-[12px] font-medium text-[#687386]">Illustrations</p><div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">{illustrations.map((illustration) => <a key={illustration.id} href={illustration.imageUrl} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><img src={illustration.imageUrl} alt={illustration.description || "Quotation illustration"} className="aspect-square w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{illustration.description}</p></a>)}</div></div>}
       </section>
+      <ProductCostingsSection lines={lines} vatRate={vatRate} costings={productCostings} setCostings={setProductCostings} />
       <section>
         <Table
           labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]}
