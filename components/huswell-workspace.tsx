@@ -3929,7 +3929,7 @@ function PriceQuotationMockups({
                     {editorItems.map((item, index) => (
                       <tr key={text(item.id)}>
                         <td className="px-3 py-2 text-center">{index + 1}</td>
-                        <td className="px-3 py-2 text-[12px]">{text(item.description)}</td>
+                        <td className="min-w-0 break-words whitespace-normal px-3 py-2 text-[12px]">{text(item.description)}</td>
                         <td className="px-3 py-2 text-center">{n(item.quantity).toLocaleString()}</td>
                       </tr>
                     ))}
