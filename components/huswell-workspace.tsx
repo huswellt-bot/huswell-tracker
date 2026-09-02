@@ -8465,6 +8465,71 @@ function Quotations({
   );
 }
 
+function PriceQuotationSubmissions({
+  store,
+  reload,
+  notice,
+}: {
+  store: Store;
+  reload: () => Promise<void>;
+  notice: (message: string) => void;
+}) {
+  const [selectedPriceQuotation, setSelectedPriceQuotation] = useState<Row | null>(null);
+  const pendingPriceQuotations = store.quotations.filter(
+    (quotation) =>
+      text(quotation.status) === "pending" &&
+      text(quotation.document_type) === "price_quotation" &&
+      !quotation.costing_source_id,
+  );
+  const officerName = (quotation: Row) =>
+    text(
+      store.profiles.find(
+        (profile) =>
+          profile.id === (quotation.prepared_by_user_id ?? quotation.submitted_by ?? quotation.created_by),
+      )?.full_name,
+      "Project Officer",
+    );
+  return (
+    <Panel
+      title="Price Quotation Submissions"
+      detail="Review submitted Price Quotations from the Sales Project Officers and approve or return them for revision."
+      variant="page"
+      hideHeading
+    >
+      {pendingPriceQuotations.length ? (
+        <Table labels={["Price Quotation", "Client", "Prepared by", "Submitted", "Review"]}>
+          {pendingPriceQuotations.map((quotation) => {
+            const lead = store.leads.find((item) => item.id === quotation.lead_id);
+            return (
+              <tr key={text(quotation.id)}>
+                <td className="px-5 py-3"><b>{text(quotation.quotation_no)}</b><small>{text(quotation.project_name, text(lead?.project_name))}</small></td>
+                <td className="px-5 py-3 font-medium">{text(quotation.client_name, text(lead?.client_name))}</td>
+                <td className="px-5 py-3">{officerName(quotation)}</td>
+                <td className="px-5 py-3">{day(quotation.submitted_at)}</td>
+                <td className="px-5 py-3">
+                  <ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon>
+                </td>
+              </tr>
+            );
+          })}
+        </Table>
+      ) : (
+        <Empty>No Price Quotations are awaiting review.</Empty>
+      )}
+      {selectedPriceQuotation && (
+        <PriceQuotationReview
+          quotation={selectedPriceQuotation}
+          store={store}
+          saving={false}
+          close={() => setSelectedPriceQuotation(null)}
+          notice={notice}
+          reload={reload}
+        />
+      )}
+    </Panel>
+  );
+}
+
 function PriceQuotationWorkspace({
   store,
   orgId,
@@ -13607,10 +13672,18 @@ export function HuswellWorkspace({
         "Build material and production costs, then submit them for General Manager review.",
     },
     "Price Quotations": {
-      title: isManagementRole ? "Price Quotation Review" : "Price Quotations",
-      detail: isManagementRole
-        ? "Review officer-submitted quotations, set commercial terms and pricing, then approve or return them for revision."
-        : "Prepare quotations from leads, then submit them for General Manager pricing and approval.",
+      title:
+        role === "pricing_officer"
+          ? "Price Quotation Submissions"
+          : isManagementRole
+            ? "Price Quotation Review"
+            : "Price Quotations",
+      detail:
+        role === "pricing_officer"
+          ? "Review submitted Price Quotations from the Sales Project Officers, set pricing, and approve or return them for revision."
+          : isManagementRole
+            ? "Review officer-submitted quotations, set commercial terms and pricing, then approve or return them for revision."
+            : "Prepare quotations from leads, then submit them for General Manager pricing and approval.",
     },
     "Materials List": {
       title: "Materials List",
@@ -13731,6 +13804,13 @@ export function HuswellWorkspace({
         role={role}
       />
     ) : active === "Price Quotations" ? (
+        role === "pricing_officer" ? (
+          <PriceQuotationSubmissions
+            store={store}
+            reload={reload}
+            notice={setMessage}
+          />
+        ) : (
         <PriceQuotationWorkspace
           store={store}
           orgId={organizationId}
@@ -13739,6 +13819,7 @@ export function HuswellWorkspace({
           role={role}
           profileName={profileName}
         />
+        )
     ) : active === "Leads" ? (
         <Records
           module={leads}
@@ -13913,15 +13994,17 @@ export function HuswellWorkspace({
                   const navigationLabel =
                     view === "Dashboard" && ["project_manager", "admin"].includes(role)
                       ? "KPI"
-                      : isManagementRole && view === "Leads"
-                        ? "Lead Management"
-                        : view === "Projects"
-                          ? "Projects / Production"
-                          : isManagementRole && view === "Price Quotations"
-                            ? "Price Quotation Review"
-                            : view === "Submissions"
-                              ? "Submissions Approvals"
-                              : view;
+                      : role === "pricing_officer" && view === "Price Quotations"
+                        ? "Price Quotation Submissions"
+                        : isManagementRole && view === "Leads"
+                          ? "Lead Management"
+                          : view === "Projects"
+                            ? "Projects / Production"
+                            : isManagementRole && view === "Price Quotations"
+                              ? "Price Quotation Review"
+                              : view === "Submissions"
+                                ? "Submissions Approvals"
+                                : view;
                   return (
                     <button
                     key={view}
@@ -14062,7 +14145,7 @@ export function HuswellWorkspace({
             )}
           </div>
         </header>
-        <div className={`workspace-content ${["Projects", "Price Quotations"].includes(active) ? "p-0" : "p-3 sm:p-4 lg:p-5"}`}>
+        <div className={`workspace-content ${["Projects", "Price Quotations"].includes(active) && role !== "pricing_officer" ? "p-0" : "p-3 sm:p-4 lg:p-5"}`}>
           {message && (
             <div className="fixed inset-0 z-[60] grid place-items-center bg-[#061426]/30 p-4">
               <section
