@@ -8550,6 +8550,11 @@ function PriceQuotationWorkspace({
         ) : undefined
       }
     >
+      <LoadingModal
+        open={saving && editorOpen}
+        title={editing ? "Saving Price Quotation changes" : "Saving Price Quotation draft"}
+        message="Uploading illustrations and saving your quotation. Please wait."
+      />
       <div className="px-4 py-4 sm:px-5 lg:px-6">
       <div className="mb-4">
         <nav aria-label="Price quotation sections" className="flex gap-1 overflow-x-auto border-b border-[#e4e8ef]">
