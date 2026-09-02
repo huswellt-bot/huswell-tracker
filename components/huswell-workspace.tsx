@@ -8387,9 +8387,10 @@ function PriceQuotationWorkspace({
         quantity: n(item.quantity),
         image_url: item.imageUrl ?? "",
       })),
-      p_has_illustrations:
-        savedItems.some((item) => Boolean(item.imageUrl)) ||
-        savedQuotationIllustrations.length > 0,
+      // The established five-argument draft function validates only the
+      // legacy per-item image URLs. Gallery illustrations are validated and
+      // persisted by the six-argument wrapper in migration 093.
+      p_has_illustrations: savedItems.some((item) => Boolean(item.imageUrl)),
       p_quotation_illustrations: savedQuotationIllustrations,
     });
     if (error) {
