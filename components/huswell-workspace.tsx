@@ -8669,7 +8669,7 @@ function PriceQuotationWorkspace({
               </Table>
               <div className="mt-3 flex justify-end"><Button secondary onClick={() => setItems((current) => [...current, { key: `item-${Date.now()}`, description: "", quantity: "1" }])}><Plus size={14} /> Add Item</Button></div>
             </div>
-            <div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={resetEditor}>Cancel</Button><Button disabled={saving} onClick={() => void saveDraft()}>{editing ? "Save changes" : "Save draft"}</Button></div>
+            <div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary disabled={saving} onClick={resetEditor}>Cancel</Button><Button disabled={saving} onClick={() => void saveDraft()}>{saving && <span aria-hidden="true" className="size-3.5 animate-spin rounded-full border-2 border-white/45 border-t-white" />} {saving ? (editing ? "Saving changes…" : "Saving draft…") : (editing ? "Save changes" : "Save draft")}</Button></div>
           </section>
         </div>
       )}
