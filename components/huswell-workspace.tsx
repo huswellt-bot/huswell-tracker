@@ -172,8 +172,10 @@ type ProductCostingDraft = {
   costLines: {
     key: string;
     description: string;
+    calculationType: "quantity_unit_cost" | "fixed_amount";
     quantity: string;
     unitCost: string;
+    amount: string;
   }[];
   markups: { key: string; label: string; rate: string }[];
 };
@@ -184,8 +186,10 @@ const newProductCostingDraft = (quotationItemId: string): ProductCostingDraft =>
     {
       key: `cost-line-${crypto.randomUUID()}`,
       description: "",
+      calculationType: "quantity_unit_cost",
       quantity: "1",
       unitCost: "0",
+      amount: "0",
     },
   ],
   markups: [
@@ -196,10 +200,38 @@ const newProductCostingDraft = (quotationItemId: string): ProductCostingDraft =>
     { key: `markup-${crypto.randomUUID()}`, label: "Declared Markup", rate: "15" },
   ],
 });
+const productCostingDrafts = (
+  costings: Row[],
+  costLines: Row[],
+  markups: Row[],
+): ProductCostingDraft[] =>
+  costings.map((costing, costingIndex) => ({
+    key: text(costing.id, `product-costing-${costingIndex}`),
+    quotationItemId: text(costing.quotation_item_id),
+    costLines: costLines
+      .filter((line) => line.product_costing_id === costing.id)
+      .sort((left, right) => n(left.sort_order) - n(right.sort_order))
+      .map((line, lineIndex) => ({
+        key: text(line.id, `cost-line-${lineIndex}`),
+        description: text(line.description),
+        calculationType: text(line.calculation_type) === "fixed_amount" ? "fixed_amount" : "quantity_unit_cost",
+        quantity: text(line.quantity, "1"),
+        unitCost: text(line.unit_cost, "0"),
+        amount: text(line.unit_cost, "0"),
+      })),
+    markups: markups
+      .filter((markup) => markup.product_costing_id === costing.id)
+      .sort((left, right) => n(left.sort_order) - n(right.sort_order))
+      .map((markup, markupIndex) => ({
+        key: text(markup.id, `markup-${markupIndex}`),
+        label: text(markup.label),
+        rate: text(markup.rate, "0"),
+      })),
+  }));
 const productCostingTotals = (costing: ProductCostingDraft, productQuantity: number, vatRate: number) => {
   const rounded = (value: number) => Math.round(value * 100) / 100;
   const cogs = costing.costLines.reduce(
-    (sum, line) => sum + rounded(n(line.quantity) * n(line.unitCost)),
+    (sum, line) => sum + rounded(line.calculationType === "fixed_amount" ? n(line.amount) : n(line.quantity) * n(line.unitCost)),
     0,
   );
   const markupTotal = costing.markups.reduce(
@@ -1745,7 +1777,7 @@ function PriceQuotationPdf({ quote, store, origin, showInternalCosting = false }
         const costLines = store.price_quotation_costing_lines.filter((line) => line.product_costing_id === costing.id).sort((a, b) => n(a.sort_order) - n(b.sort_order));
         const markups = store.price_quotation_costing_markups.filter((markup) => markup.product_costing_id === costing.id).sort((a, b) => n(a.sort_order) - n(b.sort_order));
         const rounded = (value: number) => Math.round(value * 100) / 100;
-        const cogs = costLines.reduce((sum, line) => sum + rounded(n(line.quantity) * n(line.unit_cost)), 0);
+        const cogs = costLines.reduce((sum, line) => sum + rounded(text(line.calculation_type) === "fixed_amount" ? n(line.unit_cost) : n(line.quantity) * n(line.unit_cost)), 0);
         const markupTotal = markups.reduce((sum, markup) => sum + rounded(cogs * n(markup.rate) / 100), 0);
         const sellingExVat = cogs + markupTotal;
         const vat = sellingExVat * n(quote.vat_rate) / 100;
@@ -1754,7 +1786,7 @@ function PriceQuotationPdf({ quote, store, origin, showInternalCosting = false }
           <PdfText style={priceQuotationPdfStyles.internalProductTitle}>{`${costingIndex + 1}. ${text(product?.description, "Quotation product")} — ${quantity} ${quantity === 1 ? "pc" : "pcs"}`}</PdfText>
           <PdfView style={priceQuotationPdfStyles.table}>
             <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="49%" header description>INTERNAL COST</PriceQuotationPdfCell><PriceQuotationPdfCell width="15%" header>QTY</PriceQuotationPdfCell><PriceQuotationPdfCell width="18%" header>UNIT COST</PriceQuotationPdfCell><PriceQuotationPdfCell width="18%" header>AMOUNT</PriceQuotationPdfCell></PdfView>
-            {costLines.map((line, index) => <PdfView key={text(line.id, String(index))} style={priceQuotationPdfStyles.row} wrap={false}><PriceQuotationPdfCell width="49%" description>{text(line.description)}</PriceQuotationPdfCell><PriceQuotationPdfCell width="15%">{n(line.quantity)}</PriceQuotationPdfCell><PriceQuotationPdfCell width="18%">{currency(n(line.unit_cost))}</PriceQuotationPdfCell><PriceQuotationPdfCell width="18%">{currency(rounded(n(line.quantity) * n(line.unit_cost)))}</PriceQuotationPdfCell></PdfView>)}
+            {costLines.map((line, index) => { const isFixedAmount = text(line.calculation_type) === "fixed_amount"; const amount = isFixedAmount ? n(line.unit_cost) : rounded(n(line.quantity) * n(line.unit_cost)); return <PdfView key={text(line.id, String(index))} style={priceQuotationPdfStyles.row} wrap={false}><PriceQuotationPdfCell width="49%" description>{text(line.description)}</PriceQuotationPdfCell><PriceQuotationPdfCell width="15%">{isFixedAmount ? "—" : n(line.quantity)}</PriceQuotationPdfCell><PriceQuotationPdfCell width="18%">{isFixedAmount ? "—" : currency(n(line.unit_cost))}</PriceQuotationPdfCell><PriceQuotationPdfCell width="18%">{currency(amount)}</PriceQuotationPdfCell></PdfView>; })}
           </PdfView>
           <PdfView style={priceQuotationPdfStyles.internalSummary}>
             <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>TOTAL DIRECT COST</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(cogs)}</PriceQuotationPdfCell></PdfView>
@@ -2184,6 +2216,7 @@ function Table({
   minWidth = 680,
   className,
   scrollable = true,
+  compact = false,
   columnWidths,
 }: {
   labels: string[];
@@ -2191,6 +2224,7 @@ function Table({
   minWidth?: number;
   className?: string;
   scrollable?: boolean;
+  compact?: boolean;
   columnWidths?: string[];
 }) {
   return (
@@ -2198,7 +2232,7 @@ function Table({
       className="max-w-full overflow-hidden rounded-lg border border-[#d6dee8] bg-white"
     >
       <div
-        className={`overflow-x-auto overscroll-x-contain ${scrollable ? "max-h-[656px] overflow-y-auto" : ""}`}
+        className={scrollable ? "max-h-[656px] overflow-x-auto overflow-y-auto overscroll-x-contain" : "overflow-x-hidden"}
       >
         <table
           className={`app-table w-full text-left text-[12px] ${className ?? ""}`}
@@ -2212,7 +2246,7 @@ function Table({
                 <th
                   key={l}
                   scope="col"
-                  className={`whitespace-nowrap px-5 py-3 ${l.toLowerCase() === "actions" ? "text-center" : ["amount", "total"].includes(l.toLowerCase()) ? "text-right" : ""}`}
+                  className={`${compact ? "px-2 py-2 text-[11px]" : "px-5 py-3"} whitespace-nowrap ${l.toLowerCase() === "actions" ? "text-center" : ["amount", "total"].includes(l.toLowerCase()) ? "text-right" : ""}`}
                   style={columnWidths?.[index] ? { width: columnWidths[index] } : undefined}
                 >
                   {titleCase(l)}
@@ -8772,7 +8806,7 @@ function PriceQuotationWorkspace({
                   <td className="px-3 py-2 text-center"><ActionIcon label={`Remove item ${index + 1}`} tone="red" disabled={items.length === 1} onClick={() => setItems((current) => current.filter((value) => value.key !== item.key))}><Trash2 size={15} /></ActionIcon></td>
                 </tr>)}
               </Table>
-              <div className="mt-3 flex justify-end"><Button secondary onClick={() => setItems((current) => [...current, { key: `item-${Date.now()}`, description: "", quantity: "1" }])}><Plus size={14} /> Add Item</Button></div>
+              <div className="mt-3 flex justify-end"><Button onClick={() => setItems((current) => [...current, { key: `item-${Date.now()}`, description: "", quantity: "1" }])}><Plus size={14} /> Add Item</Button></div>
             </div>
             <div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary disabled={saving} onClick={resetEditor}>Cancel</Button><Button disabled={saving} onClick={() => void saveDraft()}>{saving && <span aria-hidden="true" className="size-3.5 animate-spin rounded-full border-2 border-white/45 border-t-white" />} {saving ? (editing ? "Saving changes…" : "Saving draft…") : (editing ? "Save changes" : "Save draft")}</Button></div>
           </section>
@@ -8789,9 +8823,9 @@ function PriceQuotationWorkspace({
       )}
       {illustrationQuote && (
         <div className="fixed inset-0 z-[70] grid place-items-center bg-[#151922]/40 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setIllustrationQuote(null); }}>
-          <section role="dialog" aria-modal="true" aria-labelledby="price-quotation-illustrations-title" className="w-full max-w-2xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
+          <section role="dialog" aria-modal="true" aria-labelledby="price-quotation-illustrations-title" className="w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
             <div className="flex items-start justify-between gap-4"><div><h2 id="price-quotation-illustrations-title" className="text-[16px] font-semibold text-[#202938]">Quotation illustrations</h2><p className="mt-1 text-[12px] text-[#687386]">{text(illustrationQuote.quotation_no, "Price Quotation")} · View-only; not included in the PDF.</p></div><button type="button" onClick={() => setIllustrationQuote(null)} aria-label="Close illustrations" className="rounded-md p-1 text-[#687386] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938]"><X size={18} /></button></div>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">{[
+            <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">{[
               ...store.price_quotation_illustrations
                 .filter((illustration) => illustration.quotation_id === illustrationQuote.id)
                 .sort((left, right) => n(left.sort_order) - n(right.sort_order))
@@ -8799,7 +8833,7 @@ function PriceQuotationWorkspace({
               ...store.quotation_items
                 .filter((item) => item.quotation_id === illustrationQuote.id && Boolean(text(item.image_url, "")))
                 .map((item) => ({ id: text(item.id), imageUrl: text(item.image_url, ""), description: text(item.description, "Quotation illustration") })),
-            ].map((illustration) => <a key={illustration.id} href={illustration.imageUrl} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><img src={illustration.imageUrl} alt={illustration.description} className="h-44 w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{illustration.description}</p></a>)}</div>
+            ].map((illustration) => <a key={illustration.id} href={illustration.imageUrl} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><img src={illustration.imageUrl} alt={illustration.description} className="aspect-square w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{illustration.description}</p></a>)}</div>
             <div className="mt-5 flex justify-end"><Button secondary onClick={() => setIllustrationQuote(null)}>Close</Button></div>
           </section>
         </div>
@@ -8849,9 +8883,9 @@ function ProductCostingsSection({
             <label className="min-w-64 flex-1 text-[12px] font-medium text-[#202938]">Finished product<select value={costing.quotationItemId} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, quotationItemId: event.target.value }))} className="input mt-1"><option value="">Select quotation product</option>{lines.map((line) => <option key={text(line.id)} value={text(line.id)} disabled={costings.some((other) => other.key !== costing.key && other.quotationItemId === line.id)}>{text(line.description)} — {n(line.quantity)} pcs</option>)}</select></label>
             <Button secondary onClick={() => setCostings((current) => current.filter((item) => item.key !== costing.key))}><Trash2 size={14} /> Remove table</Button>
           </div>
-          <div className="mt-3"><div className="mb-3 flex items-center justify-between gap-3"><h4 className="text-[12px] font-semibold text-[#344054]">Internal costs</h4><Button secondary compact onClick={() => updateCosting(costing.key, (current) => ({ ...current, costLines: [...current.costLines, { key: `cost-line-${crypto.randomUUID()}`, description: "", quantity: "1", unitCost: "0" }] }))}><Plus size={13} /> Add cost</Button></div>
-            <Table labels={["Description", "Quantity", "Unit Cost", "Amount", ""]} minWidth={0} className="table-fixed" columnWidths={["42%", "16%", "18%", "18%", "6%"]}>{costing.costLines.map((line, lineIndex) => <tr key={line.key}><td className="px-2 py-2"><input aria-label={`Cost ${lineIndex + 1} description`} value={line.description} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, description: event.target.value } : item) }))} className="input mt-0" placeholder="Material, labor, logistics" /></td><td className="px-2 py-2"><input aria-label={`Cost ${lineIndex + 1} quantity`} type="number" min="0.001" step="any" value={line.quantity} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, quantity: event.target.value } : item) }))} className="input mt-0 text-center" /></td><td className="px-2 py-2"><input aria-label={`Cost ${lineIndex + 1} unit cost`} type="number" min="0" step="any" value={line.unitCost} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, unitCost: event.target.value } : item) }))} className="input mt-0 text-right" /></td><td className="px-2 py-2 text-right font-medium">{peso.format(n(line.quantity) * n(line.unitCost))}</td><td className="px-1 py-2 text-center"><ActionIcon label={`Remove cost ${lineIndex + 1}`} tone="red" disabled={costing.costLines.length === 1} onClick={() => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.filter((item) => item.key !== line.key) }))}><Trash2 size={14} /></ActionIcon></td></tr>)}</Table></div>
-          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]"><div><h4 className="text-[12px] font-semibold text-[#344054]">Markup, VAT &amp; Expenses</h4><div className="mt-2 space-y-2">{costing.markups.map((markup, markupIndex) => <div key={markup.key} className="grid grid-cols-[minmax(0,1fr)_110px] gap-2"><input aria-label={`Markup ${markupIndex + 1} name`} value={markup.label} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, markups: current.markups.map((item) => item.key === markup.key ? { ...item, label: event.target.value } : item) }))} className="input mt-0" placeholder="Markup name" /><div className="relative"><input aria-label={`${markup.label || "Markup"} percentage`} type="number" min="0" step="any" value={markup.rate} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, markups: current.markups.map((item) => item.key === markup.key ? { ...item, rate: event.target.value } : item) }))} className="input mt-0 pr-6 text-right" /><span className="pointer-events-none absolute right-2 top-2 text-[12px] text-[#687386]">%</span></div></div>)}<div className="grid grid-cols-[minmax(0,1fr)_110px] gap-2"><div className="input mt-0 flex items-center bg-[#f5f7fa]">VAT</div><div className="relative"><input aria-label="VAT percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input mt-0 pr-6 text-right" /><span className="pointer-events-none absolute right-2 top-2 text-[12px] text-[#687386]">%</span></div></div></div></div>
+          <div className="mt-3"><div className="mb-3"><h4 className="text-[12px] font-semibold text-[#344054]">Internal costs</h4></div>
+            <Table labels={["Description", "Quantity", "Unit Cost", "Amount", ""]} minWidth={0} className="table-fixed" scrollable={false} compact columnWidths={["46%", "15%", "16%", "14%", "9%"]}>{costing.costLines.map((line, lineIndex) => { const isFixedAmount = line.calculationType === "fixed_amount"; const lineAmount = isFixedAmount ? n(line.amount) : n(line.quantity) * n(line.unitCost); return <tr key={line.key}><td className="min-w-0 whitespace-normal break-words px-2 py-2"><input aria-label={`Cost ${lineIndex + 1} description`} value={line.description} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, description: titleCaseEntry(event.target.value, "description") } : item) }))} className="input mt-0 min-w-0 max-w-full px-2" placeholder="Material, labor, logistics" /><select aria-label={`Cost ${lineIndex + 1} calculation type`} value={line.calculationType} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, calculationType: event.target.value === "fixed_amount" ? "fixed_amount" : "quantity_unit_cost", amount: event.target.value === "fixed_amount" && item.calculationType !== "fixed_amount" ? String(n(item.quantity) * n(item.unitCost)) : item.amount } : item) }))} className="mt-1 w-full rounded-md border border-[#d9e0e9] bg-white px-2 py-1 text-[10px] text-[#687386] outline-none focus:border-[#c43b43]"><option value="quantity_unit_cost">Quantity × Unit Cost</option><option value="fixed_amount">Fixed Amount</option></select></td><td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-center text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} quantity`} type="number" min="0.001" step="any" value={line.quantity} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, quantity: event.target.value } : item) }))} className="input mt-0 min-w-0 max-w-full px-1 text-center" />}</td><td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-center text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} unit cost`} type="number" min="0" step="any" value={line.unitCost} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, unitCost: event.target.value } : item) }))} className="input mt-0 min-w-0 max-w-full px-1 text-center" />}</td><td className="min-w-0 px-2 py-2">{isFixedAmount ? <input aria-label={`Cost ${lineIndex + 1} fixed amount`} type="number" min="0" step="any" value={line.amount} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, amount: event.target.value } : item) }))} className="input mt-0 min-w-0 max-w-full px-1 text-center" /> : <span className="flex min-h-9 items-center justify-end whitespace-nowrap font-medium">{peso.format(lineAmount)}</span>}</td><td className="px-1 py-2 text-center"><ActionIcon label={`Remove cost ${lineIndex + 1}`} tone="red" disabled={costing.costLines.length === 1} onClick={() => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.filter((item) => item.key !== line.key) }))}><Trash2 size={14} /></ActionIcon></td></tr>; })}</Table><div className="mt-2 mb-2 flex items-center justify-between gap-3"><h4 className="text-[12px] font-semibold text-[#344054]">Markup, VAT &amp; Expenses</h4><Button onClick={() => updateCosting(costing.key, (current) => ({ ...current, costLines: [...current.costLines, { key: `cost-line-${crypto.randomUUID()}`, description: "", calculationType: "quantity_unit_cost", quantity: "1", unitCost: "0", amount: "0" }] }))}><Plus size={13} /> Add cost</Button></div></div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]"><div><div className="mt-1 space-y-2"><div aria-hidden="true" className="grid grid-cols-[minmax(0,1fr)_104px_88px] gap-2 px-1 text-[10px] font-medium uppercase tracking-wide text-[#8b92a1]"><span>Category</span><span className="text-center">Rate</span><span className="text-right">Total</span></div>{costing.markups.map((markup) => { const markupAmount = Math.round(totals.cogs * n(markup.rate) * 100) / 10000; return <div key={markup.key} className="grid grid-cols-[minmax(0,1fr)_104px_88px] gap-2"><span className="flex min-h-9 items-center px-1 text-[12px] font-medium text-[#344054]">{markup.label}</span><div className="flex items-center gap-1"><input aria-label={`${markup.label || "Markup"} percentage`} type="number" min="0" step="any" value={markup.rate} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, markups: current.markups.map((item) => item.key === markup.key ? { ...item, rate: event.target.value } : item) }))} className="input mt-0 w-[78px] text-center" /><span className="text-[12px] text-[#687386]">%</span></div><output aria-label={`${markup.label || "Markup"} total`} className="flex min-h-9 items-center justify-end whitespace-nowrap text-[12px] font-medium text-[#344054]">{peso.format(markupAmount)}</output></div>; })}<div className="grid grid-cols-[minmax(0,1fr)_104px_88px] gap-2"><span className="flex min-h-9 items-center px-1 text-[12px] font-medium text-[#344054]">VAT</span><div className="flex items-center gap-1"><input aria-label="VAT percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input mt-0 w-[78px] text-center" /><span className="text-[12px] text-[#687386]">%</span></div><output aria-label="VAT total" className="flex min-h-9 items-center justify-end whitespace-nowrap text-[12px] font-medium text-[#344054]">{peso.format(totals.vat)}</output></div></div></div>
             <dl className="overflow-hidden rounded-lg border border-[#d9e0e9] text-[12px]"><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Total Direct Cost</dt><dd className="font-medium">{peso.format(totals.cogs)}</dd></div><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>All markups</dt><dd>{peso.format(totals.markupTotal)}</dd></div><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Selling Price VAT EX (total)</dt><dd>{peso.format(totals.sellingExVat)}</dd></div><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>VAT ({n(vatRate)}%)</dt><dd>{peso.format(totals.vat)}</dd></div><div className="flex justify-between bg-[#f8fbff] px-3 py-2"><dt>Selling Price VAT EX / Piece</dt><dd>{peso.format(totals.unitExVat)}</dd></div><div className="flex justify-between bg-[#eff7f1] px-3 py-2 font-semibold text-[#176b40]"><dt>Selling Price VAT INC / Piece</dt><dd>{peso.format(totals.unitIncVat)}</dd></div></dl></div>
         </article>;
       })}</div>}
@@ -8867,6 +8901,8 @@ type PriceQuotationReviewContentProps = {
   setProductCostings: (next: ProductCostingDraft[] | ((current: ProductCostingDraft[]) => ProductCostingDraft[])) => void;
   prices: Record<string, string>;
   setPrices: (next: Record<string, string> | ((current: Record<string, string>) => Record<string, string>)) => void;
+  priceBasis: "ex" | "inc";
+  setPriceBasis: (basis: "ex" | "inc") => void;
   subtotal: number;
   vatRate: string;
   setVatRate: (value: string) => void;
@@ -8886,9 +8922,11 @@ type PriceQuotationReviewContentProps = {
 
 function PriceQuotationReviewContent({
   lines, projectType, illustrations, productCostings, setProductCostings, prices, setPrices, subtotal, vatRate, setVatRate, tax,
-  total, terms, setTerms, bankDetails, setBankDetails,
+  total, terms, setTerms, bankDetails, setBankDetails, priceBasis, setPriceBasis,
   revisionNote, setRevisionNote, close, saving, working, review,
 }: PriceQuotationReviewContentProps) {
+  const vatMultiplier = 1 + n(vatRate) / 100;
+  const priceLabel = "Selling Price / Unit";
   return (
     <div className="mt-5 space-y-5">
       <section className="rounded-xl border border-[#e1e6ee] p-4">
@@ -8901,21 +8939,30 @@ function PriceQuotationReviewContent({
       </section>
       <ProductCostingsSection lines={lines} vatRate={vatRate} setVatRate={setVatRate} costings={productCostings} setCostings={setProductCostings} />
       <section>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <p className="text-[12px] text-[#687386]">Choose how the selling price is entered. The quotation always saves its VAT-exclusive price.</p>
+          <div className="inline-flex rounded-lg border border-[#d9e0e9] bg-[#f8fafc] p-0.5" aria-label="Selling price VAT basis">
+            {(["ex", "inc"] as const).map((basis) => <button key={basis} type="button" aria-pressed={priceBasis === basis} onClick={() => setPriceBasis(basis)} className={`min-h-8 rounded-md px-3 text-[12px] font-semibold transition-colors ${priceBasis === basis ? "bg-white text-[#202938] shadow-sm" : "text-[#687386] hover:text-[#344054]"}`}>VAT {basis.toUpperCase()}</button>)}
+          </div>
+        </div>
         <Table
-          labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]}
+          labels={["Item", "Description", "Quantity", priceLabel, "Amount"]}
           minWidth={0}
           className="price-quotation-review-items table-fixed"
           columnWidths={["7%", "43%", "11%", "22%", "17%"]}
         >
           {lines.map((line, index) => {
-            const price = n(prices[text(line.id)]);
+            const storedPrice = prices[text(line.id)] ?? "";
+            const price = n(storedPrice);
+            const enteredPrice = priceBasis === "inc" && storedPrice ? (price * vatMultiplier).toFixed(2) : storedPrice;
+            const displayedPrice = priceBasis === "inc" ? price * vatMultiplier : price;
             const productCosting = productCostings.find((costing) => costing.quotationItemId === line.id);
             return <tr key={text(line.id)}>
               <td className="px-4 py-3 text-center">{index + 1}</td>
               <td className="whitespace-pre-wrap break-words px-4 py-3 font-medium">{text(line.description)}</td>
               <td className="px-4 py-3 text-center">{n(line.quantity)}</td>
-              <td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} readOnly={Boolean(productCosting)} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className={`input mt-0 ${productCosting ? "bg-[#f5f7fa]" : ""}`} /></td>
-              <td className="px-4 py-3 text-right font-semibold">{wholePeso.format(n(line.quantity) * price)}</td>
+              <td className="px-4 py-2">{productCosting ? <span aria-label={`${priceLabel} for ${text(line.description)}`} className="flex min-h-9 items-center justify-center font-medium text-[#202938]">{peso.format(displayedPrice)}</span> : <input aria-label={`${priceLabel} for ${text(line.description)}`} type="number" min="0" step="any" value={enteredPrice} onChange={(event) => setPrices((current) => { const enteredValue = event.target.value; return { ...current, [text(line.id)]: priceBasis === "inc" && enteredValue ? (n(enteredValue) / vatMultiplier).toFixed(2) : enteredValue }; })} className="input mt-0 text-center" />}</td>
+              <td className="px-4 py-3 text-right font-semibold">{wholePeso.format(n(line.quantity) * displayedPrice)}</td>
             </tr>;
           })}
         </Table>
@@ -8934,8 +8981,8 @@ function PriceQuotationReviewContent({
       </section>
       <section className="rounded-xl border border-[#e1e6ee] p-4">
         <h3 className="text-[14px] font-semibold">Bank Details</h3>
-        <div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
-        <div className="mt-3 flex justify-end"><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div>
+        <div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
+        <div className="mt-3 flex justify-end"><Button onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div>
       </section>
       <label className="block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label>
       <div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div>
@@ -8965,40 +9012,88 @@ function PriceQuotationReview({
         .map((item) => [text(item.id), text(item.unit_cost, "")]),
     ),
   );
+  const [priceBasis, setPriceBasis] = useState<"ex" | "inc">("ex");
   const [vatRate, setVatRate] = useState(text(quotation.vat_rate, "12"));
   const [terms, setTerms] = useState(
     text(quotation.terms_conditions, DEFAULT_QUOTATION_TERMS)
       .split(/\r?\n+/)
       .filter((term) => term && !term.trim().toLowerCase().startsWith("validity:")),
   );
-  const [bankDetails, setBankDetails] = useState<BankDetail[]>(() => quotationBankDetails(quotation.bank_details));
+  const [bankDetails, setBankDetails] = useState<BankDetail[]>(() =>
+    quotationBankDetails(
+      store.business_settings.find(
+        (setting) => text(setting.organization_id) === text(quotation.organization_id),
+      )?.default_bank_details,
+    ),
+  );
+  useEffect(() => {
+    let active = true;
+    const organizationId = text(quotation.organization_id);
+    if (!organizationId) return;
+    void createClient()
+      .from("business_settings")
+      .select("default_bank_details")
+      .eq("organization_id", organizationId)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!active || error || data?.default_bank_details === undefined) return;
+        setBankDetails(quotationBankDetails(data.default_bank_details));
+      });
+    return () => {
+      active = false;
+    };
+  }, [quotation.organization_id]);
   const [revisionNote, setRevisionNote] = useState("");
   const [working, setWorking] = useState(false);
   const [productCostings, setProductCostings] = useState<ProductCostingDraft[]>(() =>
-    store.price_quotation_product_costings
-      .filter((costing) => costing.quotation_id === quotation.id)
-      .map((costing, costingIndex) => ({
-        key: text(costing.id, `product-costing-${costingIndex}`),
-        quotationItemId: text(costing.quotation_item_id),
-        costLines: store.price_quotation_costing_lines
-          .filter((line) => line.product_costing_id === costing.id)
-          .sort((left, right) => n(left.sort_order) - n(right.sort_order))
-          .map((line, lineIndex) => ({
-            key: text(line.id, `cost-line-${lineIndex}`),
-            description: text(line.description),
-            quantity: text(line.quantity, "1"),
-            unitCost: text(line.unit_cost, "0"),
-          })),
-        markups: store.price_quotation_costing_markups
-          .filter((markup) => markup.product_costing_id === costing.id)
-          .sort((left, right) => n(left.sort_order) - n(right.sort_order))
-          .map((markup, markupIndex) => ({
-            key: text(markup.id, `markup-${markupIndex}`),
-            label: text(markup.label),
-            rate: text(markup.rate, "0"),
-          })),
-      })),
+    productCostingDrafts(
+      store.price_quotation_product_costings.filter(
+        (costing) => costing.quotation_id === quotation.id,
+      ),
+      store.price_quotation_costing_lines,
+      store.price_quotation_costing_markups,
+    ),
   );
+  useEffect(() => {
+    let active = true;
+    const loadProductCostings = async () => {
+      const client = createClient();
+      const { data: costingData, error: costingError } = await client
+        .from("price_quotation_product_costings")
+        .select("*")
+        .eq("quotation_id", quotation.id);
+      if (!active || costingError) return;
+
+      const costings = (costingData ?? []) as Row[];
+      if (!costings.length) {
+        setProductCostings([]);
+        return;
+      }
+      const costingIds = costings.map((costing) => text(costing.id)).filter(Boolean);
+      const [costLineResult, markupResult] = await Promise.all([
+        client
+          .from("price_quotation_costing_lines")
+          .select("*")
+          .in("product_costing_id", costingIds),
+        client
+          .from("price_quotation_costing_markups")
+          .select("*")
+          .in("product_costing_id", costingIds),
+      ]);
+      if (!active || costLineResult.error || markupResult.error) return;
+      setProductCostings(
+        productCostingDrafts(
+          costings,
+          (costLineResult.data ?? []) as Row[],
+          (markupResult.data ?? []) as Row[],
+        ),
+      );
+    };
+    void loadProductCostings();
+    return () => {
+      active = false;
+    };
+  }, [quotation.id]);
   const [galleryIllustrations, setGalleryIllustrations] = useState<Row[]>(() =>
     store.price_quotation_illustrations.filter(
       (illustration) => illustration.quotation_id === quotation.id,
@@ -9065,8 +9160,10 @@ function PriceQuotationReview({
       quotation_item_id: costing.quotationItemId,
       cost_lines: costing.costLines.map((line) => ({
         description: line.description,
-        quantity: n(line.quantity),
-        unit_cost: n(line.unitCost),
+        calculation_type: line.calculationType,
+        quantity: line.calculationType === "fixed_amount" ? 1 : n(line.quantity),
+        unit_cost: line.calculationType === "fixed_amount" ? n(line.amount) : n(line.unitCost),
+        amount: line.calculationType === "fixed_amount" ? n(line.amount) : undefined,
       })),
       markups: costing.markups.map((markup) => ({
         label: markup.label,
@@ -9103,7 +9200,7 @@ function PriceQuotationReview({
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} shipping={shipping} setShipping={setShipping} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} · {text(quotation.client_name)} · Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><div className="mt-5 grid gap-5 lg:grid-cols-[1.45fr_.75fr]"><div><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><section className="mt-5 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="mt-4 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="mt-4 block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label></div><aside><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><div className="border-b border-[#edf0f5] px-4 py-3"><h3 className="text-[14px] font-semibold">Quotation Total</h3></div><Table labels={["Category", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section></aside></div><div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></section></div>;
   */
-  return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectType={text(quotation.project_types, "")} illustrations={illustrations} productCostings={productCostings} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
+  return <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectType={text(quotation.project_types, "")} illustrations={illustrations} productCostings={productCostings} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} priceBasis={priceBasis} setPriceBasis={setPriceBasis} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
 }
 
 function GeneralManagerCostingReview({
