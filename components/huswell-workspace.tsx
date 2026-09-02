@@ -13270,14 +13270,14 @@ export function HuswellWorkspace({
       items: [
         { view: "Dashboard", icon: LayoutDashboard },
         { view: "Leads", icon: ClipboardCheck },
-        { view: "Projects", icon: ClipboardCheck },
-        { view: "Mockups", icon: ImageIcon },
       ],
     },
     {
       label: "Reviews",
       items: [
         { view: "Price Quotations", icon: FileText },
+        { view: "Mockups", icon: ImageIcon },
+        { view: "Projects", icon: ClipboardCheck },
         { view: "Submissions", icon: ClipboardCheck },
       ],
     },
@@ -13295,8 +13295,8 @@ export function HuswellWorkspace({
         { view: "Dashboard", icon: LayoutDashboard },
         { view: "Leads", icon: ClipboardCheck },
         { view: "Price Quotations", icon: FileText },
-        { view: "Projects", icon: ClipboardCheck },
         { view: "Mockups", icon: ImageIcon },
+        { view: "Projects", icon: ClipboardCheck },
         { view: "Suppliers & Materials", icon: UsersRound },
       ],
     },

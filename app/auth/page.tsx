@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, LoaderCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 export default function AuthPage() {
@@ -13,22 +13,37 @@ export default function AuthPage() {
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [message, setMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (submitting) return;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     setMessage("");
     const supabase = createClient();
+    let signedIn = false;
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) setMessage(error.message);
-    else router.replace("/");
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (error) {
+        setMessage(error.message);
+        return;
+      }
 
-    setSubmitting(false);
+      signedIn = true;
+      router.replace("/");
+    } catch {
+      setMessage("Unable to sign in. Please try again.");
+    } finally {
+      if (!signedIn) {
+        submittingRef.current = false;
+        setSubmitting(false);
+      }
+    }
   }
 
   return (
@@ -51,11 +66,12 @@ export default function AuthPage() {
           <p className="mb-6 text-center text-[12px] text-[#626b7a]">
             Sign in to Huswell Virtual Office
           </p>
-          <form onSubmit={submit} className="space-y-4">
+          <form onSubmit={submit} className="space-y-4" aria-busy={submitting}>
             <label className="block text-[14px] font-medium">
               Email
               <input
                 required
+                disabled={submitting}
                 type="email"
                 placeholder="name@company.com"
                 value={email}
@@ -68,6 +84,7 @@ export default function AuthPage() {
               <span className="relative mt-1.5 block">
                 <input
                   required
+                  disabled={submitting}
                   minLength={6}
                   type={passwordVisible ? "text" : "password"}
                   placeholder="Enter your password"
@@ -77,6 +94,7 @@ export default function AuthPage() {
                 />
                 <button
                   type="button"
+                  disabled={submitting}
                   onClick={() => setPasswordVisible((visible) => !visible)}
                   aria-label={passwordVisible ? "Hide password" : "Show password"}
                   className="absolute inset-y-0 right-0 grid w-10 place-items-center text-[#8b92a1] hover:text-[#626b7a]"
@@ -92,9 +110,12 @@ export default function AuthPage() {
             )}
             <div className="pt-2">
               <button
+                type="submit"
                 disabled={submitting}
-                className="w-full rounded-lg bg-[#c43b43] px-3 py-2.5 text-[14px] font-semibold text-white transition-colors hover:bg-[#ab3038] disabled:cursor-not-allowed disabled:opacity-60"
+                aria-busy={submitting}
+                className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#c43b43] px-3 py-2.5 text-[14px] font-semibold text-white transition-colors hover:bg-[#ab3038] disabled:cursor-not-allowed disabled:opacity-60"
               >
+                {submitting && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
                 {submitting ? "Signing in..." : "Sign in"}
               </button>
             </div>
