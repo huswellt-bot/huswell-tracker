@@ -128,6 +128,7 @@ type TableName =
   | "price_quotation_product_costings"
   | "price_quotation_costing_lines"
   | "price_quotation_costing_markups"
+  | "price_quotation_mockups"
   | "production_jobs"
   | "production_material_usage"
   | "production_job_activity"
@@ -149,7 +150,6 @@ type TableName =
   | "quotation_revision_requests"
   | "price_quotation_revision_requests"
   | "project_schedules"
-  | "mockup_tasks"
   | "activity_log"
   | "leads"
   | "supplier_payables"
@@ -295,6 +295,7 @@ const tables: TableName[] = [
   "price_quotation_product_costings",
   "price_quotation_costing_lines",
   "price_quotation_costing_markups",
+  "price_quotation_mockups",
   "production_jobs",
   "production_material_usage",
   "production_job_activity",
@@ -316,7 +317,6 @@ const tables: TableName[] = [
   "quotation_revision_requests",
   "price_quotation_revision_requests",
   "project_schedules",
-  "mockup_tasks",
   "activity_log",
   "leads",
   "supplier_payables",
@@ -508,14 +508,6 @@ const projectTypeCalendarColors: Record<string, string> = {
   Digital: "#03A9F4",
   "Mock Up": "#7E57C2",
 };
-const MOCKUP_STATUSES = [
-  "requested",
-  "in_progress",
-  "sent_to_client",
-  "revision_requested",
-  "client_approved",
-  "cancelled",
-] as const;
 
 type BankDetail = {
   bank_name: string;
@@ -596,6 +588,8 @@ const doneDealStatusLabel = (value: unknown) =>
   statusLabel(doneDealStatuses, value);
 const memberRole = (role: string) =>
   ["super_admin", "owner", "admin"].includes(role);
+const canReviewPriceQuotations = (role: string) =>
+  memberRole(role) || role === "pricing_officer";
 type AccessAction = "create" | "update" | "archive" | "approve" | "request";
 const rolePermissions: Record<
   string,
@@ -609,11 +603,10 @@ const rolePermissions: Record<
       "quotations",
       "quotation_items",
       "project_schedules",
-      "mockup_tasks",
       "production_material_usage",
       "expenses",
     ],
-    update: ["leads", "customers", "suppliers", "quotations", "mockup_tasks"],
+    update: ["leads", "customers", "suppliers", "quotations"],
     archive: ["customers", "suppliers"],
     request: ["quotations"],
   },
@@ -680,6 +673,17 @@ const rolePermissions: Record<
     ],
     update: ["production_jobs", "finished_product_stock_ins"],
   },
+  pricing_officer: {
+    update: [
+      "leads",
+      "customers",
+      "quotations",
+      "quotation_items",
+      "price_quotation_illustrations",
+    ],
+    approve: ["quotations", "price_quotation_product_costings"],
+    request: ["quotations"],
+  },
 };
 const canAccess = (role: string, resource: string, action: AccessAction) =>
   memberRole(role) ||
@@ -701,8 +705,23 @@ const roleReadableTables: Record<string, TableName[]> = {
     "lead_change_requests",
     "quotation_revision_requests",
     "price_quotation_revision_requests",
+    "price_quotation_mockups",
     "project_schedules",
-    "mockup_tasks",
+  ],
+  pricing_officer: [
+    "profiles",
+    "organization_members",
+    "business_settings",
+    "leads",
+    "customers",
+    "quotations",
+    "quotation_items",
+    "price_quotation_illustrations",
+    "price_quotation_product_costings",
+    "price_quotation_costing_lines",
+    "price_quotation_costing_markups",
+    "price_quotation_mockups",
+    "price_quotation_revision_requests",
   ],
   sales: [
     "business_settings",
@@ -799,10 +818,9 @@ const workspaceViewTables = (
       "project_edit_requests",
       "project_schedule_revision_requests",
       "project_schedule_completion_requests",
-      "mockup_tasks",
     ];
   if (view === "Mockups")
-    return ["mockup_tasks", "quotations", "leads", "profiles", "organization_members"];
+    return ["price_quotation_mockups", "quotations", "quotation_items", "leads", "profiles", "organization_members"];
   if (
     view === "Price Quotations" ||
     (view === "Leads" && leadMode === "quotation")
@@ -1661,6 +1679,44 @@ function PdfBankDetails({ details }: { details: BankDetail[] }) {
 }
 
 const LONG_BOND_PORTRAIT: [number, number] = [612, 936];
+type SalesQuotationPageDensity = "standard" | "compact" | "super-compact" | "overflow";
+
+function quotationTextUnits(value: unknown, charactersPerLine: number) {
+  const content = text(value).replace(/\s+/g, " ").trim();
+  return Math.max(1, Math.ceil(content.length / charactersPerLine));
+}
+
+function salesQuotationPageDensity(quote: Row, store: Store): SalesQuotationPageDensity {
+  const lines = store.quotation_items.filter((item) => item.quotation_id === quote.id);
+  const terms = text(quote.terms_conditions, DEFAULT_QUOTATION_TERMS)
+    .split(/\r?\n+/)
+    .map((item) => item.trim().replace(/^\d+[.)]\s*/, ""))
+    .filter((item) => item && !item.toLowerCase().startsWith("validity:"));
+  const bankDetails = quotationBankDetails(quote.bank_details);
+  const lineUnits = lines.reduce(
+    (total, line) => total + quotationTextUnits(line.description, 48),
+    0,
+  );
+  const termUnits = terms.reduce((total, term) => {
+    const [heading, ...description] = term.split(":");
+    return total + Math.max(
+      quotationTextUnits(heading, 38),
+      quotationTextUnits(description.join(":") || heading, 68),
+    );
+  }, 0);
+  const bankUnits = bankDetails.reduce(
+    (total, bank) => total + Math.max(
+      quotationTextUnits(bank.bank_name, 36),
+      quotationTextUnits([bank.account_name, bank.account_number].filter(Boolean).join(" - "), 64),
+    ),
+    0,
+  );
+  const contentUnits = 27 + lineUnits + 1 + termUnits + (bankDetails.length ? 1 + bankUnits : 0) + (n(quote.shipping_handling) > 0 ? 4 : 3);
+  if (contentUnits <= 48) return "standard";
+  if (contentUnits <= 62) return "compact";
+  if (contentUnits <= 80) return "super-compact";
+  return "overflow";
+}
 
 const priceQuotationPdfStyles = PdfStyleSheet.create({
   // 8.5 × 13 in (long bond paper) at React PDF's 72 points per inch.
@@ -1681,17 +1737,37 @@ const priceQuotationPdfStyles = PdfStyleSheet.create({
   internalTitle: { color: "#9d1f25", fontSize: 14, fontWeight: 700, marginBottom: 3 }, internalNote: { color: "#555", fontSize: 7.5, marginBottom: 10 }, internalProductTitle: { fontSize: 8.5, fontWeight: 700, marginTop: 9, marginBottom: 4 }, internalSummary: { marginTop: 4, marginLeft: "42%", borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" },
 });
 
-function PriceQuotationPdfCell({ children, width, header = false, description = false, style }: { children: ReactNode; width: string; header?: boolean; description?: boolean; style?: React.ComponentProps<typeof PdfView>["style"] }) {
+const priceQuotationPdfCompactStyles = PdfStyleSheet.create({
+  page: { paddingTop: 12, paddingRight: 17, paddingBottom: 11, paddingLeft: 17, fontSize: 6.3 },
+  topHeader: { paddingBottom: 5 }, logo: { width: 108, height: 36 }, businessDetail: { fontSize: 5.9, lineHeight: 1.1, marginBottom: 0 }, quoteColumn: { paddingLeft: 10 }, title: { fontSize: 13, marginBottom: 3 },
+  quoteMetaLabel: { width: 60, fontSize: 6.2 }, quoteMetaColon: { width: 6, fontSize: 6.2 }, quoteMetaValue: { fontSize: 6.2 },
+  clientGrid: { marginTop: 5, marginBottom: 4 }, clientColumn: { paddingRight: 8 }, clientColumnRight: { paddingLeft: 10 }, clientField: { minHeight: 12, marginBottom: 1 }, clientLabel: { width: 63, fontSize: 6.3 }, clientColon: { width: 6, fontSize: 6.3 }, clientValue: { fontSize: 6.2, paddingBottom: 0 },
+  salutation: { fontSize: 6.4, marginBottom: 4 }, cell: { paddingVertical: 2, paddingHorizontal: 3, fontSize: 6.2, lineHeight: 1.05 }, termsHeader: { paddingVertical: 2, paddingHorizontal: 4, fontSize: 6.5 }, termsTable: { marginTop: 5 }, bankTable: { marginTop: 5 },
+  signatures: { marginTop: 6 }, signatureColumn: { minHeight: 36, paddingRight: 9 }, signatureColumnRight: { minHeight: 36, paddingLeft: 10 }, signatureLine: { minHeight: 13 }, signatureLabel: { width: 53, fontSize: 6.3 }, signatureSignatory: { minHeight: 16 }, signatureImage: { width: 50, height: 18 }, signatureName: { fontSize: 6.3 }, signatureRole: { marginTop: 2, marginLeft: 53, fontSize: 6.1 },
+  footer: { marginTop: 4, paddingTop: 3 }, footerItalic: { fontSize: 6.1 }, footerAddress: { fontSize: 5.8, marginTop: 2 },
+});
+
+const priceQuotationPdfSuperCompactStyles = PdfStyleSheet.create({
+  page: { paddingTop: 8, paddingRight: 14, paddingBottom: 7, paddingLeft: 14, fontSize: 5.6 },
+  topHeader: { paddingBottom: 3 }, logo: { width: 96, height: 32 }, businessDetail: { fontSize: 5.2, lineHeight: 1.05, marginBottom: 0 }, quoteColumn: { paddingLeft: 8 }, title: { fontSize: 11, marginBottom: 2 },
+  quoteMetaLabel: { width: 52, fontSize: 5.5 }, quoteMetaColon: { width: 5, fontSize: 5.5 }, quoteMetaValue: { fontSize: 5.5 },
+  clientGrid: { marginTop: 3, marginBottom: 2 }, clientColumn: { paddingRight: 6 }, clientColumnRight: { paddingLeft: 8 }, clientField: { minHeight: 10, marginBottom: 0.5 }, clientLabel: { width: 55, fontSize: 5.6 }, clientColon: { width: 5, fontSize: 5.6 }, clientValue: { fontSize: 5.5, paddingBottom: 0 },
+  salutation: { fontSize: 5.7, marginBottom: 2 }, cell: { paddingVertical: 1.5, paddingHorizontal: 2, fontSize: 5.5, lineHeight: 1 }, termsHeader: { paddingVertical: 1.5, paddingHorizontal: 3, fontSize: 5.7 }, termsTable: { marginTop: 3 }, bankTable: { marginTop: 3 },
+  signatures: { marginTop: 3 }, signatureColumn: { minHeight: 28, paddingRight: 7 }, signatureColumnRight: { minHeight: 28, paddingLeft: 8 }, signatureLine: { minHeight: 11 }, signatureLabel: { width: 45, fontSize: 5.5 }, signatureSignatory: { minHeight: 13 }, signatureImage: { width: 42, height: 15 }, signatureName: { fontSize: 5.5 }, signatureRole: { marginTop: 1, marginLeft: 45, fontSize: 5.3 },
+  footer: { marginTop: 2, paddingTop: 2 }, footerItalic: { fontSize: 5.3 }, footerAddress: { fontSize: 5, marginTop: 1 },
+});
+
+function PriceQuotationPdfCell({ children, width, header = false, description = false, compact = false, superCompact = false, style }: { children: ReactNode; width: string; header?: boolean; description?: boolean; compact?: boolean; superCompact?: boolean; style?: React.ComponentProps<typeof PdfView>["style"] }) {
   const plainText = typeof children === "string" || typeof children === "number";
-  return <PdfView style={[priceQuotationPdfStyles.cell, { width }, header ? priceQuotationPdfStyles.tableHeader : undefined, description ? priceQuotationPdfStyles.descriptionCell : undefined, style]}>{plainText ? <PdfText style={{ textAlign: description ? "left" : "center" }}>{children}</PdfText> : children}</PdfView>;
+  return <PdfView style={[priceQuotationPdfStyles.cell, { width }, header ? priceQuotationPdfStyles.tableHeader : undefined, description ? priceQuotationPdfStyles.descriptionCell : undefined, style, compact ? priceQuotationPdfCompactStyles.cell : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.cell : undefined]}>{plainText ? <PdfText style={{ textAlign: description ? "left" : "center" }}>{children}</PdfText> : children}</PdfView>;
 }
 
-function PriceQuotationTermCell({ children, width, heading = false }: { children: string; width: string; heading?: boolean }) {
-  return <PdfView style={[priceQuotationPdfStyles.cell, { width, justifyContent: "center" }]}><PdfText style={{ fontSize: 7.1, lineHeight: 1.15, textAlign: "left", fontWeight: heading ? 700 : 400 }}>{children}</PdfText></PdfView>;
+function PriceQuotationTermCell({ children, width, heading = false, compact = false, superCompact = false }: { children: string; width: string; heading?: boolean; compact?: boolean; superCompact?: boolean }) {
+  return <PdfView style={[priceQuotationPdfStyles.cell, { width, justifyContent: "center" }, compact ? priceQuotationPdfCompactStyles.cell : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.cell : undefined]}><PdfText style={{ fontSize: superCompact ? 5.5 : compact ? 6.2 : 7.1, lineHeight: superCompact ? 1 : compact ? 1.05 : 1.15, textAlign: "left", fontWeight: heading ? 700 : 400 }}>{children}</PdfText></PdfView>;
 }
 
-function PriceQuotationSignature({ label, name, signatureSource }: { label: string; name: string; signatureSource?: string }) {
-  return <PdfView style={priceQuotationPdfStyles.signatureLine}><PdfText style={priceQuotationPdfStyles.signatureLabel}>{label}</PdfText><PdfView style={priceQuotationPdfStyles.signatureSignatory}>{signatureSource && <PdfImage src={signatureSource} style={priceQuotationPdfStyles.signatureImage} />}<PdfText style={priceQuotationPdfStyles.signatureName}>{name}</PdfText></PdfView></PdfView>;
+function PriceQuotationSignature({ label, name, signatureSource, compact = false, superCompact = false }: { label: string; name: string; signatureSource?: string; compact?: boolean; superCompact?: boolean }) {
+  return <PdfView style={[priceQuotationPdfStyles.signatureLine, compact ? priceQuotationPdfCompactStyles.signatureLine : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureLine : undefined]}><PdfText style={[priceQuotationPdfStyles.signatureLabel, compact ? priceQuotationPdfCompactStyles.signatureLabel : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureLabel : undefined]}>{label}</PdfText><PdfView style={[priceQuotationPdfStyles.signatureSignatory, compact ? priceQuotationPdfCompactStyles.signatureSignatory : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureSignatory : undefined]}>{signatureSource && <PdfImage src={signatureSource} style={[priceQuotationPdfStyles.signatureImage, compact ? priceQuotationPdfCompactStyles.signatureImage : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureImage : undefined]} />}<PdfText style={[priceQuotationPdfStyles.signatureName, compact ? priceQuotationPdfCompactStyles.signatureName : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureName : undefined]}>{name}</PdfText></PdfView></PdfView>;
 }
 
 function PriceQuotationPdf({ quote, store, origin, showInternalCosting = false }: { quote: Row; store: Store; origin: string; showInternalCosting?: boolean }) {
@@ -1725,50 +1801,82 @@ function PriceQuotationPdf({ quote, store, origin, showInternalCosting = false }
   const subtotal = n(quote.subtotal);
   const tax = n(quote.vat_amount);
   const shipping = n(quote.shipping_handling);
+  const density = salesQuotationPageDensity(quote, store);
+  const compact = density === "compact" || density === "super-compact";
+  const superCompact = density === "super-compact";
+  const overflow = density === "overflow";
   const productCostings = showInternalCosting
     ? store.price_quotation_product_costings.filter((costing) => costing.quotation_id === quote.id)
     : [];
-  const clientField = (label: string, value: string) => <PdfView key={label} style={priceQuotationPdfStyles.clientField}><PdfText style={priceQuotationPdfStyles.clientLabel}>{label}</PdfText><PdfText style={priceQuotationPdfStyles.clientColon}>:</PdfText><PdfText style={priceQuotationPdfStyles.clientValue}>{value}</PdfText></PdfView>;
+  const pageStyle = [priceQuotationPdfStyles.page, compact ? priceQuotationPdfCompactStyles.page : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.page : undefined];
+  const clientField = (label: string, value: string) => <PdfView key={label} style={[priceQuotationPdfStyles.clientField, compact ? priceQuotationPdfCompactStyles.clientField : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientField : undefined]}><PdfText style={[priceQuotationPdfStyles.clientLabel, compact ? priceQuotationPdfCompactStyles.clientLabel : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientLabel : undefined]}>{label}</PdfText><PdfText style={[priceQuotationPdfStyles.clientColon, compact ? priceQuotationPdfCompactStyles.clientColon : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientColon : undefined]}>:</PdfText><PdfText style={[priceQuotationPdfStyles.clientValue, compact ? priceQuotationPdfCompactStyles.clientValue : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientValue : undefined]}>{value}</PdfText></PdfView>;
+  const headerSection = (
+    <PdfView style={[priceQuotationPdfStyles.topHeader, compact ? priceQuotationPdfCompactStyles.topHeader : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.topHeader : undefined]}>
+      <PdfView style={priceQuotationPdfStyles.logoColumn}><PdfImage src={`${origin}/huswell-quotation-logo.png`} style={[priceQuotationPdfStyles.logo, compact ? priceQuotationPdfCompactStyles.logo : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.logo : undefined]} /></PdfView>
+      <PdfView style={priceQuotationPdfStyles.businessColumn}>
+        <PdfText style={[priceQuotationPdfStyles.businessDetail, compact ? priceQuotationPdfCompactStyles.businessDetail : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.businessDetail : undefined]}>72 Adrian St., North Fairview Park Subd.,{`\n`}Brgy. North Fairview, Quezon City, Metro Manila</PdfText>
+        <PdfText style={[priceQuotationPdfStyles.businessDetail, compact ? priceQuotationPdfCompactStyles.businessDetail : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.businessDetail : undefined]}>(02) 456-7890</PdfText>
+        <PdfText style={[priceQuotationPdfStyles.businessDetail, compact ? priceQuotationPdfCompactStyles.businessDetail : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.businessDetail : undefined]}>info@huswelltrading.com</PdfText>
+        <PdfText style={[priceQuotationPdfStyles.businessDetail, compact ? priceQuotationPdfCompactStyles.businessDetail : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.businessDetail : undefined]}>www.huswelltrading.com</PdfText>
+      </PdfView>
+      <PdfView style={[priceQuotationPdfStyles.quoteColumn, compact ? priceQuotationPdfCompactStyles.quoteColumn : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.quoteColumn : undefined]}>
+        <PdfText style={[priceQuotationPdfStyles.title, compact ? priceQuotationPdfCompactStyles.title : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.title : undefined]}>PRICE QUOTATION</PdfText>
+        {[["Quotation No.", text(quote.quotation_no)], ["Quotation Date", issueDate], ["Prepared By", text(quote.representative, "Sales Project Officer")]].map(([label, value]) => <PdfView key={label} style={priceQuotationPdfStyles.quoteMetaRow}><PdfText style={[priceQuotationPdfStyles.quoteMetaLabel, compact ? priceQuotationPdfCompactStyles.quoteMetaLabel : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.quoteMetaLabel : undefined]}>{label}</PdfText><PdfText style={[priceQuotationPdfStyles.quoteMetaColon, compact ? priceQuotationPdfCompactStyles.quoteMetaColon : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.quoteMetaColon : undefined]}>:</PdfText><PdfText style={[priceQuotationPdfStyles.quoteMetaValue, compact ? priceQuotationPdfCompactStyles.quoteMetaValue : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.quoteMetaValue : undefined]}>{value}</PdfText></PdfView>)}
+      </PdfView>
+    </PdfView>
+  );
+  const clientSection = (
+    <PdfView style={[priceQuotationPdfStyles.clientGrid, compact ? priceQuotationPdfCompactStyles.clientGrid : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientGrid : undefined]}>
+      <PdfView style={[priceQuotationPdfStyles.clientColumn, compact ? priceQuotationPdfCompactStyles.clientColumn : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientColumn : undefined]}>{clientField("Company Name", clientName)}{clientField("Contact Person", contactName)}{clientField("Contact Number", contactNumber)}</PdfView>
+      <PdfView style={[priceQuotationPdfStyles.clientColumnRight, compact ? priceQuotationPdfCompactStyles.clientColumnRight : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientColumnRight : undefined]}>{clientField("Date", leadDate)}{clientField("Email", clientEmail)}{clientField("Project Type", text(quote.project_types, "-"))}</PdfView>
+    </PdfView>
+  );
+  const salutationSection = <PdfText style={[priceQuotationPdfStyles.salutation, compact ? priceQuotationPdfCompactStyles.salutation : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.salutation : undefined]}>Dear Sir/Madam, Thank you for the opportunity to serve your requirements.</PdfText>;
+  const tableSection = (
+    <PdfView style={priceQuotationPdfStyles.table} wrap>
+      <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="11%" header>ITEM</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="37%" header>DESCRIPTION</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="16%" header>QUANTITY</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="21%" header>SELLING PRICE / UNIT</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="15%" header>AMOUNT</PriceQuotationPdfCell></PdfView>
+      {lines.map((line, index) => { const quantity = n(line.quantity); return <PdfView key={text(line.id, String(index))} style={priceQuotationPdfStyles.row} wrap={false}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="11%">{index + 1}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="37%" description>{text(line.description)}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="16%">{`${quantity} ${quantity === 1 ? "pc" : "pcs"}`}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="21%">{currency(n(line.unit_cost))}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="15%">{currency(n(line.line_total))}</PriceQuotationPdfCell></PdfView>; })}
+      {[["SUBTOTAL", currency(subtotal)], [`TAX (${n(quote.vat_rate)}%)`, currency(tax)], ...(shipping > 0 ? [["SHIPPING / HANDLING", currency(shipping)]] : [])].map(([label, value]) => <PdfView key={label} style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="85%" description style={priceQuotationPdfStyles.totalLabel}>{label}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="15%" style={priceQuotationPdfStyles.totalValue}>{value}</PriceQuotationPdfCell></PdfView>)}
+      <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="85%" description style={[priceQuotationPdfStyles.totalRow, priceQuotationPdfStyles.totalLabelStrong]}>TOTAL</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="15%" style={[priceQuotationPdfStyles.totalRow, priceQuotationPdfStyles.totalValueStrong]}>{currency(n(quote.total_amount))}</PriceQuotationPdfCell></PdfView>
+    </PdfView>
+  );
+  const termsSection = (
+    <PdfView style={[priceQuotationPdfStyles.termsTable, compact ? priceQuotationPdfCompactStyles.termsTable : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.termsTable : undefined]} wrap>
+      <PdfView style={[priceQuotationPdfStyles.termsHeader, compact ? priceQuotationPdfCompactStyles.termsHeader : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.termsHeader : undefined]}><PdfText>TERMS AND CONDITIONS</PdfText></PdfView>
+      {termRows.map((term, index) => <PdfView key={`${term.heading}-${index}`} style={priceQuotationPdfStyles.row} wrap={false}><PriceQuotationTermCell superCompact={superCompact} compact={compact} width="32%" heading>{term.heading}</PriceQuotationTermCell><PriceQuotationTermCell superCompact={superCompact} compact={compact} width="68%">{term.description}</PriceQuotationTermCell></PdfView>)}
+    </PdfView>
+  );
+  const bankSection = (
+    <PdfView style={[priceQuotationPdfStyles.bankTable, compact ? priceQuotationPdfCompactStyles.bankTable : { marginTop: 8 }, superCompact ? priceQuotationPdfSuperCompactStyles.bankTable : undefined]}>
+        <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="30%" header style={priceQuotationPdfStyles.bankHeader}>BANK</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="70%" header style={priceQuotationPdfStyles.bankHeader}>ACCOUNT NAME / NUMBER</PriceQuotationPdfCell></PdfView>
+        {bankDetails.map((detail, index) => <PdfView key={`${detail.bank_name}-${detail.account_number}-${index}`} style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="30%" description>{detail.bank_name}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="70%" description>{[detail.account_name, detail.account_number].filter(Boolean).join(" - ")}</PriceQuotationPdfCell></PdfView>)}
+    </PdfView>
+  );
+  const signatureSection = (
+    <PdfView style={[priceQuotationPdfStyles.signatures, compact ? priceQuotationPdfCompactStyles.signatures : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatures : undefined]}>
+      <PdfView style={[priceQuotationPdfStyles.signatureColumn, compact ? priceQuotationPdfCompactStyles.signatureColumn : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureColumn : undefined]}><PriceQuotationSignature superCompact={superCompact} compact={compact} label="Prepared by:" name={text(quote.representative, "Sales Project Officer")} signatureSource={preparedBySignature} /><PdfText style={[priceQuotationPdfStyles.signatureRole, compact ? priceQuotationPdfCompactStyles.signatureRole : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureRole : undefined]}>Sales Project Officer</PdfText></PdfView>
+      <PdfView style={[priceQuotationPdfStyles.signatureColumnRight, compact ? priceQuotationPdfCompactStyles.signatureColumnRight : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureColumnRight : undefined]}><PriceQuotationSignature superCompact={superCompact} compact={compact} label="Approved by:" name={approvedByName} signatureSource={approvedBySignature} /><PdfText style={[priceQuotationPdfStyles.signatureRole, compact ? priceQuotationPdfCompactStyles.signatureRole : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureRole : undefined]}>{approvedByRole}</PdfText><PdfView style={[priceQuotationPdfStyles.signatureLine, { marginTop: compact ? 3 : 5 }, compact ? priceQuotationPdfCompactStyles.signatureLine : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureLine : undefined]}><PdfText style={[priceQuotationPdfStyles.signatureLabel, compact ? priceQuotationPdfCompactStyles.signatureLabel : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureLabel : undefined]}>Conforme:</PdfText><PdfView style={[priceQuotationPdfStyles.signatureSignatory, compact ? priceQuotationPdfCompactStyles.signatureSignatory : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureSignatory : undefined]}><PdfText style={[priceQuotationPdfStyles.signatureName, compact ? priceQuotationPdfCompactStyles.signatureName : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureName : undefined]}> </PdfText></PdfView></PdfView><PdfView style={[priceQuotationPdfStyles.signatureLine, { marginTop: compact ? 3 : 5 }, compact ? priceQuotationPdfCompactStyles.signatureLine : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureLine : undefined]}><PdfText style={[priceQuotationPdfStyles.signatureLabel, compact ? priceQuotationPdfCompactStyles.signatureLabel : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureLabel : undefined]}>Date:</PdfText><PdfView style={[priceQuotationPdfStyles.signatureSignatory, compact ? priceQuotationPdfCompactStyles.signatureSignatory : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureSignatory : undefined]}><PdfText style={[priceQuotationPdfStyles.signatureName, compact ? priceQuotationPdfCompactStyles.signatureName : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureName : undefined]}> </PdfText></PdfView></PdfView></PdfView>
+    </PdfView>
+  );
+  const footerSection = (
+    <PdfView style={[priceQuotationPdfStyles.footer, compact ? priceQuotationPdfCompactStyles.footer : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.footer : undefined]}><PdfText style={[priceQuotationPdfStyles.footerItalic, compact ? priceQuotationPdfCompactStyles.footerItalic : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.footerItalic : undefined]}>Thank you for the opportunity to provide this quotation.{`\n`}We look forward to working with you.</PdfText><PdfText style={[priceQuotationPdfStyles.footerAddress, compact ? priceQuotationPdfCompactStyles.footerAddress : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.footerAddress : undefined]}>Business Address: 72 Adrian St., North Fairview Park Subd., Brgy. North Fairview, Quezon City, Metro Manila</PdfText></PdfView>
+  );
   return <PdfDocument title={`Price Quotation ${text(quote.quotation_no)}`}>
-    <PdfPage size={LONG_BOND_PORTRAIT} style={priceQuotationPdfStyles.page} wrap={false}>
-      <PdfView style={priceQuotationPdfStyles.topHeader}>
-        <PdfView style={priceQuotationPdfStyles.logoColumn}><PdfImage src={`${origin}/huswell-quotation-logo.png`} style={priceQuotationPdfStyles.logo} /></PdfView>
-        <PdfView style={priceQuotationPdfStyles.businessColumn}>
-          <PdfText style={priceQuotationPdfStyles.businessDetail}>72 Adrian St., North Fairview Park Subd.,{`\n`}Brgy. North Fairview, Quezon City, Metro Manila</PdfText>
-          <PdfText style={priceQuotationPdfStyles.businessDetail}>(02) 456-7890</PdfText>
-          <PdfText style={priceQuotationPdfStyles.businessDetail}>info@huswelltrading.com</PdfText>
-          <PdfText style={priceQuotationPdfStyles.businessDetail}>www.huswelltrading.com</PdfText>
-        </PdfView>
-        <PdfView style={priceQuotationPdfStyles.quoteColumn}>
-          <PdfText style={priceQuotationPdfStyles.title}>PRICE QUOTATION</PdfText>
-          {[["Quotation No.", text(quote.quotation_no)], ["Quotation Date", issueDate], ["Prepared By", text(quote.representative, "Sales Project Officer")]].map(([label, value]) => <PdfView key={label} style={priceQuotationPdfStyles.quoteMetaRow}><PdfText style={priceQuotationPdfStyles.quoteMetaLabel}>{label}</PdfText><PdfText style={priceQuotationPdfStyles.quoteMetaColon}>:</PdfText><PdfText style={priceQuotationPdfStyles.quoteMetaValue}>{value}</PdfText></PdfView>)}
-        </PdfView>
-      </PdfView>
-      <PdfView style={priceQuotationPdfStyles.clientGrid}>
-        <PdfView style={priceQuotationPdfStyles.clientColumn}>{clientField("Company Name", clientName)}{clientField("Contact Person", contactName)}{clientField("Contact Number", contactNumber)}</PdfView>
-        <PdfView style={priceQuotationPdfStyles.clientColumnRight}>{clientField("Date", leadDate)}{clientField("Email", clientEmail)}{clientField("Project Type", text(quote.project_types, "-"))}</PdfView>
-      </PdfView>
-      <PdfText style={priceQuotationPdfStyles.salutation}>Dear Sir/Madam, Thank you for the opportunity to serve your requirements.</PdfText>
-      <PdfView style={priceQuotationPdfStyles.table} wrap>
-        <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="11%" header>ITEM</PriceQuotationPdfCell><PriceQuotationPdfCell width="37%" header>DESCRIPTION</PriceQuotationPdfCell><PriceQuotationPdfCell width="16%" header>QUANTITY</PriceQuotationPdfCell><PriceQuotationPdfCell width="21%" header>SELLING PRICE / UNIT</PriceQuotationPdfCell><PriceQuotationPdfCell width="15%" header>AMOUNT</PriceQuotationPdfCell></PdfView>
-        {lines.map((line, index) => { const quantity = n(line.quantity); return <PdfView key={text(line.id, String(index))} style={priceQuotationPdfStyles.row} wrap={false}><PriceQuotationPdfCell width="11%">{index + 1}</PriceQuotationPdfCell><PriceQuotationPdfCell width="37%" description>{text(line.description)}</PriceQuotationPdfCell><PriceQuotationPdfCell width="16%">{`${quantity} ${quantity === 1 ? "pc" : "pcs"}`}</PriceQuotationPdfCell><PriceQuotationPdfCell width="21%">{currency(n(line.unit_cost))}</PriceQuotationPdfCell><PriceQuotationPdfCell width="15%">{currency(n(line.line_total))}</PriceQuotationPdfCell></PdfView>; })}
-        {[["SUBTOTAL", currency(subtotal)], [`TAX (${n(quote.vat_rate)}%)`, currency(tax)], ...(shipping > 0 ? [["SHIPPING / HANDLING", currency(shipping)]] : [])].map(([label, value]) => <PdfView key={label} style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="85%" description style={priceQuotationPdfStyles.totalLabel}>{label}</PriceQuotationPdfCell><PriceQuotationPdfCell width="15%" style={priceQuotationPdfStyles.totalValue}>{value}</PriceQuotationPdfCell></PdfView>)}
-        <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="85%" description style={[priceQuotationPdfStyles.totalRow, priceQuotationPdfStyles.totalLabelStrong]}>TOTAL</PriceQuotationPdfCell><PriceQuotationPdfCell width="15%" style={[priceQuotationPdfStyles.totalRow, priceQuotationPdfStyles.totalValueStrong]}>{currency(n(quote.total_amount))}</PriceQuotationPdfCell></PdfView>
-      </PdfView>
-      <PdfView style={priceQuotationPdfStyles.termsTable} wrap>
-        <PdfView style={priceQuotationPdfStyles.termsHeader}><PdfText>TERMS AND CONDITIONS</PdfText></PdfView>
-        {termRows.map((term, index) => <PdfView key={`${term.heading}-${index}`} style={priceQuotationPdfStyles.row} wrap={false}><PriceQuotationTermCell width="32%" heading>{term.heading}</PriceQuotationTermCell><PriceQuotationTermCell width="68%">{term.description}</PriceQuotationTermCell></PdfView>)}
-      </PdfView>
-      <PdfView style={[priceQuotationPdfStyles.bankTable, { marginTop: 8 }]}>
-          <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="30%" header style={priceQuotationPdfStyles.bankHeader}>BANK</PriceQuotationPdfCell><PriceQuotationPdfCell width="70%" header style={priceQuotationPdfStyles.bankHeader}>ACCOUNT NAME / NUMBER</PriceQuotationPdfCell></PdfView>
-          {bankDetails.map((detail, index) => <PdfView key={`${detail.bank_name}-${detail.account_number}-${index}`} style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="30%" description>{detail.bank_name}</PriceQuotationPdfCell><PriceQuotationPdfCell width="70%" description>{[detail.account_name, detail.account_number].filter(Boolean).join(" - ")}</PriceQuotationPdfCell></PdfView>)}
-      </PdfView>
-      <PdfView style={priceQuotationPdfStyles.signatures}>
-        <PdfView style={priceQuotationPdfStyles.signatureColumn}><PriceQuotationSignature label="Prepared by:" name={text(quote.representative, "Sales Project Officer")} signatureSource={preparedBySignature} /><PdfText style={priceQuotationPdfStyles.signatureRole}>Sales Project Officer</PdfText></PdfView>
-        <PdfView style={priceQuotationPdfStyles.signatureColumnRight}><PriceQuotationSignature label="Approved by:" name={approvedByName} signatureSource={approvedBySignature} /><PdfText style={priceQuotationPdfStyles.signatureRole}>{approvedByRole}</PdfText><PdfView style={[priceQuotationPdfStyles.signatureLine, { marginTop: 5 }]}><PdfText style={priceQuotationPdfStyles.signatureLabel}>Conforme:</PdfText><PdfView style={priceQuotationPdfStyles.signatureSignatory}><PdfText style={priceQuotationPdfStyles.signatureName}> </PdfText></PdfView></PdfView><PdfView style={[priceQuotationPdfStyles.signatureLine, { marginTop: 5 }]}><PdfText style={priceQuotationPdfStyles.signatureLabel}>Date:</PdfText><PdfView style={priceQuotationPdfStyles.signatureSignatory}><PdfText style={priceQuotationPdfStyles.signatureName}> </PdfText></PdfView></PdfView></PdfView>
-      </PdfView>
-      <PdfView style={priceQuotationPdfStyles.footer}><PdfText style={priceQuotationPdfStyles.footerItalic}>Thank you for the opportunity to provide this quotation.{`\n`}We look forward to working with you.</PdfText><PdfText style={priceQuotationPdfStyles.footerAddress}>Business Address: 72 Adrian St., North Fairview Park Subd., Brgy. North Fairview, Quezon City, Metro Manila</PdfText></PdfView>
-    </PdfPage>
+    {overflow ? (
+      <>
+        {/* Overflow: page 1 keeps the complete client-facing document; terms and bank details flow to page 2. */}
+        <PdfPage size={LONG_BOND_PORTRAIT} style={[priceQuotationPdfStyles.page, priceQuotationPdfCompactStyles.page, priceQuotationPdfSuperCompactStyles.page]} wrap={false}>
+          {headerSection}{clientSection}{salutationSection}{tableSection}{signatureSection}{footerSection}
+        </PdfPage>
+        <PdfPage size={LONG_BOND_PORTRAIT} style={[priceQuotationPdfStyles.page, priceQuotationPdfCompactStyles.page, priceQuotationPdfSuperCompactStyles.page]} wrap={false}>
+          {termsSection}{bankSection}
+        </PdfPage>
+      </>
+    ) : (
+      <PdfPage size={LONG_BOND_PORTRAIT} style={pageStyle} wrap={false}>
+        {headerSection}{clientSection}{salutationSection}{tableSection}{termsSection}{bankSection}{signatureSection}{footerSection}
+      </PdfPage>
+    )}
     {showInternalCosting && productCostings.length > 0 && <PdfPage size={LONG_BOND_PORTRAIT} style={priceQuotationPdfStyles.page}>
       <PdfText style={priceQuotationPdfStyles.internalTitle}>INTERNAL PRODUCT COSTINGS</PdfText>
       <PdfText style={priceQuotationPdfStyles.internalNote}>General Manager confidential — do not share with the client or Sales Project Officer.</PdfText>
@@ -1822,7 +1930,7 @@ function PriceQuotationPdfLegacy({ quote, store, origin }: { quote: Row; store: 
   const tax = n(quote.vat_amount);
   const shipping = n(quote.shipping_handling);
   return <PdfDocument title={`Price Quotation ${text(quote.quotation_no)}`}>
-    <PdfPage size={[612, 936]} style={generatedPdfStyles.page}>
+    <PdfPage size={LONG_BOND_PORTRAIT} style={generatedPdfStyles.page}>
       <PdfView style={generatedPdfStyles.header}>
         <PdfView><PdfImage src={`${origin}/huswell-quotation-logo.png`} style={generatedPdfStyles.logo} /><PdfText>72 Adrian St. North Fairview Park Subd.</PdfText><PdfText>Brgy. North Fairview, Quezon City</PdfText><PdfText>09171697153</PdfText><PdfText>saleshuswell@gmail.com</PdfText></PdfView>
         <PdfView style={generatedPdfStyles.quotationHeader}><PdfText style={generatedPdfStyles.quotationTitle}>PRICE QUOTATION</PdfText><PdfView style={generatedPdfStyles.quotationDetails}><PdfText style={generatedPdfStyles.quotationDetail}>Quotation No.: {text(quote.quotation_no)}</PdfText><PdfText style={generatedPdfStyles.quotationDetail}>Quotation Date: {issueDate}</PdfText><PdfText style={generatedPdfStyles.quotationDetail}>Prepared For: {text(customer?.company_name ?? lead?.client_name ?? quote.client_name, "—")}</PdfText><PdfText style={generatedPdfStyles.quotationDetail}>Attention: {text(customer?.contact_name ?? lead?.contact_name ?? quote.client_contact_name, "—")}</PdfText></PdfView></PdfView>
@@ -1863,7 +1971,7 @@ function CostingBreakdownPdf({ quote, store, origin }: { quote: Row; store: Stor
   const approvedByName = text(quote.approved_by_name, "Marvin S. Tavarez");
   const approvedBySignature = text(quote.approved_by_signature_url, "") || (quote.approved_by_name ? undefined : `${origin}/marvin-tavarez-signature.png`);
   const approvedByRole = quote.approved_by_name ? "General Manager" : "Proprietor";
-  return <PdfDocument title={`Costing Breakdown ${text(quote.quotation_no)}`}><PdfPage size={[612, 936]} style={generatedPdfStyles.page}>
+  return <PdfDocument title={`Costing Breakdown ${text(quote.quotation_no)}`}><PdfPage size={LONG_BOND_PORTRAIT} style={generatedPdfStyles.page}>
     <PdfView style={{ alignItems: "center" }}><PdfImage src={`${origin}/huswell-quotation-logo.png`} style={generatedPdfStyles.logo} /><PdfText style={generatedPdfStyles.title}>COSTING BREAKDOWN / PRICE QUOTE</PdfText></PdfView>
     <PdfText style={generatedPdfStyles.sectionTitle}>CLIENT INFORMATION</PdfText>
     {[["Company Name", text(customer?.company_name ?? lead?.client_name ?? quote.client_name)], ["Client Name", text(customer?.contact_name ?? lead?.contact_name ?? quote.client_contact_name)], ["Phone / Email", text(quote.client_phone)], ["Date", day(quote.issue_date)]].map(([label, value]) => <PdfView key={label} style={generatedPdfStyles.infoRow}><PdfText style={generatedPdfStyles.infoLabel}>{label}:</PdfText><PdfText style={generatedPdfStyles.infoValue}>{value}</PdfText></PdfView>)}
@@ -2218,6 +2326,7 @@ function Table({
   scrollable = true,
   compact = false,
   columnWidths,
+  alignRightLabels = [],
 }: {
   labels: string[];
   children: ReactNode;
@@ -2226,6 +2335,7 @@ function Table({
   scrollable?: boolean;
   compact?: boolean;
   columnWidths?: string[];
+  alignRightLabels?: string[];
 }) {
   return (
     <div
@@ -2246,7 +2356,7 @@ function Table({
                 <th
                   key={l}
                   scope="col"
-                  className={`${compact ? "px-2 py-2 text-[11px]" : "px-5 py-3"} whitespace-nowrap ${l.toLowerCase() === "actions" ? "text-center" : ["amount", "total"].includes(l.toLowerCase()) ? "text-right" : ""}`}
+                  className={`${compact ? "px-2 py-2 text-[11px]" : "px-5 py-3"} whitespace-nowrap ${l.toLowerCase() === "actions" ? "text-center" : ["amount", "total", ...alignRightLabels.map((label) => label.toLowerCase())].includes(l.toLowerCase()) ? "text-right" : ""}`}
                   style={columnWidths?.[index] ? { width: columnWidths[index] } : undefined}
                 >
                   {titleCase(l)}
@@ -3580,26 +3690,7 @@ const monthStartFromValue = (value: string) => {
 const monthValue = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 
-function MockupIllustration({ path, label }: { path: unknown; label: string }) {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    const illustrationPath = text(path, "");
-    if (!illustrationPath) {
-      setUrl(null);
-      return;
-    }
-    let active = true;
-    void createClient().storage.from("mockup-images").createSignedUrl(illustrationPath, 3600)
-      .then(({ data }) => {
-        if (active) setUrl(data?.signedUrl ?? null);
-      });
-    return () => { active = false; };
-  }, [path]);
-  if (!url) return <span className="text-[#8b92a1]">No image</span>;
-  return <a href={url} target="_blank" rel="noreferrer" className="block w-fit"><img src={url} alt={`Mockup illustration: ${label}`} className="size-12 rounded-md border border-[#d9e0e9] bg-white object-cover" /></a>;
-}
-
-function MockupWorkspace({
+function PriceQuotationMockups({
   store,
   orgId,
   reload,
@@ -3612,222 +3703,276 @@ function MockupWorkspace({
   notice: (message: string) => void;
   role: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState<Row | null>(null);
+  const canEdit = canReviewPriceQuotations(role);
+  const quotations = store.quotations
+    .filter((quote) => text(quote.document_type) === "price_quotation" && !quote.costing_source_id)
+    .sort((left, right) => text(right.created_at).localeCompare(text(left.created_at)));
+  const [selectedQuoteId, setSelectedQuoteId] = useState("");
+  const [mockupStatus, setMockupStatus] = useState("ongoing");
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const [existingImages, setExistingImages] = useState<{ id: string; image_url: string }[]>([]);
   const [saving, setSaving] = useState(false);
-  const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("pending");
-  const [values, setValues] = useState<Record<string, string>>({});
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [illustrationFile, setIllustrationFile] = useState<File | null>(null);
-  const [illustrationPreview, setIllustrationPreview] = useState<string | null>(null);
-  const [reviewing, setReviewing] = useState<Row | null>(null);
-  const [revisionNote, setRevisionNote] = useState("");
-  const [reviewingSaving, setReviewingSaving] = useState(false);
-  const isGeneralManager = memberRole(role);
-  useEffect(() => {
-    let active = true;
-    void createClient().auth.getUser().then(({ data }) => {
-      if (active) setCurrentUserId(data.user?.id ?? null);
-    });
-    return () => { active = false; };
-  }, []);
-  const tasks = store.mockup_tasks.slice().sort((left, right) =>
-    text(left.due_date, "9999-12-31").localeCompare(text(right.due_date, "9999-12-31")),
-  );
-  const isActive = (task: Row) =>
-    !["client_approved", "cancelled"].includes(text(task.status, "requested"));
-  const approvalStatus = (task: Row) => text(task.approval_status, "pending");
-  const pendingCount = tasks.filter((task) => approvalStatus(task) === "pending").length;
-  const revisionCount = tasks.filter((task) => approvalStatus(task) === "needs_revision").length;
-  const approvedCount = tasks.filter((task) => approvalStatus(task) === "approved").length;
-  const filteredTasks = tasks.filter((task) => {
-    if (statusFilter !== "all" && approvalStatus(task) !== statusFilter) return false;
-    const officer = store.profiles.find((profile) => text(profile.id, "") === text(task.assigned_to, ""));
-    const search = [
-      task.mockup_name,
-      task.project_name,
-      task.client_name,
-      task.company_name,
-      officer?.full_name,
-      task.notes,
-    ].map((value) => text(value).toLowerCase()).join(" ");
-    return search.includes(query.trim().toLowerCase());
-  });
-  const quoteIdsWithMockups = new Set(tasks.map((task) => text(task.quotation_id, "")));
-  const availableQuotes = store.quotations.filter((quote) => {
-    const lead = store.leads.find((item) => text(item.id, "") === text(quote.lead_id, ""));
-    return text(quote.document_type) === "price_quotation"
-      && !quote.costing_source_id
-      && text(quote.status) === "approved"
-      && Boolean(currentUserId)
-      && lead?.assigned_to === currentUserId
-      && !quoteIdsWithMockups.has(text(quote.id, ""));
-  });
-  const officerName = (task: Row) =>
-    text(
-      store.profiles.find((profile) => text(profile.id, "") === text(task.assigned_to, ""))?.full_name,
-      "Project Officer",
-    );
-  const close = () => {
-    setOpen(false);
-    setEditing(null);
-    setIllustrationFile(null);
-    setIllustrationPreview(null);
-    setValues({});
-  };
-  const openNew = () => {
-    setEditing(null);
-    setValues({
-      quotation_id: "",
-      mockup_name: "",
-      pieces: "1",
-      due_date: isoToday(),
-      notes: "",
-    });
-    setOpen(true);
-  };
-  const openEdit = (task: Row) => {
-    setEditing(task);
-    setIllustrationFile(null);
-    setIllustrationPreview(null);
-    setValues({
-      mockup_name: text(task.mockup_name, ""),
-      pieces: text(task.pieces, "1"),
-      due_date: text(task.due_date, ""),
-      status: text(task.status, "requested"),
-      notes: text(task.notes, ""),
-    });
-    setOpen(true);
-  };
-  const save = async () => {
-    const mockupName = titleCase(values.mockup_name?.trim() ?? "");
-    const pieces = n(values.pieces);
-    if (!mockupName || !values.due_date || pieces <= 0)
-      return notice("Enter a mockup name, pieces, and due date.");
-    if (!editing && !values.quotation_id)
-      return notice("Select an approved Price Quotation before creating a mockup.");
-    if (!editing && !illustrationFile)
-      return notice("Upload a mockup illustration before submitting it.");
-    if (editing && !illustrationFile && !editing.illustration_path)
-      return notice("Upload a mockup illustration before resubmitting it.");
-    if (!currentUserId)
-      return notice("Please wait for your account to load, then try again.");
 
+  const selectedQuotation = quotations.find((q) => q.id === selectedQuoteId);
+  const selectedLead = selectedQuotation
+    ? store.leads.find((l) => l.id === selectedQuotation.lead_id)
+    : null;
+  const selectedItems = selectedQuotation
+    ? store.quotation_items
+        .filter((item) => item.quotation_id === selectedQuotation.id)
+        .sort((left, right) => n(left.sort_order) - n(right.sort_order))
+    : [];
+
+  useEffect(() => {
+    if (!selectedQuoteId) {
+      setExistingImages([]);
+      return;
+    }
+    const mockups = store.price_quotation_mockups
+      .filter((m) => m.quotation_id === selectedQuoteId)
+      .sort((left, right) => text(left.created_at).localeCompare(text(right.created_at)));
+    setExistingImages(mockups.map((m) => ({ id: text(m.id), image_url: text(m.image_url) })));
+    if (mockups.length > 0) setMockupStatus(text(mockups[0].status, "ongoing"));
+  }, [selectedQuoteId, store.price_quotation_mockups]);
+
+  const addImages = (files: FileList | null) => {
+    if (!files) return;
+    const remaining = 20 - existingImages.length - imageFiles.length;
+    const validTypes = ["image/jpeg", "image/png", "image/webp"];
+    const maxSize = 10 * 1024 * 1024;
+    const valid: File[] = [];
+    for (let i = 0; i < files.length && valid.length < remaining; i++) {
+      const file = files[i];
+      if (!validTypes.includes(file.type)) {
+        notice(`Skipped ${file.name}: only JPEG, PNG, or WebP files are accepted.`);
+        continue;
+      }
+      if (file.size > maxSize) {
+        notice(`Skipped ${file.name}: file exceeds 10 MB limit.`);
+        continue;
+      }
+      valid.push(file);
+    }
+    if (valid.length < files.length && remaining <= 0)
+      notice(`Maximum 20 images allowed per quotation.`);
+    setImageFiles((prev) => [...prev, ...valid]);
+    setImagePreviews((prev) => [...prev, ...valid.map((f) => URL.createObjectURL(f))]);
+  };
+
+  const removeExistingImage = (index: number) => {
+    setExistingImages((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const removeNewImage = (index: number) => {
+    URL.revokeObjectURL(imagePreviews[index]);
+    setImageFiles((prev) => prev.filter((_, i) => i !== index));
+    setImagePreviews((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const save = async () => {
+    if (!selectedQuotation) return notice("Select a price quotation first.");
+    const totalImageCount = existingImages.length + imageFiles.length;
+    if (totalImageCount === 0) return notice("Upload at least one mockup image.");
     setSaving(true);
     const client = createClient();
-    let uploadedPath: string | null = null;
-    let nextIllustrationPath = text(editing?.illustration_path, "") || null;
     try {
-      if (illustrationFile) {
-        const optimized = await optimizeQuotationImage(illustrationFile);
-        const extension = optimized.type === "image/png" ? "png" : optimized.type === "image/webp" ? "webp" : "jpg";
-        uploadedPath = `${orgId}/mockups/${currentUserId}/${crypto.randomUUID()}.${extension}`;
-        const { error: uploadError } = await client.storage.from("mockup-images").upload(uploadedPath, optimized, { contentType: optimized.type, upsert: false });
+      const allImageUrls: { image_url: string }[] = existingImages.map((img) => ({ image_url: img.image_url }));
+      for (const file of imageFiles) {
+        const extension = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
+        const path = `${orgId}/price-quotation-mockups/${crypto.randomUUID()}.${extension}`;
+        const { error: uploadError } = await client.storage
+          .from("quotation-images")
+          .upload(path, file, { contentType: file.type, upsert: false });
         if (uploadError) throw uploadError;
-        nextIllustrationPath = uploadedPath;
+        allImageUrls.push({ image_url: client.storage.from("quotation-images").getPublicUrl(path).data.publicUrl });
       }
-      const payload = {
-        mockup_name: mockupName,
-        pieces,
-        due_date: values.due_date,
-        status: editing ? values.status : "requested",
-        notes: values.notes?.trim() || null,
-        illustration_path: nextIllustrationPath,
-        ...(editing ? { approval_status: "pending" } : {}),
-      };
-      const { error } = editing?.id
-        ? await client.from("mockup_tasks").update(payload).eq("id", editing.id)
-        : await client.from("mockup_tasks").insert({
-            ...payload,
-            organization_id: orgId,
-            quotation_id: values.quotation_id,
-          });
+      const { error } = await client.rpc("save_price_quotation_mockups", {
+        p_quotation_id: selectedQuotation.id,
+        p_images: allImageUrls,
+        p_status: mockupStatus,
+      });
       if (error) throw error;
+      notice("Mockup images saved successfully.");
+      setImageFiles([]);
+      setImagePreviews([]);
+      await reload();
     } catch (error) {
-      if (uploadedPath) await client.storage.from("mockup-images").remove([uploadedPath]);
-      setSaving(false);
-      return notice(error instanceof Error ? error.message : "Mockup could not be submitted.");
+      notice(error instanceof Error ? error.message : "Failed to save mockups.");
     }
     setSaving(false);
-    close();
-    notice(editing ? "Mockup revised and resubmitted for General Manager approval." : "Mockup submitted for General Manager approval.");
-    await reload();
   };
-  const review = async (task: Row, decision: "approved" | "needs_revision", note = "") => {
-    if (decision === "needs_revision" && !note.trim()) return notice("Enter revision notes before returning this mockup.");
-    setReviewingSaving(true);
-    const { error } = await createClient().rpc("review_mockup_task", {
-      p_mockup_id: task.id,
-      p_decision: decision,
-      p_revision_note: note.trim() || null,
-    });
-    setReviewingSaving(false);
-    if (error) return notice(error.message);
-    setReviewing(null);
-    setRevisionNote("");
-    notice(decision === "approved" ? "Mockup approved. The project can now be scheduled." : "Mockup returned to the Project Officer for revision.");
-    await reload();
-  };
-  const dialogFields: Field[] = editing ? [
-    { key: "mockup_name", label: "Mockup name", required: true },
-    { key: "pieces", label: "Pieces", type: "number", required: true },
-    { key: "due_date", label: "Due date", type: "date", required: true },
-    { key: "status", label: "Status", type: "select", required: true, options: [...MOCKUP_STATUSES] },
-    { key: "notes", label: "Update / notes", type: "textarea", hint: "Visible to the General Manager in real time." },
-  ] : [
-    {
-      type: "select",
-      required: true,
-      key: "quotation_id",
-      label: "Approved Price Quotation",
-      options: availableQuotes.map(
-        (quote) =>
-          `${text(quote.id)}|${text(quote.quotation_no)} - ${text(quote.client_name, "Client")}`,
-      ),
-    },
-    { key: "mockup_name", label: "Mockup name", required: true, placeholder: "e.g. Product box layout" },
-    { key: "pieces", label: "Pieces", type: "number", required: true },
-    { key: "due_date", label: "Due date", type: "date", required: true },
-    { key: "notes", label: "Request details / notes", type: "textarea" },
-  ];
+
+  const totalImageCount = existingImages.length + imageFiles.length;
 
   return (
     <Panel
-      title={isGeneralManager ? "Mockup oversight" : "Mockups"}
-      detail={isGeneralManager ? "Monitor ongoing mockups across all Project Officers in real time." : "Track pre-quotation client mockups for your assigned leads."}
+      title={canEdit ? "Price Quotation Mockups" : "Price Quotation Mockups (View Only)"}
+      detail={canEdit ? "Upload production mockup images for approved price quotations and track their status." : "View mockup images and status for your price quotations."}
       variant="page"
       hideHeading
-      action={!isGeneralManager ? <Button onClick={openNew} disabled={!currentUserId || !availableQuotes.length}><Plus size={14} /> Add mockup</Button> : undefined}
     >
-      <section className="grid gap-3 border-b border-[#e4e8ef] px-4 py-4 sm:grid-cols-3 sm:px-5 lg:px-6">
-        {[
-          ["Pending review", pendingCount, "text-[#a76605]"],
-          ["Needs revision", revisionCount, "text-[#b42318]"],
-          ["GM approved", approvedCount, "text-[#218b55]"],
-        ].map(([label, count, color]) => <div key={String(label)} className="rounded-xl border border-[#dfe5ec] bg-white px-4 py-3"><p className="text-[11px] font-medium uppercase tracking-[.05em] text-[#7b8494]">{label}</p><p className={`mt-1 text-2xl font-semibold ${color}`}>{count}</p></div>)}
+      <section className="border-b border-[#e4e8ef] px-4 py-3 sm:px-5 lg:px-6">
+        <label className="flex h-9 min-w-64 flex-1 items-center gap-2 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[#687386]">
+          <FileText size={15} />
+          <span className="sr-only">Select a price quotation</span>
+          <select
+            value={selectedQuoteId}
+            onChange={(event) => {
+              setSelectedQuoteId(event.target.value);
+              setImageFiles([]);
+              setImagePreviews([]);
+            }}
+            className="min-w-0 flex-1 border-0 bg-transparent text-[12px] outline-none"
+          >
+            <option value="">Select a Price Quotation</option>
+            {quotations.map((quote) => (
+              <option key={text(quote.id)} value={text(quote.id)}>
+                {text(quote.quotation_no)} — {text(quote.client_name, "Client")} ({text(quote.status)})
+              </option>
+            ))}
+          </select>
+        </label>
       </section>
-      <section className="flex flex-wrap items-center gap-2 border-b border-[#e4e8ef] px-4 py-3 sm:px-5 lg:px-6">
-        <label className="flex h-9 min-w-52 flex-1 items-center gap-2 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[#687386]"><Search size={15} /><span className="sr-only">Search mockups</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search client, company, project…" className="min-w-0 flex-1 border-0 bg-transparent text-[12px] outline-none" /></label>
-        <label className="flex h-9 items-center rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px]"><span className="sr-only">Mockup approval status</span><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)} className="border-0 bg-transparent outline-none"><option value="pending">Pending review</option><option value="needs_revision">Needs revision</option><option value="approved">GM approved</option><option value="all">All approval statuses</option></select></label>
-      </section>
-      <Table labels={["Mockup / Project", "Illustration", "Client / Company", "Pieces", "Due date", "Approval", "Status", ...(isGeneralManager ? ["Project Officer"] : []), "Updated", "Actions"]} minWidth={isGeneralManager ? 1120 : 980}>
-        {filteredTasks.map((task) => <tr key={text(task.id)}>
-          <td className="px-4 py-3"><b>{text(task.mockup_name)}</b><small>{text(task.project_name)}</small></td>
-          <td className="px-4 py-3"><MockupIllustration path={task.illustration_path} label={text(task.mockup_name)} /></td>
-          <td className="px-4 py-3"><b>{text(task.client_name, "—")}</b><small>{text(task.company_name, "—")}</small></td>
-          <td className="px-4 py-3 text-center">{n(task.pieces).toLocaleString()}</td>
-          <td className={`px-4 py-3 ${isActive(task) && text(task.due_date, "") < isoToday() ? "font-semibold text-[#b42318]" : ""}`}>{day(task.due_date)}</td>
-          <td className="px-4 py-3"><Status value={approvalStatus(task)} /></td>
-          <td className="px-4 py-3"><Status value={task.status} /></td>
-          {isGeneralManager && <td className="px-4 py-3">{officerName(task)}</td>}
-          <td className="px-4 py-3">{day(task.updated_at)}</td>
-          <td className="px-4 py-3">{isGeneralManager ? (approvalStatus(task) === "pending" ? <div className="flex items-center gap-1"><ActionIcon label={`Approve ${text(task.mockup_name)}`} tone="green" onClick={() => void review(task, "approved")}><Check size={15} /></ActionIcon><ActionIcon label={`Return ${text(task.mockup_name)} for revision`} tone="amber" confirm={false} onClick={() => { setReviewing(task); setRevisionNote(""); }}><RotateCcw size={15} /></ActionIcon></div> : <span className="text-[#8b92a1]">—</span>) : (approvalStatus(task) === "needs_revision" ? <ActionIcon label={`Revise ${text(task.mockup_name)}`} confirm={false} onClick={() => openEdit(task)}><Pencil size={15} /></ActionIcon> : <span className="text-[#8b92a1]">Awaiting GM</span>)}</td>
-        </tr>)}
-      </Table>
-      {!filteredTasks.length && <Empty>{statusFilter === "pending" ? "No mockups are awaiting General Manager review." : "No mockups match these filters."}</Empty>}
-      {open && <Dialog title={editing ? "Revise mockup" : "Add mockup"} fields={dialogFields} values={values} setValues={setValues} save={() => void save()} close={close} saving={saving} saveLabel={editing ? "Resubmit mockup" : "Submit mockup"}><label className="mt-4 block text-[12px] font-medium text-[#202938]">Mockup illustration<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { const file = event.target.files?.[0] ?? null; setIllustrationFile(file); setIllustrationPreview(file ? URL.createObjectURL(file) : null); }} className="mt-1 block w-full text-[12px]" />{illustrationPreview ? <img src={illustrationPreview} alt="New mockup preview" className="mt-3 h-32 rounded-lg border border-[#d9e0e9] object-contain" /> : editing?.illustration_path ? <p className="mt-1 text-[11px] text-[#687386]">Current illustration is retained unless you upload a replacement.</p> : <p className="mt-1 text-[11px] text-[#687386]">An illustration is required before submission.</p>}</label></Dialog>}
-      {reviewing && <Dialog title="Return mockup for revision" fields={[{ key: "revision_note", label: "Revision notes", type: "textarea", required: true, hint: "Explain the changes required before the officer resubmits." }]} values={{ revision_note: revisionNote }} setValues={(next) => setRevisionNote(next.revision_note ?? "")} save={() => void review(reviewing, "needs_revision", revisionNote)} close={() => setReviewing(null)} saving={reviewingSaving} saveLabel="Return for revision" />}
+
+      {selectedQuotation && (
+        <section className="border-b border-[#e4e8ef] bg-[#fafbfc] px-4 py-4 sm:px-5 lg:px-6">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-[#7b8494]">Quotation No.</p>
+              <p className="mt-1 text-[13px] font-medium text-[#202938]">{text(selectedQuotation.quotation_no)}</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-[#7b8494]">Client</p>
+              <p className="mt-1 text-[13px] font-medium text-[#202938]">{text(selectedQuotation.client_name, "—")}</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-[#7b8494]">Project Type</p>
+              <p className="mt-1 text-[13px] font-medium text-[#202938]">{text(selectedLead?.project_type, "—")}</p>
+            </div>
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-[#7b8494]">Status</p>
+              <p className="mt-1"><Status value={selectedQuotation.status} /></p>
+            </div>
+          </div>
+          {selectedItems.length > 0 && (
+            <div className="mt-3 overflow-x-auto">
+              <Table labels={["#", "Description", "Qty"]} minWidth={0} className="table-fixed" compact>
+                {selectedItems.map((item, index) => (
+                  <tr key={text(item.id)}>
+                    <td className="px-3 py-2 text-center">{index + 1}</td>
+                    <td className="px-3 py-2 text-[12px]">{text(item.description)}</td>
+                    <td className="px-3 py-2 text-center">{n(item.quantity).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </Table>
+            </div>
+          )}
+        </section>
+      )}
+
+      {selectedQuotation && (
+        <section className="px-4 py-4 sm:px-5 lg:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-[13px] font-semibold text-[#202938]">Mockup Images ({totalImageCount}/20)</h3>
+              <p className="mt-0.5 text-[11px] text-[#687386]">Upload JPEG, PNG, or WebP images up to 10 MB each.</p>
+            </div>
+            {canEdit && (
+              <div className="flex items-center gap-3">
+                <label className="flex h-8 items-center rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium text-[#344054] hover:bg-[#f5f7fa]">
+                  <Plus size={13} className="mr-1" /> Add Images ({imageFiles.length} new)
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    multiple
+                    onChange={(event) => { addImages(event.target.files); event.target.value = ""; }}
+                    className="hidden"
+                  />
+                </label>
+                <label className="flex h-8 items-center gap-2 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium text-[#344054]">
+                  Status
+                  <select
+                    value={mockupStatus}
+                    onChange={(event) => setMockupStatus(event.target.value)}
+                    className="border-0 bg-transparent text-[12px] outline-none"
+                  >
+                    <option value="ongoing">Ongoing</option>
+                    <option value="completed">Completed</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </label>
+              </div>
+            )}
+          </div>
+
+          {existingImages.length > 0 && (
+            <div className="mt-3">
+              <p className="mb-2 text-[11px] font-medium text-[#687386]">Saved images</p>
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8">
+                {existingImages.map((img) => (
+                  <div key={img.id} className="group relative overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc]">
+                    <img src={img.image_url} alt="Mockup" className="aspect-square w-full object-cover" />
+                    {canEdit && (
+                      <button
+                        type="button"
+                        onClick={() => removeExistingImage(existingImages.indexOf(img))}
+                        className="absolute right-1 top-1 grid size-6 place-items-center rounded-full bg-[#151922]/60 text-white opacity-0 transition-opacity hover:bg-[#151922]/80 group-hover:opacity-100"
+                        aria-label="Remove saved image"
+                      >
+                        <X size={12} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {imagePreviews.length > 0 && (
+            <div className="mt-3">
+              <p className="mb-2 text-[11px] font-medium text-[#687386]">New uploads (will be saved on submit)</p>
+              <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8">
+                {imagePreviews.map((preview, index) => (
+                  <div key={preview} className="group relative overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc]">
+                    <img src={preview} alt={`Upload ${index + 1}`} className="aspect-square w-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => removeNewImage(index)}
+                      className="absolute right-1 top-1 grid size-6 place-items-center rounded-full bg-[#151922]/60 text-white opacity-0 transition-opacity hover:bg-[#151922]/80 group-hover:opacity-100"
+                      aria-label="Remove new image"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {totalImageCount === 0 && (
+            <div className="mt-6 rounded-xl border border-dashed border-[#ccd5e0] bg-white py-8 text-center">
+              <ImageIcon className="mx-auto text-[#c4ccd8]" size={28} />
+              <p className="mt-2 text-[12px] text-[#687386]">No mockup images uploaded yet.</p>
+              {canEdit && <p className="mt-1 text-[11px] text-[#8b92a1]">Click &quot;Add Images&quot; to upload production mockups.</p>}
+            </div>
+          )}
+
+          {canEdit && totalImageCount > 0 && (
+            <div className="mt-4 flex justify-end">
+              <Button onClick={() => void save()} disabled={saving}>
+                <Save size={14} /> {saving ? "Saving..." : "Save Mockups"}
+              </Button>
+            </div>
+          )}
+        </section>
+      )}
+
+      {!selectedQuotation && (
+        <div className="px-4 py-10 text-center">
+          <Empty>Select a Price Quotation above to view and manage its mockup images.</Empty>
+        </div>
+      )}
     </Panel>
   );
 }
@@ -3927,16 +4072,10 @@ function ProjectCalendar({
       .filter((schedule) => text(schedule.status, "approved") !== "rejected")
       .map((schedule) => text(schedule.quotation_id, "")),
   );
-  const mockupApprovedQuoteIds = new Set(
-    store.mockup_tasks
-      .filter((mockup) => text(mockup.approval_status, "pending") === "approved")
-      .map((mockup) => text(mockup.quotation_id, "")),
-  );
   const approvedQuotes = store.quotations.filter(
     (quote) =>
       text(quote.document_type, "") === "price_quotation" &&
       text(quote.status, "") === "approved" &&
-      mockupApprovedQuoteIds.has(text(quote.id, "")) &&
       !scheduledQuoteIds.has(text(quote.id, "")),
   );
   const canCreateSchedule = role === "project_manager";
@@ -6061,14 +6200,14 @@ function QuotationDocument({
           <article
             ref={documentRef}
             className="quotation-print-document bg-white font-serif text-[#111]"
-            style={{ width: "210mm" }}
+            style={{ width: "8.5in" }}
           >
             <section
-              className="quotation-print-page relative min-h-[297mm] w-[210mm] px-[12mm] pb-[15mm] pt-[11mm]"
+              className="quotation-print-page relative min-h-[13in] w-[8.5in] px-[12mm] pb-[15mm] pt-[11mm]"
               style={{
                 position: "relative",
-                width: "210mm",
-                minHeight: "297mm",
+                width: "8.5in",
+                minHeight: "13in",
                 padding: "11mm 12mm 15mm",
               }}
             >
@@ -6191,11 +6330,11 @@ function QuotationDocument({
               </p>
             </section>
             <section
-              className="quotation-print-page relative min-h-[297mm] w-[210mm] px-[12mm] pb-[15mm] pt-[12.5mm] text-[12px] leading-[1.4]"
+              className="quotation-print-page relative min-h-[13in] w-[8.5in] px-[12mm] pb-[15mm] pt-[12.5mm] text-[12px] leading-[1.4]"
               style={{
                 position: "relative",
-                width: "210mm",
-                minHeight: "297mm",
+                width: "8.5in",
+                minHeight: "13in",
                 padding: "12.5mm 12mm 15mm",
               }}
             >
@@ -6253,11 +6392,11 @@ function QuotationDocument({
               </p>
             </section>
             <section
-              className="quotation-print-page relative min-h-[297mm] w-[210mm] px-[12mm] pb-[15mm] pt-[12.5mm] text-[12px] leading-[1.4]"
+              className="quotation-print-page relative min-h-[13in] w-[8.5in] px-[12mm] pb-[15mm] pt-[12.5mm] text-[12px] leading-[1.4]"
               style={{
                 position: "relative",
-                width: "210mm",
-                minHeight: "297mm",
+                width: "8.5in",
+                minHeight: "13in",
                 padding: "12.5mm 12mm 15mm",
               }}
             >
@@ -8377,8 +8516,8 @@ function PriceQuotationWorkspace({
   const [reviewing, setReviewing] = useState<Row | null>(null);
   const [revisionNoteQuote, setRevisionNoteQuote] = useState<Row | null>(null);
   const [illustrationQuote, setIllustrationQuote] = useState<Row | null>(null);
-  const isGeneralManager = memberRole(role);
   const canPrepare = role === "project_manager";
+  const isGeneralManager = canReviewPriceQuotations(role);
   useEffect(() => {
     let active = true;
     void createClient().auth.getUser().then(({ data }) => {
@@ -8869,7 +9008,7 @@ function ProductCostingsSection({
   return (
     <section className="rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div><h3 className="text-[14px] font-semibold text-[#202938]">Internal product costings</h3><p className="mt-1 text-[12px] text-[#687386]">General Manager only. Add one costing table for each finished product; all internal costs and markups calculate the quotation price automatically.</p></div>
+        <div><h3 className="text-[14px] font-semibold text-[#202938]">Internal product costings</h3><p className="mt-1 text-[12px] text-[#687386]">General Manager / Pricing Officer only. Add one costing table for each finished product; all internal costs and markups calculate the quotation price automatically.</p></div>
         <Button secondary disabled={!canAddCosting} onClick={() => {
           const nextLine = lines.find((line) => !costings.some((costing) => costing.quotationItemId === line.id));
           if (nextLine?.id) setCostings((current) => [...current, newProductCostingDraft(text(nextLine.id))]);
@@ -8884,8 +9023,8 @@ function ProductCostingsSection({
             <Button secondary onClick={() => setCostings((current) => current.filter((item) => item.key !== costing.key))}><Trash2 size={14} /> Remove table</Button>
           </div>
           <div className="mt-3"><div className="mb-3"><h4 className="text-[12px] font-semibold text-[#344054]">Internal costs</h4></div>
-            <Table labels={["Description", "Quantity", "Unit Cost", "Amount", ""]} minWidth={0} className="table-fixed" scrollable={false} compact columnWidths={["46%", "15%", "16%", "14%", "9%"]}>{costing.costLines.map((line, lineIndex) => { const isFixedAmount = line.calculationType === "fixed_amount"; const lineAmount = isFixedAmount ? n(line.amount) : n(line.quantity) * n(line.unitCost); return <tr key={line.key}><td className="min-w-0 whitespace-normal break-words px-2 py-2"><input aria-label={`Cost ${lineIndex + 1} description`} value={line.description} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, description: titleCaseEntry(event.target.value, "description") } : item) }))} className="input mt-0 min-w-0 max-w-full px-2" placeholder="Material, labor, logistics" /><select aria-label={`Cost ${lineIndex + 1} calculation type`} value={line.calculationType} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, calculationType: event.target.value === "fixed_amount" ? "fixed_amount" : "quantity_unit_cost", amount: event.target.value === "fixed_amount" && item.calculationType !== "fixed_amount" ? String(n(item.quantity) * n(item.unitCost)) : item.amount } : item) }))} className="mt-1 w-full rounded-md border border-[#d9e0e9] bg-white px-2 py-1 text-[10px] text-[#687386] outline-none focus:border-[#c43b43]"><option value="quantity_unit_cost">Quantity × Unit Cost</option><option value="fixed_amount">Fixed Amount</option></select></td><td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-center text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} quantity`} type="number" min="0.001" step="any" value={line.quantity} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, quantity: event.target.value } : item) }))} className="input mt-0 min-w-0 max-w-full px-1 text-center" />}</td><td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-center text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} unit cost`} type="number" min="0" step="any" value={line.unitCost} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, unitCost: event.target.value } : item) }))} className="input mt-0 min-w-0 max-w-full px-1 text-center" />}</td><td className="min-w-0 px-2 py-2">{isFixedAmount ? <input aria-label={`Cost ${lineIndex + 1} fixed amount`} type="number" min="0" step="any" value={line.amount} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, amount: event.target.value } : item) }))} className="input mt-0 min-w-0 max-w-full px-1 text-center" /> : <span className="flex min-h-9 items-center justify-end whitespace-nowrap font-medium">{peso.format(lineAmount)}</span>}</td><td className="px-1 py-2 text-center"><ActionIcon label={`Remove cost ${lineIndex + 1}`} tone="red" disabled={costing.costLines.length === 1} onClick={() => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.filter((item) => item.key !== line.key) }))}><Trash2 size={14} /></ActionIcon></td></tr>; })}</Table><div className="mt-2 mb-2 flex items-center justify-between gap-3"><h4 className="text-[12px] font-semibold text-[#344054]">Markup, VAT &amp; Expenses</h4><Button onClick={() => updateCosting(costing.key, (current) => ({ ...current, costLines: [...current.costLines, { key: `cost-line-${crypto.randomUUID()}`, description: "", calculationType: "quantity_unit_cost", quantity: "1", unitCost: "0", amount: "0" }] }))}><Plus size={13} /> Add cost</Button></div></div>
-          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]"><div><div className="mt-1 space-y-2"><div aria-hidden="true" className="grid grid-cols-[minmax(0,1fr)_104px_88px] gap-2 px-1 text-[10px] font-medium uppercase tracking-wide text-[#8b92a1]"><span>Category</span><span className="text-center">Rate</span><span className="text-right">Total</span></div>{costing.markups.map((markup) => { const markupAmount = Math.round(totals.cogs * n(markup.rate) * 100) / 10000; return <div key={markup.key} className="grid grid-cols-[minmax(0,1fr)_104px_88px] gap-2"><span className="flex min-h-9 items-center px-1 text-[12px] font-medium text-[#344054]">{markup.label}</span><div className="flex items-center gap-1"><input aria-label={`${markup.label || "Markup"} percentage`} type="number" min="0" step="any" value={markup.rate} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, markups: current.markups.map((item) => item.key === markup.key ? { ...item, rate: event.target.value } : item) }))} className="input mt-0 w-[78px] text-center" /><span className="text-[12px] text-[#687386]">%</span></div><output aria-label={`${markup.label || "Markup"} total`} className="flex min-h-9 items-center justify-end whitespace-nowrap text-[12px] font-medium text-[#344054]">{peso.format(markupAmount)}</output></div>; })}<div className="grid grid-cols-[minmax(0,1fr)_104px_88px] gap-2"><span className="flex min-h-9 items-center px-1 text-[12px] font-medium text-[#344054]">VAT</span><div className="flex items-center gap-1"><input aria-label="VAT percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input mt-0 w-[78px] text-center" /><span className="text-[12px] text-[#687386]">%</span></div><output aria-label="VAT total" className="flex min-h-9 items-center justify-end whitespace-nowrap text-[12px] font-medium text-[#344054]">{peso.format(totals.vat)}</output></div></div></div>
+            <Table labels={["Mode", "Description", "Quantity", "Unit Cost", "Amount", ""]} minWidth={0} className="table-fixed" scrollable={false} compact columnWidths={["12%", "42%", "12%", "12%", "12%", "10%"]} alignRightLabels={["Quantity", "Unit Cost"]}>{costing.costLines.map((line, lineIndex) => { const isFixedAmount = line.calculationType === "fixed_amount"; const lineAmount = isFixedAmount ? n(line.amount) : n(line.quantity) * n(line.unitCost); const setCalculationType = (value: "quantity_unit_cost" | "fixed_amount") => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, calculationType: value, amount: value === "fixed_amount" && item.calculationType !== "fixed_amount" ? String(n(item.quantity) * n(item.unitCost)) : item.amount } : item) })); return <tr key={line.key}><td className="min-w-0 px-1 py-2"><div aria-label={`Cost ${lineIndex + 1} calculation type`} role="group" className="inline-flex w-full items-center justify-center whitespace-nowrap overflow-hidden rounded-md border border-[#d9e0e9] text-[10px] font-semibold"><button type="button" aria-pressed={!isFixedAmount} onClick={() => setCalculationType("quantity_unit_cost")} className={`min-w-0 flex-1 min-h-6 px-1 transition-colors ${!isFixedAmount ? "bg-[#c43b43] text-white" : "bg-white text-[#687386] hover:bg-[#f5f7fa]"}`}>Q×C</button><button type="button" aria-pressed={isFixedAmount} onClick={() => setCalculationType("fixed_amount")} className={`min-w-0 flex-1 min-h-6 px-1 transition-colors ${isFixedAmount ? "bg-[#c43b43] text-white" : "bg-white text-[#687386] hover:bg-[#f5f7fa]"}`}>Fixed</button></div></td><td className="min-w-0 !whitespace-normal break-words px-2 py-2"><input aria-label={`Cost ${lineIndex + 1} description`} value={line.description} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, description: titleCaseEntry(event.target.value, "description") } : item) }))} className="input mt-0 min-w-0 max-w-full px-2" placeholder="Material, labor, logistics" /></td><td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-end text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} quantity`} type="number" min="0.001" step="any" value={line.quantity} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, quantity: event.target.value } : item) }))} className="input mt-0 min-w-0 max-w-full px-1 text-right" />}</td><td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-end text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} unit cost`} type="number" min="0" step="any" value={line.unitCost} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, unitCost: event.target.value } : item) }))} className="input mt-0 min-w-0 max-w-full px-1 text-right" />}</td><td className="min-w-0 px-2 py-2">{isFixedAmount ? <input aria-label={`Cost ${lineIndex + 1} fixed amount`} type="number" min="0" step="any" value={line.amount} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, amount: event.target.value } : item) }))} className="input mt-0 min-w-0 max-w-full px-1 text-right" /> : <span className="flex min-h-9 items-center justify-end whitespace-nowrap font-medium">{peso.format(lineAmount)}</span>}</td><td className="px-1 py-2 text-center"><ActionIcon label={`Remove cost ${lineIndex + 1}`} tone="red" disabled={costing.costLines.length === 1} onClick={() => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.filter((item) => item.key !== line.key) }))}><Trash2 size={14} /></ActionIcon></td></tr>; })}</Table><div className="mt-2 mb-2 flex items-center justify-between gap-3"><h4 className="text-[12px] font-semibold text-[#344054]">Markup, VAT &amp; Expenses</h4><Button onClick={() => updateCosting(costing.key, (current) => ({ ...current, costLines: [...current.costLines, { key: `cost-line-${crypto.randomUUID()}`, description: "", calculationType: "quantity_unit_cost", quantity: "1", unitCost: "0", amount: "0" }] }))}><Plus size={13} /> Add cost</Button></div></div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]"><div><div className="mt-1 space-y-2 w-fit"><div aria-hidden="true" className="grid grid-cols-[auto_104px_88px] gap-4 px-1 text-[10px] font-medium uppercase tracking-wide text-[#8b92a1]"><span>Category</span><span className="text-center">Rate</span><span className="text-right">Total</span></div>{costing.markups.map((markup) => { const markupAmount = Math.round(totals.cogs * n(markup.rate) * 100) / 10000; return <div key={markup.key} className="grid grid-cols-[auto_104px_88px] gap-4"><span className="flex min-h-9 items-center px-1 text-[12px] font-medium text-[#344054]">{markup.label}</span><div className="flex items-center gap-1"><input aria-label={`${markup.label || "Markup"} percentage`} type="number" min="0" step="any" value={markup.rate} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, markups: current.markups.map((item) => item.key === markup.key ? { ...item, rate: event.target.value } : item) }))} className="input mt-0 w-[78px] text-center" /><span className="text-[12px] text-[#687386]">%</span></div><output aria-label={`${markup.label || "Markup"} total`} className="flex min-h-9 items-center justify-end whitespace-nowrap text-[12px] font-medium text-[#344054]">{peso.format(markupAmount)}</output></div>; })}<div className="grid grid-cols-[auto_104px_88px] gap-4"><span className="flex min-h-9 items-center px-1 text-[12px] font-medium text-[#344054]">VAT</span><div className="flex items-center gap-1"><input aria-label="VAT percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input mt-0 w-[78px] text-center" /><span className="text-[12px] text-[#687386]">%</span></div><output aria-label="VAT total" className="flex min-h-9 items-center justify-end whitespace-nowrap text-[12px] font-medium text-[#344054]">{peso.format(totals.vat)}</output></div></div></div>
             <dl className="overflow-hidden rounded-lg border border-[#d9e0e9] text-[12px]"><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Total Direct Cost</dt><dd className="font-medium">{peso.format(totals.cogs)}</dd></div><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>All markups</dt><dd>{peso.format(totals.markupTotal)}</dd></div><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Selling Price VAT EX (total)</dt><dd>{peso.format(totals.sellingExVat)}</dd></div><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>VAT ({n(vatRate)}%)</dt><dd>{peso.format(totals.vat)}</dd></div><div className="flex justify-between bg-[#f8fbff] px-3 py-2"><dt>Selling Price VAT EX / Piece</dt><dd>{peso.format(totals.unitExVat)}</dd></div><div className="flex justify-between bg-[#eff7f1] px-3 py-2 font-semibold text-[#176b40]"><dt>Selling Price VAT INC / Piece</dt><dd>{peso.format(totals.unitIncVat)}</dd></div></dl></div>
         </article>;
       })}</div>}
@@ -8977,7 +9116,7 @@ function PriceQuotationReviewContent({
       <section className="rounded-xl border border-[#e1e6ee] p-4">
         <h3 className="text-[14px] font-semibold">Terms and Conditions</h3>
         <div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
-        <div className="mt-3 flex justify-end"><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div>
+        <div className="mt-3 flex justify-end"><Button onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div>
       </section>
       <section className="rounded-xl border border-[#e1e6ee] p-4">
         <h3 className="text-[14px] font-semibold">Bank Details</h3>
@@ -9200,7 +9339,7 @@ function PriceQuotationReview({
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} shipping={shipping} setShipping={setShipping} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} · {text(quotation.client_name)} · Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><div className="mt-5 grid gap-5 lg:grid-cols-[1.45fr_.75fr]"><div><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><section className="mt-5 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="mt-4 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="mt-4 block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label></div><aside><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><div className="border-b border-[#edf0f5] px-4 py-3"><h3 className="text-[14px] font-semibold">Quotation Total</h3></div><Table labels={["Category", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section></aside></div><div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></section></div>;
   */
-  return <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectType={text(quotation.project_types, "")} illustrations={illustrations} productCostings={productCostings} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} priceBasis={priceBasis} setPriceBasis={setPriceBasis} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
+  return <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectType={text(quotation.project_types, "")} illustrations={illustrations} productCostings={productCostings} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} priceBasis={priceBasis} setPriceBasis={setPriceBasis} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
 }
 
 function GeneralManagerCostingReview({
@@ -9305,7 +9444,7 @@ function GeneralManagerCostingReview({
               </tr>
             </Table>
             <section className="mt-5 rounded-xl border border-[#e1e6ee] p-4">
-              <div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div>
+<div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div>
               <div className="mt-3 space-y-2">{terms.map((term, index) => <div key={index} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label="Remove term" onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] transition-colors hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
             </section>
             <section className="mt-4 rounded-xl border border-[#e1e6ee] p-4">
@@ -13341,6 +13480,12 @@ export function HuswellWorkspace({
       "Price Quotations",
     ],
     sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory"],
+    pricing_officer: [
+      "Dashboard",
+      "Leads",
+      "Mockups",
+      "Price Quotations",
+    ],
     warehouse: ["Dashboard", "Catalog", "Inventory", "Production"],
     accountant: ["Finance"],
     payroll: ["Dashboard", "Payroll & Leave", "Directory"],
@@ -13384,6 +13529,19 @@ export function HuswellWorkspace({
         { view: "Finance", icon: Wallet },
         { view: "Settings", icon: Settings },
       ],
+    },
+  ] : role === "pricing_officer" ? [
+    {
+      label: "Pricing",
+      items: [
+        { view: "Dashboard", icon: LayoutDashboard },
+        { view: "Price Quotations", icon: FileText },
+        { view: "Mockups", icon: ImageIcon },
+      ],
+    },
+    {
+      label: "Clients",
+      items: [{ view: "Leads", icon: ClipboardCheck }],
     },
   ] : [
     {
@@ -13565,7 +13723,7 @@ export function HuswellWorkspace({
         role={role}
       />
     ) : active === "Mockups" ? (
-      <MockupWorkspace
+      <PriceQuotationMockups
         store={store}
         orgId={organizationId}
         reload={reload}

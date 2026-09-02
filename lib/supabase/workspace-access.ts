@@ -6,6 +6,7 @@ export const workspaceRoles = [
   "owner",
   "admin",
   "project_manager",
+  "pricing_officer",
   "sales",
   "production",
   "warehouse",

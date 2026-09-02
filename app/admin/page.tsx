@@ -7,6 +7,7 @@ export default async function AdminPage() {
 
   if (access.role === "super_admin") redirect("/super-admin");
   if (access.role === "project_manager") redirect("/project-manager");
+  if (access.role === "pricing_officer") redirect("/pricing-officer");
   if (!["owner", "admin"].includes(access.role)) redirect("/auth");
 
   return <HuswellWorkspace {...access} />;

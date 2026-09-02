@@ -9,5 +9,7 @@ export default async function ProfilePage() {
     return <HuswellWorkspace {...access} initialView="Settings" />;
   if (access.role === "project_manager")
     return <HuswellWorkspace {...access} initialView="Profile" />;
+  if (access.role === "pricing_officer")
+    return <HuswellWorkspace {...access} initialView="Profile" />;
   redirect("/");
 }

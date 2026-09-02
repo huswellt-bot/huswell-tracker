@@ -143,7 +143,9 @@ export async function POST(request: Request) {
     typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
   const password = typeof body?.password === "string" ? body.password : "";
   const role =
-    body?.role === "admin" || body?.role === "project_manager"
+    body?.role === "admin" ||
+    body?.role === "project_manager" ||
+    body?.role === "pricing_officer"
       ? body.role
       : null;
   if (
@@ -264,7 +266,9 @@ export async function PATCH(request: Request) {
     typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
   const password = typeof body?.password === "string" ? body.password : "";
   const role =
-    body?.role === "admin" || body?.role === "project_manager"
+    body?.role === "admin" ||
+    body?.role === "project_manager" ||
+    body?.role === "pricing_officer"
       ? body.role
       : null;
   if (

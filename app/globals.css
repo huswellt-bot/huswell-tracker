@@ -301,17 +301,17 @@ small {
 }
 @media print {
   @page {
-    size: A4 portrait;
+    size: 8.5in 13in;
     margin: 0;
   }
   body {
     background: #fff;
   }
   .quotation-print-document {
-    width: 210mm;
+    width: 8.5in;
   }
   .quotation-print-page {
-    min-height: 297mm;
+    min-height: 13in;
     break-after: page;
   }
   .quotation-print-page:last-child {
@@ -353,10 +353,10 @@ select:not([multiple]) {
   line-height: 20px;
 }
 .quotation-print-document {
-  width: 210mm;
+  width: 8.5in;
 }
 .quotation-print-page {
-  min-height: 297mm;
+  min-height: 13in;
 }
 .huswell-workspace [data-pdf-document] {
   overflow-wrap: anywhere;

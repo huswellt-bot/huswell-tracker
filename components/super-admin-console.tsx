@@ -40,7 +40,11 @@ type UserFormValues = {
 };
 
 const displayRole = (role: string) =>
-  role === "admin" ? "General Manager" : "Sales Project Officer";
+  role === "admin"
+    ? "General Manager"
+    : role === "pricing_officer"
+      ? "Pricing Officer"
+      : "Sales Project Officer";
 const titleCase = (value: string) =>
   value.replace(
     /(^|[^A-Za-z])([a-z])/g,
@@ -519,6 +523,7 @@ export function SuperAdminConsole({
                 >
                   <option value="project_manager">Sales Project Officer</option>
                   <option value="admin">General Manager</option>
+                  <option value="pricing_officer">Pricing Officer</option>
                 </select>
               </label>
               {["project_manager", "admin"].includes(editValues.role) && (
@@ -670,6 +675,7 @@ export function SuperAdminConsole({
                 >
                   <option value="project_manager">Sales Project Officer</option>
                   <option value="admin">General Manager</option>
+                  <option value="pricing_officer">Pricing Officer</option>
                 </select>
               </label>
               {["project_manager", "admin"].includes(values.role) && (
