@@ -9392,8 +9392,8 @@ function PriceQuotationReviewContent({
               <td className="px-4 py-3 text-center">{index + 1}</td>
               <td className="whitespace-pre-wrap break-words px-4 py-3 font-medium">{text(line.description)}</td>
               <td className="px-4 py-3 text-center">{n(line.quantity)}</td>
-              <td className="px-4 py-2">{productCosting ? <span aria-label={`${priceLabel} for ${text(line.description)}`} className="flex min-h-9 items-center justify-center font-medium text-[#202938]">{peso.format(displayedPrice)}</span> : <input aria-label={`${priceLabel} for ${text(line.description)}`} type="number" min="0" step="any" value={enteredPrice} onChange={(event) => setPrices((current) => { const enteredValue = event.target.value; return { ...current, [text(line.id)]: priceBasis === "inc" && enteredValue ? (n(enteredValue) / vatMultiplier).toFixed(2) : enteredValue }; })} className="input mt-0 text-center" />}</td>
-              <td className="px-4 py-3 text-right font-semibold">{wholePeso.format(n(line.quantity) * displayedPrice)}</td>
+              <td className="px-4 py-2">{productCosting ? <span aria-label={`${priceLabel} for ${text(line.description)}`} className="flex min-h-9 items-center justify-center font-medium text-[#202938]">{peso.format(displayedPrice)}</span> : <span aria-label={`${priceLabel} for ${text(line.description)}`} className="flex min-h-9 items-center justify-center text-[#8b92a1]">—</span>}</td>
+              <td className="px-4 py-3 text-right font-semibold">{productCosting ? wholePeso.format(n(line.quantity) * displayedPrice) : <span className="text-[#8b92a1]">—</span>}</td>
             </tr>;
           })}
         </Table>
