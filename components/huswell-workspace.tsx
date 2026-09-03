@@ -13778,7 +13778,6 @@ export function HuswellWorkspace({
     sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Policy"],
     pricing_officer: [
       "Dashboard",
-      "Leads",
       "Mockups",
       "Price Quotations",
       "Policy",
@@ -13837,10 +13836,6 @@ export function HuswellWorkspace({
         { view: "Price Quotations", icon: FileText },
         { view: "Mockups", icon: ImageIcon },
       ],
-    },
-    {
-      label: "Clients",
-      items: [{ view: "Leads", icon: ClipboardCheck }],
     },
     {
       label: "Company",
