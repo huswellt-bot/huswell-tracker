@@ -45,6 +45,7 @@ import {
   RotateCcw,
   Save,
   Search,
+  ScrollText,
   Send,
   Settings,
   ShoppingCart,
@@ -112,6 +113,7 @@ type View =
   | "Targets"
   | "Approvals"
   | "Submissions"
+  | "Policy"
   | "Settings"
   | "Profile";
 type TableName =
@@ -129,6 +131,7 @@ type TableName =
   | "price_quotation_costing_lines"
   | "price_quotation_costing_markups"
   | "price_quotation_mockups"
+  | "policies"
   | "production_jobs"
   | "production_material_usage"
   | "production_job_activity"
@@ -296,6 +299,7 @@ const tables: TableName[] = [
   "price_quotation_costing_lines",
   "price_quotation_costing_markups",
   "price_quotation_mockups",
+  "policies",
   "production_jobs",
   "production_material_usage",
   "production_job_activity",
@@ -706,6 +710,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "quotation_revision_requests",
     "price_quotation_revision_requests",
     "price_quotation_mockups",
+    "policies",
     "project_schedules",
   ],
   pricing_officer: [
@@ -721,6 +726,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "price_quotation_costing_lines",
     "price_quotation_costing_markups",
     "price_quotation_mockups",
+    "policies",
     "price_quotation_revision_requests",
   ],
   sales: [
@@ -734,6 +740,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "invoices",
     "invoice_items",
     "payments",
+    "policies",
   ],
   warehouse: [
     "customers",
@@ -744,6 +751,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "production_material_usage",
     "production_job_activity",
     "finished_product_stock_ins",
+    "policies",
   ],
   accountant: [
     "customers",
@@ -756,12 +764,14 @@ const roleReadableTables: Record<string, TableName[]> = {
     "expenses",
     "cash_flow_entries",
     "supplier_payables",
+    "policies",
   ],
   payroll: [
     "employees",
     "payroll_periods",
     "payroll_entries",
     "leave_requests",
+    "policies",
   ],
   production: [
     "customers",
@@ -772,6 +782,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "production_material_usage",
     "production_job_activity",
     "finished_product_stock_ins",
+    "policies",
   ],
   viewer: [
     "customers",
@@ -790,6 +801,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "payments",
     "expenses",
     "target_goals",
+    "policies",
   ],
 };
 const canReadTable = (role: string, table: TableName) =>
@@ -3700,6 +3712,183 @@ const MockupStatusBadge = ({ value }: { value: string }) => (
     {value || "ongoing"}
   </span>
 );
+
+function PolicyView({
+  store,
+  orgId,
+  reload,
+  notice,
+  role,
+}: {
+  store: Store;
+  orgId: string;
+  reload: () => Promise<void>;
+  notice: (message: string) => void;
+  role: string;
+}) {
+  const canManage = role === "admin";
+  const [addOpen, setAddOpen] = useState(false);
+  const [title, setTitle] = useState("");
+  const [pdfFile, setPdfFile] = useState<File | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const policies = [...store.policies].sort((left, right) =>
+    text(right.created_at).localeCompare(text(left.created_at)),
+  );
+
+  const resetForm = () => {
+    setTitle("");
+    setPdfFile(null);
+    setAddOpen(false);
+  };
+
+  const addPolicy = async () => {
+    if (!title.trim()) return notice("Enter a policy title.");
+    if (!pdfFile) return notice("Choose a policy PDF to upload.");
+    if (pdfFile.type !== "application/pdf")
+      return notice("Only PDF documents can be uploaded.");
+    setSaving(true);
+    const client = createClient();
+    try {
+      const path = `${orgId}/policy-documents/${crypto.randomUUID()}.pdf`;
+      const { error: uploadError } = await client.storage
+        .from("policy-documents")
+        .upload(path, pdfFile, { contentType: "application/pdf", upsert: false });
+      if (uploadError) throw uploadError;
+      const fileUrl = client.storage
+        .from("policy-documents")
+        .getPublicUrl(path).data.publicUrl;
+      const { error } = await client.rpc("insert_policy", {
+        p_title: title.trim(),
+        p_file_url: fileUrl,
+      });
+      if (error) throw error;
+      notice("Policy uploaded successfully.");
+      resetForm();
+      await reload();
+    } catch (error) {
+      notice(error instanceof Error ? error.message : "Failed to upload policy.");
+    }
+    setSaving(false);
+  };
+
+  const removePolicy = async (policy: Row) => {
+    const client = createClient();
+    try {
+      const { error } = await client.rpc("delete_policy", {
+        p_policy_id: policy.id,
+      });
+      if (error) throw error;
+      const fileUrl = text(policy.file_url, "");
+      try {
+        const path = fileUrl.split("/policy-documents/")[1];
+        if (path) await client.storage.from("policy-documents").remove([path]);
+      } catch {
+        // Best-effort cleanup of the storage object; the record is already gone.
+      }
+      notice("Policy deleted.");
+      await reload();
+    } catch (error) {
+      notice(error instanceof Error ? error.message : "Failed to delete policy.");
+    }
+  };
+
+  return (
+    <Panel
+      title="Company Policies"
+      detail="View uploaded company policy documents."
+      action={
+        canManage ? (
+          <Button onClick={() => setAddOpen(true)}>
+            <Plus size={14} /> Add Policy
+          </Button>
+        ) : undefined
+      }
+    >
+      {policies.length ? (
+        <div className="divide-y divide-[#edf0f5]">
+          {policies.map((policy) => (
+            <div
+              key={text(policy.id)}
+              className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-[13px] font-semibold text-[#202938]">
+                  {text(policy.title)}
+                </p>
+                <p className="mt-0.5 text-[11px] text-[#8b92a1]">
+                  Uploaded {day(policy.created_at)}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={text(policy.file_url)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium text-[#344054] transition-colors hover:bg-[#f5f7fa]"
+                >
+                  <FileText size={13} /> View Policy
+                </a>
+                {canManage && (
+                  <ActionIcon
+                    label="Delete policy"
+                    tone="red"
+                    confirmationDescription={`Delete "${text(policy.title)}"?`}
+                    onClick={() => void removePolicy(policy)}
+                  >
+                    <Trash2 size={15} />
+                  </ActionIcon>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="px-4 py-10 text-center">
+          <Empty>No company policies have been uploaded yet.</Empty>
+        </div>
+      )}
+
+      {addOpen && (
+        <Dialog
+          title="Add Policy"
+          fields={[]}
+          values={{}}
+          setValues={() => undefined}
+          save={() => void addPolicy()}
+          close={resetForm}
+          saving={saving}
+          saveLabel="Upload Policy"
+          className="max-w-xl"
+        >
+          <label className="block text-[12px] font-medium text-[#202938]">
+            Title
+            <input
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="e.g. Company credit terms"
+              className="input mt-1"
+            />
+          </label>
+          <label className="mt-4 block text-[12px] font-medium text-[#202938]">
+            Policy Document
+            <input
+              type="file"
+              accept="application/pdf"
+              className="mt-1"
+              onChange={(event) =>
+                setPdfFile(event.target.files?.[0] ?? null)
+              }
+            />
+          </label>
+          <p className="mt-1 text-[10px] text-[#8b92a1]">
+            Upload a PDF document up to 10 MB.
+          </p>
+        </Dialog>
+      )}
+    </Panel>
+  );
+}
 
 function PriceQuotationMockups({
   store,
@@ -13553,6 +13742,7 @@ export function HuswellWorkspace({
       "Price Quotations",
       "Finance",
       "Submissions",
+      "Policy",
       "Settings",
     ],
     owner: [
@@ -13563,6 +13753,7 @@ export function HuswellWorkspace({
       "Price Quotations",
       "Finance",
       "Submissions",
+      "Policy",
       "Settings",
     ],
     admin: [
@@ -13573,6 +13764,7 @@ export function HuswellWorkspace({
       "Price Quotations",
       "Finance",
       "Submissions",
+      "Policy",
       "Settings",
     ],
     project_manager: [
@@ -13581,18 +13773,20 @@ export function HuswellWorkspace({
       "Projects",
       "Mockups",
       "Price Quotations",
+      "Policy",
     ],
-    sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory"],
+    sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Policy"],
     pricing_officer: [
       "Dashboard",
       "Leads",
       "Mockups",
       "Price Quotations",
+      "Policy",
     ],
-    warehouse: ["Dashboard", "Catalog", "Inventory", "Production"],
-    accountant: ["Finance"],
-    payroll: ["Dashboard", "Payroll & Leave", "Directory"],
-    production: ["Dashboard", "Production", "Inventory"],
+    warehouse: ["Dashboard", "Catalog", "Inventory", "Production", "Policy"],
+    accountant: ["Finance", "Policy"],
+    payroll: ["Dashboard", "Payroll & Leave", "Directory", "Policy"],
+    production: ["Dashboard", "Production", "Inventory", "Policy"],
     viewer: [
       "Dashboard",
       "Quotations",
@@ -13603,6 +13797,7 @@ export function HuswellWorkspace({
       "Expenses",
       "Directory",
       "Targets",
+      "Policy",
     ],
   };
   const isManagementRole = memberRole(role);
@@ -13630,6 +13825,7 @@ export function HuswellWorkspace({
       label: "Business",
       items: [
         { view: "Finance", icon: Wallet },
+        { view: "Policy", icon: ScrollText },
         { view: "Settings", icon: Settings },
       ],
     },
@@ -13645,6 +13841,10 @@ export function HuswellWorkspace({
     {
       label: "Clients",
       items: [{ view: "Leads", icon: ClipboardCheck }],
+    },
+    {
+      label: "Company",
+      items: [{ view: "Policy", icon: ScrollText }],
     },
   ] : [
     {
@@ -13668,6 +13868,10 @@ export function HuswellWorkspace({
         { view: "Submissions", icon: ClipboardCheck },
         { view: "Settings", icon: Settings },
       ],
+    },
+    {
+      label: "Company",
+      items: [{ view: "Policy", icon: ScrollText }],
     },
   ];
   const nav = navBase
@@ -13788,6 +13992,10 @@ export function HuswellWorkspace({
     Settings: {
       title: "Business settings",
       detail: "Manage business defaults, profile details, and staff access.",
+    },
+    Policy: {
+      title: "Company Policies",
+      detail: "View uploaded company policy documents.",
     },
     Profile: {
       title: "Profile",
@@ -13972,6 +14180,14 @@ export function HuswellWorkspace({
         orgId={organizationId}
         reload={reload}
         notice={setMessage}
+      />
+    ) : active === "Policy" ? (
+      <PolicyView
+        store={store}
+        orgId={organizationId}
+        reload={reload}
+        notice={setMessage}
+        role={role}
       />
     ) : (
       <SettingsView
