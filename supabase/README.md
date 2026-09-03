@@ -98,7 +98,8 @@
 96. Run `101_company_policies.sql` to add General Manager-managed company policy PDFs.
 97. Run `102_secure_company_policy_storage.sql` to make policy PDFs private and restrict their storage writes to the General Manager.
 98. Run `103_company_announcements.sql` to add General Manager announcements that every organization member can view. Run it after `102_secure_company_policy_storage.sql` and before deploying the matching app code.
-99. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
+99. Run `104_price_quotation_endorsements.sql` to let a Sales Project Officer create an immutable, private PDF copy of their approved Price Quotation for another Sales Project Officer. Run it before deploying the matching app code.
+100. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 

@@ -131,6 +131,7 @@ type TableName =
   | "price_quotation_costing_lines"
   | "price_quotation_costing_markups"
   | "price_quotation_mockups"
+  | "price_quotation_endorsements"
   | "announcements"
   | "policies"
   | "production_jobs"
@@ -300,6 +301,7 @@ const tables: TableName[] = [
   "price_quotation_costing_lines",
   "price_quotation_costing_markups",
   "price_quotation_mockups",
+  "price_quotation_endorsements",
   "announcements",
   "policies",
   "production_jobs",
@@ -734,6 +736,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "quotation_revision_requests",
     "price_quotation_revision_requests",
     "price_quotation_mockups",
+    "price_quotation_endorsements",
     "announcements",
     "policies",
     "project_schedules",
@@ -882,6 +885,7 @@ const workspaceViewTables = (
       "business_settings",
       "profiles",
       "price_quotation_revision_requests",
+      "price_quotation_endorsements",
     ];
   if (view === "Suppliers & Materials")
     return [
@@ -9099,6 +9103,10 @@ function PriceQuotationWorkspace({
   const [reviewing, setReviewing] = useState<Row | null>(null);
   const [revisionNoteQuote, setRevisionNoteQuote] = useState<Row | null>(null);
   const [illustrationQuote, setIllustrationQuote] = useState<Row | null>(null);
+  const [endorseQuote, setEndorseQuote] = useState<Row | null>(null);
+  const [endorsementValues, setEndorsementValues] = useState<Record<string, string>>({ recipient_user_id: "", note: "" });
+  const [endorsing, setEndorsing] = useState(false);
+  const [openingEndorsementId, setOpeningEndorsementId] = useState<string | null>(null);
   const canPrepare = role === "project_manager";
   const isGeneralManager = canReviewPriceQuotations(role);
   useEffect(() => {
@@ -9123,6 +9131,12 @@ function PriceQuotationWorkspace({
   const quotationPreparers = Array.from(
     new Map(quotations.map((quote) => [preparedByKey(quote), preparedByName(quote)])).entries(),
   ).map(([id, name]) => ({ id, name })).filter((officer) => officer.id);
+  const recipientEndorsements = store.price_quotation_endorsements.filter(
+    (endorsement) => text(endorsement.recipient_user_id) === currentUserId && text(endorsement.status) === "active",
+  );
+  const availableEndorsementRecipients = projectOfficerOptions(store).filter(
+    (officer) => officer.id !== currentUserId,
+  );
   const filteredQuotations = quotations.filter((quote) => {
     if (text(quote.status) !== quotationTab) return false;
     if (preparedByFilter !== "all" && preparedByKey(quote) !== preparedByFilter) return false;
@@ -9190,6 +9204,53 @@ function PriceQuotationWorkspace({
         })),
     );
     setEditorOpen(true);
+  };
+  const openEndorsement = (quote: Row) => {
+    setEndorseQuote(quote);
+    setEndorsementValues({ recipient_user_id: "", note: "" });
+  };
+  const endorse = async () => {
+    if (!endorseQuote) return;
+    const recipientUserId = text(endorsementValues.recipient_user_id).trim();
+    if (!recipientUserId) return notice("Select the Sales Project Officer receiving this copy.");
+    setEndorsing(true);
+    const client = createClient();
+    try {
+      const { data, error } = await client.rpc("create_price_quotation_endorsement", {
+        p_quotation_id: endorseQuote.id,
+        p_recipient_user_id: recipientUserId,
+        p_note: text(endorsementValues.note).trim() || null,
+      });
+      if (error) throw error;
+      const endorsement = Array.isArray(data) ? data[0] : data;
+      if (!endorsement?.id || !endorsement.snapshot_path) throw new Error("Unable to prepare the endorsement.");
+      const pdfBlob = await pdf(<PriceQuotationPdf quote={endorseQuote} store={store} origin={window.location.origin} />).toBlob();
+      if (!pdfBlob.size) throw new Error("Unable to generate the approved Price Quotation PDF.");
+      const { error: uploadError } = await client.storage.from("price-quotation-endorsements").upload(endorsement.snapshot_path, pdfBlob, { contentType: "application/pdf", upsert: false });
+      if (uploadError) throw uploadError;
+      const { error: activateError } = await client.rpc("activate_price_quotation_endorsement", { p_endorsement_id: endorsement.id });
+      if (activateError) throw activateError;
+      setEndorseQuote(null);
+      notice("Approved Price Quotation copy endorsed successfully.");
+      await reload();
+    } catch (error) {
+      notice(error instanceof Error ? error.message : "Failed to endorse the Price Quotation.");
+    }
+    setEndorsing(false);
+  };
+  const openEndorsedSnapshot = async (endorsement: Row) => {
+    const endorsementWindow = window.open("", "_blank");
+    if (!endorsementWindow) return notice("Allow pop-ups to view the endorsed PDF.");
+    endorsementWindow.opener = null;
+    setOpeningEndorsementId(text(endorsement.id));
+    try {
+      const { data, error } = await createClient().storage.from("price-quotation-endorsements").createSignedUrl(text(endorsement.snapshot_path), 5 * 60);
+      if (error || !data?.signedUrl) throw error ?? new Error("Unable to open the endorsed PDF.");
+      endorsementWindow.location.href = data.signedUrl;
+    } catch (error) {
+      endorsementWindow.close();
+      notice(error instanceof Error ? error.message : "Unable to open the endorsed PDF.");
+    } finally { setOpeningEndorsementId(null); }
   };
   const saveDraft = async () => {
     if (!leadId) return notice("Select a lead before saving the quotation.");
@@ -9475,6 +9536,9 @@ function PriceQuotationWorkspace({
                   {role === "project_manager" && !isLegacy && text(quote.status) === "approved" && (
                     <ActionIcon label="Edit and resubmit Price Quotation" tone="amber" loading={saving} disabled={saving || Boolean(priceRevisionRequest)} onClick={() => void beginRevision(quote)}><RotateCcw size={15} /></ActionIcon>
                   )}
+                  {role === "project_manager" && !isLegacy && text(quote.status) === "approved" && preparedByKey(quote) === currentUserId && (
+                    <ActionIcon label="Endorse approved Price Quotation" confirm={false} disabled={endorsing} onClick={() => openEndorsement(quote)}><Send size={15} /></ActionIcon>
+                  )}
                   {isGeneralManager && text(quote.status) === "pending" && (
                     <ActionIcon label="Review Price Quotation" onClick={() => void reload().then(() => setReviewing(quote))}><FileText size={15} /></ActionIcon>
                   )}
@@ -9502,6 +9566,19 @@ function PriceQuotationWorkspace({
         </Table>
       ) : <Empty>{quotations.length ? "No Price Quotations match the selected filters." : "No Price Quotations yet. Create one from a lead to begin."}</Empty>}
       </div>
+      {role === "project_manager" && recipientEndorsements.length > 0 && (
+        <section className="border-t border-[#edf0f5] px-4 py-4 sm:px-5 lg:px-6">
+          <div className="mb-3"><h3 className="text-[14px] font-semibold text-[#202938]">Endorsed to Me</h3><p className="mt-0.5 text-[12px] text-[#687386]">Read-only PDF copies shared by another Sales Project Officer.</p></div>
+          <Table labels={["Price Quotation", "Client / Project", "Endorsed", "PDF"]} minWidth={640}>
+            {recipientEndorsements.map((endorsement) => <tr key={text(endorsement.id)}><td className="px-5 py-3 font-medium">{text(endorsement.quotation_no)}</td><td className="px-5 py-3"><b>{text(endorsement.client_name)}</b><small>{text(endorsement.project_name)}</small></td><td className="px-5 py-3">{day(endorsement.activated_at ?? endorsement.created_at)}</td><td className="px-5 py-3"><ActionIcon label="View endorsed Price Quotation PDF" confirm={false} loading={openingEndorsementId === text(endorsement.id)} onClick={() => void openEndorsedSnapshot(endorsement)}><FileText size={15} /></ActionIcon></td></tr>)}
+          </Table>
+        </section>
+      )}
+      {endorseQuote && (
+        <Dialog title="Endorse Price Quotation" fields={[{ key: "recipient_user_id", label: "Sales Project Officer", type: "select", required: true, options: availableEndorsementRecipients.map((officer) => `${officer.id}|${officer.name}`) }, { key: "note", label: "Note (optional)", type: "textarea", placeholder: "Add a note for the receiving officer." }]} values={endorsementValues} setValues={setEndorsementValues} save={() => void endorse()} close={() => setEndorseQuote(null)} saving={endorsing} saveLabel="Create PDF Copy & Endorse" className="max-w-xl">
+          <p className="mt-4 rounded-lg border border-[#f2dadd] bg-[#fff9f9] p-3 text-[12px] leading-5 text-[#687386]">This creates an immutable, read-only PDF copy of {text(endorseQuote.quotation_no)}. Future revisions to the original will not change this endorsed copy.</p>
+        </Dialog>
+      )}
       {editorOpen && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/30 p-4">
           <section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
