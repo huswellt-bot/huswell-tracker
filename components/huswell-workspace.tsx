@@ -993,7 +993,7 @@ const leads: Module = {
     "Register outbound client contacts using the same fields as the outbound tracker.",
   add: "Add lead",
   fields: [
-    { key: "date_sent", label: "Date sent", type: "date", required: true },
+    { key: "date_sent", label: "Date sent", type: "date" },
     { key: "contact_name", label: "Client name", required: true },
     { key: "client_name", label: "Company Name (Optional)" },
     { key: "email", label: "Email" },
@@ -3018,6 +3018,12 @@ function Records({
     module.fields
       .filter((f) => f.type === "number")
       .forEach((f) => (payload[f.key] = n(payload[f.key])));
+    module.fields
+      .filter((f) => f.type === "date")
+      .forEach((f) => {
+        const value = payload[f.key];
+        if (typeof value === "string" && !value.trim()) payload[f.key] = null;
+      });
     if (typeof payload.customer_id === "string")
       payload.customer_id = String(payload.customer_id).split("|")[0] || null;
     if (typeof payload.supplier_id === "string")
