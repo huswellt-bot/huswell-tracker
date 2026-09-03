@@ -3,7 +3,6 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Eye, EyeOff, LoaderCircle, Pencil, X } from "lucide-react";
-import { LoadingModal } from "@/components/loading-modal";
 import { createClient } from "@/lib/supabase/client";
 
 type ProfileValues = { fullName: string; email: string; password: string };
@@ -140,7 +139,6 @@ export function AccountProfileDialog({
             : "fixed inset-0 z-[70] grid place-items-center bg-[#151922]/40 p-4"
       }`}
     >
-      <LoadingModal open={loading || saving} title={saving ? "Saving profile" : "Loading profile"} />
       <form
         onSubmit={submit}
         className={
@@ -310,7 +308,7 @@ export function AccountProfileDialog({
                 className="inline-flex min-h-8 items-center gap-1.5 rounded-lg bg-[#c43b43] px-2.5 text-[13px] font-semibold text-white hover:bg-[#ab3038] disabled:opacity-50"
               >
                 {(loading || saving) && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
-                {loading ? "Loading..." : "Save Changes"}
+                {saving ? "Saving..." : loading ? "Loading..." : "Save Changes"}
               </button>
             </>
           )}

@@ -80,7 +80,6 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { AccountProfileDialog } from "@/components/account-profile-dialog";
 import { FixedIconTooltip } from "@/components/fixed-icon-tooltip";
-import { LoadingModal } from "@/components/loading-modal";
 
 PdfFont.register({
   family: "SF Pro Display",
@@ -2719,7 +2718,6 @@ function Dialog({
           </button>
         </div>
       </form>
-      <LoadingModal open={saving} />
       <ConfirmationDialog
         open={confirmOpen}
         title="Confirm save"
@@ -7811,7 +7809,6 @@ function Quotations({
           : "space-y-5"
       }
     >
-      <LoadingModal open={generatingPdf !== null} title={generatingPdf === "costing" ? "Generating Costing Breakdown PDF" : "Generating quotation PDF"} message="Please wait a moment." />
       <Panel
         title={mode === "costing" ? "Costing breakdown" : "Price quotations"}
         detail={
@@ -8009,6 +8006,8 @@ function Quotations({
                         canGenerateCostingPdf && text(q.status) === "approved" ? (
                           <ActionIcon
                             label="View Costing Breakdown PDF"
+                            loading={generatingPdf === "costing"}
+                            disabled={generatingPdf !== null}
                             onClick={() => openPdf(q, true, false)}
                           >
                             <FileText size={15} />
@@ -8029,9 +8028,11 @@ function Quotations({
                           </ActionIcon>
                         ) : null
                       ) : <>
-                        <ActionIcon
-                          label="View Price Quotation PDF"
-                          onClick={() => openPdf(q, false, false)}
+                          <ActionIcon
+                            label="View Price Quotation PDF"
+                            loading={generatingPdf === "quotation"}
+                            disabled={generatingPdf !== null}
+                            onClick={() => openPdf(q, false, false)}
                         >
                           <FileText size={15} />
                         </ActionIcon>
@@ -9404,11 +9405,6 @@ function PriceQuotationWorkspace({
         ) : undefined
       }
     >
-      <LoadingModal
-        open={saving && editorOpen}
-        title={editing ? "Saving Price Quotation changes" : "Saving Price Quotation draft"}
-        message="Uploading illustrations and saving your quotation. Please wait."
-      />
       <div className="px-4 py-4 sm:px-5 lg:px-6">
       <div className="mb-4">
         <nav aria-label="Price quotation sections" className="flex gap-1 overflow-x-auto border-b border-[#e4e8ef]">

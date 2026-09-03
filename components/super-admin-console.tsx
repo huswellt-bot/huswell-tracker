@@ -21,7 +21,6 @@ import {
 import { useRouter } from "next/navigation";
 import { AccountProfileDialog } from "@/components/account-profile-dialog";
 import { FixedIconTooltip } from "@/components/fixed-icon-tooltip";
-import { LoadingModal } from "@/components/loading-modal";
 import { createClient } from "@/lib/supabase/client";
 
 type ManagedUser = {
@@ -265,7 +264,6 @@ export function SuperAdminConsole({
 
   return (
     <main className="super-admin-console compact-ui min-h-screen bg-[#fafafa] text-[12px] text-[#151922]">
-      <LoadingModal open={loading || saving} title={saving ? "Saving user changes" : "Loading users"} />
       <header className="border-b border-[#dfe5ed] bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
           <div className="flex items-center gap-3">
