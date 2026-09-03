@@ -358,6 +358,28 @@ const text = (value: unknown, fallback = "-") =>
       ? fallback
       : String(value),
   );
+const policyStoragePath = (value: unknown, organizationId: string) => {
+  const rawValue = text(value, "").trim();
+  if (!rawValue) return "";
+
+  let path = rawValue.replace(/^\/+/, "");
+  if (/^https?:\/\//i.test(rawValue)) {
+    try {
+      const marker = "/storage/v1/object/";
+      const pathname = new URL(rawValue).pathname;
+      const markerIndex = pathname.indexOf(marker);
+      if (markerIndex < 0) return "";
+      const parts = pathname.slice(markerIndex + marker.length).split("/");
+      if (["public", "authenticated", "sign"].includes(parts[0])) parts.shift();
+      if (parts.shift() !== "policy-documents") return "";
+      path = parts.map((part) => decodeURIComponent(part)).join("/");
+    } catch {
+      return "";
+    }
+  }
+
+  return path.startsWith(`${organizationId}/policy-documents/`) ? path : "";
+};
 const projectOfficerOptions = (store: Store) =>
   store.organization_members
     .filter((member) => text(member.role, "") === "project_manager")
@@ -915,6 +937,7 @@ const workspaceViewTables = (
     ];
   if (view === "Settings")
     return ["business_settings", "organization_members", "profiles"];
+  if (view === "Policy") return ["policies"];
   return [];
 };
 
@@ -3744,6 +3767,7 @@ function PolicyView({
   const [values, setValues] = useState<Record<string, string>>({ title: "" });
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
+  const [openingPolicyId, setOpeningPolicyId] = useState<string | null>(null);
 
   const policies = [...store.policies].sort((left, right) =>
     text(right.created_at).localeCompare(text(left.created_at)),
@@ -3792,9 +3816,8 @@ function PolicyView({
         p_policy_id: policy.id,
       });
       if (error) throw error;
-      const fileUrl = text(policy.file_url, "");
       try {
-        const path = fileUrl.split("/policy-documents/")[1];
+        const path = policyStoragePath(policy.file_url, orgId);
         if (path) await client.storage.from("policy-documents").remove([path]);
       } catch {
         // Best-effort cleanup of the storage object; the record is already gone.
@@ -3803,6 +3826,42 @@ function PolicyView({
       await reload();
     } catch (error) {
       notice(error instanceof Error ? error.message : "Failed to delete policy.");
+    }
+  };
+
+  const viewPolicy = async (policy: Row) => {
+    const path = policyStoragePath(policy.file_url, orgId);
+    if (!path) return notice("This policy file is unavailable.");
+
+    const policyWindow = window.open("", "_blank");
+    if (!policyWindow) return notice("Allow pop-ups to view policy documents.");
+    policyWindow.opener = null;
+
+    const policyId = text(policy.id, "");
+    setOpeningPolicyId(policyId);
+    try {
+      const { data, error } = await createClient()
+        .storage
+        .from("policy-documents")
+        .createSignedUrl(path, 5 * 60);
+      if (data?.signedUrl) {
+        policyWindow.location.href = data.signedUrl;
+        return;
+      }
+
+      // Keeps the new client compatible until the accompanying private-bucket
+      // migration is applied. The migration disables these legacy public URLs.
+      const legacyUrl = text(policy.file_url, "").trim();
+      if (/^https?:\/\//i.test(legacyUrl)) {
+        policyWindow.location.href = legacyUrl;
+        return;
+      }
+      throw error ?? new Error("Unable to create a secure policy link.");
+    } catch (error) {
+      policyWindow.close();
+      notice(error instanceof Error ? error.message : "Failed to open policy.");
+    } finally {
+      setOpeningPolicyId(null);
     }
   };
 
@@ -3834,14 +3893,19 @@ function PolicyView({
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <a
-                  href={text(policy.file_url)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium text-[#344054] transition-colors hover:bg-[#f5f7fa]"
+                <button
+                  type="button"
+                  onClick={() => void viewPolicy(policy)}
+                  disabled={openingPolicyId === text(policy.id, "")}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium text-[#344054] transition-colors hover:bg-[#f5f7fa] disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  <FileText size={13} /> View Policy
-                </a>
+                  {openingPolicyId === text(policy.id, "") ? (
+                    <LoaderCircle size={13} className="animate-spin" />
+                  ) : (
+                    <FileText size={13} />
+                  )}
+                  {openingPolicyId === text(policy.id, "") ? "Opening..." : "View Policy"}
+                </button>
                 {canManage && (
                   <ActionIcon
                     label="Delete policy"

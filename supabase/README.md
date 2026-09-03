@@ -95,7 +95,9 @@
 93. Run `094_price_quotation_product_costings.sql` to add General Manager-only per-product internal costings for direct Price Quotations.
 94. Run `095_allow_price_quotation_item_content_revisions.sql` to let Sales Project Officers revise direct quotation content without changing General Manager prices.
 95. Run `096_fixed_amount_internal_cost_lines.sql` to support fixed-amount internal expenses such as logistics and design fees.
-96. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
+96. Run `101_company_policies.sql` to add General Manager-managed company policy PDFs.
+97. Run `102_secure_company_policy_storage.sql` to make policy PDFs private and restrict their storage writes to the General Manager.
+98. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 
