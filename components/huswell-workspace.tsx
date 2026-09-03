@@ -3728,7 +3728,7 @@ function PolicyView({
 }) {
   const canManage = role === "admin";
   const [addOpen, setAddOpen] = useState(false);
-  const [title, setTitle] = useState("");
+  const [values, setValues] = useState<Record<string, string>>({ title: "" });
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -3737,13 +3737,13 @@ function PolicyView({
   );
 
   const resetForm = () => {
-    setTitle("");
+    setValues({ title: "" });
     setPdfFile(null);
     setAddOpen(false);
   };
 
   const addPolicy = async () => {
-    if (!title.trim()) return notice("Enter a policy title.");
+    if (!(values.title ?? "").trim()) return notice("Enter a policy title.");
     if (!pdfFile) return notice("Choose a policy PDF to upload.");
     if (pdfFile.type !== "application/pdf")
       return notice("Only PDF documents can be uploaded.");
@@ -3759,7 +3759,7 @@ function PolicyView({
         .from("policy-documents")
         .getPublicUrl(path).data.publicUrl;
       const { error } = await client.rpc("insert_policy", {
-        p_title: title.trim(),
+        p_title: (values.title ?? "").trim(),
         p_file_url: fileUrl,
       });
       if (error) throw error;
@@ -3852,38 +3852,54 @@ function PolicyView({
       {addOpen && (
         <Dialog
           title="Add Policy"
-          fields={[]}
-          values={{}}
-          setValues={() => undefined}
+          fields={[
+            {
+              key: "title",
+              label: "Title",
+              type: "text",
+              required: true,
+              placeholder: "e.g. Company credit terms",
+            },
+          ]}
+          values={values}
+          setValues={setValues}
           save={() => void addPolicy()}
           close={resetForm}
           saving={saving}
           saveLabel="Upload Policy"
           className="max-w-xl"
         >
-          <label className="block text-[12px] font-medium text-[#202938]">
-            Title
-            <input
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="e.g. Company credit terms"
-              className="input mt-1"
-            />
-          </label>
-          <label className="mt-4 block text-[12px] font-medium text-[#202938]">
-            Policy Document
-            <input
-              type="file"
-              accept="application/pdf"
-              className="mt-1"
-              onChange={(event) =>
-                setPdfFile(event.target.files?.[0] ?? null)
-              }
-            />
-          </label>
-          <p className="mt-1 text-[10px] text-[#8b92a1]">
-            Upload a PDF document up to 10 MB.
-          </p>
+          <div className="mt-4 rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4">
+            <p className="text-[12px] font-medium text-[#202938]">
+              Policy Document
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              <label className="flex h-8 cursor-pointer items-center rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium text-[#344054] hover:bg-[#f5f7fa]">
+                <Plus size={13} className="mr-1" /> Choose PDF
+                <input
+                  type="file"
+                  accept="application/pdf"
+                  className="hidden"
+                  onChange={(event) =>
+                    setPdfFile(event.target.files?.[0] ?? null)
+                  }
+                />
+              </label>
+              {pdfFile ? (
+                <span className="inline-flex max-w-full items-center gap-1.5 truncate rounded-md border border-[#d9e0e9] bg-white px-2.5 py-1 text-[12px] text-[#344054]">
+                  <FileText size={13} className="shrink-0" />
+                  <span className="min-w-0 truncate">{pdfFile.name}</span>
+                </span>
+              ) : (
+                <span className="text-[12px] text-[#8b92a1]">
+                  No PDF selected.
+                </span>
+              )}
+            </div>
+            <p className="mt-2 text-[10px] text-[#8b92a1]">
+              Upload a PDF document up to 10 MB.
+            </p>
+          </div>
         </Dialog>
       )}
     </Panel>
