@@ -31,6 +31,7 @@ For every feature or behavior change, perform a brief impact assessment before c
 
 ## UI consistency
 
+- Before starting any task in this repository, read this `AGENTS.md` in full. For every UI change, keep the design consistent across all relevant pages, roles, and responsive layouts—not only the screen being changed.
 - Treat the existing shared components, global styles, design tokens, and established page patterns as the source of truth for all UI work.
 - Before adding or changing UI, inspect and reuse the closest existing pattern for layout, buttons, action icons, form controls, tables, dialogs, status badges, tooltips, uploads, loading, empty, and error states.
 - Prefer extending a shared component or existing style over duplicating markup, adding one-off CSS, hardcoded visual values, or introducing a new component pattern.

@@ -132,6 +132,7 @@ type TableName =
   | "price_quotation_costing_lines"
   | "price_quotation_costing_markups"
   | "price_quotation_mockups"
+  | "announcements"
   | "policies"
   | "production_jobs"
   | "production_material_usage"
@@ -300,6 +301,7 @@ const tables: TableName[] = [
   "price_quotation_costing_lines",
   "price_quotation_costing_markups",
   "price_quotation_mockups",
+  "announcements",
   "policies",
   "production_jobs",
   "production_material_usage",
@@ -733,6 +735,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "quotation_revision_requests",
     "price_quotation_revision_requests",
     "price_quotation_mockups",
+    "announcements",
     "policies",
     "project_schedules",
   ],
@@ -749,6 +752,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "price_quotation_costing_lines",
     "price_quotation_costing_markups",
     "price_quotation_mockups",
+    "announcements",
     "policies",
     "price_quotation_revision_requests",
   ],
@@ -763,6 +767,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "invoices",
     "invoice_items",
     "payments",
+    "announcements",
     "policies",
   ],
   warehouse: [
@@ -774,6 +779,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "production_material_usage",
     "production_job_activity",
     "finished_product_stock_ins",
+    "announcements",
     "policies",
   ],
   accountant: [
@@ -787,6 +793,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "expenses",
     "cash_flow_entries",
     "supplier_payables",
+    "announcements",
     "policies",
   ],
   payroll: [
@@ -794,6 +801,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "payroll_periods",
     "payroll_entries",
     "leave_requests",
+    "announcements",
     "policies",
   ],
   production: [
@@ -805,6 +813,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "production_material_usage",
     "production_job_activity",
     "finished_product_stock_ins",
+    "announcements",
     "policies",
   ],
   viewer: [
@@ -824,6 +833,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "payments",
     "expenses",
     "target_goals",
+    "announcements",
     "policies",
   ],
 };
@@ -937,7 +947,7 @@ const workspaceViewTables = (
     ];
   if (view === "Settings")
     return ["business_settings", "organization_members", "profiles"];
-  if (view === "Policy") return ["policies"];
+  if (view === "Policy") return ["announcements", "policies"];
   return [];
 };
 
@@ -3761,12 +3771,16 @@ function PolicyView({
   reload,
   notice,
   role,
+  policyAction,
+  onPolicyActionHandled,
 }: {
   store: Store;
   orgId: string;
   reload: () => Promise<void>;
   notice: (message: string) => void;
   role: string;
+  policyAction: "announcement" | "policy" | null;
+  onPolicyActionHandled: () => void;
 }) {
   const canManage = role === "admin";
   const [addOpen, setAddOpen] = useState(false);
@@ -3774,8 +3788,17 @@ function PolicyView({
   const [pdfFile, setPdfFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [openingPolicyId, setOpeningPolicyId] = useState<string | null>(null);
+  const [announcementOpen, setAnnouncementOpen] = useState(false);
+  const [editingAnnouncement, setEditingAnnouncement] = useState<Row | null>(null);
+  const [announcementValues, setAnnouncementValues] = useState<Record<string, string>>({
+    title: "",
+    message: "",
+  });
 
   const policies = [...store.policies].sort((left, right) =>
+    text(right.created_at).localeCompare(text(left.created_at)),
+  );
+  const announcements = [...store.announcements].sort((left, right) =>
     text(right.created_at).localeCompare(text(left.created_at)),
   );
 
@@ -3784,6 +3807,36 @@ function PolicyView({
     setPdfFile(null);
     setAddOpen(false);
   };
+
+  const closeAnnouncement = () => {
+    setAnnouncementOpen(false);
+    setEditingAnnouncement(null);
+    setAnnouncementValues({ title: "", message: "" });
+  };
+
+  const openAnnouncement = (announcement?: Row) => {
+    setAddOpen(false);
+    setEditingAnnouncement(announcement ?? null);
+    setAnnouncementValues({
+      title: text(announcement?.title),
+      message: text(announcement?.message),
+    });
+    setAnnouncementOpen(true);
+  };
+
+  useEffect(() => {
+    if (policyAction === "announcement") {
+      setAddOpen(false);
+      setEditingAnnouncement(null);
+      setAnnouncementValues({ title: "", message: "" });
+      setAnnouncementOpen(true);
+    }
+    if (policyAction === "policy") {
+      setAnnouncementOpen(false);
+      setAddOpen(true);
+    }
+    if (policyAction) onPolicyActionHandled();
+  }, [policyAction, onPolicyActionHandled]);
 
   const addPolicy = async () => {
     if (!(values.title ?? "").trim()) return notice("Enter a policy title.");
@@ -3835,6 +3888,63 @@ function PolicyView({
     }
   };
 
+  const saveAnnouncement = async () => {
+    const title = text(announcementValues.title).trim();
+    const message = text(announcementValues.message).trim();
+    if (!title) return notice("Enter an announcement title.");
+    if (!message) return notice("Enter the announcement message.");
+
+    setSaving(true);
+    const client = createClient();
+    try {
+      let error: Error | null = null;
+      if (editingAnnouncement) {
+        const result = await client
+          .from("announcements")
+          .update({ title, message })
+          .eq("id", editingAnnouncement.id)
+          .eq("organization_id", orgId);
+        error = result.error;
+      } else {
+        const {
+          data: { user },
+          error: userError,
+        } = await client.auth.getUser();
+        if (userError) throw userError;
+        if (!user) throw new Error("You must be signed in to post an announcement.");
+        const result = await client.from("announcements").insert({
+          organization_id: orgId,
+          title,
+          message,
+          created_by: user.id,
+        });
+        error = result.error;
+      }
+      if (error) throw error;
+      notice(editingAnnouncement ? "Announcement updated." : "Announcement posted.");
+      closeAnnouncement();
+      await reload();
+    } catch (error) {
+      notice(error instanceof Error ? error.message : "Failed to save announcement.");
+    }
+    setSaving(false);
+  };
+
+  const removeAnnouncement = async (announcement: Row) => {
+    try {
+      const { error } = await createClient()
+        .from("announcements")
+        .delete()
+        .eq("id", announcement.id)
+        .eq("organization_id", orgId);
+      if (error) throw error;
+      notice("Announcement deleted.");
+      await reload();
+    } catch (error) {
+      notice(error instanceof Error ? error.message : "Failed to delete announcement.");
+    }
+  };
+
   const viewPolicy = async (policy: Row) => {
     const path = policyStoragePath(policy.file_url, orgId);
     if (!path) return notice("This policy file is unavailable.");
@@ -3872,31 +3982,81 @@ function PolicyView({
   };
 
   return (
-    <Panel
-      title="Company Policies"
-      detail="View uploaded company policy documents."
-      action={
-        canManage ? (
-          <Button onClick={() => setAddOpen(true)}>
-            <Plus size={14} /> Add Policy
-          </Button>
-        ) : undefined
-      }
-    >
+    <div className="min-h-[calc(100vh-64px)] bg-white">
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-[#edf0f5] px-4 py-4 sm:px-5">
+        <div>
+          <h1 className="text-[15px] font-semibold text-[#202938]">Announcements & Policy</h1>
+          <p className="mt-1 text-[12px] text-[#687386]">Read General Manager announcements and company policy documents.</p>
+        </div>
+      </header>
+      <section>
+        {announcements.length ? (
+          <div className="space-y-2 p-3 sm:p-4">
+            {announcements.map((announcement) => (
+              <article key={text(announcement.id)} className="flex flex-wrap items-start justify-between gap-3 border-l-[3px] border-[#c43b43] bg-[#fffafa] px-3 py-3 sm:px-4">
+                <div className="min-w-0 flex-1">
+                  <div className="mb-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[#ab3038]">Company announcement</span>
+                    <span className="text-[11px] text-[#8b92a1]">Posted {day(announcement.created_at)}</span>
+                  </div>
+                  <p className="text-[13px] font-semibold text-[#202938]">{text(announcement.title)}</p>
+                  <p className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-[#475467]">{text(announcement.message)}</p>
+                </div>
+                {canManage && (
+                  <div className="flex items-center gap-2">
+                    <ActionIcon label="Edit announcement" confirm={false} onClick={() => openAnnouncement(announcement)}>
+                      <Pencil size={15} />
+                    </ActionIcon>
+                    <ActionIcon label="Delete announcement" tone="red" confirmationDescription={`Delete "${text(announcement.title)}"?`} onClick={() => void removeAnnouncement(announcement)}>
+                      <Trash2 size={15} />
+                    </ActionIcon>
+                  </div>
+                )}
+              </article>
+            ))}
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center px-4 py-10 text-center">
+            <span className="grid size-9 place-items-center rounded-md bg-[#fceced] text-[#ab3038]">
+              <MessageSquareText size={18} />
+            </span>
+            <p className="mt-3 text-[13px] font-semibold text-[#202938]">No announcements yet</p>
+            <p className="mt-1 text-[12px] text-[#8b92a1]">New General Manager updates will appear here.</p>
+          </div>
+        )}
+      </section>
+
+      <section className="border-t border-[#edf0f5]">
+        <div className="border-b border-[#edf0f5] px-4 py-3 sm:px-5">
+          <p className="text-[13px] font-semibold text-[#202938]">Policy Documents</p>
+          <p className="mt-0.5 text-[11px] text-[#8b92a1]">Company policy PDFs available to view.</p>
+        </div>
       {policies.length ? (
         <div className="divide-y divide-[#edf0f5]">
+          <div className="hidden grid-cols-[minmax(0,1fr)_auto] gap-3 bg-[#fafbfc] px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-[#687386] sm:grid sm:px-5">
+            <span>Policy title</span>
+            <span>PDF document</span>
+          </div>
           {policies.map((policy) => (
             <div
               key={text(policy.id)}
               className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5"
             >
-              <div className="min-w-0">
-                <p className="truncate text-[13px] font-semibold text-[#202938]">
-                  {text(policy.title)}
-                </p>
-                <p className="mt-0.5 text-[11px] text-[#8b92a1]">
-                  Uploaded {day(policy.created_at)}
-                </p>
+              <div className="flex min-w-0 items-center gap-2.5">
+                <span className="grid size-8 shrink-0 place-items-center rounded-md bg-[#fceced] text-[#ab3038]">
+                  <FileText size={16} />
+                </span>
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <p className="truncate text-[13px] font-semibold text-[#202938]">
+                      {text(policy.title)}
+                    </p>
+                    <span className="shrink-0 rounded border border-[#f2c7cb] bg-[#fff5f5] px-1.5 py-0.5 text-[10px] font-semibold text-[#ab3038]">PDF</span>
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-[#8b92a1]">
+                    Uploaded {day(policy.created_at)}
+                  </p>
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -3910,7 +4070,7 @@ function PolicyView({
                   ) : (
                     <FileText size={13} />
                   )}
-                  {openingPolicyId === text(policy.id, "") ? "Opening..." : "View Policy"}
+                  {openingPolicyId === text(policy.id, "") ? "Opening PDF..." : "View PDF"}
                 </button>
                 {canManage && (
                   <ActionIcon
@@ -3927,9 +4087,27 @@ function PolicyView({
           ))}
         </div>
       ) : (
-        <div className="px-4 py-10 text-center">
+        <div className="px-4 py-8 text-center">
           <Empty>No company policies have been uploaded yet.</Empty>
         </div>
+      )}
+      </section>
+
+      {announcementOpen && (
+        <Dialog
+          title={editingAnnouncement ? "Edit Announcement" : "New Announcement"}
+          fields={[
+            { key: "title", label: "Title", type: "text", required: true, placeholder: "e.g. Office schedule update" },
+            { key: "message", label: "Message", type: "textarea", required: true, placeholder: "Write the announcement for your team." },
+          ]}
+          values={announcementValues}
+          setValues={setAnnouncementValues}
+          save={() => void saveAnnouncement()}
+          close={closeAnnouncement}
+          saving={saving}
+          saveLabel={editingAnnouncement ? "Update Announcement" : "Post Announcement"}
+          className="max-w-xl"
+        />
       )}
 
       {addOpen && (
@@ -3985,7 +4163,7 @@ function PolicyView({
           </div>
         </Dialog>
       )}
-    </Panel>
+    </div>
   );
 }
 
@@ -13695,6 +13873,7 @@ export function HuswellWorkspace({
   const [store, setStore] = useState<Store>(blank);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string | null>(null);
+  const [policyAction, setPolicyAction] = useState<"announcement" | "policy" | null>(null);
   const [signOutOpen, setSignOutOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [navigationDate, setNavigationDate] = useState(() => new Date());
@@ -14110,8 +14289,8 @@ export function HuswellWorkspace({
       detail: "Manage business defaults, profile details, and staff access.",
     },
     Policy: {
-      title: "Company Policies",
-      detail: "View uploaded company policy documents.",
+      title: "Announcements & Policy",
+      detail: "Read General Manager announcements and company policy documents.",
     },
     Profile: {
       title: "Profile",
@@ -14304,6 +14483,8 @@ export function HuswellWorkspace({
         reload={reload}
         notice={setMessage}
         role={role}
+        policyAction={policyAction}
+        onPolicyActionHandled={() => setPolicyAction(null)}
       />
     ) : (
       <SettingsView
@@ -14364,6 +14545,8 @@ export function HuswellWorkspace({
                   const navigationLabel =
                     view === "Dashboard" && ["project_manager", "admin"].includes(role)
                       ? "KPI"
+                      : view === "Policy"
+                        ? "Announcements & Policy"
                       : role === "pricing_officer" && view === "Price Quotations"
                         ? "Price Quotation Submissions"
                         : isManagementRole && view === "Leads"
@@ -14481,6 +14664,16 @@ export function HuswellWorkspace({
             >
               <Menu size={21} />
             </button>
+            {active === "Policy" && role === "admin" && (
+              <div className="flex min-w-0 items-center gap-1.5">
+                <Button compact onClick={() => setPolicyAction("announcement")}>
+                  <Plus size={13} /> <span className="hidden sm:inline">Add Announcement</span><span className="sm:hidden">Announcement</span>
+                </Button>
+                <Button compact onClick={() => setPolicyAction("policy")}>
+                  <Plus size={13} /> Add Policy
+                </Button>
+              </div>
+            )}
             <span className="sr-only">{activePageHeader.title}</span>
           </div>
           <div className="flex shrink-0 items-center gap-2.5 text-[#626b7a]">
@@ -14516,7 +14709,7 @@ export function HuswellWorkspace({
             )}
           </div>
         </header>
-        <div className={`workspace-content ${["Projects", "Price Quotations"].includes(active) && role !== "pricing_officer" ? "p-0" : "p-2 sm:p-3 lg:p-4"}`}>
+        <div className={`workspace-content ${(["Projects", "Price Quotations"].includes(active) && role !== "pricing_officer") || active === "Policy" ? "p-0" : "p-2 sm:p-3 lg:p-4"}`}>
           {message && (
             <div className="fixed inset-0 z-[60] grid place-items-center bg-[#061426]/30 p-4">
               <section
