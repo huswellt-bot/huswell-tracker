@@ -35,6 +35,7 @@ import {
   Goal,
   ImageIcon,
   LayoutDashboard,
+  LoaderCircle,
   LogOut,
   Menu,
   MessageSquareText,
@@ -1488,6 +1489,7 @@ function Button({
   tone = "blue",
   compact = false,
   disabled = false,
+  loading = false,
   confirm = false,
   confirmationText,
 }: {
@@ -1497,6 +1499,7 @@ function Button({
   tone?: "blue" | "green";
   compact?: boolean;
   disabled?: boolean;
+  loading?: boolean;
   confirm?: boolean;
   confirmationText?: string;
 }) {
@@ -1514,11 +1517,13 @@ function Button({
     <>
       <button
         type="button"
-        disabled={disabled}
+        disabled={disabled || loading}
+        aria-busy={loading || undefined}
         onClick={trigger}
         style={{ fontSize: "14px", lineHeight: "20px" }}
         className={`${secondary ? "border border-[#cfd8e3] bg-white text-[#151922] hover:bg-[#f5f7fa]" : tone === "green" ? "bg-[#218b55] text-white hover:bg-[#176d42]" : "bg-[#c43b43] text-white hover:bg-[#ab3038]"} inline-flex ${compact ? "min-h-7 py-0.5" : "min-h-9"} items-center gap-2 rounded-lg px-3 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50`}
       >
+        {loading && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
         {children}
       </button>
       {confirm && (
@@ -1592,6 +1597,7 @@ function ActionIcon({
   children,
   onClick,
   disabled = false,
+  loading = false,
   tone = "primary",
   confirm = true,
   confirmationDescription,
@@ -1600,6 +1606,7 @@ function ActionIcon({
   children: ReactNode;
   onClick: () => void;
   disabled?: boolean;
+  loading?: boolean;
   tone?: "primary" | "green" | "amber" | "red";
   confirm?: boolean;
   confirmationDescription?: string;
@@ -1617,11 +1624,12 @@ function ActionIcon({
         <button
           type="button"
           onClick={() => (confirm ? setConfirmOpen(true) : onClick())}
-          disabled={disabled}
+          disabled={disabled || loading}
+          aria-busy={loading || undefined}
           aria-label={label}
           className={`disabled:cursor-not-allowed disabled:opacity-50 ${colors[tone]}`}
         >
-          {children}
+          {loading ? <LoaderCircle className="size-4 animate-spin" aria-hidden="true" /> : children}
         </button>
       </FixedIconTooltip>
       {confirm && <ConfirmationDialog
@@ -2667,10 +2675,13 @@ function Dialog({
             Cancel
           </Button>
           <button
+            type="submit"
             disabled={saving}
+            aria-busy={saving || undefined}
             style={{ fontSize: "14px", lineHeight: "20px" }}
-            className="min-h-9 rounded-lg bg-[#c43b43] px-3 text-[13px] font-semibold text-white hover:bg-[#ab3038] disabled:opacity-50"
+            className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-[#c43b43] px-3 text-[13px] font-semibold text-white hover:bg-[#ab3038] disabled:opacity-50"
           >
+            {saving && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
             {saving ? "Saving…" : saveLabel}
           </button>
         </div>
@@ -3296,6 +3307,7 @@ function Records({
                           <ActionIcon
                             label="Unsubmit lead change"
                             tone="amber"
+                            loading={saving}
                             disabled={saving}
                             confirm
                             onClick={() => void unsubmitRequest(request, "unsubmit_lead_change", "Lead change")}
@@ -3338,6 +3350,7 @@ function Records({
                     <ActionIcon
                       label="Unsubmit project edit"
                       tone="amber"
+                      loading={saving}
                       disabled={saving}
                       confirm
                       onClick={() => void unsubmitRequest(request, "unsubmit_project_edit", "Project edit")}
@@ -4779,7 +4792,7 @@ function ProjectCalendar({
               {role !== "project_manager" && <td className="px-4 py-2">{officerName(schedule)}</td>}
               <td className="px-4 py-2">
                 {showProjectActions ? <div className="flex items-center gap-1">
-                  {role === "project_manager" && !schedule.completed_at && <ActionIcon label="Save project progress" tone="green" disabled={savingProgressId === schedule.id} onClick={() => void saveProgress(schedule)}><Save size={15} /></ActionIcon>}
+                  {role === "project_manager" && !schedule.completed_at && <ActionIcon label="Save project progress" tone="green" loading={savingProgressId === schedule.id} disabled={savingProgressId === schedule.id} onClick={() => void saveProgress(schedule)}><Save size={15} /></ActionIcon>}
                   {canRequestScheduleCompletion(schedule) && (
                     <ActionIcon
                       label={
@@ -4788,6 +4801,7 @@ function ProjectCalendar({
                           : "Request project completion"
                       }
                       tone="green"
+                      loading={saving}
                       disabled={saving || hasPendingScheduleCompletion(schedule)}
                       onClick={() => void requestCompletion(schedule)}
                     >
@@ -4880,6 +4894,7 @@ function ProjectCalendar({
                           secondary
                           confirm
                           confirmationText="Unsubmit this schedule revision? The General Manager will no longer be able to review it."
+                          loading={saving}
                           disabled={saving}
                           onClick={() => void unsubmitScheduleRequest(request, "unsubmit_project_schedule_revision", "Schedule revision")}
                         >
@@ -4912,6 +4927,7 @@ function ProjectCalendar({
                           secondary
                           confirm
                           confirmationText="Unsubmit this project completion request? The General Manager will no longer be able to review it."
+                          loading={saving}
                           disabled={saving}
                           onClick={() => void unsubmitScheduleRequest(request, "unsubmit_project_schedule_completion", "Project completion")}
                         >
@@ -5293,6 +5309,7 @@ function MaterialsList({
             <ActionIcon
               label="Save material"
               tone="green"
+              loading={saving || optimizingImage}
               disabled={saving || optimizingImage}
               onClick={() => void saveMaterial(materialDraft, isNew)}
             >
@@ -5380,6 +5397,7 @@ function MaterialsList({
                     <ActionIcon
                       label={`Delete ${titleCase(text(material.name))}`}
                       tone="red"
+                      loading={saving}
                       disabled={saving || Boolean(newMaterial) || Boolean(editingId)}
                       onClick={() => void deleteMaterial(material)}
                     >
@@ -5642,6 +5660,7 @@ function SuppliersList({
             <ActionIcon
               label="Save supplier"
               tone="green"
+              loading={saving}
               disabled={saving}
               onClick={() => void saveSupplier(supplierDraft, isNew)}
             >
@@ -5756,6 +5775,7 @@ function SuppliersList({
                     <ActionIcon
                       label={`Delete ${text(supplier.company_name)}`}
                       tone="red"
+                      loading={saving}
                       disabled={saving || Boolean(newSupplier) || Boolean(editingId)}
                       onClick={() => void deleteSupplier(supplier)}
                     >
@@ -7812,6 +7832,8 @@ function Quotations({
                         <ActionIcon
                           label="Submit for Review"
                           tone="green"
+                          loading={saving}
+                          disabled={saving}
                           onClick={() => void change(q, "pending")}
                         >
                           <Send size={15} />
@@ -7823,6 +7845,7 @@ function Quotations({
                           <ActionIcon
                             label="Request costing revision"
                             tone="amber"
+                            loading={saving}
                             disabled={saving}
                             onClick={() => void requestRevision(q)}
                           >
@@ -7833,6 +7856,7 @@ function Quotations({
                         <ActionIcon
                           label="Delete Costing Breakdown and linked Price Quotation"
                           tone="red"
+                          loading={saving}
                           disabled={saving}
                           onClick={() => void deleteCostingBreakdown(q)}
                         >
@@ -7929,6 +7953,7 @@ function Quotations({
                       confirm
                       confirmationText="Are you sure you want to add this cost line?"
                       onClick={() => void addCostLine()}
+                      loading={saving}
                       disabled={saving}
                     >
                       <Plus size={14} />
@@ -8133,6 +8158,7 @@ function Quotations({
                                 : "Are you sure you want to add this cost line?"
                             }
                             onClick={() => void addCostLine()}
+                            loading={saving}
                             disabled={saving}
                           >
                             <Plus size={14} />
@@ -9185,15 +9211,16 @@ function PriceQuotationWorkspace({
                     <ActionIcon label="Edit Price Quotation" onClick={() => openEdit(quote)}><Pencil size={15} /></ActionIcon>
                   )}
                   {role === "project_manager" && editable && (
-                    <ActionIcon label="Submit for General Manager review" tone="green" disabled={saving} onClick={() => void submit(quote)}><Send size={15} /></ActionIcon>
+                    <ActionIcon label="Submit for General Manager review" tone="green" loading={saving} disabled={saving} onClick={() => void submit(quote)}><Send size={15} /></ActionIcon>
                   )}
                   {role === "project_manager" && text(quote.status) === "pending" && (
-                    <ActionIcon label="Unsubmit and return to draft" tone="amber" disabled={saving} onClick={() => void unsubmit(quote)}><RotateCcw size={15} /></ActionIcon>
+                    <ActionIcon label="Unsubmit and return to draft" tone="amber" loading={saving} disabled={saving} onClick={() => void unsubmit(quote)}><RotateCcw size={15} /></ActionIcon>
                   )}
                   {role === "project_manager" && priceRevisionRequest && (
                     <ActionIcon
                       label="Unsubmit Price Quotation revision request"
                       tone="amber"
+                      loading={saving}
                       disabled={saving}
                       confirm
                       onClick={() => void unsubmitRevisionRequest(priceRevisionRequest)}
@@ -9202,7 +9229,7 @@ function PriceQuotationWorkspace({
                     </ActionIcon>
                   )}
                   {role === "project_manager" && !isLegacy && text(quote.status) === "approved" && (
-                    <ActionIcon label="Edit and resubmit Price Quotation" tone="amber" disabled={saving || Boolean(priceRevisionRequest)} onClick={() => void beginRevision(quote)}><RotateCcw size={15} /></ActionIcon>
+                    <ActionIcon label="Edit and resubmit Price Quotation" tone="amber" loading={saving} disabled={saving || Boolean(priceRevisionRequest)} onClick={() => void beginRevision(quote)}><RotateCcw size={15} /></ActionIcon>
                   )}
                   {isGeneralManager && text(quote.status) === "pending" && (
                     <ActionIcon label="Review Price Quotation" onClick={() => void reload().then(() => setReviewing(quote))}><FileText size={15} /></ActionIcon>
@@ -9211,6 +9238,7 @@ function PriceQuotationWorkspace({
                     <ActionIcon
                       label="Delete Price Quotation"
                       tone="red"
+                      loading={saving}
                       disabled={saving}
                       confirm
                       confirmationDescription={quote.costing_source_id
@@ -9255,7 +9283,7 @@ function PriceQuotationWorkspace({
               </Table>
               <div className="mt-3 flex justify-end"><Button onClick={() => setItems((current) => [...current, { key: `item-${Date.now()}`, description: "", quantity: "1" }])}><Plus size={14} /> Add Item</Button></div>
             </div>
-            <div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary disabled={saving} onClick={resetEditor}>Cancel</Button><Button disabled={saving} onClick={() => void saveDraft()}>{saving && <span aria-hidden="true" className="size-3.5 animate-spin rounded-full border-2 border-white/45 border-t-white" />} {saving ? (editing ? "Saving changes…" : "Saving draft…") : (editing ? "Save changes" : "Save draft")}</Button></div>
+            <div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary disabled={saving} onClick={resetEditor}>Cancel</Button><Button loading={saving} disabled={saving} onClick={() => void saveDraft()}>{saving ? (editing ? "Saving changes…" : "Saving draft…") : (editing ? "Save changes" : "Save draft")}</Button></div>
           </section>
         </div>
       )}
@@ -9294,7 +9322,7 @@ function PriceQuotationWorkspace({
 function PriceQuotationReviewContentLegacy({ lines, prices, setPrices, subtotal, vatRate, setVatRate, tax, shipping, setShipping, total, terms, setTerms, bankDetails, setBankDetails, revisionNote, setRevisionNote, close, saving, working, review }: {
   lines: Row[]; prices: Record<string, string>; setPrices: (next: Record<string, string> | ((current: Record<string, string>) => Record<string, string>)) => void; subtotal: number; vatRate: string; setVatRate: (value: string) => void; tax: number; shipping: string; setShipping: (value: string) => void; total: number; terms: string[]; setTerms: (next: string[] | ((current: string[]) => string[])) => void; bankDetails: BankDetail[]; setBankDetails: (next: BankDetail[] | ((current: BankDetail[]) => BankDetail[])) => void; revisionNote: string; setRevisionNote: (value: string) => void; close: () => void; saving: boolean; working: boolean; review: (decision: "approved" | "needs_revision") => Promise<void>;
 }) {
-  return <div className="mt-5 space-y-5"><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]} minWidth={0}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><Table labels={["Quotation Total", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section><section className="rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label><div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></div>;
+  return <div className="mt-5 space-y-5"><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]} minWidth={0}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><Table labels={["Quotation Total", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section><section className="rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label><div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary loading={saving || working} disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></div>;
 }
 
 function ProductCostingsSection({
@@ -9432,7 +9460,7 @@ function PriceQuotationReviewContent({
         <div className="mt-3 flex justify-end"><Button onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div>
       </section>
       <label className="block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label>
-      <div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div>
+      <div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary loading={saving || working} disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div>
     </div>
   );
 }
@@ -9645,7 +9673,7 @@ function PriceQuotationReview({
   };
   /*
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} shipping={shipping} setShipping={setShipping} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
-  return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} · {text(quotation.client_name)} · Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><div className="mt-5 grid gap-5 lg:grid-cols-[1.45fr_.75fr]"><div><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><section className="mt-5 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="mt-4 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="mt-4 block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label></div><aside><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><div className="border-b border-[#edf0f5] px-4 py-3"><h3 className="text-[14px] font-semibold">Quotation Total</h3></div><Table labels={["Category", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section></aside></div><div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></section></div>;
+  return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} · {text(quotation.client_name)} · Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><div className="mt-5 grid gap-5 lg:grid-cols-[1.45fr_.75fr]"><div><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><section className="mt-5 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="mt-4 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="mt-4 block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label></div><aside><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><div className="border-b border-[#edf0f5] px-4 py-3"><h3 className="text-[14px] font-semibold">Quotation Total</h3></div><Table labels={["Category", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section></aside></div><div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary loading={saving || working} disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></section></div>;
   */
   return <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectType={text(quotation.project_types, "")} illustrations={illustrations} productCostings={productCostings} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} priceBasis={priceBasis} setPriceBasis={setPriceBasis} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
 }
@@ -9859,8 +9887,8 @@ function GeneralManagerCostingReview({
         </div>
         <div className="mt-6 flex flex-wrap justify-end gap-2 border-t border-[#edf0f5] pt-4">
           <Button secondary onClick={close}>Close</Button>
-          <Button secondary disabled={saving} onClick={() => decide("needs_revision", changes, revisionNote)}><RotateCcw size={14} /> Return for revision</Button>
-          <Button tone="green" disabled={saving} onClick={() => decide("approved", changes)}><Check size={14} /> Approve & Create Price Quotation</Button>
+          <Button secondary loading={saving} disabled={saving} onClick={() => decide("needs_revision", changes, revisionNote)}><RotateCcw size={14} /> Return for revision</Button>
+          <Button tone="green" loading={saving} disabled={saving} onClick={() => decide("approved", changes)}><Check size={14} /> Approve & Create Price Quotation</Button>
         </div>
       </section>
     </div>
@@ -10029,6 +10057,7 @@ function SubmissionReview({
             secondary
             confirm
             confirmationText="Are you sure you want to return this submission for revision?"
+            loading={saving}
             disabled={saving}
             onClick={() => decide("needs_revision")}
           >
@@ -10039,6 +10068,7 @@ function SubmissionReview({
             tone="green"
             confirm
             confirmationText="Are you sure you want to approve this submission?"
+            loading={saving}
             disabled={saving}
             onClick={() => decide("approved")}
           >
@@ -10107,8 +10137,8 @@ function ProjectEditRequestReview({
         </label>
         <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-[#edf0f5] pt-4">
           <Button secondary onClick={close}>Close</Button>
-          <Button secondary disabled={saving || !note.trim()} onClick={() => decide("needs_revision", note)}><RotateCcw size={14} /> Return for revision</Button>
-          <Button tone="green" disabled={saving} onClick={() => decide("approved", note)}><Check size={14} /> Approve edit</Button>
+          <Button secondary loading={saving} disabled={saving || !note.trim()} onClick={() => decide("needs_revision", note)}><RotateCcw size={14} /> Return for revision</Button>
+          <Button tone="green" loading={saving} disabled={saving} onClick={() => decide("approved", note)}><Check size={14} /> Approve edit</Button>
         </div>
       </section>
     </div>
@@ -10217,12 +10247,13 @@ function LeadChangeRequestReview({
         <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-[#edf0f5] pt-4">
           <Button secondary onClick={close}>Close</Button>
           {isDeletion ? (
-            <Button secondary disabled={saving} onClick={() => decide("rejected", note)}><X size={14} /> Reject deletion</Button>
+            <Button secondary loading={saving} disabled={saving} onClick={() => decide("rejected", note)}><X size={14} /> Reject deletion</Button>
           ) : (
-            <Button secondary disabled={saving || !note.trim()} onClick={() => decide("needs_revision", note)}><RotateCcw size={14} /> Return for revision</Button>
+            <Button secondary loading={saving} disabled={saving || !note.trim()} onClick={() => decide("needs_revision", note)}><RotateCcw size={14} /> Return for revision</Button>
           )}
           <Button
             tone="green"
+            loading={saving}
             disabled={saving}
             confirm={isDeletion}
             confirmationText="Approve and permanently delete this Lead? This cannot be undone."
@@ -10563,7 +10594,7 @@ function Submissions({
         <Table labels={["Price Quotation", "Client", "Project Officer", "Requested", "Review"]}>
           {pendingPriceQuotationRevisions.map((request) => {
             const quotation = store.quotations.find((item) => item.id === request.quotation_id);
-            return <tr key={text(request.id)}><td className="px-5 py-3"><b>{text(quotation?.quotation_no, "Price Quotation")}</b><small>{text(quotation?.project_name)}</small></td><td className="px-5 py-3">{text(quotation?.client_name)}</td><td className="px-5 py-3">{projectOfficerName(request)}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>;
+            return <tr key={text(request.id)}><td className="px-5 py-3"><b>{text(quotation?.quotation_no, "Price Quotation")}</b><small>{text(quotation?.project_name)}</small></td><td className="px-5 py-3">{text(quotation?.client_name)}</td><td className="px-5 py-3">{projectOfficerName(request)}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>;
           })}
         </Table>
       ) : <Empty>No Price Quotation revisions are awaiting review.</Empty>)}
@@ -10630,7 +10661,7 @@ function Submissions({
               <td className="px-5 py-3"><b>{text(costing?.quotation_no, "Costing Breakdown")}</b><small>{text(costing?.project_name)}</small></td>
               <td className="px-5 py-3">{projectOfficerName(request)}</td>
               <td className="px-5 py-3">{day(request.submitted_at)}</td>
-              <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve costing revision" tone="green" disabled={savingId === request.id} onClick={() => void decideQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject costing revision" tone="red" disabled={savingId === request.id} onClick={() => void decideQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td>
+              <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve costing revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject costing revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td>
             </tr>;
           })}
         </Table>
@@ -10649,7 +10680,7 @@ function Submissions({
               <td className="px-5 py-3">{day(schedule.start_date)}</td>
               <td className="px-5 py-3">{day(schedule.due_date)}</td>
               <td className="px-5 py-3"><Status value={schedule.status} /></td>
-              <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="View Price Quotation PDF" confirm={false} onClick={() => openQuotationPdf(quotation)}><FileText size={15} /></ActionIcon><ActionIcon label="Approve project schedule" tone="green" disabled={savingId === schedule.id} onClick={() => void decideProjectSchedule(schedule, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project schedule" tone="red" disabled={savingId === schedule.id} onClick={() => void decideProjectSchedule(schedule, "rejected")}><X size={15} /></ActionIcon></div></td>
+              <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="View Price Quotation PDF" confirm={false} onClick={() => openQuotationPdf(quotation)}><FileText size={15} /></ActionIcon><ActionIcon label="Approve project schedule" tone="green" loading={savingId === schedule.id} disabled={savingId === schedule.id} onClick={() => void decideProjectSchedule(schedule, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project schedule" tone="red" loading={savingId === schedule.id} disabled={savingId === schedule.id} onClick={() => void decideProjectSchedule(schedule, "rejected")}><X size={15} /></ActionIcon></div></td>
             </tr>
             );
           })}
@@ -10671,7 +10702,7 @@ function Submissions({
                 <td className="px-5 py-3"><b>{day(request.proposed_start_date)}</b><small>Current: {day(schedule?.start_date)}</small></td>
                 <td className="px-5 py-3"><b>{day(request.proposed_due_date)}</b><small>Current: {day(schedule?.due_date)}</small></td>
                 <td className="px-5 py-3"><Status value="revision pending" /></td>
-                <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve project schedule revision" tone="green" disabled={savingId === request.id} onClick={() => void decideProjectScheduleRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project schedule revision" tone="red" disabled={savingId === request.id} onClick={() => void decideProjectScheduleRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td>
+                <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve project schedule revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideProjectScheduleRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project schedule revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideProjectScheduleRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td>
               </tr>
             );
           })}
@@ -10693,7 +10724,7 @@ function Submissions({
                 <td className="px-5 py-3">{day(schedule?.start_date)}</td>
                 <td className="px-5 py-3">{day(schedule?.due_date)}</td>
                 <td className="px-5 py-3"><Status value="completion pending" /></td>
-                <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve project completion" tone="green" disabled={savingId === request.id} onClick={() => void decideProjectScheduleCompletion(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project completion" tone="red" disabled={savingId === request.id} onClick={() => void decideProjectScheduleCompletion(request, "rejected")}><X size={15} /></ActionIcon></div></td>
+                <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve project completion" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideProjectScheduleCompletion(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project completion" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideProjectScheduleCompletion(request, "rejected")}><X size={15} /></ActionIcon></div></td>
               </tr>
             );
           })}
@@ -14340,6 +14371,7 @@ export function HuswellWorkspace({
                 Cancel
               </Button>
               <Button
+                loading={signingOut}
                 disabled={signingOut}
                 onClick={async () => {
                   setSigningOut(true);

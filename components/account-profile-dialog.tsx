@@ -2,7 +2,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Eye, EyeOff, Pencil, X } from "lucide-react";
+import { Eye, EyeOff, LoaderCircle, Pencil, X } from "lucide-react";
 import { LoadingModal } from "@/components/loading-modal";
 import { createClient } from "@/lib/supabase/client";
 
@@ -306,8 +306,10 @@ export function AccountProfileDialog({
               )}
               <button
                 disabled={loading || saving}
-                className="min-h-9 rounded-lg bg-[#c43b43] px-3 text-[14px] font-semibold text-white hover:bg-[#ab3038] disabled:opacity-50"
+                aria-busy={loading || saving || undefined}
+                className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-[#c43b43] px-3 text-[14px] font-semibold text-white hover:bg-[#ab3038] disabled:opacity-50"
               >
+                {(loading || saving) && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
                 {loading ? "Loading..." : "Save Changes"}
               </button>
             </>

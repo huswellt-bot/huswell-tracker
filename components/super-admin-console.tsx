@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
+  LoaderCircle,
   LogOut,
   Pencil,
   Plus,
@@ -299,6 +300,7 @@ export function SuperAdminConsole({
               onClick={() => setConfirmSignOut(true)}
               className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-[#d8dee8] px-3 font-semibold text-[#344054] transition-colors hover:bg-[#f7f7f8] disabled:opacity-60"
             >
+              {signingOut && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
               <LogOut size={15} />
               {signingOut ? "Signing out..." : "Sign Out"}
             </button>
@@ -605,8 +607,10 @@ export function SuperAdminConsole({
               </button>
               <button
                 disabled={saving}
-                className="min-h-9 rounded-lg bg-[#c43b43] px-3 text-[14px] font-semibold text-white hover:bg-[#ab3038] disabled:opacity-50"
+                aria-busy={saving || undefined}
+                className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-[#c43b43] px-3 text-[14px] font-semibold text-white hover:bg-[#ab3038] disabled:opacity-50"
               >
+                {saving && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
                 Save Changes
               </button>
             </div>
@@ -737,8 +741,10 @@ export function SuperAdminConsole({
               </button>
               <button
                 disabled={saving}
-                className="min-h-9 rounded-lg bg-[#c43b43] px-3 text-[14px] font-semibold text-white disabled:opacity-50"
+                aria-busy={saving || undefined}
+                className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-[#c43b43] px-3 text-[14px] font-semibold text-white disabled:opacity-50"
               >
+                {saving && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
                 {saving ? "Creating…" : "Create User"}
               </button>
             </div>
@@ -837,8 +843,9 @@ export function SuperAdminConsole({
                 type="button"
                 disabled={signingOut}
                 onClick={() => void signOut()}
-                className="min-h-9 rounded-lg bg-[#c43b43] px-3 text-[14px] font-semibold text-white hover:bg-[#ab3038] disabled:opacity-60"
+                className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-[#c43b43] px-3 text-[14px] font-semibold text-white hover:bg-[#ab3038] disabled:opacity-60"
               >
+                {signingOut && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
                 {signingOut ? "Signing out..." : "Sign Out"}
               </button>
             </div>
