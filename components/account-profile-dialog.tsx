@@ -130,15 +130,15 @@ export function AccountProfileDialog({
   if (!open) return null;
   return (
     <div
-      className={
+      className={`account-profile-dialog compact-ui ${
         embedded
           ? editing
             ? "fixed inset-0 z-[70] grid place-items-center bg-[#151922]/40 p-4"
             : "w-full"
           : page
-            ? "min-h-screen bg-[#fafafa] p-5 sm:p-8"
+            ? "min-h-screen bg-[#fafafa] p-4 sm:p-6"
             : "fixed inset-0 z-[70] grid place-items-center bg-[#151922]/40 p-4"
-      }
+      }`}
     >
       <LoadingModal open={loading || saving} title={saving ? "Saving profile" : "Loading profile"} />
       <form
@@ -146,15 +146,15 @@ export function AccountProfileDialog({
         className={
           embedded
             ? editing
-              ? "w-full max-w-md rounded-2xl border border-[#dfe5ed] bg-white p-5 shadow-2xl"
-              : `w-full rounded-2xl border border-[#dfe5ed] bg-white p-5 shadow-none ${fullWidth ? "" : "mx-auto max-w-2xl"}`
-            : `w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl ${page ? "mx-auto border border-[#dfe5ed]" : ""}`
+              ? "w-full max-w-md rounded-2xl border border-[#dfe5ed] bg-white p-4 shadow-2xl"
+              : `w-full rounded-2xl border border-[#dfe5ed] bg-white p-4 shadow-none ${fullWidth ? "" : "mx-auto max-w-2xl"}`
+            : `w-full max-w-md rounded-2xl bg-white p-4 shadow-2xl ${page ? "mx-auto border border-[#dfe5ed]" : ""}`
         }
       >
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start justify-between gap-3">
           <div>
-            <h2 className="text-[17px] font-semibold">My Profile</h2>
-            <p className="mt-1 text-[14px] text-[#7d8797]">
+            <h2 className="text-[16px] font-semibold">My Profile</h2>
+            <p className="mt-1 text-[12px] text-[#7d8797]">
               {embedded && !editing
                 ? "View your account information and keep it up to date."
                 : "Update your personal account details."}
@@ -163,7 +163,7 @@ export function AccountProfileDialog({
           {page ? (
             <a
               href={backHref}
-              className="text-[14px] font-semibold text-[#2168d6]"
+              className="text-[13px] font-semibold text-[#2168d6]"
             >
               Back
             </a>
@@ -178,35 +178,35 @@ export function AccountProfileDialog({
           ) : null}
         </div>
         {embedded && !editing ? (
-          <div className="mt-5 divide-y divide-[#edf0f5] border-y border-[#edf0f5]">
-            <div className="grid gap-1 py-3 sm:grid-cols-3">
-              <span className="text-[13px] font-medium text-[#7d8797]">
+          <div className="mt-4 divide-y divide-[#edf0f5] border-y border-[#edf0f5]">
+            <div className="grid gap-1 py-2 sm:grid-cols-3">
+              <span className="text-[11px] font-medium text-[#7d8797]">
                 Full Name
               </span>
-              <span className="text-[14px] font-medium sm:col-span-2">
+              <span className="text-[12px] font-medium sm:col-span-2">
                 {values.fullName || "Not Set"}
               </span>
             </div>
-            <div className="grid gap-1 py-3 sm:grid-cols-3">
-              <span className="text-[13px] font-medium text-[#7d8797]">
+            <div className="grid gap-1 py-2 sm:grid-cols-3">
+              <span className="text-[11px] font-medium text-[#7d8797]">
                 Email
               </span>
-              <span className="break-all text-[14px] font-medium sm:col-span-2">
+              <span className="break-all text-[12px] font-medium sm:col-span-2">
                 {values.email || "Not Set"}
               </span>
             </div>
-            <div className="grid gap-1 py-3 sm:grid-cols-3">
-              <span className="text-[13px] font-medium text-[#7d8797]">
+            <div className="grid gap-1 py-2 sm:grid-cols-3">
+              <span className="text-[11px] font-medium text-[#7d8797]">
                 Account Type
               </span>
-              <span className="capitalize text-[14px] font-medium sm:col-span-2">
+              <span className="capitalize text-[12px] font-medium sm:col-span-2">
                 {accountType || "User"}
               </span>
             </div>
           </div>
         ) : (
-          <div className="mt-5 space-y-4">
-            <label className="block text-[14px] font-semibold">
+          <div className="mt-4 space-y-3">
+            <label className="block text-[13px] font-semibold">
               Full Name
               <input
                 required
@@ -218,10 +218,10 @@ export function AccountProfileDialog({
                     fullName: titleCase(event.target.value),
                   })
                 }
-                className="profile-field mt-1.5 w-full rounded-lg border border-[#cfd8e3] px-3 py-2 text-[14px] outline-none focus:border-[#c43b43] disabled:bg-[#f7f7f8]"
+                className="profile-field mt-1.5 w-full rounded-lg border border-[#cfd8e3] px-2.5 py-1.5 text-[13px] outline-none focus:border-[#c43b43] disabled:bg-[#f7f7f8]"
               />
             </label>
-            <label className="block text-[14px] font-semibold">
+            <label className="block text-[13px] font-semibold">
               Email
               <input
                 required
@@ -231,10 +231,10 @@ export function AccountProfileDialog({
                 onChange={(event) =>
                   setValues({ ...values, email: event.target.value })
                 }
-                className="profile-field mt-1.5 w-full rounded-lg border border-[#cfd8e3] px-3 py-2 text-[14px] outline-none focus:border-[#c43b43] disabled:bg-[#f7f7f8]"
+                className="profile-field mt-1.5 w-full rounded-lg border border-[#cfd8e3] px-2.5 py-1.5 text-[13px] outline-none focus:border-[#c43b43] disabled:bg-[#f7f7f8]"
               />
             </label>
-            <label className="block text-[14px] font-semibold">
+            <label className="block text-[13px] font-semibold">
               New Password{" "}
               <span className="font-normal text-[#7d8797]">(optional)</span>
               <div className="relative mt-1.5">
@@ -247,12 +247,12 @@ export function AccountProfileDialog({
                   onChange={(event) =>
                     setValues({ ...values, password: event.target.value })
                   }
-                  className={`profile-field w-full rounded-lg border border-[#cfd8e3] px-3 py-2 pr-10 text-[14px] outline-none focus:border-[#c43b43] disabled:bg-[#f7f7f8] ${showPassword ? "" : "password-input--masked"}`}
+                  className={`profile-field w-full rounded-lg border border-[#cfd8e3] px-2.5 py-1.5 pr-9 text-[13px] outline-none focus:border-[#c43b43] disabled:bg-[#f7f7f8] ${showPassword ? "" : "password-input--masked"}`}
                 />
                 {!showPassword && values.password && (
                   <span
                     aria-hidden="true"
-                    className="pointer-events-none absolute inset-y-0 left-3 flex items-center font-mono text-[14px] tracking-[0.08em] text-[#151922]"
+                    className="pointer-events-none absolute inset-y-0 left-2.5 flex items-center font-mono text-[13px] tracking-[0.08em] text-[#151922]"
                   >
                     {"●".repeat(values.password.length)}
                   </span>
@@ -268,16 +268,16 @@ export function AccountProfileDialog({
                 </button>
               </div>
             </label>
-            {error && <p className="text-[14px] text-[#b42318]">{error}</p>}
+            {error && <p className="text-[12px] text-[#b42318]">{error}</p>}
           </div>
         )}
-        <div className="mt-6 flex justify-end gap-2">
+        <div className="mt-4 flex justify-end gap-2">
           {embedded && !editing ? (
             <button
               type="button"
               disabled={loading}
               onClick={() => setEditing(true)}
-              className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-[#c43b43] px-3 text-[14px] font-semibold text-white hover:bg-[#ab3038] disabled:opacity-50"
+              className="inline-flex min-h-8 items-center gap-1.5 rounded-lg bg-[#c43b43] px-2.5 text-[13px] font-semibold text-white hover:bg-[#ab3038] disabled:opacity-50"
             >
               <Pencil size={15} />
               Edit Profile
@@ -289,7 +289,7 @@ export function AccountProfileDialog({
                   type="button"
                   disabled={saving}
                   onClick={onClose}
-                  className="min-h-9 rounded-lg border border-[#cfd8e3] px-3 text-[14px] font-semibold disabled:opacity-50"
+                  className="min-h-8 rounded-lg border border-[#cfd8e3] px-2.5 text-[13px] font-semibold disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -299,7 +299,7 @@ export function AccountProfileDialog({
                   type="button"
                   disabled={saving}
                   onClick={closeEmbeddedEditor}
-                  className="min-h-9 rounded-lg border border-[#cfd8e3] px-3 text-[14px] font-semibold disabled:opacity-50"
+                  className="min-h-8 rounded-lg border border-[#cfd8e3] px-2.5 text-[13px] font-semibold disabled:opacity-50"
                 >
                   Cancel
                 </button>
@@ -307,7 +307,7 @@ export function AccountProfileDialog({
               <button
                 disabled={loading || saving}
                 aria-busy={loading || saving || undefined}
-                className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-[#c43b43] px-3 text-[14px] font-semibold text-white hover:bg-[#ab3038] disabled:opacity-50"
+                className="inline-flex min-h-8 items-center gap-1.5 rounded-lg bg-[#c43b43] px-2.5 text-[13px] font-semibold text-white hover:bg-[#ab3038] disabled:opacity-50"
               >
                 {(loading || saving) && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
                 {loading ? "Loading..." : "Save Changes"}
@@ -321,24 +321,24 @@ export function AccountProfileDialog({
           <section
             role="dialog"
             aria-modal="true"
-            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl"
+            className="w-full max-w-sm rounded-2xl bg-white p-4 shadow-2xl"
           >
-            <h2 className="text-[16px] font-semibold">Save Profile Changes?</h2>
-            <p className="mt-2 text-[14px] leading-5 text-[#667085]">
+            <h2 className="text-[15px] font-semibold">Save Profile Changes?</h2>
+            <p className="mt-1.5 text-[12px] leading-[18px] text-[#667085]">
               Your personal account details will be updated.
             </p>
-            <div className="mt-6 flex justify-end gap-2">
+            <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
                 onClick={() => setConfirmOpen(false)}
-                className="min-h-9 rounded-lg border border-[#cfd8e3] px-3 text-[14px] font-semibold"
+                className="min-h-8 rounded-lg border border-[#cfd8e3] px-2.5 text-[13px] font-semibold"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={() => void save()}
-                className="min-h-9 rounded-lg bg-[#c43b43] px-3 text-[14px] font-semibold text-white hover:bg-[#ab3038]"
+                className="min-h-8 rounded-lg bg-[#c43b43] px-2.5 text-[13px] font-semibold text-white hover:bg-[#ab3038]"
               >
                 Confirm
               </button>

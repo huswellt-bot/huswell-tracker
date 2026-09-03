@@ -68,7 +68,7 @@ export function FixedIconTooltip({
       {position && (
         <span
           role="tooltip"
-          className="pointer-events-none fixed z-[100] whitespace-nowrap rounded-md bg-[#182334] px-2 py-1 text-[12px] font-medium text-white shadow-md"
+          className="pointer-events-none fixed z-[100] whitespace-nowrap rounded-md bg-[#182334] px-2 py-1 text-[11px] font-medium text-white shadow-md"
           style={{
             left: position.left,
             top: position.top,

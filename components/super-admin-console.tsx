@@ -264,11 +264,11 @@ export function SuperAdminConsole({
         : `Unban ${pendingAction?.user.full_name}? They will be able to sign in again.`;
 
   return (
-    <main className="min-h-screen bg-[#fafafa] text-[14px] text-[#151922]">
+    <main className="super-admin-console compact-ui min-h-screen bg-[#fafafa] text-[12px] text-[#151922]">
       <LoadingModal open={loading || saving} title={saving ? "Saving user changes" : "Loading users"} />
       <header className="border-b border-[#dfe5ed] bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-5 py-4">
-          <div className="flex items-center gap-4">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3">
+          <div className="flex items-center gap-3">
             <Image
               src="/huswell-quotation-logo.png"
               alt="Huswell Trading"
@@ -279,8 +279,8 @@ export function SuperAdminConsole({
             />
             <span className="hidden h-8 w-px bg-[#dfe5ed] sm:block" />
             <div>
-              <h1 className="text-[16px] font-semibold">Super Admin</h1>
-              <p className="text-[14px] text-[#7d8797]">
+              <h1 className="text-[15px] font-semibold">Super Admin</h1>
+              <p className="text-[12px] text-[#7d8797]">
                 {organizationName} · User Management
               </p>
             </div>
@@ -289,7 +289,7 @@ export function SuperAdminConsole({
             <button
               type="button"
               onClick={() => setProfileOpen(true)}
-              className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-[#d8dee8] px-3 font-semibold text-[#344054] transition-colors hover:bg-[#f7f7f8]"
+              className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-[#d8dee8] px-2.5 font-semibold text-[#344054] transition-colors hover:bg-[#f7f7f8]"
             >
               <UserRound size={15} />
               Profile
@@ -298,7 +298,7 @@ export function SuperAdminConsole({
               type="button"
               disabled={signingOut}
               onClick={() => setConfirmSignOut(true)}
-              className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-[#d8dee8] px-3 font-semibold text-[#344054] transition-colors hover:bg-[#f7f7f8] disabled:opacity-60"
+              className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-[#d8dee8] px-2.5 font-semibold text-[#344054] transition-colors hover:bg-[#f7f7f8] disabled:opacity-60"
             >
               {signingOut && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
               <LogOut size={15} />
@@ -307,36 +307,36 @@ export function SuperAdminConsole({
           </div>
         </div>
       </header>
-      <div className="mx-auto max-w-6xl px-5 py-8">
+      <div className="mx-auto max-w-6xl px-4 py-6">
         <section className="overflow-hidden rounded-2xl border border-[#dfe5ed] bg-white">
-          <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#edf0f5] p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#edf0f5] p-4">
             <div>
-              <h2 className="flex items-center gap-2 text-[16px] font-semibold">
+              <h2 className="flex items-center gap-1.5 text-[15px] font-semibold">
                 <UsersRound size={18} className="text-[#c43b43]" />
                 Users
               </h2>
-              <p className="mt-1 text-[14px] text-[#7d8797]">
+              <p className="mt-1 text-[12px] text-[#7d8797]">
                 Accounts currently assigned to this workspace.
               </p>
             </div>
             <button
               type="button"
               onClick={() => setOpen(true)}
-              className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-[#c43b43] px-3 font-semibold text-white transition-colors hover:bg-[#ab3038]"
+              className="inline-flex min-h-8 items-center gap-1.5 rounded-lg bg-[#c43b43] px-2.5 font-semibold text-white transition-colors hover:bg-[#ab3038]"
             >
               <Plus size={15} />
               Add User
             </button>
           </div>
           <div className="max-h-[460px] overflow-auto rounded-lg border border-[#d6dee8] bg-white">
-            <table className="app-table w-full min-w-[760px] text-left text-[14px]">
-              <thead className="sticky top-0 z-10 border-b border-[#102f61] bg-[#102f61] text-[14px] font-bold text-white">
+            <table className="app-table w-full min-w-[760px] text-left text-[12px]">
+              <thead className="sticky top-0 z-10 border-b border-[#102f61] bg-[#102f61] text-[12px] font-bold text-white">
                 <tr>
-                  <th className="px-5 py-3">User</th>
-                  <th className="px-5 py-3">Email</th>
-                  <th className="px-5 py-3">User Type</th>
-                  <th className="px-5 py-3">Account Status</th>
-                  <th className="px-5 py-3 text-center">Actions</th>
+                  <th className="px-4 py-2">User</th>
+                  <th className="px-4 py-2">Email</th>
+                  <th className="px-4 py-2">User Type</th>
+                  <th className="px-4 py-2">Account Status</th>
+                  <th className="px-4 py-2 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#edf0f5]">

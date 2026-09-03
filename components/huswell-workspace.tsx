@@ -1520,8 +1520,8 @@ function Button({
         disabled={disabled || loading}
         aria-busy={loading || undefined}
         onClick={trigger}
-        style={{ fontSize: "14px", lineHeight: "20px" }}
-        className={`${secondary ? "border border-[#cfd8e3] bg-white text-[#151922] hover:bg-[#f5f7fa]" : tone === "green" ? "bg-[#218b55] text-white hover:bg-[#176d42]" : "bg-[#c43b43] text-white hover:bg-[#ab3038]"} inline-flex ${compact ? "min-h-7 py-0.5" : "min-h-9"} items-center gap-2 rounded-lg px-3 text-[13px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50`}
+        style={{ fontSize: "var(--font-size-body)", lineHeight: "var(--line-height-body)" }}
+        className={`${secondary ? "border border-[#cfd8e3] bg-white text-[#151922] hover:bg-[#f5f7fa]" : tone === "green" ? "bg-[#218b55] text-white hover:bg-[#176d42]" : "bg-[#c43b43] text-white hover:bg-[#ab3038]"} inline-flex ${compact ? "min-h-7 py-0.5" : "min-h-8"} items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50`}
       >
         {loading && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
         {children}
@@ -1564,25 +1564,25 @@ function ConfirmationDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirmation-title"
-        className="w-full max-w-sm min-w-0 rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"
+        className="w-full max-w-sm min-w-0 rounded-[14px] border border-[#d9e0e9] bg-white p-4 shadow-xl"
       >
         <h2
           id="confirmation-title"
-          className="min-w-0 break-words text-[16px] font-semibold text-[#202938]"
+          className="min-w-0 break-words text-[15px] font-semibold text-[#202938]"
         >
           {title}
         </h2>
-        <p className="mt-2 min-w-0 whitespace-normal break-words [overflow-wrap:anywhere] text-[13px] leading-5 text-[#626b7a]">
+        <p className="mt-1.5 min-w-0 whitespace-normal break-words [overflow-wrap:anywhere] text-[12px] leading-[18px] text-[#626b7a]">
           {description}
         </p>
-        <div className="mt-6 flex justify-end gap-2">
+        <div className="mt-4 flex justify-end gap-2">
           <Button secondary onClick={onCancel}>
             Cancel
           </Button>
           <button
             type="button"
             onClick={onConfirm}
-            className="inline-flex min-h-9 items-center rounded-lg bg-[#c43b43] px-3 text-[13px] font-semibold text-white transition-colors hover:bg-[#ab3038]"
+            className="inline-flex min-h-8 items-center rounded-lg bg-[#c43b43] px-2.5 text-[12px] font-semibold text-white transition-colors hover:bg-[#ab3038]"
           >
             Confirm
           </button>
@@ -2062,12 +2062,12 @@ function Panel({
     >
       {!hideHeading && (
         <header
-          className={`flex flex-wrap items-start justify-between gap-3 ${variant === "page" ? "border-b border-[#e9edf2] px-4 py-3 sm:px-6 lg:px-7" : "p-4 sm:p-5"}`}
+          className={`flex flex-wrap items-start justify-between gap-3 ${variant === "page" ? "border-b border-[#e9edf2] px-3 py-2 sm:px-4 lg:px-5" : "p-3 sm:p-4"}`}
         >
           <div className="min-w-0">
-            <h2 className="text-[15px] font-semibold">{title}</h2>
+            <h2 className="text-[14px] font-semibold">{title}</h2>
             <p
-              className={`${variant === "page" ? "mt-0.5" : "mt-1"} text-[12px] text-[#8b92a1]`}
+              className={`${variant === "page" ? "mt-0.5" : "mt-1"} text-[11px] text-[#8b92a1]`}
             >
               {detail}
             </p>
@@ -2127,7 +2127,7 @@ function LeadWorkspaceTabs({
 }
 function Empty({ children }: { children: ReactNode }) {
   return (
-    <div className="border-t border-[#e4e8ef] px-5 py-12 text-center text-[13px] text-[#8b92a1]">
+    <div className="border-t border-[#e4e8ef] px-4 py-8 text-center text-[12px] text-[#8b92a1]">
       {children}
     </div>
   );
@@ -2431,15 +2431,15 @@ function Dialog({
           e.preventDefault();
           setConfirmOpen(true);
         }}
-        className={`max-h-[90vh] w-full overflow-y-auto rounded-[14px] border border-[#d9e0e9] bg-white p-4 sm:p-5 ${className}`}
+        className={`max-h-[90vh] w-full overflow-y-auto rounded-[14px] border border-[#d9e0e9] bg-white p-3 sm:p-4 ${className}`}
       >
-        <div className="mb-5 flex items-center justify-between">
-          <h2 className="text-[16px] font-semibold">{title}</h2>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-[15px] font-semibold">{title}</h2>
           <button type="button" onClick={close} aria-label="Close" className="grid size-8 place-items-center rounded-md text-[#8a95a6] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938]">
             <X size={18} />
           </button>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2">
+        <div className="grid gap-3 sm:grid-cols-2">
           {fields.map((f) => (
             <label
               key={f.key}
@@ -2670,7 +2670,7 @@ function Dialog({
           ))}
         </div>
         {children}
-        <div className="mt-6 flex justify-end gap-2">
+        <div className="mt-4 flex justify-end gap-2">
           <Button secondary onClick={close}>
             Cancel
           </Button>
@@ -2678,8 +2678,8 @@ function Dialog({
             type="submit"
             disabled={saving}
             aria-busy={saving || undefined}
-            style={{ fontSize: "14px", lineHeight: "20px" }}
-            className="inline-flex min-h-9 items-center gap-2 rounded-lg bg-[#c43b43] px-3 text-[13px] font-semibold text-white hover:bg-[#ab3038] disabled:opacity-50"
+            style={{ fontSize: "var(--font-size-body)", lineHeight: "var(--line-height-body)" }}
+            className="inline-flex min-h-8 items-center gap-1.5 rounded-lg bg-[#c43b43] px-2.5 text-[12px] font-semibold text-white hover:bg-[#ab3038] disabled:opacity-50"
           >
             {saving && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
             {saving ? "Saving…" : saveLabel}
@@ -12642,7 +12642,7 @@ function ProjectOfficerSalesFunnel({
     </div>;
   };
 
-  return <section className="space-y-5" style={{ fontFamily: '"SF Pro Display", Arial, Helvetica, sans-serif' }}>
+  return <section className="space-y-4">
     <header className="flex flex-wrap items-end justify-between gap-3 border-b border-[#e4e8ef] pb-4">
       <div><h1 className="text-[20px] font-semibold tracking-[-.02em] text-[#202938]">Sales pipeline</h1><p className="mt-1 text-[12px] text-[#687386]">Track leads from first contact through completed projects.</p></div>
       <span className="inline-flex items-center gap-2 text-[12px] text-[#687386]"><CalendarDays size={15} className="text-[#c43b43]" />{todayLabel}</span>
@@ -12729,10 +12729,10 @@ function GeneralManagerKpiDashboard({ store }: { store: Store }) {
   const compare = (value: number, previous: number) => previous ? `${Math.abs(((value - previous) / previous) * 100).toFixed(1)}% ${value >= previous ? "up" : "down"}` : "No prior month";
   const financeAmountSize = (value: number) => {
     const length = peso.format(value).length;
-    if (length > 18) return "17px";
-    if (length > 15) return "21px";
-    if (length > 12) return "25px";
-    return "30px";
+    if (length > 18) return "16px";
+    if (length > 15) return "19px";
+    if (length > 12) return "23px";
+    return "28px";
   };
   const metricCards = [
     { title: "TOTAL SALES", value: totalSales, detail: "This month", compare: compare(totalSales, previousSales), previous: previousSales, Icon: TrendingUp, color: "#1262e7", tint: "#edf4ff" },
@@ -12741,7 +12741,7 @@ function GeneralManagerKpiDashboard({ store }: { store: Store }) {
     { title: "OVERDUE RECEIVABLES", value: overdue, detail: "As of today", compare: compare(overdue, previousOverdue), previous: previousOverdue, Icon: CalendarDays, color: "#e30719", tint: "#fff0f1" },
   ];
 
-  return <div className="space-y-5" style={{ fontFamily: '"SF Pro Display", Arial, Helvetica, sans-serif', fontSize: "13px" }}>
+  return <div className="space-y-4">
     <section className="overflow-hidden rounded-lg border border-[#dfe5ed] bg-white">
       <header className="flex flex-wrap items-end justify-between gap-3 border-b border-[#e4e8ef] px-4 py-4 sm:px-5">
         <div><h1 className="text-[20px] font-semibold tracking-[-.02em] text-[#202938]">KPI dashboard</h1><p className="mt-1 text-[12px] text-[#687386]">Sales, collections, and cash exposure at a glance.</p></div>
@@ -14245,9 +14245,9 @@ export function HuswellWorkspace({
       />
     );
   return (
-    <div className={`huswell-workspace min-h-screen bg-[#fafafa] text-[#151922] ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    <div className={`huswell-workspace compact-ui min-h-screen bg-[#fafafa] text-[#151922] ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside
-        className={`${mobile ? "translate-x-0" : "-translate-x-full"} sidebar-shell fixed inset-y-0 z-40 flex w-64 flex-col border-r border-[#e2e7ef] bg-white p-4 text-[#475467] transition-[transform,width,padding] lg:translate-x-0 ${sidebarCollapsed ? "lg:w-[72px] lg:px-2" : "lg:w-64"}`}
+        className={`${mobile ? "translate-x-0" : "-translate-x-full"} sidebar-shell fixed inset-y-0 z-40 flex w-64 flex-col border-r border-[#e2e7ef] bg-white p-3 text-[#475467] transition-[transform,width,padding] lg:translate-x-0 ${sidebarCollapsed ? "lg:w-[72px] lg:px-2" : "lg:w-64"}`}
       >
         <button
           type="button"
@@ -14259,7 +14259,7 @@ export function HuswellWorkspace({
         >
           {sidebarCollapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
         </button>
-        <div className="mb-5 flex items-center justify-between px-1">
+        <div className="mb-4 flex items-center justify-between px-1">
           <div className="flex min-w-0 flex-1 justify-center">
             <Image
               src="https://huswelltrading.com/favicon.ico"
@@ -14279,7 +14279,7 @@ export function HuswellWorkspace({
           </div>
           <button
             type="button"
-            className="grid size-9 place-items-center rounded-lg text-[#626b7a] transition-colors hover:bg-[#f1f3f4] hover:text-[#202124] lg:hidden"
+            className="grid size-8 place-items-center rounded-lg text-[#626b7a] transition-colors hover:bg-[#f1f3f4] hover:text-[#202124] lg:hidden"
             onClick={() => setMobile(false)}
             aria-label="Close navigation"
           >
@@ -14315,11 +14315,11 @@ export function HuswellWorkspace({
                     title={navigationLabel}
                     aria-label={navigationLabel}
                     style={{
-                      fontSize: "14px",
-                      lineHeight: "20px",
+                      fontSize: "var(--font-size-body)",
+                      lineHeight: "var(--line-height-body)",
                     }}
                     aria-current={active === view ? "page" : undefined}
-                    className={`${active === view ? "bg-[#c43b43] font-medium text-white" : "text-[#202124] hover:bg-[#f1f3f4]"} group flex min-h-9 w-full items-center gap-2.5 rounded-lg px-3 py-1 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c43b43] focus-visible:ring-offset-2 focus-visible:ring-offset-white ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
+                    className={`${active === view ? "bg-[#c43b43] font-medium text-white" : "text-[#202124] hover:bg-[#f1f3f4]"} group flex min-h-8 w-full items-center gap-2 rounded-lg px-2.5 py-1 text-left text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c43b43] focus-visible:ring-offset-2 focus-visible:ring-offset-white ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
                   >
                     <Icon
                       size={17}
@@ -14333,11 +14333,11 @@ export function HuswellWorkspace({
             </div>
           ))}
         </nav>
-        <div className="mt-4 border-t border-[#e2e7ef] pt-4">
+        <div className="mt-3 border-t border-[#e2e7ef] pt-3">
           {canEditOwnProfile && !isManagementRole && (
             <a
               href="/profile"
-              className={`mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-[#202124] transition-colors hover:bg-[#f1f3f4] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
+              className={`mt-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] font-medium text-[#202124] transition-colors hover:bg-[#f1f3f4] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
             >
               <UserRound size={17} />
               <span className={sidebarCollapsed ? "lg:sr-only" : ""}>Profile</span>
@@ -14345,7 +14345,7 @@ export function HuswellWorkspace({
           )}
           <button
             onClick={() => setSignOutOpen(true)}
-            className={`mt-4 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-[13px] font-medium text-[#202124] transition-colors hover:bg-[#f1f3f4] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
+            className={`mt-3 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] font-medium text-[#202124] transition-colors hover:bg-[#f1f3f4] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
           >
             <LogOut size={17} />
             <span className={sidebarCollapsed ? "lg:sr-only" : ""}>Sign out</span>
@@ -14358,15 +14358,15 @@ export function HuswellWorkspace({
             role="dialog"
             aria-modal="true"
             aria-labelledby="sign-out-title"
-            className="w-full max-w-sm rounded-[14px] border border-[#d9e0e9] bg-white p-5"
+            className="w-full max-w-sm rounded-[14px] border border-[#d9e0e9] bg-white p-4"
           >
-            <h2 id="sign-out-title" className="text-[16px] font-semibold">
+            <h2 id="sign-out-title" className="text-[15px] font-semibold">
               Sign out?
             </h2>
-            <p className="mt-2 text-[13px] text-[#626b7a]">
+            <p className="mt-1.5 text-[12px] text-[#626b7a]">
               You will be returned to the sign-in page.
             </p>
-            <div className="mt-5 flex justify-end gap-2">
+            <div className="mt-4 flex justify-end gap-2">
               <Button
                 secondary
                 disabled={signingOut}
@@ -14402,10 +14402,10 @@ export function HuswellWorkspace({
         />
       )}
       <main className={`min-h-screen bg-[#fafafa] transition-[padding] ${sidebarCollapsed ? "lg:pl-[72px]" : "lg:pl-64"}`}>
-        <header className="sticky top-0 z-30 flex min-h-[64px] items-center justify-between gap-3 border-b border-[#dfe5ed] bg-white px-4 py-3 sm:min-h-[72px] sm:px-5 lg:px-6">
+        <header className="sticky top-0 z-30 flex min-h-[60px] items-center justify-between gap-2.5 border-b border-[#dfe5ed] bg-white px-3 py-2.5 sm:min-h-[64px] sm:px-4 lg:px-5">
           <div className="flex min-w-0 items-center gap-3">
             <button
-              className="grid size-10 shrink-0 place-items-center rounded-lg text-[#151922] hover:bg-[#f7f7f8] lg:hidden"
+              className="grid size-9 shrink-0 place-items-center rounded-lg text-[#151922] hover:bg-[#f7f7f8] lg:hidden"
               onClick={() => setMobile(true)}
               aria-label="Open navigation"
             >
@@ -14413,8 +14413,8 @@ export function HuswellWorkspace({
             </button>
             <span className="sr-only">{activePageHeader.title}</span>
           </div>
-          <div className="flex shrink-0 items-center gap-3 text-[#626b7a]">
-            <span className="hidden items-center gap-2 text-[12px] font-medium sm:flex">
+          <div className="flex shrink-0 items-center gap-2.5 text-[#626b7a]">
+            <span className="hidden items-center gap-1.5 text-[11px] font-medium sm:flex">
               <CalendarDays size={17} />
               {new Intl.DateTimeFormat("en-PH", {
                 month: "short",
@@ -14427,7 +14427,7 @@ export function HuswellWorkspace({
                 type="button"
                 onClick={() => navigate("Settings")}
                 aria-label="Open settings"
-                className="grid size-9 place-items-center rounded-full bg-[#fceced] text-[11px] font-semibold text-[#ab3038] transition-colors hover:bg-[#f6d8da]"
+                className="grid size-8 place-items-center rounded-full bg-[#fceced] text-[11px] font-semibold text-[#ab3038] transition-colors hover:bg-[#f6d8da]"
               >
                 {profileName.slice(0, 2).toUpperCase()}
               </button>
@@ -14435,35 +14435,35 @@ export function HuswellWorkspace({
               <a
                 href="/profile"
                 aria-label="Edit profile"
-                className="grid size-9 place-items-center rounded-full bg-[#fceced] text-[11px] font-semibold text-[#ab3038] transition-colors hover:bg-[#f6d8da]"
+                className="grid size-8 place-items-center rounded-full bg-[#fceced] text-[11px] font-semibold text-[#ab3038] transition-colors hover:bg-[#f6d8da]"
               >
                 {profileName.slice(0, 2).toUpperCase()}
               </a>
             ) : (
-              <span className="grid size-9 place-items-center rounded-full bg-[#fceced] text-[11px] font-semibold text-[#ab3038]">
+              <span className="grid size-8 place-items-center rounded-full bg-[#fceced] text-[11px] font-semibold text-[#ab3038]">
                 {profileName.slice(0, 2).toUpperCase()}
               </span>
             )}
           </div>
         </header>
-        <div className={`workspace-content ${["Projects", "Price Quotations"].includes(active) && role !== "pricing_officer" ? "p-0" : "p-3 sm:p-4 lg:p-5"}`}>
+        <div className={`workspace-content ${["Projects", "Price Quotations"].includes(active) && role !== "pricing_officer" ? "p-0" : "p-2 sm:p-3 lg:p-4"}`}>
           {message && (
             <div className="fixed inset-0 z-[60] grid place-items-center bg-[#061426]/30 p-4">
               <section
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="notification-title"
-                className="w-full max-w-sm rounded-[14px] border border-[#dfe5ed] bg-white p-5"
+                className="w-full max-w-sm rounded-[14px] border border-[#dfe5ed] bg-white p-4"
               >
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h2
                       id="notification-title"
-                      className="text-[16px] font-semibold text-[#151922]"
+                      className="text-[15px] font-semibold text-[#151922]"
                     >
                       Notification
                     </h2>
-                    <p className="mt-2 text-[13px] leading-5 text-[#626b7a]">
+                    <p className="mt-1.5 text-[12px] leading-[18px] text-[#626b7a]">
                       {message}
                     </p>
                   </div>
@@ -14476,7 +14476,7 @@ export function HuswellWorkspace({
                     <X size={17} />
                   </button>
                 </div>
-                <div className="mt-5 flex justify-end">
+                <div className="mt-4 flex justify-end">
                   <Button onClick={() => setMessage(null)}>Okay</Button>
                 </div>
               </section>

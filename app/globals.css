@@ -120,11 +120,42 @@
   --card-shadow: none;
 }
 
+/* Compact density tokens: smaller type and tighter spacing for dense business workflows. */
+:root {
+  --space-panel: 16px;
+  --space-panel-compact: 12px;
+  --space-section: 12px;
+  --space-control-x: 10px;
+  --space-control-y: 6px;
+  --space-table-x: 10px;
+  --space-table-y: 5px;
+  --space-table-detail-y: 6px;
+  --font-size-body: 12px;
+  --line-height-body: 16px;
+  --font-size-caption: 11px;
+  --line-height-caption: 15px;
+  --font-size-body-emphasis: 13px;
+  --line-height-body-emphasis: 18px;
+  --font-size-heading-sm: 14px;
+  --line-height-heading-sm: 18px;
+  --font-size-heading: 15px;
+  --line-height-heading: 20px;
+  --font-size-heading-lg: 16px;
+  --line-height-heading-lg: 20px;
+  --font-size-display-sm: 17px;
+  --line-height-display-sm: 22px;
+  --font-size-display: 19px;
+  --line-height-display: 24px;
+  --font-size-display-lg: 21px;
+  --line-height-display-lg: 26px;
+  --control-min-height: 32px;
+}
+
 @theme inline {
   --color-background: var(--canvas);
   --color-foreground: var(--text);
-  --font-sans: "SF Pro Display", Arial, Helvetica, sans-serif;
-  --font-heading: "SF Pro Display", Arial, Helvetica, sans-serif;
+  --font-sans: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  --font-heading: var(--font-geist-sans), Arial, Helvetica, sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -170,8 +201,9 @@ body {
   min-width: 320px;
   background: var(--canvas);
   color: var(--text);
-  font-family: "SF Pro Display", Arial, Helvetica, sans-serif;
-  font-size: 13px;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
 }
 button,
 input,
@@ -188,9 +220,9 @@ textarea {
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   background: var(--surface);
-  padding: 7px 9px;
-  font-size: 13px;
-  line-height: 18px;
+  padding: var(--space-control-y) var(--space-control-x);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
   outline: none;
   transition:
     border-color 150ms ease,
@@ -227,10 +259,10 @@ textarea {
 }
 .app-table thead th,
 .app-table tbody td {
-  padding-left: 0.75rem !important;
-  padding-right: 0.75rem !important;
-  padding-top: 0.375rem !important;
-  padding-bottom: 0.375rem !important;
+  padding-left: var(--space-table-x) !important;
+  padding-right: var(--space-table-x) !important;
+  padding-top: var(--space-table-y) !important;
+  padding-bottom: var(--space-table-y) !important;
 }
 .app-table thead,
 .app-table tbody tr,
@@ -246,8 +278,8 @@ textarea {
   color: #ffffff !important;
 }
 .costing-detail-table :is(th, td) {
-  padding-top: 0.5rem !important;
-  padding-bottom: 0.5rem !important;
+  padding-top: var(--space-table-detail-y) !important;
+  padding-bottom: var(--space-table-detail-y) !important;
 }
 .app-table textarea {
   white-space: pre-wrap;
@@ -261,7 +293,7 @@ textarea {
   word-break: break-word;
   vertical-align: top;
 }
-/* Keep all visual emphasis on SF Pro Display Medium. */
+/* Keep all visual emphasis on Geist Sans Medium. */
 .font-semibold,
 .font-bold,
 .font-extrabold,
@@ -294,8 +326,8 @@ option {
 small {
   display: block;
   margin-top: 2px;
-  font-size: 11px;
-  line-height: 16px;
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-caption);
   color: #8b92a1;
   font-weight: 400;
 }
@@ -324,10 +356,10 @@ button {
 select:not([multiple]) {
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='m4 6 4 4 4-4' stroke='%23626b7a' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  background-position: right 14px center;
+  background-position: right 10px center;
   background-repeat: no-repeat;
-  background-size: 14px;
-  padding-right: 44px !important;
+  background-size: 12px;
+  padding-right: 36px !important;
 }
 .border-\[\#edf0f5\] {
   border-color: var(--border);
@@ -339,18 +371,18 @@ select:not([multiple]) {
   border-color: var(--border-strong);
 }
 .sidebar-nav-button {
-  font-size: 14px;
-  line-height: 20px;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
 }
 .huswell-sidebar-logo {
   /* White stroke follows the transparent logo artwork, not its rectangle. */
   filter: drop-shadow(0 0 .42px rgb(255 255 255 / 64%));
 }
 .auth-card form > button {
-  padding: 10px 12px;
-  font-size: 14px;
+  padding: var(--space-control-y) var(--space-control-x);
+  font-size: var(--font-size-body);
   font-weight: 500;
-  line-height: 20px;
+  line-height: var(--line-height-body);
 }
 .quotation-print-document {
   width: 8.5in;
@@ -377,7 +409,7 @@ select:not([multiple]) {
 }
 .cost-line-input-grid {
   display: grid;
-  gap: 0.75rem;
+  gap: var(--space-section);
 }
 .cost-line-input-grid > * {
   min-width: 0;
@@ -395,8 +427,10 @@ select:not([multiple]) {
   }
 }
 .huswell-workspace {
-  --font-size-ui: 13px;
-  --line-height-ui: 18px;
+  --font-size-ui: var(--font-size-body);
+  --line-height-ui: var(--line-height-body);
+  --font-size-ui-caption: var(--font-size-caption);
+  --line-height-ui-caption: var(--line-height-caption);
   font-size: var(--font-size-ui);
   line-height: var(--line-height-ui);
 }
@@ -405,13 +439,67 @@ select:not([multiple]) {
   max-width: 1760px;
   margin-inline: auto;
 }
-.huswell-workspace .text-\[9px\],
-.huswell-workspace .text-\[10px\],
-.huswell-workspace .text-\[11px\],
-.huswell-workspace .text-\[12px\],
-.huswell-workspace .text-\[13px\] {
-  font-size: var(--font-size-ui);
-  line-height: var(--line-height-ui);
+.compact-ui {
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+}
+.compact-ui [class~="text-[9px]"],
+.compact-ui [class~="text-[10px]"],
+.compact-ui [class~="text-[11px]"] {
+  font-size: var(--font-size-caption);
+}
+.compact-ui [class~="text-[12px]"],
+.compact-ui [class~="text-[13px]"] {
+  font-size: var(--font-size-body);
+}
+.compact-ui [class~="text-[14px]"] {
+  font-size: var(--font-size-body-emphasis);
+}
+.compact-ui [class~="text-[15px]"] {
+  font-size: var(--font-size-heading-sm);
+}
+.compact-ui [class~="text-[16px]"] {
+  font-size: var(--font-size-heading);
+}
+.compact-ui [class~="text-[17px]"] {
+  font-size: var(--font-size-heading-lg);
+}
+.compact-ui [class~="text-[18px]"] {
+  font-size: var(--font-size-display-sm);
+}
+.compact-ui [class~="text-[20px]"],
+.compact-ui [class~="text-[21px]"] {
+  font-size: var(--font-size-display);
+}
+.compact-ui [class~="text-[22px]"],
+.compact-ui [class~="text-[23px]"],
+.compact-ui [class~="text-[24px]"] {
+  font-size: var(--font-size-display-lg);
+}
+.compact-ui [class~="min-h-9"] {
+  min-height: var(--control-min-height);
+}
+.compact-ui [class~="h-9"],
+.compact-ui [class~="size-9"] {
+  height: var(--control-min-height);
+}
+.compact-ui [class~="size-9"] {
+  width: var(--control-min-height);
+}
+.super-admin-console [class~="p-5"] {
+  padding: var(--space-panel);
+}
+.super-admin-console [class~="px-5"] {
+  padding-left: var(--space-panel);
+  padding-right: var(--space-panel);
+}
+.super-admin-console [class~="py-4"] {
+  padding-top: var(--space-panel-compact);
+  padding-bottom: var(--space-panel-compact);
+}
+.super-admin-console [class~="mt-5"],
+.super-admin-console [class~="mt-6"] {
+  margin-top: var(--space-section);
 }
 .huswell-workspace .quotation-print-document .text-\[8px\] {
   font-size: 8px;
@@ -434,16 +522,16 @@ select:not([multiple]) {
   line-height: 18px;
 }
 .huswell-workspace .dashboard-metric-label {
-  font-size: 11px;
-  line-height: 15px;
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-caption);
 }
 .huswell-workspace .dashboard-metric-value {
-  font-size: 21px;
-  line-height: 26px;
+  font-size: 20px;
+  line-height: 25px;
 }
 .huswell-workspace .dashboard-metric-hint {
-  font-size: 11px;
-  line-height: 15px;
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-caption);
 }
 .huswell-workspace .modern-page-table {
   border-collapse: separate;
@@ -452,7 +540,7 @@ select:not([multiple]) {
 }
 .huswell-workspace .modern-table-shell,
 .huswell-workspace .modern-table-footer {
-  width: calc(100% - 48px);
+  width: calc(100% - 32px);
   max-width: 1280px;
   margin-left: auto;
   margin-right: auto;
@@ -480,17 +568,17 @@ select:not([multiple]) {
 @media (max-width: 640px) {
   .huswell-workspace .modern-table-shell,
   .huswell-workspace .modern-table-footer {
-    width: calc(100% - 32px);
+    width: calc(100% - 24px);
   }
   .huswell-workspace .modern-page-table thead th {
-    height: 42px;
+    height: 38px;
   }
   .huswell-workspace .modern-page-table tbody tr {
-    height: 46px;
+    height: 40px;
   }
   .huswell-workspace .modern-page-table :is(th, td) {
-    padding-left: 1rem;
-    padding-right: 1rem;
+    padding-left: 8px;
+    padding-right: 8px;
   }
   .huswell-workspace .table-action {
     width: 32px;
@@ -509,17 +597,23 @@ select:not([multiple]) {
   background: #102f61;
 }
 .huswell-workspace .modern-page-table thead th {
-  height: 44px;
+  height: 40px;
   border-bottom: 1px solid #102f61;
   background: #102f61;
   color: #ffffff;
-  font-size: 12px;
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
   font-weight: 500;
   letter-spacing: 0.01em;
 }
 .huswell-workspace .modern-page-table tbody tr {
-  height: 48px;
+  height: 42px;
   transition: background-color 150ms ease;
+}
+.huswell-workspace .modern-page-table :is(th, td) {
+  padding: var(--space-table-y) var(--space-table-x);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
 }
 .huswell-workspace .modern-page-table tbody tr:hover {
   background: #fff9f9 !important;
@@ -530,6 +624,18 @@ select:not([multiple]) {
 }
 .huswell-workspace .modern-page-table tbody tr:last-child td {
   border-bottom: 0;
+}
+@media (max-width: 640px) {
+  .huswell-workspace .modern-page-table thead th {
+    height: 38px;
+  }
+  .huswell-workspace .modern-page-table tbody tr {
+    height: 40px;
+  }
+  .huswell-workspace .modern-page-table :is(th, td) {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
 }
 .huswell-workspace .quotation-list-table th:nth-child(3),
 .huswell-workspace .quotation-list-table th:nth-child(4) {
