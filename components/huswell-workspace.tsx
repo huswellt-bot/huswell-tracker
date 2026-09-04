@@ -413,7 +413,9 @@ const projectOfficerOptions = (store: Store) =>
         id,
         name: text(
           store.profiles.find((profile) => profile.id === id)?.full_name,
-          "Project Officer",
+          text(member.role, "") === "project_manager"
+            ? "Sales Executive"
+            : "Sales & Pricing Officer",
         ),
       };
     })
@@ -1956,7 +1958,7 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
           ["Quotation No.", text(quote.quotation_no)],
           ...(sourceQuotation ? [["Source Price Quotation", text(sourceQuotation.quotation_no)]] : []),
           ["Quotation Date", issueDate],
-          ["Prepared By", text(quote.representative, "Sales Project Officer")],
+          ["Prepared By", text(quote.representative, "Sales Executive")],
         ].map(([label, value]) => <PdfView key={label} style={priceQuotationPdfStyles.quoteMetaRow}><PdfText style={[priceQuotationPdfStyles.quoteMetaLabel, compact ? priceQuotationPdfCompactStyles.quoteMetaLabel : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.quoteMetaLabel : undefined]}>{label}</PdfText><PdfText style={[priceQuotationPdfStyles.quoteMetaColon, compact ? priceQuotationPdfCompactStyles.quoteMetaColon : undefined, superCompact ? priceQuotationPdfCompactStyles.quoteMetaColon : undefined]}>:</PdfText>{label === "Source Price Quotation" && sourceQuotationUrl ? <PdfLink src={sourceQuotationUrl} style={[priceQuotationPdfStyles.quoteMetaValue, compact ? priceQuotationPdfCompactStyles.quoteMetaValue : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.quoteMetaValue : undefined, { color: "#1769e8", textDecoration: "underline" }]}>{value}</PdfLink> : <PdfText style={[priceQuotationPdfStyles.quoteMetaValue, compact ? priceQuotationPdfCompactStyles.quoteMetaValue : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.quoteMetaValue : undefined]}>{value}</PdfText>}</PdfView>)}
       </PdfView>
     </PdfView>
@@ -1990,7 +1992,7 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
   );
   const signatureSection = (
     <PdfView style={[priceQuotationPdfStyles.signatures, compact ? priceQuotationPdfCompactStyles.signatures : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatures : undefined]}>
-      <PdfView style={[priceQuotationPdfStyles.signatureColumn, compact ? priceQuotationPdfCompactStyles.signatureColumn : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureColumn : undefined]}><PriceQuotationSignature superCompact={superCompact} compact={compact} label="Prepared by:" name={text(quote.representative, "Sales Project Officer")} signatureSource={preparedBySignature} /><PdfText style={[priceQuotationPdfStyles.signatureRole, compact ? priceQuotationPdfCompactStyles.signatureRole : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureRole : undefined]}>Sales Project Officer</PdfText></PdfView>
+      <PdfView style={[priceQuotationPdfStyles.signatureColumn, compact ? priceQuotationPdfCompactStyles.signatureColumn : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureColumn : undefined]}><PriceQuotationSignature superCompact={superCompact} compact={compact} label="Prepared by:" name={text(quote.representative, "Sales Executive")} signatureSource={preparedBySignature} /><PdfText style={[priceQuotationPdfStyles.signatureRole, compact ? priceQuotationPdfCompactStyles.signatureRole : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureRole : undefined]}>Sales Executive</PdfText></PdfView>
       <PdfView style={[priceQuotationPdfStyles.signatureColumnRight, compact ? priceQuotationPdfCompactStyles.signatureColumnRight : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureColumnRight : undefined]}><PriceQuotationSignature superCompact={superCompact} compact={compact} label="Approved by:" name={approvedByName} signatureSource={approvedBySignature} /><PdfText style={[priceQuotationPdfStyles.signatureRole, compact ? priceQuotationPdfCompactStyles.signatureRole : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureRole : undefined]}>{approvedByRole}</PdfText><PdfView style={[priceQuotationPdfStyles.signatureLine, { marginTop: compact ? 3 : 5 }, compact ? priceQuotationPdfCompactStyles.signatureLine : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureLine : undefined]}><PdfText style={[priceQuotationPdfStyles.signatureLabel, compact ? priceQuotationPdfCompactStyles.signatureLabel : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureLabel : undefined]}>Conforme:</PdfText><PdfView style={[priceQuotationPdfStyles.signatureSignatory, compact ? priceQuotationPdfCompactStyles.signatureSignatory : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureSignatory : undefined]}><PdfText style={[priceQuotationPdfStyles.signatureName, compact ? priceQuotationPdfCompactStyles.signatureName : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureName : undefined]}> </PdfText></PdfView></PdfView><PdfView style={[priceQuotationPdfStyles.signatureLine, { marginTop: compact ? 3 : 5 }, compact ? priceQuotationPdfCompactStyles.signatureLine : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureLine : undefined]}><PdfText style={[priceQuotationPdfStyles.signatureLabel, compact ? priceQuotationPdfCompactStyles.signatureLabel : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureLabel : undefined]}>Date:</PdfText><PdfView style={[priceQuotationPdfStyles.signatureSignatory, compact ? priceQuotationPdfCompactStyles.signatureSignatory : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureSignatory : undefined]}><PdfText style={[priceQuotationPdfStyles.signatureName, compact ? priceQuotationPdfCompactStyles.signatureName : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureName : undefined]}> </PdfText></PdfView></PdfView></PdfView>
     </PdfView>
   );
@@ -2015,7 +2017,7 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
     )}
     {showInternalCosting && productCostings.length > 0 && <PdfPage size={LONG_BOND_PORTRAIT} style={priceQuotationPdfStyles.page}>
       <PdfText style={priceQuotationPdfStyles.internalTitle}>INTERNAL PRODUCT COSTINGS</PdfText>
-      <PdfText style={priceQuotationPdfStyles.internalNote}>General Manager confidential — do not share with the client or Sales Project Officer.</PdfText>
+      <PdfText style={priceQuotationPdfStyles.internalNote}>General Manager confidential — do not share with the client or Sales Executive.</PdfText>
       {productCostings.map((costing, costingIndex) => {
         const product = lines.find((line) => line.id === costing.quotation_item_id);
         const costLines = store.price_quotation_costing_lines.filter((line) => line.product_costing_id === costing.id).sort((a, b) => n(a.sort_order) - n(b.sort_order));
@@ -2090,7 +2092,7 @@ function PriceQuotationPdfLegacy({ quote, store, origin }: { quote: Row; store: 
       <PdfText style={generatedPdfStyles.sectionTitle}>TERMS AND CONDITIONS</PdfText>
       <PdfText style={generatedPdfStyles.terms}>{terms.map((term, index) => `${index + 1}. ${term}`).join("\n")}</PdfText>
       <PdfBankDetails details={bankDetails} />
-      <PdfView style={generatedPdfStyles.signatureRow}><PdfSignatureBlock label="Prepared by:" name={text(quote.representative)} role="Sales Project Officer" signatureSource={text(quote.prepared_by_signature_url, "") || undefined} /><PdfSignatureBlock label="Approved by:" name={approvedByName} role={approvedByRole} signatureSource={approvedBySignature} /></PdfView>
+      <PdfView style={generatedPdfStyles.signatureRow}><PdfSignatureBlock label="Prepared by:" name={text(quote.representative)} role="Sales Executive" signatureSource={text(quote.prepared_by_signature_url, "") || undefined} /><PdfSignatureBlock label="Approved by:" name={approvedByName} role={approvedByRole} signatureSource={approvedBySignature} /></PdfView>
       <PdfText style={[generatedPdfStyles.terms, { marginTop: 10 }]}>Conforme: ______________________________</PdfText>
       <PdfText style={[generatedPdfStyles.terms, { marginTop: 14, textAlign: "center", fontStyle: "italic" }]}>Thank you for the opportunity to provide this quotation.</PdfText>
       <PdfText style={[generatedPdfStyles.terms, { textAlign: "center" }]}>We look forward to working with you.</PdfText>
@@ -2116,7 +2118,7 @@ function CostingBreakdownPdf({ quote, store, origin }: { quote: Row; store: Stor
     <PdfView style={[generatedPdfStyles.table, { marginTop: 15 }]}><PdfView style={generatedPdfStyles.row}><PdfCell width="52%" header>Materials and Production</PdfCell><PdfCell width="14%" header>Quantity</PdfCell><PdfCell width="17%" header>Unit Cost</PdfCell><PdfCell width="17%" header>Subtotal</PdfCell></PdfView>{lines.map((line, index) => <PdfView key={text(line.id, String(index))} style={generatedPdfStyles.row} wrap={false}><PdfCell width="52%">{text(line.description)}</PdfCell><PdfCell width="14%">{n(line.quantity)}</PdfCell><PdfCell width="17%">{currency(n(line.unit_cost))}</PdfCell><PdfCell width="17%">{currency(n(line.line_total))}</PdfCell></PdfView>)}<PdfView style={generatedPdfStyles.row}><PdfCell width="83%" total>TOTAL ESTIMATED COGS</PdfCell><PdfCell width="17%" total>{currency(cogs)}</PdfCell></PdfView></PdfView>
     <PdfText style={generatedPdfStyles.sectionTitle}>MARKUP, VAT, EXPENSES</PdfText>
     {[["Declared Markup", cogs * n(quote.profit_margin_rate) / 100], ["Overhead Allocation", cogs * n(quote.overhead_rate) / 100], ["Buffer Margin", cogs * n(quote.buffer_margin_rate) / 100], ["Production Commission", cogs * n(quote.commission_rate) / 100], ["VAT", n(quote.vat_amount)], ["SELLING PRICE VAT EX.", sellingExVat], ["SELLING PRICE VAT INC.", n(quote.total_amount)]].map(([label, value]) => <PdfView key={String(label)} style={generatedPdfStyles.infoRow}><PdfText style={generatedPdfStyles.infoLabel}>{String(label)}:</PdfText><PdfText style={generatedPdfStyles.infoValue}>{currency(Number(value))}</PdfText></PdfView>)}
-    <PdfView style={generatedPdfStyles.signatureRow}><PdfSignatureBlock label="Prepared by:" name={text(quote.representative)} role="Sales Project Officer" signatureSource={text(quote.prepared_by_signature_url, "") || undefined} /><PdfSignatureBlock label="Approved by:" name={approvedByName} role={approvedByRole} signatureSource={approvedBySignature} /></PdfView>
+    <PdfView style={generatedPdfStyles.signatureRow}><PdfSignatureBlock label="Prepared by:" name={text(quote.representative)} role="Sales Executive" signatureSource={text(quote.prepared_by_signature_url, "") || undefined} /><PdfSignatureBlock label="Approved by:" name={approvedByName} role={approvedByRole} signatureSource={approvedBySignature} /></PdfView>
   </PdfPage></PdfDocument>;
 }
 
@@ -2981,7 +2983,7 @@ function Records({
       const profile = store.profiles.find((item) => item.id === assignedTo);
       totals.set(assignedTo, {
         id: assignedTo,
-        name: text(profile?.full_name, "Sales Project Officer"),
+        name: text(profile?.full_name, "Sales Executive"),
         count: 1,
       });
     });
@@ -3017,7 +3019,7 @@ function Records({
         )
       : module.columns;
   const assignmentColumn = {
-    label: "Sales Project Officer",
+    label: "Sales Officer",
     value: (row: Row) =>
       text(
         store.profiles.find((profile) => profile.id === row.assigned_to)
@@ -3072,7 +3074,7 @@ function Records({
           ...visibleFields,
           {
             key: "assigned_to",
-            label: "Sales Project Officer",
+            label: "Sales Executive",
             type: "select" as const,
             options: projectOfficers.map(
               (officer) => `${officer.id}|${officer.name}`,
@@ -3545,7 +3547,7 @@ function Records({
         {module.table === "leads" && isGeneralManager && !isProjectsPage && (
           <div className={`${contentPadding} border-t border-[#edf0f5] py-3`}>
             <p className="text-[12px] text-[#687386]">
-              Manage all leads, add new opportunities, and assign each lead to a Sales Project Officer. Officer changes are reviewed from Submissions Approvals.
+              Manage all leads, add new opportunities, and assign each lead to a Sales Officer. Officer changes are reviewed from Submissions Approvals.
             </p>
           </div>
         )}
@@ -3579,7 +3581,7 @@ function Records({
             <>
               {canFilterByProjectOfficer && (
                 <select
-                  aria-label="Filter by project officer"
+                  aria-label="Filter by sales officer"
                   value={projectOfficerFilter}
                   onChange={(event) => {
                     setProjectOfficerFilter(event.target.value);
@@ -3587,7 +3589,7 @@ function Records({
                   }}
                   className={`lead-filter-select min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${projectOfficerFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}
                 >
-                  <option value="all">All Project Officers</option>
+                  <option value="all">All Sales Officers</option>
                   <option value="unassigned">Unassigned</option>
                   {projectOfficers.map((officer) => (
                     <option key={officer.id} value={officer.id}>
@@ -3668,12 +3670,12 @@ function Records({
         </div>
         {leadOfficerDistribution.length > 0 && (
           <section
-            aria-label="Lead distribution by Sales Project Officer"
+            aria-label="Lead distribution by Sales Officers"
             className={`${contentPadding} border-t border-[#edf0f5] py-3`}
           >
             <div className="mb-2 flex items-baseline justify-between gap-3">
               <h3 className="text-[12px] font-semibold text-[#344054]">
-                Lead distribution by Sales Project Officer
+                Lead distribution by Sales Officers
               </h3>
               <span className="text-[11px] text-[#8b92a1]">
                 Matching current filters
@@ -5067,6 +5069,9 @@ function QuotationCostingOverview({
 }) {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [tab, setTab] = useState<"price_quotation" | "mockup_quotation">("price_quotation");
+  const [costedQuery, setCostedQuery] = useState("");
+  const [costedMonth, setCostedMonth] = useState(currentMonth);
+  const [costedStatus, setCostedStatus] = useState("all");
   const [pdfQuote, setPdfQuote] = useState<Row | null>(null);
   const [pdfWindow, setPdfWindow] = useState<Window | null>(null);
   useEffect(() => {
@@ -5091,6 +5096,26 @@ function QuotationCostingOverview({
           costedQuotationIds.has(text(quote.id, ""))),
     )
     .sort(newestActivityFirst);
+  const sourceFor = (quote: Row) =>
+    store.quotations.find((source) => source.id === quote.source_price_quotation_id);
+  const normalizedCostedQuery = costedQuery.trim().toLowerCase();
+  const filteredCostedQuotations = costedQuotations.filter((quote) => {
+    const source = sourceFor(quote);
+    const party = quotationParty(quote, store);
+    const costedDate = text(quote.pricing_reviewed_at ?? quote.updated_at);
+    if (costedMonth && costedDate.slice(0, 7) !== costedMonth) return false;
+    if (costedStatus !== "all" && text(quote.status) !== costedStatus) return false;
+    if (!normalizedCostedQuery) return true;
+    return [
+      quote.quotation_no,
+      source?.quotation_no,
+      party.clientName,
+      party.companyName,
+      quote.project_name,
+      quote.project_types,
+      quote.status,
+    ].some((value) => text(value).toLowerCase().includes(normalizedCostedQuery));
+  });
   const openPdf = (quote: Row) => {
     if (text(quote.status) !== "approved") return notice("Only approved quotations can be opened as PDFs.");
     const nextWindow = window.open("about:blank", "_blank");
@@ -5099,8 +5124,6 @@ function QuotationCostingOverview({
     setPdfWindow(nextWindow);
     setPdfQuote(quote);
   };
-  const sourceFor = (quote: Row) =>
-    store.quotations.find((source) => source.id === quote.source_price_quotation_id);
   return (
     <Panel
       title="Quotation Costing Overview"
@@ -5125,9 +5148,50 @@ function QuotationCostingOverview({
             </button>
           ))}
         </nav>
-        {costedQuotations.length ? (
+        <div className="flex flex-wrap items-center gap-2 border-b border-[#edf0f5] py-3">
+          <label className="relative min-w-0 flex-1 sm:min-w-56 sm:max-w-sm" htmlFor="costed-quotation-search">
+            <Search className="pointer-events-none absolute left-3 top-2.5 text-[#8b92a1]" size={15} />
+            <span className="sr-only">Search costed quotations</span>
+            <input
+              id="costed-quotation-search"
+              type="search"
+              value={costedQuery}
+              onChange={(event) => setCostedQuery(event.target.value)}
+              placeholder="Search quotation, client, or project"
+              className="min-h-9 w-full rounded-lg border border-[#d9e0e9] bg-white py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-[12px] text-[#687386]">
+            <span className="whitespace-nowrap">Month</span>
+            <input
+              type="month"
+              value={costedMonth}
+              onClick={(event) => event.currentTarget.showPicker?.()}
+              onChange={(event) => setCostedMonth(event.target.value)}
+              className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px] text-[#202938] outline-none focus:border-[#c43b43]"
+            />
+          </label>
+          <select
+            aria-label="Filter by quotation status"
+            value={costedStatus}
+            onChange={(event) => setCostedStatus(event.target.value)}
+            className={`min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${costedStatus === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}
+          >
+            <option value="all">All Statuses</option>
+            <option value="draft">Draft</option>
+            <option value="pending">Pending GM Approval</option>
+            <option value="needs_revision">Needs Revision</option>
+            <option value="approved">Approved</option>
+          </select>
+          {(costedQuery || costedMonth !== currentMonth() || costedStatus !== "all") && (
+            <Button secondary onClick={() => { setCostedQuery(""); setCostedMonth(currentMonth()); setCostedStatus("all"); }}>
+              Clear filters
+            </Button>
+          )}
+        </div>
+        {filteredCostedQuotations.length ? (
           <Table labels={tab === "mockup_quotation" ? ["Mockup Quotation", "Source Price Quotation", "Client", "Project Type", "Status", "Costed", "PDF"] : ["Price Quotation", "Client", "Project Type", "Status", "Costed", "PDF"]} minWidth={tab === "mockup_quotation" ? 1000 : 850} className="!w-full">
-            {costedQuotations.map((quote) => {
+            {filteredCostedQuotations.map((quote) => {
               const source = sourceFor(quote);
               const party = quotationParty(quote, store);
               return (
@@ -5144,7 +5208,7 @@ function QuotationCostingOverview({
             })}
           </Table>
         ) : (
-          <Empty>{tab === "mockup_quotation" ? "No Mockup Quotations costed by this account yet." : "No Price Quotations costed by this account yet."}</Empty>
+          <Empty>{costedQuotations.length ? "No Quotations match the selected filters." : tab === "mockup_quotation" ? "No Mockup Quotations costed by this account yet." : "No Price Quotations costed by this account yet."}</Empty>
         )}
       </div>
       {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); notice(message); }} autoExportPdf pdfWindow={pdfWindow} hidden />}
@@ -5699,7 +5763,7 @@ function ProjectCalendar({
                 className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px] text-[#202938] outline-none focus:border-[#c43b43]"
               />
             </label>
-            {!isProjectOfficerRole(role) && <><label className="sr-only" htmlFor="project-officer-filter">Sales Project Officer</label><select id="project-officer-filter" value={projectOfficerFilter} onChange={(event) => setProjectOfficerFilter(event.target.value)} className={`min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${projectOfficerFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}><option value="all">All Sales Project Officers</option>{projectOfficerOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></>}
+            {!isProjectOfficerRole(role) && <><label className="sr-only" htmlFor="project-officer-filter">Sales Officer</label><select id="project-officer-filter" value={projectOfficerFilter} onChange={(event) => setProjectOfficerFilter(event.target.value)} className={`min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${projectOfficerFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}><option value="all">All Sales Officers</option>{projectOfficerOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></>}
           </div>
         </div>
         <Table
@@ -5714,7 +5778,7 @@ function ProjectCalendar({
             "Project Type",
             "Percentage",
             "Remark",
-            ...(!isProjectOfficerRole(role) ? ["Sales Project Officer"] : []),
+            ...(!isProjectOfficerRole(role) ? ["Sales Executive"] : []),
             "Actions",
           ]}
           minWidth={isProjectOfficerRole(role) ? 1340 : 1520}
@@ -7390,7 +7454,7 @@ function QuotationDocument({
             >
               {text(quote.representative)}
             </p>
-            <p>Sales Project Officer</p>
+              <p>Sales Executive</p>
             <div
               style={{
                 display: "flex",
@@ -7665,7 +7729,7 @@ function QuotationDocument({
                 className="absolute"
                 style={{ position: "absolute", left: "12.7mm", top: "53.6mm" }}
               >
-                Sales Project Officer
+                Sales Executive
               </p>
               <p
                 className="absolute"
@@ -7848,7 +7912,7 @@ function CostingDocument({
           <section className="mt-5 grid grid-cols-2 gap-7 border-y border-[#111] py-3"><div><b>DETAILS</b><dl className="mt-2 grid grid-cols-[145px_1fr] gap-y-1"><dt>Size: L x W x H (in./cm.):</dt><dd className="border-b border-[#777] px-1">{text(quote.size_details)}</dd><dt>Quantity:</dt><dd className="border-b border-[#777] px-1">{text(quote.project_quantity)}</dd><dt>Delivery Date:</dt><dd className="border-b border-[#777] px-1">{day(quote.delivery_date)}</dd></dl></div><div><b>PROJECT TYPE</b><div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1.5">{projectTypeOptions.map((type) => <div key={type} className="flex items-center gap-2"><span className="inline-grid size-4 place-items-center border border-[#111] text-[11px]">{text(quote.project_types, "") === type ? "✓" : ""}</span><span>{type}</span></div>)}</div></div></section>
           <table className="pdf-fixed-table mt-6 w-full border-collapse text-sm"><thead className="font-bold"><tr className="bg-[#c43b43] text-white"><th className="w-[52%] border border-[#c43b43] p-2 text-left">Materials and Production</th><th className="w-[14%] border border-[#c43b43] p-2">Quantity</th><th className="w-[17%] border border-[#c43b43] p-2">Unit Cost</th><th className="w-[17%] border border-[#c43b43] p-2">Subtotal</th></tr></thead><tbody>{lines.map((line) => <tr key={text(line.id)}><td className="border border-[#d5dbe5] p-2">{text(line.description)}</td><td className="border border-[#d5dbe5] p-2 text-center">{n(line.quantity)}</td><td className="border border-[#d5dbe5] p-2 text-right">{peso.format(n(line.unit_cost))}</td><td className="border border-[#d5dbe5] p-2 text-right">{peso.format(n(line.line_total))}</td></tr>)}<tr className="font-medium"><td colSpan={3} className="border border-[#d5dbe5] bg-[#fff7f7] p-2">TOTAL ESTIMATED COGS</td><td className="border border-[#d5dbe5] bg-[#fff7f7] p-2 text-right">{peso.format(cogs)}</td></tr></tbody></table>
           <section className="mt-7 max-w-sm border border-[#d5dbe5]"><h2 className="border-b border-[#d5dbe5] bg-[#fff7f7] px-3 py-2 font-medium text-[#a22d35]">MARKUP, VAT, EXPENSES</h2><Cost label={`Declared Markup (${n(quote.profit_margin_rate)}%)`} value={profit} /><Cost label={`Overhead Allocation (${n(quote.overhead_rate)}%)`} value={overhead} /><Cost label={`Buffer Margin (${n(quote.buffer_margin_rate)}%)`} value={buffer} /><Cost label={`Production Commission (${n(quote.commission_rate)}%)`} value={commission} /><Cost label={`VAT (${n(quote.vat_rate)}%)`} value={n(quote.vat_amount)} /><Cost label="SELLING PRICE VAT INC." value={n(quote.total_amount)} strong /><Cost label="SELLING PRICE VAT EX." value={sellingExVat} strong /></section>
-          <section className="mt-12 flex items-end justify-between"><div className="w-56 text-center"><div className="h-14" /><div className="mx-auto w-52 border-b border-[#111] pb-1 font-semibold">{text(quote.representative)}</div><div>Sales Project Officer</div></div><div className="w-56 text-center"><div className="h-14">{approved && <img src="/marvin-tavarez-signature.png" alt="Signature of Mr. Marvin S. Tavarez" className="mx-auto h-14 max-w-full object-contain" />}</div><div className="mx-auto w-52 border-b border-[#111] pb-1 font-semibold">{approved ? "Mr. Marvin S. Tavarez" : "Pending approval"}</div><div>{approved ? `Approved and Signed By · ${day(quote.approved_at)}` : "Approved and Signed By"}</div></div></section>
+          <section className="mt-12 flex items-end justify-between"><div className="w-56 text-center"><div className="h-14" /><div className="mx-auto w-52 border-b border-[#111] pb-1 font-semibold">{text(quote.representative)}</div><div>Sales Executive</div></div><div className="w-56 text-center"><div className="h-14">{approved && <img src="/marvin-tavarez-signature.png" alt="Signature of Mr. Marvin S. Tavarez" className="mx-auto h-14 max-w-full object-contain" />}</div><div className="mx-auto w-52 border-b border-[#111] pb-1 font-semibold">{approved ? "Mr. Marvin S. Tavarez" : "Pending approval"}</div><div>{approved ? `Approved and Signed By · ${day(quote.approved_at)}` : "Approved and Signed By"}</div></div></section>
         </article>
     </div>
   );
@@ -8099,7 +8163,7 @@ function Quotations({
             `${lead.id}|${text(lead.contact_name) || text(lead.client_name)} — ${text(lead.project_name)}`,
         ),
     },
-    { key: "representative", label: "Sales Project Officer" },
+    { key: "representative", label: "Sales Executive" },
     { key: "profit_margin_rate", label: "Declared markup %", type: "number" },
     { key: "overhead_rate", label: "Overhead %", type: "number" },
     { key: "buffer_margin_rate", label: "Buffer margin %", type: "number" },
@@ -8140,7 +8204,7 @@ function Quotations({
     },
     {
       key: "representative",
-      label: "Sales Project Officer",
+      label: "Sales Executive",
       required: true,
       readOnly: true,
     },
@@ -8637,12 +8701,12 @@ function Quotations({
           </label>
           {canFilterByProjectOfficer && (
             <select
-              aria-label="Filter by project officer"
+              aria-label="Filter by sales officer"
               value={projectOfficerFilter}
               onChange={(event) => setProjectOfficerFilter(event.target.value)}
               className={`lead-filter-select min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${projectOfficerFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}
             >
-              <option value="all">All Project Officers</option>
+              <option value="all">All Sales Officers</option>
               {projectOfficers.map((officer) => (
                 <option key={officer.id} value={officer.id}>
                   {officer.name}
@@ -8688,7 +8752,7 @@ function Quotations({
                 const submittedBy = text(
                   store.profiles.find((profile) => profile.id === submittedById)
                     ?.full_name,
-                  "Project Officer",
+                  "Sales Officer",
                 );
                 return (
                 <tr key={text(q.id)}>
@@ -9771,12 +9835,12 @@ function PriceQuotationSubmissions({
         (profile) =>
           profile.id === (quotation.prepared_by_user_id ?? quotation.submitted_by ?? quotation.created_by),
       )?.full_name,
-      "Project Officer",
+      "Sales Executive",
     );
   return (
     <Panel
       title="Price Quotation Submissions"
-      detail="Review submitted Price Quotations from the Sales Project Officers and approve or return them for revision."
+      detail="Review submitted Price Quotations from the Sales Executives and approve or return them for revision."
       variant="page"
       hideHeading
     >
@@ -9903,7 +9967,7 @@ function PriceQuotationWorkspace({
       store.profiles.find(
         (profile) => profile.id === (quote.prepared_by_user_id ?? quote.created_by),
       )?.full_name,
-      text(quote.representative, "Sales Project Officer"),
+      text(quote.representative, "Sales Executive"),
     );
   const quotationPreparers = Array.from(
     new Map(quotations.map((quote) => [preparedByKey(quote), preparedByName(quote)])).entries(),
@@ -9989,7 +10053,7 @@ function PriceQuotationWorkspace({
   const endorse = async () => {
     if (!endorseQuote) return;
     const recipientUserId = text(endorsementValues.recipient_user_id).trim();
-    if (!recipientUserId) return notice("Select the Sales Project Officer receiving this copy.");
+    if (!recipientUserId) return notice("Select the Sales Executive receiving this copy.");
     setEndorsing(true);
     const client = createClient();
     try {
@@ -10254,7 +10318,7 @@ function PriceQuotationWorkspace({
         <div className="flex flex-wrap items-center gap-2 border-b border-[#edf0f5] py-3">
           <label className="relative min-w-0 flex-1 sm:min-w-56 sm:max-w-sm" htmlFor="price-quotation-search"><Search className="pointer-events-none absolute left-3 top-2.5 text-[#8b92a1]" size={15} /><span className="sr-only">Search quotations</span><input id="price-quotation-search" type="search" value={quotationQuery} onChange={(event) => setQuotationQuery(event.target.value)} placeholder="Search quotations" className="w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]" /></label>
           <label className="flex items-center gap-2 text-[12px] text-[#687386]"><span className="whitespace-nowrap">Month</span><input type="month" value={quotationMonth} onClick={(event) => event.currentTarget.showPicker?.()} onChange={(event) => setQuotationMonth(event.target.value)} className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px] text-[#202938] outline-none focus:border-[#c43b43]" /></label>
-          {!isProjectOfficerRole(role) && <><label className="sr-only" htmlFor="price-quotation-officer">Sales Project Officer</label><select id="price-quotation-officer" value={preparedByFilter} onChange={(event) => setPreparedByFilter(event.target.value)} className={`min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${preparedByFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}><option value="all">All Sales Project Officers</option>{quotationPreparers.map((officer) => <option key={officer.id} value={officer.id}>{officer.name}</option>)}</select></>}
+          {!isProjectOfficerRole(role) && <><label className="sr-only" htmlFor="price-quotation-officer">Sales Officer</label><select id="price-quotation-officer" value={preparedByFilter} onChange={(event) => setPreparedByFilter(event.target.value)} className={`min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${preparedByFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}><option value="all">All Sales Officers</option>{quotationPreparers.map((officer) => <option key={officer.id} value={officer.id}>{officer.name}</option>)}</select></>}
         </div>
       </div>
       {filteredQuotations.length ? (
@@ -10351,7 +10415,7 @@ function PriceQuotationWorkspace({
       </div>
       {isProjectOfficerRole(role) && recipientEndorsements.length > 0 && (
         <section className="border-t border-[#edf0f5] px-4 py-4 sm:px-5 lg:px-6">
-          <div className="mb-3"><h3 className="text-[14px] font-semibold text-[#202938]">Endorsed to Me</h3><p className="mt-0.5 text-[12px] text-[#687386]">Read-only PDF copies shared by another Sales Project Officer.</p></div>
+          <div className="mb-3"><h3 className="text-[14px] font-semibold text-[#202938]">Endorsed to Me</h3><p className="mt-0.5 text-[12px] text-[#687386]">Read-only PDF copies shared by another Sales Executive.</p></div>
           <Table labels={["Price Quotation", "Client's Name", "Company Name", "Endorsed", "PDF"]} minWidth={800}>
             {recipientEndorsements.map((endorsement) => {
               const quotation = store.quotations.find((item) => item.id === endorsement.quotation_id);
@@ -10364,7 +10428,7 @@ function PriceQuotationWorkspace({
         </section>
       )}
       {endorseQuote && (
-        <Dialog title="Endorse Price Quotation" fields={[{ key: "recipient_user_id", label: "Sales Project Officer", type: "select", required: true, options: availableEndorsementRecipients.map((officer) => `${officer.id}|${officer.name}`) }, { key: "note", label: "Note (optional)", type: "textarea", placeholder: "Add a note for the receiving officer." }]} values={endorsementValues} setValues={setEndorsementValues} save={() => void endorse()} close={() => setEndorseQuote(null)} saving={endorsing} saveLabel="Create PDF Copy & Endorse" className="max-w-xl">
+        <Dialog title="Endorse Price Quotation" fields={[{ key: "recipient_user_id", label: "Sales Executive", type: "select", required: true, options: availableEndorsementRecipients.map((officer) => `${officer.id}|${officer.name}`) }, { key: "note", label: "Note (optional)", type: "textarea", placeholder: "Add a note for the receiving officer." }]} values={endorsementValues} setValues={setEndorsementValues} save={() => void endorse()} close={() => setEndorseQuote(null)} saving={endorsing} saveLabel="Create PDF Copy & Endorse" className="max-w-xl">
           <p className="mt-4 rounded-lg border border-[#f2dadd] bg-[#fff9f9] p-3 text-[12px] leading-5 text-[#687386]">This creates an immutable, read-only PDF copy of {text(endorseQuote.quotation_no)}. Future revisions to the original will not change this endorsed copy.</p>
         </Dialog>
       )}
@@ -10948,7 +11012,7 @@ function GeneralManagerCostingReview({
               <div className="mt-3 space-y-2">{bankDetails.map((detail, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={detail.bank_name} onChange={(event) => setBankDetails((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, bank_name: event.target.value } : item))} placeholder="Bank name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={detail.account_name} onChange={(event) => setBankDetails((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, account_name: event.target.value } : item))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={detail.account_number} onChange={(event) => setBankDetails((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, account_number: event.target.value } : item))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label="Remove bank" onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] transition-colors hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
             </section>
             <label className="mt-4 block text-[12px] font-medium text-[#202938]">
-              Revision notes for Project Officer
+              Revision notes for Sales Executive
               <textarea
                 rows={3}
                 value={revisionNote}
@@ -11109,7 +11173,7 @@ function SubmissionReview({
             </p>
           </div>
           <div>
-            <span className="text-[#8b92a1]">Project Officer</span>
+            <span className="text-[#8b92a1]">Sales Executive</span>
             <p className="mt-1 font-medium">{officer}</p>
           </div>
           <div>
@@ -11117,7 +11181,7 @@ function SubmissionReview({
             <p className="mt-1 font-medium">{day(quotation.submitted_at)}</p>
           </div>
           <div>
-            <span className="text-[#8b92a1]">Sales Project Officer</span>
+            <span className="text-[#8b92a1]">Sales Executive</span>
             <p className="mt-1 font-medium">{text(quotation.representative)}</p>
           </div>
           <div>
@@ -11366,7 +11430,7 @@ function LeadChangeRequestReview({
             </p>
             <section className="mt-4 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3">
               <h3 className="text-[12px] font-semibold text-[#344054]">
-                Sales Project Officer reason
+                Sales Executive reason
               </h3>
               <p className="mt-1 whitespace-pre-wrap text-[13px] leading-5 text-[#4b5565]">
                 {text(request.request_note, "No reason provided.")}
@@ -11393,7 +11457,7 @@ function LeadChangeRequestReview({
         {!isDeletion && text(request.request_note, "") && (
           <section className="mt-4 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3">
             <h3 className="text-[12px] font-semibold text-[#344054]">
-              Sales Project Officer note
+              Sales Executive note
             </h3>
             <p className="mt-1 whitespace-pre-wrap text-[13px] leading-5 text-[#4b5565]">
               {text(request.request_note)}
@@ -11402,7 +11466,7 @@ function LeadChangeRequestReview({
         )}
         <label className="mt-4 block text-[12px] font-medium text-[#202938]">
           {isDeletion ? "Decision note" : "Revision note"}
-          <textarea rows={3} value={note} onChange={(event) => setNote(titleCaseEntry(event.target.value, "note"))} className="input mt-1 min-h-[76px] resize-y" placeholder={isDeletion ? "Optional note for the Sales Project Officer" : "Required when returning for revision"} />
+          <textarea rows={3} value={note} onChange={(event) => setNote(titleCaseEntry(event.target.value, "note"))} className="input mt-1 min-h-[76px] resize-y" placeholder={isDeletion ? "Optional note for the Sales Executive" : "Required when returning for revision"} />
         </label>
         <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-[#edf0f5] pt-4">
           <Button secondary onClick={close}>Close</Button>
@@ -11469,7 +11533,7 @@ function Submissions({
         (profile) =>
           profile.id === (quotation.submitted_by ?? quotation.created_by),
       )?.full_name,
-      "Project Officer",
+      "Sales Executive",
     );
   const decide = async (
     quotation: Row,
@@ -11516,7 +11580,7 @@ function Submissions({
         ? hasLinkedPriceQuotation
           ? "Costing Breakdown approved and Price Quotation updated."
           : "Costing Breakdown approved and Price Quotation created."
-        : "Returned to the Project Officer for re-evaluation.",
+        : "Returned to the Sales Executive for re-evaluation.",
     );
     await reload();
   };
@@ -11719,13 +11783,13 @@ function Submissions({
     text(
       store.profiles.find((profile) => profile.id === request.submitted_by)
         ?.full_name,
-      "Project Officer",
+      "Sales Executive",
     );
   const scheduleOfficerName = (schedule: Row) =>
     text(
       store.profiles.find((profile) => profile.id === schedule.assigned_to)
         ?.full_name,
-      "Project Officer",
+      "Sales Executive",
     );
   const openQuotationPdf = (quotation?: Row) => {
     if (!quotation) return notice("The Price Quotation for this project could not be found.");
@@ -11769,7 +11833,7 @@ function Submissions({
         </Table>
       ) : <Empty>No Mockup Quotations are awaiting General Manager review.</Empty>)}
       {tab === "price_revisions" && (pendingPriceQuotationRevisions.length ? (
-        <Table labels={["Price Quotation", "Client's Name", "Company Name", "Project Officer", "Requested", "Review"]} minWidth={860}>
+        <Table labels={["Price Quotation", "Client's Name", "Company Name", "Sales Executive", "Requested", "Review"]} minWidth={860}>
           {pendingPriceQuotationRevisions.map((request) => {
             const quotation = store.quotations.find((item) => item.id === request.quotation_id);
             const party = quotation ? quotationParty(quotation, store) : { clientName: "-", companyName: "-" };
@@ -11782,7 +11846,7 @@ function Submissions({
           labels={[
             "Costing Breakdown",
             "Client",
-            "Project Officer",
+            "Sales Executive",
             "Submitted",
             "Estimated COGS",
             "Review",
@@ -11833,7 +11897,7 @@ function Submissions({
         </Table>
       ) : <Empty>No costing breakdowns are awaiting review.</Empty>)}
       {tab === "revisions" && (pendingQuotationRevisions.length ? (
-        <Table labels={["Costing Breakdown", "Project Officer", "Requested", "Review"]}>
+        <Table labels={["Costing Breakdown", "Sales Executive", "Requested", "Review"]}>
           {pendingQuotationRevisions.map((request) => {
             const costing = store.quotations.find((item) => item.id === request.costing_id);
             return <tr key={text(request.id)}>
@@ -11846,7 +11910,7 @@ function Submissions({
         </Table>
       ) : <Empty>No Costing Breakdown revisions are awaiting review.</Empty>)}
       {tab === "calendar_projects" && (pendingProjectSchedules.length ? (
-        <Table labels={["Assigned Project Officer", "Quotation Code", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1140}>
+        <Table labels={["Assigned Sales Executive", "Quotation Code", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1140}>
           {pendingProjectSchedules.map((schedule) => {
             const quotation = store.quotations.find((item) => item.id === schedule.quotation_id);
             return (
@@ -11866,7 +11930,7 @@ function Submissions({
         </Table>
       ) : <Empty>No Project Calendar submissions are awaiting review.</Empty>)}
       {tab === "calendar_revisions" && (pendingProjectScheduleRevisions.length ? (
-        <Table labels={["Assigned Project Officer", "Quotation Code", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1140}>
+        <Table labels={["Assigned Sales Executive", "Quotation Code", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1140}>
           {pendingProjectScheduleRevisions.map((request) => {
             const schedule = store.project_schedules.find(
               (item) => item.id === request.schedule_id,
@@ -11888,7 +11952,7 @@ function Submissions({
         </Table>
       ) : <Empty>No Project Calendar revisions are awaiting review.</Empty>)}
       {tab === "calendar_completions" && (pendingProjectScheduleCompletions.length ? (
-        <Table labels={["Assigned Project Officer", "Quotation Code", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1140}>
+        <Table labels={["Assigned Sales Executive", "Quotation Code", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1140}>
           {pendingProjectScheduleCompletions.map((request) => {
             const schedule = store.project_schedules.find(
               (item) => item.id === request.schedule_id,
@@ -11910,7 +11974,7 @@ function Submissions({
         </Table>
       ) : <Empty>No Project Calendar completion requests are awaiting review.</Empty>)}
       {tab === "projects" && (pendingProjectEdits.length ? (
-        <Table labels={["Project", "Project Officer", "Submitted", "Requested changes", "Review"]}>
+        <Table labels={["Project", "Sales Executive", "Submitted", "Requested changes", "Review"]}>
           {pendingProjectEdits.map((request) => {
             const project = store.leads.find((lead) => lead.id === request.project_id);
             const changes = request.proposed_changes && typeof request.proposed_changes === "object" ? Object.keys(request.proposed_changes as Record<string, unknown>) : [];
@@ -11925,7 +11989,7 @@ function Submissions({
         </Table>
       ) : <Empty>No project edits are awaiting review.</Empty>)}
       {tab === "leads" && (pendingLeadChanges.length ? (
-        <Table labels={["Lead", "Project Officer", "Requested", "Change", "Review"]}>
+        <Table labels={["Lead", "Sales Executive", "Requested", "Change", "Review"]}>
           {pendingLeadChanges.map((request) => {
             const lead = store.leads.find((item) => item.id === request.lead_id);
             const changes = request.proposed_changes && typeof request.proposed_changes === "object" ? Object.keys(request.proposed_changes as Record<string, unknown>) : [];
@@ -14078,11 +14142,11 @@ function Dashboard({
     { label: "Quarterly sales quota", value: dashboardQuarterTarget ? `${dashboardQuarterProgress}%` : "Not set", detail: dashboardQuarterTarget ? `${quarterLabel} · ${peso.format(Math.max(dashboardQuarterTarget - dashboardQuarterSales, 0))} remaining` : `Set a target for ${quarterLabel}`, icon: Goal, iconClass: "bg-[#7043ca] text-white", accent: "bg-[#7043ca]", view: isProjectOfficer ? "Dashboard" as View : "Targets" as View },
   ];
   const operationsMetrics = [
-    { label: "Leads generated", value: dashboardLeads, detail: "All project officers", icon: ClipboardCheck, tone: "bg-[#7043ca]", view: "Leads" as View },
+    { label: "Leads generated", value: dashboardLeads, detail: "All sales officers", icon: ClipboardCheck, tone: "bg-[#7043ca]", view: "Leads" as View },
     { label: "Price quotations", value: dashboardQuotes, detail: "Sent or approved", icon: FileText, tone: "bg-[#1769e8]", view: "Price Quotations" as View },
   ];
   const projectOfficerMetrics = [
-    { label: "All leads generated", value: dashboardLeads, detail: "All project officers", icon: ClipboardCheck, tone: "bg-[#7043ca]" },
+    { label: "All leads generated", value: dashboardLeads, detail: "All sales officers", icon: ClipboardCheck, tone: "bg-[#7043ca]" },
     { label: "My leads generated", value: dashboardOfficerLeads, detail: "Assigned to you", icon: UserRound, tone: "bg-[#7043ca]" },
     { label: "All price quotations", value: dashboardQuotes, detail: "Team sent or approved", icon: FileText, tone: "bg-[#1769e8]" },
     { label: "My price quotations", value: dashboardOfficerQuotes, detail: "Your sent or approved", icon: UserRound, tone: "bg-[#1769e8]" },
@@ -14470,7 +14534,7 @@ function CommissionsView({ role }: { role: string }) {
   }, []);
   const paid = rows.reduce((sum, row) => sum + n(row.paid_amount), 0);
   const earned = rows.reduce((sum, row) => sum + n(row.earned_commission), 0);
-  return <div className="space-y-5"><Panel title={isProjectOfficerRole(role) ? "My commissions" : "Sales Project Officer commissions"} detail="Commission is earned only from actual customer payments: first ₱400,000 at 3%, then the balance at 5%."><div className="grid gap-3 p-4 sm:grid-cols-2"><div className="rounded-lg bg-[#f8fbff] p-3 text-[12px]"><p className="text-[#687386]">Actual collections</p><p className="mt-1 text-lg font-semibold">{peso.format(paid)}</p></div><div className="rounded-lg bg-[#eff7f1] p-3 text-[12px]"><p className="text-[#687386]">Commission earned</p><p className="mt-1 text-lg font-semibold text-[#176b40]">{peso.format(earned)}</p></div></div>{loading ? <Empty>Loading commissions…</Empty> : rows.length ? <Table labels={isProjectOfficerRole(role) ? ["Quotation", "Client", "Paid to date", "Projected", "Earned"] : ["Officer", "Quotation", "Client", "Paid to date", "Earned"]}>{rows.map((row) => <tr key={text(row.quotation_id)}>{!isProjectOfficerRole(role) && <td className="px-4 py-3">{text(row.officer_user_id)}</td>}<td className="px-4 py-3"><b>{text(row.quotation_no)}</b><small>{text(row.project_name)}</small></td><td className="px-4 py-3">{text(row.client_name)}</td><td className="px-4 py-3 text-right">{peso.format(n(row.paid_amount))}</td>{!isProjectOfficerRole(role) && <td className="px-4 py-3 text-right">{peso.format(n(row.projected_commission))}</td>}<td className="px-4 py-3 text-right font-semibold">{peso.format(n(row.earned_commission))}</td></tr>)}</Table> : <Empty>No approved quotations with commission eligibility yet.</Empty>}</Panel></div>;
+  return <div className="space-y-5"><Panel title={isProjectOfficerRole(role) ? "My commissions" : "Sales Executive commissions"} detail="Commission is earned only from actual customer payments: first ₱400,000 at 3%, then the balance at 5%."><div className="grid gap-3 p-4 sm:grid-cols-2"><div className="rounded-lg bg-[#f8fbff] p-3 text-[12px]"><p className="text-[#687386]">Actual collections</p><p className="mt-1 text-lg font-semibold">{peso.format(paid)}</p></div><div className="rounded-lg bg-[#eff7f1] p-3 text-[12px]"><p className="text-[#687386]">Commission earned</p><p className="mt-1 text-lg font-semibold text-[#176b40]">{peso.format(earned)}</p></div></div>{loading ? <Empty>Loading commissions…</Empty> : rows.length ? <Table labels={isProjectOfficerRole(role) ? ["Quotation", "Client", "Paid to date", "Projected", "Earned"] : ["Officer", "Quotation", "Client", "Paid to date", "Earned"]}>{rows.map((row) => <tr key={text(row.quotation_id)}>{!isProjectOfficerRole(role) && <td className="px-4 py-3">{text(row.officer_user_id)}</td>}<td className="px-4 py-3"><b>{text(row.quotation_no)}</b><small>{text(row.project_name)}</small></td><td className="px-4 py-3">{text(row.client_name)}</td><td className="px-4 py-3 text-right">{peso.format(n(row.paid_amount))}</td>{!isProjectOfficerRole(role) && <td className="px-4 py-3 text-right">{peso.format(n(row.projected_commission))}</td>}<td className="px-4 py-3 text-right font-semibold">{peso.format(n(row.earned_commission))}</td></tr>)}</Table> : <Empty>No approved quotations with commission eligibility yet.</Empty>}</Panel></div>;
 }
 
 function SettingsView({
@@ -14573,11 +14637,11 @@ function SettingsView({
     setCreatingProjectManager(false);
     if (!response.ok)
       return notice(
-        result.error ?? "Unable to create the Project Manager account.",
+        result.error ?? "Unable to create the Sales Executive account.",
       );
     setProjectManagerOpen(false);
     setProjectManagerValues({});
-    notice("Project Manager account created.");
+    notice("Sales Executive account created.");
     await reload();
   };
   const saveDefaultBankDetails = async () => {
@@ -14642,7 +14706,7 @@ function SettingsView({
       {isSuperAdmin && (
       <Panel
         title="Staff access"
-        detail="Each person uses their own account; assign every Project Officer and Accountant separately."
+        detail="Each person uses their own account; assign every Sales Executive, Sales & Pricing Officer, and Accountant separately."
       >
         <Table labels={["User", "Role", "Access"]}>
           {store.organization_members.map((m) => (
@@ -14678,7 +14742,9 @@ function SettingsView({
                       <option key={item} value={item}>
                         {item === "admin"
                           ? "Administrator"
-                          : titleCase(item.replaceAll("_", " "))}
+                          : item === "project_manager"
+                            ? "Sales Executive"
+                            : titleCase(item.replaceAll("_", " "))}
                       </option>
                     ))}
                   </select>
@@ -14691,6 +14757,8 @@ function SettingsView({
                           ? "Owner / General Manager"
                           : text(m.role) === "sales_pricing_officer"
                               ? "Sales & Pricing Officer"
+                              : text(m.role) === "project_manager"
+                                ? "Sales Executive"
                               : m.role
                     }
                   />
@@ -14714,8 +14782,8 @@ function SettingsView({
       )}
       {isSuperAdmin && (
         <Panel
-          title="Project Officer Accounts"
-          detail="Create the secure sign-in accounts used by Sales Project Officers."
+          title="Sales Staff Accounts"
+          detail="Create the secure sign-in accounts used by Sales Executives and Sales & Pricing Officers."
           action={
             <Button
               onClick={() => {
@@ -14728,14 +14796,14 @@ function SettingsView({
               }}
             >
               <Plus size={14} />
-              Create Project Manager
+              Create Sales Executive
             </Button>
           }
         >
           {store.organization_members.some(
             (member) => isProjectOfficerRole(text(member.role)),
           ) ? (
-            <Table labels={["Project Officer", "Account Status"]}>
+            <Table labels={["Sales Staff", "Account Status"]}>
               {store.organization_members
                 .filter((member) => isProjectOfficerRole(text(member.role)))
                 .map((member) => (
@@ -14749,7 +14817,7 @@ function SettingsView({
                 ))}
             </Table>
           ) : (
-            <Empty>No Project Manager accounts have been created yet.</Empty>
+            <Empty>No Sales Staff accounts have been created yet.</Empty>
           )}
         </Panel>
       )}
@@ -14772,7 +14840,7 @@ function SettingsView({
       )}
       {projectManagerOpen && (
         <Dialog
-          title="Create Project Manager Account"
+          title="Create Sales Executive Account"
           fields={[
             { key: "full_name", label: "Full Name", required: true },
             { key: "email", label: "Email", type: "email", required: true },
@@ -14781,7 +14849,7 @@ function SettingsView({
               label: "Temporary Password",
               type: "password",
               required: true,
-              hint: "At least 6 characters. Share this securely with the Project Manager.",
+              hint: "At least 6 characters. Share this securely with the Sales Executive.",
             },
           ]}
           values={projectManagerValues}
@@ -14789,7 +14857,7 @@ function SettingsView({
           save={() => void createProjectManager()}
           close={() => setProjectManagerOpen(false)}
           saving={creatingProjectManager}
-          saveLabel="Create Project Manager"
+          saveLabel="Create Sales Executive"
         />
       )}
       {profileOpen && (
@@ -15266,7 +15334,7 @@ export function HuswellWorkspace({
       detail: "Manage business defaults, profile details, and staff access.",
     },
     Commissions: {
-      title: isProjectOfficerRole(role) ? "My commissions" : "Sales Project Officer commissions",
+      title: isProjectOfficerRole(role) ? "My commissions" : "Sales Executive commissions",
       detail: "Track commission earned from actual customer payments.",
     },
     Policy: {

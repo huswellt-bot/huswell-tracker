@@ -46,7 +46,7 @@ const displayRole = (role: string) =>
     ? "General Manager"
     : role === "sales_pricing_officer"
       ? "Sales & Pricing Officer"
-      : "Sales Project Officer";
+      : "Sales Executive";
 const pricingProjectTypes = [
   "Premium Rigid Box",
   "Regular Rigid Box",
@@ -565,7 +565,7 @@ export function SuperAdminConsole({
                   }
                   className="mt-1.5 w-full rounded-lg border border-[#cfd8e3] bg-white px-3 py-2 text-[14px] outline-none focus:border-[#c43b43]"
                 >
-                  <option value="project_manager">Sales Project Officer</option>
+                  <option value="project_manager">Sales Executive</option>
                   <option value="admin">General Manager</option>
                   <option value="sales_pricing_officer">Sales &amp; Pricing Officer</option>
                 </select>
@@ -695,7 +695,7 @@ export function SuperAdminConsole({
               <div>
                 <h2 className="text-[17px] font-semibold">Add User</h2>
                 <p className="mt-1 text-[14px] text-[#7d8797]">
-                  Create a Sales Project Officer, General Manager, or Sales &amp; Pricing Officer login.
+                  Create a Sales Executive, General Manager, or Sales &amp; Pricing Officer login.
                 </p>
               </div>
               <button
@@ -745,7 +745,7 @@ export function SuperAdminConsole({
                   }
                   className="mt-1.5 w-full rounded-lg border border-[#cfd8e3] bg-white px-3 py-2 text-[14px] outline-none focus:border-[#c43b43]"
                 >
-                  <option value="project_manager">Sales Project Officer</option>
+                  <option value="project_manager">Sales Executive</option>
                   <option value="admin">General Manager</option>
                   <option value="sales_pricing_officer">Sales &amp; Pricing Officer</option>
                 </select>

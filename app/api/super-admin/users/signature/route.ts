@@ -76,7 +76,7 @@ export async function POST(request: Request) {
   if (membershipError || !membership)
     return json({ error: membershipError?.message ?? "This user is not assigned to this workspace." }, 404);
   if (!['project_manager', 'sales_pricing_officer', 'admin'].includes(membership.role))
-    return json({ error: "A signature can only be saved for a Sales Project Officer or General Manager." }, 400);
+    return json({ error: "A signature can only be saved for a Sales Executive, Sales & Pricing Officer, or General Manager." }, 400);
 
   const path = `${organizationId}/${userId}/signature.${extensions[signature.type]}`;
   const { error: uploadError } = await admin.storage
@@ -119,7 +119,7 @@ export async function POST(request: Request) {
   if (quotationError) return json({ error: quotationError.message }, 500);
 
   return Response.json({
-    message: `${['project_manager', 'sales_pricing_officer'].includes(membership.role) ? "Sales Project Officer" : "General Manager"} signature saved.`,
+    message: `${membership.role === "project_manager" ? "Sales Executive" : membership.role === "sales_pricing_officer" ? "Sales & Pricing Officer" : "General Manager"} signature saved.`,
     signature_url: signatureUrl,
   });
 }

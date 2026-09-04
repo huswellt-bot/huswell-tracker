@@ -48,7 +48,7 @@ export function AccountProfileDialog({
       : role === "admin"
         ? "General Manager"
         : role === "project_manager"
-          ? "Project Manager"
+          ? "Sales Executive"
           : role === "sales_pricing_officer"
             ? "Sales & Pricing Officer"
             : role.replaceAll("_", " ");

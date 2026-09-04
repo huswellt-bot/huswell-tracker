@@ -35,11 +35,11 @@ async function getSuperAdminOrganization() {
 export async function POST(request: Request) {
   const organizationId = await getSuperAdminOrganization();
   if (!organizationId)
-    return json({ error: "Only the Super Admin can create Project Manager accounts." }, 403);
+    return json({ error: "Only the Super Admin can create Sales Executive accounts." }, 403);
 
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!serviceRoleKey)
-    return json({ error: "Project Manager account creation is not configured. Add SUPABASE_SERVICE_ROLE_KEY to the server environment." }, 500);
+    return json({ error: "Sales Executive account creation is not configured. Add SUPABASE_SERVICE_ROLE_KEY to the server environment." }, 500);
 
   const body = (await request.json().catch(() => null)) as CreateProjectManagerRequest | null;
   const fullName = typeof body?.full_name === "string" ? body.full_name.trim() : "";
@@ -82,5 +82,5 @@ export async function POST(request: Request) {
     return json({ error: membershipError.message }, 500);
   }
 
-  return Response.json({ message: "Project Manager account created." }, { status: 201 });
+  return Response.json({ message: "Sales Executive account created." }, { status: 201 });
 }
