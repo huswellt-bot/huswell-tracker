@@ -380,6 +380,34 @@ const text = (value: unknown, fallback = "-") =>
       ? fallback
       : String(value),
   );
+const comparableDisplayText = (value: unknown) =>
+  text(value, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+const stackedCell = (
+  primary: unknown,
+  secondary?: unknown | unknown[],
+  separator = " - ",
+) => {
+  const primaryText = text(primary);
+  const primaryComparable = comparableDisplayText(primaryText);
+  const detailText = (Array.isArray(secondary) ? secondary : [secondary])
+    .map((value) => text(value, "").trim())
+    .filter(Boolean)
+    .filter((value, index, values) => {
+      const comparable = comparableDisplayText(value);
+      return comparable && comparable !== primaryComparable && values.findIndex((item) => comparableDisplayText(item) === comparable) === index;
+    })
+    .join(separator);
+
+  return (
+    <>
+      <b>{primaryText}</b>
+      {detailText && <small>{detailText}</small>}
+    </>
+  );
+};
 const policyStoragePath = (value: unknown, organizationId: string) => {
   const rawValue = text(value, "").trim();
   if (!rawValue) return "";
@@ -1035,12 +1063,7 @@ const directory: Module = {
   columns: [
     {
       label: "Customer",
-      value: (r) => (
-        <>
-          <b>{text(r.company_name)}</b>
-          <small>{text(r.contact_name)}</small>
-        </>
-      ),
+      value: (r) => stackedCell(r.company_name, r.contact_name),
     },
     { label: "Contact", value: (r) => text(r.phone) },
     { label: "Email", value: (r) => text(r.email) },
@@ -1099,12 +1122,7 @@ const leads: Module = {
   columns: [
     {
       label: "Lead / project",
-      value: (r) => (
-        <>
-          <b>{text(r.project_name)}</b>
-          <small>{text(r.client_name)}</small>
-        </>
-      ),
+      value: (r) => stackedCell(r.project_name, r.client_name),
     },
     { label: "Client's Name", value: (r) => text(r.contact_name, "—") },
     { label: "Company name", value: (r) => text(r.client_name, "—") },
@@ -1147,12 +1165,7 @@ const supplierDirectory: Module = {
   columns: [
     {
       label: "Supplier",
-      value: (r) => (
-        <>
-          <b>{text(r.company_name)}</b>
-          <small>{text(r.contact_name)}</small>
-        </>
-      ),
+      value: (r) => stackedCell(r.company_name, r.contact_name),
     },
     { label: "Address", value: (r) => text(r.address) },
     { label: "Email", value: (r) => text(r.email) },
@@ -1188,17 +1201,12 @@ const supplierPayables: Module = {
   columns: [
     {
       label: "Payable",
-      value: (r, s) => (
-        <>
-          <b>{text(r.payable_no)}</b>
-          <small>
-            {text(
-              s.suppliers.find((supplier) => supplier.id === r.supplier_id)
-                ?.company_name,
-            )}
-          </small>
-        </>
-      ),
+      value: (r, s) =>
+        stackedCell(
+          r.payable_no,
+          s.suppliers.find((supplier) => supplier.id === r.supplier_id)
+            ?.company_name,
+        ),
     },
     { label: "Due date", value: (r) => day(r.due_date) },
     {
@@ -1246,12 +1254,7 @@ const catalog: Module = {
   columns: [
     {
       label: "Item",
-      value: (r) => (
-        <>
-          <b>{text(r.name)}</b>
-          <small>{text(r.sku)}</small>
-        </>
-      ),
+      value: (r) => stackedCell(r.name, r.sku),
     },
     { label: "Type", value: (r) => <Status value={r.item_type} /> },
     {
@@ -1322,12 +1325,7 @@ const inventory: Module = {
   columns: [
     {
       label: "Supply",
-      value: (r) => (
-        <>
-          <b>{text(r.name)}</b>
-          <small>{text(r.sku)}</small>
-        </>
-      ),
+      value: (r) => stackedCell(r.name, r.sku),
     },
     {
       label: "Available",
@@ -1476,12 +1474,7 @@ const finance: Module = {
     { label: "Date", value: (r) => day(r.occurred_on) },
     {
       label: "Description",
-      value: (r) => (
-        <>
-          <b>{text(r.description)}</b>
-          <small>{text(r.entry_type).replaceAll("_", " ")}</small>
-        </>
-      ),
+      value: (r) => stackedCell(r.description, text(r.entry_type).replaceAll("_", " ")),
     },
     {
       label: "Cash in",
@@ -1622,7 +1615,7 @@ function Button({
         aria-busy={loading || undefined}
         onClick={trigger}
         style={{ fontSize: "var(--font-size-body)", lineHeight: "var(--line-height-body)" }}
-        className={`${secondary ? "border border-[#cfd8e3] bg-white text-[#151922] hover:bg-[#f5f7fa]" : tone === "green" ? "bg-[#218b55] text-white hover:bg-[#176d42]" : "bg-[#c43b43] text-white hover:bg-[#ab3038]"} inline-flex ${compact ? "min-h-7 py-0.5" : "min-h-8"} items-center gap-1.5 rounded-lg px-2.5 text-[12px] font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50`}
+        className={`${secondary ? "border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-subtle)]" : tone === "green" ? "bg-[var(--color-success)] text-white hover:bg-[color-mix(in_srgb,var(--color-success)_85%,black)]" : "bg-[var(--color-accent)] text-[var(--color-on-accent)] hover:bg-[var(--color-accent-hover)]"} inline-flex ${compact ? "min-h-7 py-0.5" : "min-h-8"} items-center gap-1.5 rounded-[var(--radius-control)] px-3 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)]`}
       >
         {loading && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
         {children}
@@ -1658,22 +1651,22 @@ function ConfirmationDialog({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-[70] grid place-items-center bg-[#151922]/40 p-4"
+      className="fixed inset-0 z-[70] grid place-items-center bg-[color-mix(in_srgb,var(--color-text-primary)_30%,transparent)] p-4"
       role="presentation"
     >
       <section
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirmation-title"
-        className="w-full max-w-sm min-w-0 rounded-[14px] border border-[#d9e0e9] bg-white p-4 shadow-xl"
+        className="w-full max-w-sm min-w-0 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-none"
       >
         <h2
           id="confirmation-title"
-          className="min-w-0 break-words text-[15px] font-semibold text-[#202938]"
+          className="min-w-0 break-words text-[16px] font-semibold text-[var(--color-text-primary)]"
         >
           {title}
         </h2>
-        <p className="mt-1.5 min-w-0 whitespace-normal break-words [overflow-wrap:anywhere] text-[12px] leading-[18px] text-[#626b7a]">
+        <p className="mt-1.5 min-w-0 whitespace-normal break-words [overflow-wrap:anywhere] text-[13px] leading-[1.45] text-[var(--color-text-secondary)]">
           {description}
         </p>
         <div className="mt-4 flex justify-end gap-2">
@@ -1683,7 +1676,7 @@ function ConfirmationDialog({
           <button
             type="button"
             onClick={onConfirm}
-            className="inline-flex min-h-8 items-center rounded-lg bg-[#c43b43] px-2.5 text-[12px] font-semibold text-white transition-colors hover:bg-[#ab3038]"
+            className="inline-flex min-h-8 items-center rounded-[var(--radius-control)] bg-[var(--color-accent)] px-3 text-[13px] font-medium text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)]"
           >
             Confirm
           </button>
@@ -2174,18 +2167,18 @@ function Panel({
     <section
       className={
         variant === "page"
-          ? "min-h-full overflow-hidden bg-white"
-          : "overflow-hidden rounded-[14px] border border-[#dfe5ed] bg-white"
+          ? "min-h-full overflow-hidden bg-[var(--color-surface)]"
+          : "overflow-hidden rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-none"
       }
     >
       {!hideHeading && (
         <header
-          className={`flex flex-wrap items-start justify-between gap-3 ${variant === "page" ? "border-b border-[#e9edf2] px-3 py-2 sm:px-4 lg:px-5" : "p-3 sm:p-4"}`}
+          className={`flex flex-wrap items-start justify-between gap-3 ${variant === "page" ? "border-b border-[var(--color-border)] px-3 py-2 sm:px-4 lg:px-5" : "p-3 sm:p-4"}`}
         >
           <div className="min-w-0">
-            <h2 className="text-[14px] font-semibold">{title}</h2>
+            <h2 className="text-[14px] font-semibold text-[var(--color-text-primary)]">{title}</h2>
             <p
-              className={`${variant === "page" ? "mt-0.5" : "mt-1"} text-[11px] text-[#8b92a1]`}
+              className={`${variant === "page" ? "mt-0.5" : "mt-1"} text-[12px] text-[var(--color-text-secondary)]`}
             >
               {detail}
             </p>
@@ -2224,10 +2217,12 @@ function LeadWorkspaceTabs({
       ? [{ mode: "lead_change_requests" as const, label: "My Lead Change Requests" }]
       : []),
   ];
+  if (tabs.length < 2) return null;
+
   return (
     <nav
       aria-label="Lead workspace sections"
-      className={`${className} flex gap-1 overflow-x-auto border-b border-[#e4e8ef] pt-2`}
+      className={`${className} app-tabs pt-2`}
     >
       {tabs.map((tab) => (
         <button
@@ -2235,7 +2230,7 @@ function LeadWorkspaceTabs({
           type="button"
           onClick={() => onChange(tab.mode)}
           aria-current={active === tab.mode ? "page" : undefined}
-          className={`shrink-0 px-3 py-2 text-[12px] font-medium ${active === tab.mode ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1] hover:text-[#4b5565]"}`}
+          className="app-tab"
         >
           {tab.label}
         </button>
@@ -2245,7 +2240,7 @@ function LeadWorkspaceTabs({
 }
 function Empty({ children }: { children: ReactNode }) {
   return (
-    <div className="border-t border-[#e4e8ef] px-4 py-8 text-center text-[12px] text-[#8b92a1]">
+    <div className="border-t border-[var(--color-border)] px-4 py-8 text-center text-[12px] text-[var(--color-text-secondary)]">
       {children}
     </div>
   );
@@ -2254,12 +2249,12 @@ function Progress({ value, total }: { value: number; total: number }) {
   const pct = total ? Math.min(Math.round((value / total) * 100), 100) : 0;
   return (
     <div className="min-w-28">
-      <div className="mb-1 flex justify-between text-[11px] text-[#626b7a]">
+      <div className="mb-1 flex justify-between text-[11px] text-[var(--color-text-secondary)]">
         <span>{value.toLocaleString()}</span>
         <span>{pct}%</span>
       </div>
-      <div className="h-1.5 overflow-hidden rounded bg-[#edf0f5]">
-        <div className="h-full bg-[#1769e8]" style={{ width: `${pct}%` }} />
+      <div className="h-1.5 overflow-hidden rounded-[var(--radius-control)] bg-[var(--color-surface-subtle)]">
+        <div className="h-full bg-[var(--color-accent)]" style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
@@ -2850,6 +2845,7 @@ function Records({
   const [doneDealStatusFilter, setDoneDealStatusFilter] = useState("all");
   const [monthFilter, setMonthFilter] = useState(currentMonth);
   const [projectOfficerFilter, setProjectOfficerFilter] = useState("all");
+  const [leadDistributionOpen, setLeadDistributionOpen] = useState(false);
   const [deletionRequestLead, setDeletionRequestLead] = useState<Row | null>(null);
   const [deletionRequestValues, setDeletionRequestValues] = useState<Record<string, string>>({
     request_note: "",
@@ -3422,7 +3418,7 @@ function Records({
                       : `${labels.slice(0, 2).join(", ")} +${labels.length - 2} more`;
                   return (
                     <tr key={text(request.id)} className="hover:bg-[#fbfcff]">
-                      <td className="px-5 py-3"><b>{text(lead?.project_name)}</b><small>{text(lead?.client_name)} - {text(lead?.contact_name)}</small></td>
+                      <td className="px-5 py-3">{stackedCell(lead?.project_name, [lead?.client_name, lead?.contact_name])}</td>
                       <td className="px-5 py-3"><span>{changeSummary || "-"}</span><small>Submitted {day(request.submitted_at)}</small></td>
                       <td className="px-5 py-3"><Status value={request.status} />{text(request.decision_note, "") && <small>{text(request.decision_note)}</small>}</td>
                       <td className="px-5 py-3">
@@ -3495,7 +3491,7 @@ function Records({
               const changes = request.proposed_changes && typeof request.proposed_changes === "object" ? Object.keys(request.proposed_changes as Record<string, unknown>) : [];
               return (
                 <tr key={text(request.id)}>
-                  <td className="px-4 py-3"><b>{text(lead?.project_name)}</b><small>{text(lead?.client_name)} · {text(lead?.contact_name)}</small></td>
+                  <td className="px-4 py-3">{stackedCell(lead?.project_name, [lead?.client_name, lead?.contact_name], " · ")}</td>
                   <td className="px-4 py-3">{day(request.submitted_at)}</td>
                   <td className="px-4 py-3">{text(request.change_type, "") === "delete" ? "Deletion request" : changes.map((change) => change.replaceAll("_", " ")).join(", ")}</td>
                   <td className="px-4 py-3"><Status value={request.status} /></td>
@@ -3660,6 +3656,15 @@ function Records({
               >
                 All months
               </Button>
+              {leadOfficerDistribution.length > 0 && (
+                <Button
+                  secondary
+                  onClick={() => setLeadDistributionOpen(true)}
+                >
+                  <UsersRound size={14} />
+                  Lead distribution
+                </Button>
+              )}
             </>
           ) : (
             <Button secondary onClick={() => setPage(0)}>
@@ -3668,37 +3673,68 @@ function Records({
             </Button>
           )}
         </div>
-        {leadOfficerDistribution.length > 0 && (
-          <section
-            aria-label="Lead distribution by Sales Officers"
-            className={`${contentPadding} border-t border-[#edf0f5] py-3`}
+        {leadDistributionOpen && (
+          <div
+            className="fixed inset-0 z-50 flex justify-end bg-[color-mix(in_srgb,var(--color-text-primary)_30%,transparent)]"
+            role="presentation"
           >
-            <div className="mb-2 flex items-baseline justify-between gap-3">
-              <h3 className="text-[12px] font-semibold text-[#344054]">
-                Lead distribution by Sales Officers
-              </h3>
-              <span className="text-[11px] text-[#8b92a1]">
-                Matching current filters
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {leadOfficerDistribution.map((officer) => (
+            <button
+              type="button"
+              className="absolute inset-0 cursor-default"
+              onClick={() => setLeadDistributionOpen(false)}
+              aria-label="Close lead distribution"
+            />
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="lead-distribution-title"
+              className="relative flex h-dvh w-full flex-col border-l border-[var(--color-border)] bg-[var(--color-surface)] shadow-none sm:max-w-[420px]"
+            >
+              <header className="flex items-start justify-between gap-4 border-b border-[var(--color-border)] px-4 py-3">
+                <div className="min-w-0">
+                  <h3
+                    id="lead-distribution-title"
+                    className="text-[14px] font-semibold text-[var(--color-text-primary)]"
+                  >
+                    Lead distribution by Sales Officers
+                  </h3>
+                  <p className="mt-1 text-[12px] text-[var(--color-text-secondary)]">
+                    Matching current filters
+                  </p>
+                </div>
                 <button
-                  key={officer.id}
                   type="button"
-                  onClick={() => {
-                    setProjectOfficerFilter(officer.id);
-                    setPage(0);
-                  }}
-                  className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-[#d9e0e9] bg-[#f8faff] px-3 text-left text-[12px] text-[#344054] transition-colors hover:border-[#c43b43] hover:bg-[#fff7f7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c43b43] focus-visible:ring-offset-2"
-                  aria-label={`Show ${officer.name}'s ${officer.count} matching leads`}
+                  onClick={() => setLeadDistributionOpen(false)}
+                  aria-label="Close lead distribution"
+                  className="grid size-8 shrink-0 place-items-center rounded-[var(--radius-control)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)]"
                 >
-                  <span className="max-w-44 truncate">{officer.name}</span>
-                  <b className="text-[13px] text-[#151922]">{officer.count}</b>
+                  <X size={16} strokeWidth={1.75} />
                 </button>
-              ))}
-            </div>
-          </section>
+              </header>
+              <div className="flex-1 overflow-y-auto p-3">
+                <div className="space-y-1">
+                  {leadOfficerDistribution.map((officer) => (
+                    <button
+                      key={officer.id}
+                      type="button"
+                      onClick={() => {
+                        setProjectOfficerFilter(officer.id);
+                        setPage(0);
+                        setLeadDistributionOpen(false);
+                      }}
+                      className="flex min-h-10 w-full items-center justify-between gap-3 rounded-[var(--radius-control)] border border-transparent px-3 py-2 text-left text-[13px] text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-border)] hover:bg-[var(--color-surface-subtle)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)]"
+                      aria-label={`Show ${officer.name}'s ${officer.count} matching leads`}
+                    >
+                      <span className="min-w-0 flex-1 truncate">{officer.name}</span>
+                      <span className="inline-flex min-w-9 justify-center rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-2 py-0.5 text-[12px] font-semibold text-[var(--color-text-primary)]">
+                        {officer.count}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </section>
+          </div>
         )}
         {shown.length ? (
           <>
@@ -3732,11 +3768,20 @@ function Records({
                 {shown.map((row) => (
                   <tr key={text(row.id)} className="hover:bg-[#fbfcff]">
                     {module.table === "leads" && rowActions(row)}
-                    {columns.map((c) => (
-                      <td key={c.label} className="px-5 py-3 align-middle">
-                        {c.value(row, store)}
-                      </td>
-                    ))}
+                    {columns.map((c) => {
+                      const value = c.value(row, store);
+                      const plainValue =
+                        typeof value === "string" || typeof value === "number"
+                          ? String(value)
+                          : undefined;
+                      return (
+                        <td key={c.label} className="px-5 py-3 align-middle">
+                          <span className="lead-cell-value" title={plainValue}>
+                            {value}
+                          </span>
+                        </td>
+                      );
+                    })}
                     {module.table !== "leads" && rowActions(row)}
                   </tr>
                 ))}
@@ -4419,7 +4464,7 @@ function PriceQuotationMockups({
               const mockupStatus = mockupStatusFor(text(quote.id));
               return (
                 <tr key={text(quote.id)}>
-                  <td className="px-5 py-3"><b>{text(quote.quotation_no)}</b><small>{text(quote.project_name, text(lead?.project_name))}</small></td>
+                  <td className="px-5 py-3">{stackedCell(quote.quotation_no, text(quote.project_name, text(lead?.project_name)))}</td>
                   <td className="px-5 py-3 font-medium">{party.clientName}</td>
                   <td className="px-5 py-3">{party.companyName}</td>
                   <td className="px-5 py-3">{day(quote.approved_at ?? quote.issue_date)}</td>
@@ -4775,7 +4820,7 @@ function MockupQuotationWorkspace({
     >
       <div className="px-4 py-4 sm:px-5 lg:px-6">
         <div className="mb-4">
-          <nav aria-label="Mockup quotation statuses" className="flex gap-1 overflow-x-auto border-b border-[#e4e8ef]">
+          <nav aria-label="Mockup quotation statuses" className="app-tabs">
             {([
               ["draft", "Draft"],
               ["pending", "Pending Review"],
@@ -4788,7 +4833,7 @@ function MockupQuotationWorkspace({
                 type="button"
                 onClick={() => setStatusTab(value)}
                 aria-current={statusTab === value ? "page" : undefined}
-                className={"shrink-0 px-3 py-2 text-[12px] font-medium " + (statusTab === value ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1] hover:text-[#4b5565]")}
+                className="app-tab"
               >
                 {label} ({mockupQuotations.filter((quote) => text(quote.status) === value).length})
               </button>
@@ -4818,7 +4863,7 @@ function MockupQuotationWorkspace({
               ).length;
               return (
                 <tr key={text(quote.id)}>
-                  <td className="px-5 py-3"><b>{text(quote.quotation_no)}</b><small>{text(quote.project_name)}</small></td>
+                  <td className="px-5 py-3">{stackedCell(quote.quotation_no, quote.project_name)}</td>
                   <td className="px-5 py-3">
                     {source?.id ? (
                       <button type="button" onClick={() => openPdf(source)} className="font-medium text-[#1769e8] underline decoration-[#b9d2fb] underline-offset-2 hover:text-[#1256bf]">
@@ -4828,7 +4873,7 @@ function MockupQuotationWorkspace({
                       text(quote.source_price_quotation_id)
                     )}
                   </td>
-                  <td className="px-5 py-3"><b>{party.clientName}</b><small>{party.companyName}</small></td>
+                  <td className="px-5 py-3">{stackedCell(party.clientName, party.companyName)}</td>
                   <td className="px-5 py-3">{text(quote.project_types)}</td>
                   <td className="px-5 py-3"><Status value={status} /></td>
                   <td className="px-5 py-3">{day(status === "approved" ? quote.approved_at : quote.submitted_at ?? quote.created_at)}</td>
@@ -5132,7 +5177,7 @@ function QuotationCostingOverview({
       hideHeading
     >
       <div className="px-4 py-4 sm:px-5 lg:px-6">
-        <nav aria-label="Costed quotation types" className="flex gap-1 overflow-x-auto border-b border-[#e4e8ef]">
+        <nav aria-label="Costed quotation types" className="app-tabs">
           {([
             ["price_quotation", "Price Quotations"],
             ["mockup_quotation", "Mockup Quotations"],
@@ -5142,7 +5187,7 @@ function QuotationCostingOverview({
               type="button"
               onClick={() => setTab(value)}
               aria-current={tab === value ? "page" : undefined}
-              className={"shrink-0 px-3 py-2 text-[12px] font-medium " + (tab === value ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1] hover:text-[#4b5565]")}
+              className="app-tab"
             >
               {label} ({store.quotations.filter((quote) => text(quote.document_type) === value && (text(quote.pricing_reviewed_by, "") === currentUserId || costedQuotationIds.has(text(quote.id, "")))).length})
             </button>
@@ -5196,9 +5241,9 @@ function QuotationCostingOverview({
               const party = quotationParty(quote, store);
               return (
                 <tr key={text(quote.id)}>
-                  <td className="px-5 py-3"><b>{text(quote.quotation_no)}</b><small>{text(quote.project_name)}</small></td>
+                  <td className="px-5 py-3">{stackedCell(quote.quotation_no, quote.project_name)}</td>
                   {tab === "mockup_quotation" && <td className="px-5 py-3">{source?.id ? <button type="button" onClick={() => openPdf(source)} className="font-medium text-[#1769e8] underline decoration-[#b9d2fb] underline-offset-2 hover:text-[#1256bf]">{text(source.quotation_no)}</button> : text(quote.source_price_quotation_id)}</td>}
-                  <td className="px-5 py-3"><b>{party.clientName}</b><small>{party.companyName}</small></td>
+                  <td className="px-5 py-3">{stackedCell(party.clientName, party.companyName)}</td>
                   <td className="px-5 py-3">{text(quote.project_types)}</td>
                   <td className="px-5 py-3"><Status value={quote.status} /></td>
                   <td className="px-5 py-3">{day(quote.pricing_reviewed_at ?? quote.updated_at)}</td>
@@ -5719,7 +5764,7 @@ function ProjectCalendar({
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <nav
             aria-label="Project status"
-            className="flex gap-1 overflow-x-auto border-b border-[#e4e8ef]"
+            className="app-tabs"
           >
             {[
               { value: "active", label: "Active", count: activeSchedules.length },
@@ -5734,7 +5779,7 @@ function ProjectCalendar({
                 type="button"
                 onClick={() => setProjectStatusTab(tab.value as "active" | "completed")}
                 aria-current={projectStatusTab === tab.value ? "page" : undefined}
-                className={`shrink-0 px-3 py-2 text-[12px] font-medium ${projectStatusTab === tab.value ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1] hover:text-[#4b5565]"}`}
+                className="app-tab"
               >
                 {tab.label} ({tab.count})
               </button>
@@ -6854,9 +6899,9 @@ function SupplierMaterials({
   };
   return (
     <div className="space-y-4">
-      <div className="flex gap-1 border-b border-[#e4e8ef] px-1">
-        <button type="button" onClick={() => setTab("suppliers")} className={`px-3 py-2 text-[12px] font-medium ${tab === "suppliers" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Suppliers</button>
-        <button type="button" onClick={() => setTab("materials")} className={`px-3 py-2 text-[12px] font-medium ${tab === "materials" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Materials List</button>
+      <div className="app-tabs px-1">
+        <button type="button" onClick={() => setTab("suppliers")} aria-current={tab === "suppliers" ? "page" : undefined} className="app-tab">Suppliers</button>
+        <button type="button" onClick={() => setTab("materials")} aria-current={tab === "materials" ? "page" : undefined} className="app-tab">Materials List</button>
       </div>
       {tab === "suppliers" ? (
         <SuppliersList
@@ -8757,10 +8802,7 @@ function Quotations({
                 return (
                 <tr key={text(q.id)}>
                   <td className="px-5 py-3">
-                    <b>{text(q.quotation_no)}</b>
-                    <small>
-                      {day(q.issue_date)}
-                    </small>
+                    {stackedCell(q.quotation_no, day(q.issue_date))}
                   </td>
                   <td className="px-5 py-3">
                     <b>{text(q.project_name)}</b>
@@ -9857,7 +9899,7 @@ function PriceQuotationSubmissions({
             const party = quotationParty(quotation, store);
             return (
               <tr key={text(quotation.id)}>
-                <td className="px-5 py-3"><div className="flex items-center gap-2"><b>{text(quotation.quotation_no)}</b><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${n(quotation.resubmission_count) > 0 ? "bg-[#fff4dd] text-[#9a6700]" : "bg-[#edf5ff] text-[#175cd3]"}`}>{submissionLabel(quotation)}</span></div><small>{text(quotation.project_name, text(lead?.project_name))}</small></td>
+                <td className="px-5 py-3"><div className="flex items-center gap-2"><b>{text(quotation.quotation_no)}</b><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${n(quotation.resubmission_count) > 0 ? "bg-[#fff4dd] text-[#9a6700]" : "bg-[#edf5ff] text-[#175cd3]"}`}>{submissionLabel(quotation)}</span></div>{comparableDisplayText(text(quotation.project_name, text(lead?.project_name))) !== comparableDisplayText(quotation.quotation_no) && <small>{text(quotation.project_name, text(lead?.project_name))}</small>}</td>
                 <td className="px-5 py-3 font-medium">{party.clientName}</td>
                 <td className="px-5 py-3">{party.companyName}</td>
                 <td className="px-5 py-3">{officerName(quotation)}</td>
@@ -10309,10 +10351,10 @@ function PriceQuotationWorkspace({
     >
       <div className="px-4 py-4 sm:px-5 lg:px-6">
       <div className="mb-4">
-        <nav aria-label="Price quotation sections" className="flex gap-1 overflow-x-auto border-b border-[#e4e8ef]">
+        <nav aria-label="Price quotation sections" className="app-tabs">
           {(["draft", "pending", "needs_revision", "approved"] as const).map((tab) => {
             const labels = { draft: "Draft", pending: "Pending Review", needs_revision: "Needs Revision", approved: "Approved" };
-            return <button key={tab} type="button" onClick={() => setQuotationTab(tab)} aria-current={quotationTab === tab ? "page" : undefined} className={`shrink-0 px-3 py-2 text-[12px] font-medium ${quotationTab === tab ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1] hover:text-[#4b5565]"}`}>{labels[tab]} ({quotations.filter((quote) => text(quote.status) === tab).length})</button>;
+            return <button key={tab} type="button" onClick={() => setQuotationTab(tab)} aria-current={quotationTab === tab ? "page" : undefined} className="app-tab">{labels[tab]} ({quotations.filter((quote) => text(quote.status) === tab).length})</button>;
           })}
         </nav>
         <div className="flex flex-wrap items-center gap-2 border-b border-[#edf0f5] py-3">
@@ -10351,8 +10393,8 @@ function PriceQuotationWorkspace({
             ).length;
             return (
               <tr key={text(quote.id)}>
-                <td className="px-5 py-3"><b>{text(quote.quotation_no)}</b><small>{day(quote.issue_date)}</small></td>
-                <td className="px-5 py-3"><b>{party.clientName}</b><small>{text(quote.project_name, text(lead?.project_name))}</small></td>
+                <td className="px-5 py-3">{stackedCell(quote.quotation_no, day(quote.issue_date))}</td>
+                <td className="px-5 py-3">{stackedCell(party.clientName, text(quote.project_name, text(lead?.project_name)))}</td>
                 <td className="px-5 py-3">{party.companyName}</td>
                 {!isProjectOfficerRole(role) && <td className="px-5 py-3">{preparedBy}</td>}
                 <td className="px-5 py-3"><div className="flex items-center gap-1.5"><Status value={quote.status} />{priceRevisionRequest && <span className="text-[11px] text-[#a76605]">Revision requested</span>}{text(quote.status) === "needs_revision" && <ActionIcon label="View revision note" tone="amber" confirm={false} onClick={() => setRevisionNoteQuote(quote)}><MessageSquareText size={15} /></ActionIcon>}</div></td>
@@ -10422,7 +10464,7 @@ function PriceQuotationWorkspace({
               const party = quotation
                 ? quotationParty(quotation, store)
                 : { clientName: "-", companyName: text(endorsement.client_name) };
-              return <tr key={text(endorsement.id)}><td className="px-5 py-3 font-medium">{text(endorsement.quotation_no)}</td><td className="px-5 py-3"><b>{party.clientName}</b><small>{text(endorsement.project_name)}</small></td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{day(endorsement.activated_at ?? endorsement.created_at)}</td><td className="px-5 py-3"><ActionIcon label="View endorsed Price Quotation PDF" confirm={false} loading={openingEndorsementId === text(endorsement.id)} onClick={() => void openEndorsedSnapshot(endorsement)}><FileText size={15} /></ActionIcon></td></tr>;
+              return <tr key={text(endorsement.id)}><td className="px-5 py-3 font-medium">{text(endorsement.quotation_no)}</td><td className="px-5 py-3">{stackedCell(party.clientName, endorsement.project_name)}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{day(endorsement.activated_at ?? endorsement.created_at)}</td><td className="px-5 py-3"><ActionIcon label="View endorsed Price Quotation PDF" confirm={false} loading={openingEndorsementId === text(endorsement.id)} onClick={() => void openEndorsedSnapshot(endorsement)}><FileText size={15} /></ActionIcon></td></tr>;
             })}
           </Table>
         </section>
@@ -11818,21 +11860,21 @@ function Submissions({
       detail="Review submitted Price Quotations, project schedules, edits, and Lead change requests."
       hideHeading
     >
-      <div className="flex gap-1 overflow-x-auto border-b border-[#e4e8ef] px-5">
-        <button type="button" onClick={() => setTab("quotations")} className={`px-3 py-2 text-[12px] font-medium ${tab === "quotations" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Price Quotations ({pendingPriceQuotations.length})</button>
-        <button type="button" onClick={() => setTab("mockup_quotations")} className={`px-3 py-2 text-[12px] font-medium ${tab === "mockup_quotations" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Mockup Quotations ({pendingMockupQuotations.length})</button>
-        <button type="button" onClick={() => setTab("price_revisions")} className={`px-3 py-2 text-[12px] font-medium ${tab === "price_revisions" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Quotation Revisions ({pendingPriceQuotationRevisions.length})</button>
-        <button type="button" onClick={() => setTab("calendar_projects")} className={`px-3 py-2 text-[12px] font-medium ${tab === "calendar_projects" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Project Calendar ({pendingProjectSchedules.length})</button>
-        <button type="button" onClick={() => setTab("calendar_revisions")} className={`px-3 py-2 text-[12px] font-medium ${tab === "calendar_revisions" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Project Revisions ({pendingProjectScheduleRevisions.length})</button>
-        <button type="button" onClick={() => setTab("calendar_completions")} className={`px-3 py-2 text-[12px] font-medium ${tab === "calendar_completions" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Project Completion ({pendingProjectScheduleCompletions.length})</button>
-        <button type="button" onClick={() => setTab("projects")} className={`px-3 py-2 text-[12px] font-medium ${tab === "projects" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Project Edits ({pendingProjectEdits.length})</button>
-        <button type="button" onClick={() => setTab("leads")} className={`px-3 py-2 text-[12px] font-medium ${tab === "leads" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Lead Changes ({pendingLeadChanges.length})</button>
+      <div className="app-tabs px-5">
+        <button type="button" onClick={() => setTab("quotations")} aria-current={tab === "quotations" ? "page" : undefined} className="app-tab">Price Quotations ({pendingPriceQuotations.length})</button>
+        <button type="button" onClick={() => setTab("mockup_quotations")} aria-current={tab === "mockup_quotations" ? "page" : undefined} className="app-tab">Mockup Quotations ({pendingMockupQuotations.length})</button>
+        <button type="button" onClick={() => setTab("price_revisions")} aria-current={tab === "price_revisions" ? "page" : undefined} className="app-tab">Quotation Revisions ({pendingPriceQuotationRevisions.length})</button>
+        <button type="button" onClick={() => setTab("calendar_projects")} aria-current={tab === "calendar_projects" ? "page" : undefined} className="app-tab">Project Calendar ({pendingProjectSchedules.length})</button>
+        <button type="button" onClick={() => setTab("calendar_revisions")} aria-current={tab === "calendar_revisions" ? "page" : undefined} className="app-tab">Project Revisions ({pendingProjectScheduleRevisions.length})</button>
+        <button type="button" onClick={() => setTab("calendar_completions")} aria-current={tab === "calendar_completions" ? "page" : undefined} className="app-tab">Project Completion ({pendingProjectScheduleCompletions.length})</button>
+        <button type="button" onClick={() => setTab("projects")} aria-current={tab === "projects" ? "page" : undefined} className="app-tab">Project Edits ({pendingProjectEdits.length})</button>
+        <button type="button" onClick={() => setTab("leads")} aria-current={tab === "leads" ? "page" : undefined} className="app-tab">Lead Changes ({pendingLeadChanges.length})</button>
       </div>
       {tab === "quotations" && (pendingPriceQuotations.length ? (
         <Table labels={["Price Quotation", "Client's Name", "Company Name", "Prepared by", "Submitted", "Review"]} minWidth={860}>
           {pendingPriceQuotations.map((quotation) => {
             const party = quotationParty(quotation, store);
-            return <tr key={text(quotation.id)}><td className="px-5 py-3"><b>{text(quotation.quotation_no)}</b><small>{text(quotation.project_name)}</small></td><td className="px-5 py-3 font-medium">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3"><ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>;
+            return <tr key={text(quotation.id)}><td className="px-5 py-3">{stackedCell(quotation.quotation_no, quotation.project_name)}</td><td className="px-5 py-3 font-medium">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3"><ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>;
           })}
         </Table>
       ) : <Empty>No Price Quotations are awaiting review.</Empty>)}
@@ -11841,7 +11883,7 @@ function Submissions({
           {pendingMockupQuotations.map((quotation) => {
             const source = store.quotations.find((item) => item.id === quotation.source_price_quotation_id);
             const party = quotationParty(quotation, store);
-            return <tr key={text(quotation.id)}><td className="px-5 py-3"><b>{text(quotation.quotation_no)}</b><small>{text(quotation.project_name)}</small></td><td className="px-5 py-3 font-medium">{source?.id ? <button type="button" onClick={() => openQuotationPdf(source)} className="text-[#1769e8] underline decoration-[#b9d2fb] underline-offset-2 hover:text-[#1256bf]">{text(source.quotation_no)}</button> : text(quotation.source_price_quotation_id, "—")}</td><td className="px-5 py-3 font-medium">{party.clientName}<small>{party.companyName}</small></td><td className="px-5 py-3">{text(quotation.project_types)}</td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3"><ActionIcon label="Review Mockup Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>;
+            return <tr key={text(quotation.id)}><td className="px-5 py-3">{stackedCell(quotation.quotation_no, quotation.project_name)}</td><td className="px-5 py-3 font-medium">{source?.id ? <button type="button" onClick={() => openQuotationPdf(source)} className="text-[#1769e8] underline decoration-[#b9d2fb] underline-offset-2 hover:text-[#1256bf]">{text(source.quotation_no)}</button> : text(quotation.source_price_quotation_id, "—")}</td><td className="px-5 py-3 font-medium">{stackedCell(party.clientName, party.companyName)}</td><td className="px-5 py-3">{text(quotation.project_types)}</td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3"><ActionIcon label="Review Mockup Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>;
           })}
         </Table>
       ) : <Empty>No Mockup Quotations are awaiting General Manager review.</Empty>)}
@@ -11850,7 +11892,7 @@ function Submissions({
           {pendingPriceQuotationRevisions.map((request) => {
             const quotation = store.quotations.find((item) => item.id === request.quotation_id);
             const party = quotation ? quotationParty(quotation, store) : { clientName: "-", companyName: "-" };
-            return <tr key={text(request.id)}><td className="px-5 py-3"><b>{text(quotation?.quotation_no, "Price Quotation")}</b><small>{text(quotation?.project_name)}</small></td><td className="px-5 py-3">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{projectOfficerName(request)}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>;
+            return <tr key={text(request.id)}><td className="px-5 py-3">{stackedCell(text(quotation?.quotation_no, "Price Quotation"), quotation?.project_name)}</td><td className="px-5 py-3">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{projectOfficerName(request)}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>;
           })}
         </Table>
       ) : <Empty>No Price Quotation revisions are awaiting review.</Empty>)}
@@ -11914,7 +11956,7 @@ function Submissions({
           {pendingQuotationRevisions.map((request) => {
             const costing = store.quotations.find((item) => item.id === request.costing_id);
             return <tr key={text(request.id)}>
-              <td className="px-5 py-3"><b>{text(costing?.quotation_no, "Costing Breakdown")}</b><small>{text(costing?.project_name)}</small></td>
+              <td className="px-5 py-3">{stackedCell(text(costing?.quotation_no, "Costing Breakdown"), costing?.project_name)}</td>
               <td className="px-5 py-3">{projectOfficerName(request)}</td>
               <td className="px-5 py-3">{day(request.submitted_at)}</td>
               <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve costing revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject costing revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td>
@@ -11992,7 +12034,7 @@ function Submissions({
             const project = store.leads.find((lead) => lead.id === request.project_id);
             const changes = request.proposed_changes && typeof request.proposed_changes === "object" ? Object.keys(request.proposed_changes as Record<string, unknown>) : [];
             return <tr key={text(request.id)}>
-              <td className="px-5 py-3"><b>{text(project?.project_name)}</b><small>{text(project?.client_name)} · {text(project?.contact_name)}</small></td>
+              <td className="px-5 py-3">{stackedCell(project?.project_name, [project?.client_name, project?.contact_name], " · ")}</td>
               <td className="px-5 py-3">{projectOfficerName(request)}</td>
               <td className="px-5 py-3">{day(request.submitted_at)}</td>
               <td className="px-5 py-3">{changes.map((change) => change.replaceAll("_", " ")).join(", ")}</td>
@@ -12014,7 +12056,7 @@ function Submissions({
                 ? changeLabels.join(", ")
                 : `${changeLabels.slice(0, 2).join(", ")} +${changeLabels.length - 2} more`;
             return <tr key={text(request.id)}>
-              <td className="px-5 py-3"><b>{text(lead?.project_name)}</b><small>{text(lead?.client_name)} · {text(lead?.contact_name)}</small></td>
+              <td className="px-5 py-3">{stackedCell(lead?.project_name, [lead?.client_name, lead?.contact_name], " · ")}</td>
               <td className="px-5 py-3">{projectOfficerName(request)}</td>
               <td className="px-5 py-3">{day(request.submitted_at)}</td>
               <td className="px-5 py-3">{changeSummary || "-"}</td>
@@ -12173,8 +12215,7 @@ function Production({
               return (
                 <tr key={text(job.id)}>
                   <td className="px-5 py-3">
-                    <b className="text-[#1769e8]">{text(job.job_no)}</b>
-                    <small>{text(job.title)}</small>
+                    {stackedCell(job.job_no, job.title)}
                   </td>
                   <td className="px-5 py-3">
                     {text(
@@ -13693,15 +13734,12 @@ function FinanceReports({
               {receivables.map(({ invoice, balance }) => (
                 <tr key={text(invoice.id)}>
                   <td className="px-5 py-3">
-                    <b>
-                      {text(
-                        store.customers.find(
-                          (customer) => customer.id === invoice.customer_id,
-                        )?.company_name,
-                        "Walk-in client",
-                      )}
-                    </b>
-                    <small>{text(invoice.invoice_no)}</small>
+                    {stackedCell(
+                      store.customers.find(
+                        (customer) => customer.id === invoice.customer_id,
+                      )?.company_name,
+                      invoice.invoice_no,
+                    )}
                   </td>
                   <td className="px-5 py-3">{day(invoice.due_date)}</td>
                   <td className="px-5 py-3 font-semibold">
@@ -13726,14 +13764,12 @@ function FinanceReports({
               {payables.map((payable) => (
                 <tr key={text(payable.id)}>
                   <td className="px-5 py-3">
-                    <b>
-                      {text(
-                        store.suppliers.find(
-                          (supplier) => supplier.id === payable.supplier_id,
-                        )?.company_name,
-                      )}
-                    </b>
-                    <small>{text(payable.payable_no)}</small>
+                    {stackedCell(
+                      store.suppliers.find(
+                        (supplier) => supplier.id === payable.supplier_id,
+                      )?.company_name,
+                      payable.payable_no,
+                    )}
                   </td>
                   <td className="px-5 py-3">{day(payable.due_date)}</td>
                   <td className="px-5 py-3 font-semibold">
@@ -14352,8 +14388,7 @@ function Directory({
           label: "Supplier",
           value: (r) => (
             <>
-              <b>{text(r.company_name)}</b>
-              <small>{text(r.contact_name)}</small>
+              {stackedCell(r.company_name, r.contact_name)}
             </>
           ),
         },
@@ -14405,8 +14440,7 @@ function Directory({
           label: "Employee",
           value: (r) => (
             <>
-              <b>{text(r.full_name)}</b>
-              <small>{text(r.employee_no)}</small>
+              {stackedCell(r.full_name, r.employee_no)}
             </>
           ),
         },
@@ -14418,11 +14452,13 @@ function Directory({
   };
   return (
     <div className="space-y-4">
-      <div className="flex gap-1 border-b border-[#e4e8ef]">
+      <div className="app-tabs">
         {(Object.keys(modules) as (typeof tab)[]).map((k) => (
           <button
+            type="button"
             onClick={() => setTab(k)}
-            className={`px-3 py-2 text-[12px] font-medium capitalize ${tab === k ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}
+            aria-current={tab === k ? "page" : undefined}
+            className="app-tab capitalize"
             key={k}
           >
             {k}
@@ -14547,7 +14583,7 @@ function CommissionsView({ role }: { role: string }) {
   }, []);
   const paid = rows.reduce((sum, row) => sum + n(row.paid_amount), 0);
   const earned = rows.reduce((sum, row) => sum + n(row.earned_commission), 0);
-  return <div className="space-y-5"><Panel title={isProjectOfficerRole(role) ? "My commissions" : "Sales Executive commissions"} detail="Commission is earned only from actual customer payments: first ₱400,000 at 3%, then the balance at 5%."><div className="grid gap-3 p-4 sm:grid-cols-2"><div className="rounded-lg bg-[#f8fbff] p-3 text-[12px]"><p className="text-[#687386]">Actual collections</p><p className="mt-1 text-lg font-semibold">{peso.format(paid)}</p></div><div className="rounded-lg bg-[#eff7f1] p-3 text-[12px]"><p className="text-[#687386]">Commission earned</p><p className="mt-1 text-lg font-semibold text-[#176b40]">{peso.format(earned)}</p></div></div>{loading ? <Empty>Loading commissions…</Empty> : rows.length ? <Table labels={isProjectOfficerRole(role) ? ["Quotation", "Client", "Paid to date", "Projected", "Earned"] : ["Officer", "Quotation", "Client", "Paid to date", "Earned"]}>{rows.map((row) => <tr key={text(row.quotation_id)}>{!isProjectOfficerRole(role) && <td className="px-4 py-3">{text(row.officer_user_id)}</td>}<td className="px-4 py-3"><b>{text(row.quotation_no)}</b><small>{text(row.project_name)}</small></td><td className="px-4 py-3">{text(row.client_name)}</td><td className="px-4 py-3 text-right">{peso.format(n(row.paid_amount))}</td>{!isProjectOfficerRole(role) && <td className="px-4 py-3 text-right">{peso.format(n(row.projected_commission))}</td>}<td className="px-4 py-3 text-right font-semibold">{peso.format(n(row.earned_commission))}</td></tr>)}</Table> : <Empty>No approved quotations with commission eligibility yet.</Empty>}</Panel></div>;
+  return <div className="space-y-5"><Panel title={isProjectOfficerRole(role) ? "My commissions" : "Sales Executive commissions"} detail="Commission is earned only from actual customer payments: first ₱400,000 at 3%, then the balance at 5%."><div className="grid gap-3 p-4 sm:grid-cols-2"><div className="rounded-lg bg-[#f8fbff] p-3 text-[12px]"><p className="text-[#687386]">Actual collections</p><p className="mt-1 text-lg font-semibold">{peso.format(paid)}</p></div><div className="rounded-lg bg-[#eff7f1] p-3 text-[12px]"><p className="text-[#687386]">Commission earned</p><p className="mt-1 text-lg font-semibold text-[#176b40]">{peso.format(earned)}</p></div></div>{loading ? <Empty>Loading commissions…</Empty> : rows.length ? <Table labels={isProjectOfficerRole(role) ? ["Quotation", "Client", "Paid to date", "Projected", "Earned"] : ["Officer", "Quotation", "Client", "Paid to date", "Earned"]}>{rows.map((row) => <tr key={text(row.quotation_id)}>{!isProjectOfficerRole(role) && <td className="px-4 py-3">{text(row.officer_user_id)}</td>}<td className="px-4 py-3">{stackedCell(row.quotation_no, row.project_name)}</td><td className="px-4 py-3">{text(row.client_name)}</td><td className="px-4 py-3 text-right">{peso.format(n(row.paid_amount))}</td>{!isProjectOfficerRole(role) && <td className="px-4 py-3 text-right">{peso.format(n(row.projected_commission))}</td>}<td className="px-4 py-3 text-right font-semibold">{peso.format(n(row.earned_commission))}</td></tr>)}</Table> : <Empty>No approved quotations with commission eligibility yet.</Empty>}</Panel></div>;
 }
 
 function SettingsView({
@@ -15565,13 +15601,13 @@ export function HuswellWorkspace({
       />
     );
   return (
-    <div className={`huswell-workspace compact-ui min-h-screen bg-[#fafafa] text-[#151922] ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    <div className={`huswell-workspace compact-ui min-h-screen bg-[var(--color-bg)] text-[var(--color-text-primary)] ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside
-        className={`${mobile ? "translate-x-0" : "-translate-x-full"} sidebar-shell fixed inset-y-0 z-40 flex w-64 flex-col border-r border-[#e2e7ef] bg-white p-3 text-[#475467] transition-[transform,width,padding] lg:translate-x-0 ${sidebarCollapsed ? "lg:w-[72px] lg:px-2" : "lg:w-64"}`}
+        className={`${mobile ? "translate-x-0" : "-translate-x-full"} sidebar-shell fixed inset-y-0 z-40 flex w-64 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)] p-3 text-[var(--color-text-secondary)] transition-[transform,width,padding] lg:translate-x-0 ${sidebarCollapsed ? "lg:w-[72px] lg:px-2" : "lg:w-64"}`}
       >
         <button
           type="button"
-          className="absolute -right-4 top-5 hidden size-8 place-items-center rounded-full border border-[#d9e0e9] bg-white text-[#626b7a] shadow-sm transition-colors hover:bg-[#f7f7f8] hover:text-[#202124] lg:grid"
+          className="absolute -right-4 top-5 hidden size-8 place-items-center rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] shadow-none transition-colors hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] lg:grid"
           onClick={() => setSidebarCollapsed((current) => !current)}
           aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           aria-pressed={!sidebarCollapsed}
@@ -15599,7 +15635,7 @@ export function HuswellWorkspace({
           </div>
           <button
             type="button"
-            className="grid size-8 place-items-center rounded-lg text-[#626b7a] transition-colors hover:bg-[#f1f3f4] hover:text-[#202124] lg:hidden"
+            className="grid size-8 place-items-center rounded-[var(--radius-control)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] lg:hidden"
             onClick={() => setMobile(false)}
             aria-label="Close navigation"
           >
@@ -15641,11 +15677,12 @@ export function HuswellWorkspace({
                       lineHeight: "var(--line-height-body)",
                     }}
                     aria-current={active === view ? "page" : undefined}
-                    className={`${active === view ? "bg-[#c43b43] font-medium text-white" : "text-[#202124] hover:bg-[#f1f3f4]"} group flex min-h-8 w-full items-center gap-2 rounded-lg px-2.5 py-1 text-left text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#c43b43] focus-visible:ring-offset-2 focus-visible:ring-offset-white ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
+                    className={`${active === view ? "bg-[var(--color-accent)] font-medium text-[var(--color-on-accent)]" : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)]"} sidebar-item group flex min-h-8 w-full items-center gap-2 rounded-[var(--radius-control)] px-3 py-1 text-left text-[13px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
                   >
                     <Icon
-                      size={17}
-                      className={`${active === view ? "text-white" : "text-[#5f6368] group-focus-visible:text-[#202124]"} shrink-0 transition-colors`}
+                      size={16}
+                      strokeWidth={1.75}
+                      className={`${active === view ? "text-[var(--color-on-accent)]" : "text-[var(--color-text-tertiary)] group-hover:text-[var(--color-text-tertiary)]"} shrink-0 transition-colors`}
                     />
                     <span className={`min-w-0 flex-1 truncate ${sidebarCollapsed ? "lg:hidden" : ""}`}>{navigationLabel}</span>
                   </button>
@@ -15655,37 +15692,37 @@ export function HuswellWorkspace({
             </div>
           ))}
         </nav>
-        <div className="mt-3 border-t border-[#e2e7ef] pt-3">
+        <div className="mt-3 border-t border-[var(--color-border)] pt-3">
           {canEditOwnProfile && !isManagementRole && (
             <a
               href="/profile"
-              className={`mt-1 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] font-medium text-[#202124] transition-colors hover:bg-[#f1f3f4] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
+              className={`sidebar-item mt-1 flex w-full items-center gap-2.5 rounded-[var(--radius-control)] px-3 py-1.5 text-left text-[13px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
             >
-              <UserRound size={17} />
+              <UserRound size={16} strokeWidth={1.75} />
               <span className={sidebarCollapsed ? "lg:sr-only" : ""}>Profile</span>
             </a>
           )}
           <button
             onClick={() => setSignOutOpen(true)}
-            className={`mt-3 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] font-medium text-[#202124] transition-colors hover:bg-[#f1f3f4] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
+            className={`sidebar-item mt-3 flex w-full items-center gap-2.5 rounded-[var(--radius-control)] px-3 py-1.5 text-left text-[13px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
           >
-            <LogOut size={17} />
+            <LogOut size={16} strokeWidth={1.75} />
             <span className={sidebarCollapsed ? "lg:sr-only" : ""}>Sign out</span>
           </button>
         </div>
       </aside>
       {signOutOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-[#151922]/30 p-4">
+        <div className="fixed inset-0 z-50 grid place-items-center bg-[color-mix(in_srgb,var(--color-text-primary)_30%,transparent)] p-4">
           <section
             role="dialog"
             aria-modal="true"
             aria-labelledby="sign-out-title"
-            className="w-full max-w-sm rounded-[14px] border border-[#d9e0e9] bg-white p-4"
+            className="w-full max-w-sm rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-none"
           >
-            <h2 id="sign-out-title" className="text-[15px] font-semibold">
+            <h2 id="sign-out-title" className="text-[16px] font-semibold text-[var(--color-text-primary)]">
               Sign out?
             </h2>
-            <p className="mt-1.5 text-[12px] text-[#626b7a]">
+            <p className="mt-1.5 text-[13px] text-[var(--color-text-secondary)]">
               You will be returned to the sign-in page.
             </p>
             <div className="mt-4 flex justify-end gap-2">
@@ -15718,20 +15755,20 @@ export function HuswellWorkspace({
       )}
       {mobile && (
         <button
-          className="fixed inset-0 z-20 bg-[#151922]/20 lg:hidden"
+          className="fixed inset-0 z-20 bg-[color-mix(in_srgb,var(--color-text-primary)_20%,transparent)] lg:hidden"
           onClick={() => setMobile(false)}
           aria-label="Close navigation"
         />
       )}
-      <main className={`min-h-screen bg-[#fafafa] transition-[padding] ${sidebarCollapsed ? "lg:pl-[72px]" : "lg:pl-64"}`}>
-        <header className="sticky top-0 z-30 flex min-h-[60px] items-center justify-between gap-2.5 border-b border-[#dfe5ed] bg-white px-3 py-2.5 sm:min-h-[64px] sm:px-4 lg:px-5">
+      <main className={`min-h-screen bg-[var(--color-bg)] transition-[padding] ${sidebarCollapsed ? "lg:pl-[72px]" : "lg:pl-64"}`}>
+        <header className="sticky top-0 z-30 flex min-h-[60px] items-center justify-between gap-2.5 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2.5 sm:min-h-[64px] sm:px-4 lg:px-5">
           <div className="flex min-w-0 items-center gap-3">
             <button
-              className="grid size-9 shrink-0 place-items-center rounded-lg text-[#151922] hover:bg-[#f7f7f8] lg:hidden"
+              className="grid size-8 shrink-0 place-items-center rounded-[var(--radius-control)] text-[var(--color-text-primary)] hover:bg-[var(--color-surface-subtle)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] lg:hidden"
               onClick={() => setMobile(true)}
               aria-label="Open navigation"
             >
-              <Menu size={21} />
+              <Menu size={16} strokeWidth={1.75} />
             </button>
             {active === "Policy" && role === "admin" && (
               <div className="flex min-w-0 items-center gap-1.5">
@@ -15745,9 +15782,9 @@ export function HuswellWorkspace({
             )}
             <span className="sr-only">{activePageHeader.title}</span>
           </div>
-          <div className="flex shrink-0 items-center gap-2.5 text-[#626b7a]">
+          <div className="flex shrink-0 items-center gap-2.5 text-[var(--color-text-secondary)]">
             <span className="hidden items-center gap-1.5 text-[11px] font-medium sm:flex">
-              <CalendarDays size={17} />
+              <CalendarDays size={16} strokeWidth={1.75} />
               {new Intl.DateTimeFormat("en-PH", {
                 month: "short",
                 day: "numeric",
@@ -15759,7 +15796,7 @@ export function HuswellWorkspace({
                 type="button"
                 onClick={() => navigate("Settings")}
                 aria-label="Open settings"
-                className="grid size-8 place-items-center rounded-full bg-[#fceced] text-[11px] font-semibold text-[#ab3038] transition-colors hover:bg-[#f6d8da]"
+                className="grid size-8 place-items-center rounded-[var(--radius-control)] border border-[var(--color-accent-border)] bg-[var(--color-accent-subtle)] text-[11px] font-medium text-[var(--color-accent-text)] transition-colors hover:border-[var(--color-border-strong)]"
               >
                 {profileName.slice(0, 2).toUpperCase()}
               </button>
@@ -15767,12 +15804,12 @@ export function HuswellWorkspace({
               <a
                 href="/profile"
                 aria-label="Edit profile"
-                className="grid size-8 place-items-center rounded-full bg-[#fceced] text-[11px] font-semibold text-[#ab3038] transition-colors hover:bg-[#f6d8da]"
+                className="grid size-8 place-items-center rounded-[var(--radius-control)] border border-[var(--color-accent-border)] bg-[var(--color-accent-subtle)] text-[11px] font-medium text-[var(--color-accent-text)] transition-colors hover:border-[var(--color-border-strong)]"
               >
                 {profileName.slice(0, 2).toUpperCase()}
               </a>
             ) : (
-              <span className="grid size-8 place-items-center rounded-full bg-[#fceced] text-[11px] font-semibold text-[#ab3038]">
+              <span className="grid size-8 place-items-center rounded-[var(--radius-control)] border border-[var(--color-accent-border)] bg-[var(--color-accent-subtle)] text-[11px] font-medium text-[var(--color-accent-text)]">
                 {profileName.slice(0, 2).toUpperCase()}
               </span>
             )}
@@ -15780,22 +15817,22 @@ export function HuswellWorkspace({
         </header>
         <div className={`workspace-content ${(["Projects", "Price Quotations", "Price Quotation Review"].includes(active) || active === "Policy") ? "p-0" : "p-2 sm:p-3 lg:p-4"}`}>
           {message && (
-            <div className="fixed inset-0 z-[60] grid place-items-center bg-[#061426]/30 p-4">
+            <div className="fixed inset-0 z-[60] grid place-items-center bg-[color-mix(in_srgb,var(--color-text-primary)_30%,transparent)] p-4">
               <section
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="notification-title"
-                className="w-full max-w-sm rounded-[14px] border border-[#dfe5ed] bg-white p-4"
+                className="w-full max-w-sm rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-none"
               >
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <h2
                       id="notification-title"
-                      className="text-[15px] font-semibold text-[#151922]"
+                      className="text-[16px] font-semibold text-[var(--color-text-primary)]"
                     >
                       Notification
                     </h2>
-                    <p className="mt-1.5 text-[12px] leading-[18px] text-[#626b7a]">
+                    <p className="mt-1.5 text-[13px] leading-[1.45] text-[var(--color-text-secondary)]">
                       {message}
                     </p>
                   </div>
@@ -15803,9 +15840,9 @@ export function HuswellWorkspace({
                     type="button"
                     onClick={() => setMessage(null)}
                     aria-label="Close notification"
-                    className="grid size-8 shrink-0 place-items-center rounded-lg text-[#626b7a] hover:bg-[#f7f7f8]"
+                    className="grid size-8 shrink-0 place-items-center rounded-[var(--radius-control)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)]"
                   >
-                    <X size={17} />
+                    <X size={16} strokeWidth={1.75} />
                   </button>
                 </div>
                 <div className="mt-4 flex justify-end">

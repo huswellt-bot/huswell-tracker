@@ -52,16 +52,16 @@ export function QuotationPdfViewer({
   }, [quote, store]);
 
   return (
-    <main className="grid min-h-screen place-items-center bg-[#f6f8fc] p-3 font-sans text-[#202938] sm:p-5">
-      <section className="flex min-h-[calc(100vh-1.5rem)] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-[#dfe5ed] bg-white shadow-xl sm:min-h-[calc(100vh-2.5rem)]">
-        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-[#e9edf2] px-4 py-3 sm:px-5">
+    <main className="quotation-pdf-viewer grid min-h-screen place-items-center bg-[var(--color-bg)] p-3 font-sans text-[var(--color-text-primary)] sm:p-5">
+      <section className="flex min-h-[calc(100vh-1.5rem)] w-full max-w-6xl flex-col overflow-hidden rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-none sm:min-h-[calc(100vh-2.5rem)]">
+        <header className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--color-border)] px-4 py-3 sm:px-5">
           <div>
-            <h1 className="text-[14px] font-semibold">
+            <h1 className="text-[16px] font-semibold text-[var(--color-text-primary)]">
               {quote.document_type === "mockup_quotation"
                 ? "Mockup Quotation"
                 : "Price Quotation"}
             </h1>
-            <p className="mt-0.5 text-[11px] text-[#7c8594]">
+            <p className="mt-0.5 text-[12px] text-[var(--color-text-secondary)]">
               {String(quote.quotation_no ?? "Quotation")}
             </p>
           </div>
@@ -69,7 +69,7 @@ export function QuotationPdfViewer({
             <a
               href={pdfUrl}
               download={`${quote.quotation_no ?? "quotation"}.pdf`}
-              className="rounded-lg border border-[#d9e0e9] px-3 py-2 text-[11px] font-medium text-[#4b5565] hover:bg-[#f6f8fc]"
+              className="rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[13px] font-medium text-[var(--color-text-primary)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-subtle)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)]"
             >
               Download PDF
             </a>
@@ -77,7 +77,7 @@ export function QuotationPdfViewer({
         </header>
         {error ? (
           <div className="grid flex-1 place-items-center p-6 text-center">
-            <p className="text-[12px] text-[#b4232d]">{error}</p>
+            <p className="text-[13px] text-[var(--color-danger)]">{error}</p>
           </div>
         ) : pdfUrl ? (
           <iframe
@@ -88,8 +88,8 @@ export function QuotationPdfViewer({
         ) : (
           <div className="grid flex-1 place-items-center p-6 text-center">
             <div>
-              <div className="mx-auto size-7 animate-spin rounded-full border-[3px] border-[#f6d9db] border-t-[#c43b43]" />
-              <p className="mt-3 text-[12px] text-[#687386]">
+              <div className="mx-auto size-7 animate-spin rounded-[var(--radius-card)] border-[3px] border-[var(--color-accent-subtle)] border-t-[var(--color-accent)]" />
+              <p className="mt-3 text-[13px] text-[var(--color-text-secondary)]">
                 Generating quotation PDF…
               </p>
             </div>

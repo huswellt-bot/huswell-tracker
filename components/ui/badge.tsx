@@ -2,8 +2,15 @@ import * as React from "react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
-const badgeVariants = cva("inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold", {
-  variants: { variant: { default: "bg-[#eef5ff] text-[#1769e8]", success: "bg-[#edf9f2] text-[#208c52]", warning: "bg-[#fff6e6] text-[#c77b12]", muted: "bg-[#f5f6f8] text-[#626b7a]" } },
+const badgeVariants = cva("inline-flex rounded-[var(--radius-control)] border px-2 py-0.5 text-[11px] font-medium", {
+  variants: {
+    variant: {
+      default: "border-[var(--color-accent-border)] bg-[var(--color-accent-subtle)] text-[var(--color-accent-text)]",
+      success: "border-[color-mix(in_srgb,var(--color-success)_30%,white)] bg-[color-mix(in_srgb,var(--color-success)_8%,white)] text-[var(--color-success)]",
+      warning: "border-[color-mix(in_srgb,var(--color-warning)_30%,white)] bg-[color-mix(in_srgb,var(--color-warning)_10%,white)] text-[var(--color-warning)]",
+      muted: "border-[var(--color-border)] bg-[var(--color-surface-subtle)] text-[var(--color-text-secondary)]",
+    },
+  },
   defaultVariants: { variant: "default" },
 });
 
