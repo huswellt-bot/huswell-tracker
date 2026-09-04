@@ -115,6 +115,7 @@ type View =
   | "Submissions"
   | "Policy"
   | "Settings"
+  | "Commissions"
   | "Profile";
 type TableName =
   | "profiles"
@@ -201,8 +202,7 @@ const newProductCostingDraft = (quotationItemId: string): ProductCostingDraft =>
     { key: `markup-${crypto.randomUUID()}`, label: "Profit Margin", rate: "0" },
     { key: `markup-${crypto.randomUUID()}`, label: "Overhead Expense", rate: "0" },
     { key: `markup-${crypto.randomUUID()}`, label: "Buffer Margin", rate: "0" },
-    { key: `markup-${crypto.randomUUID()}`, label: "Production Commission", rate: "0" },
-    { key: `markup-${crypto.randomUUID()}`, label: "Declared Markup", rate: "15" },
+    { key: `markup-${crypto.randomUUID()}`, label: "Additional Markup", rate: "15" },
   ],
 });
 const productCostingDrafts = (
@@ -510,6 +510,12 @@ const day = (value: unknown) =>
     : "—";
 const isoToday = () => new Date().toISOString().slice(0, 10);
 const currentMonth = () => isoToday().slice(0, 7);
+const newestActivityFirst = (left: Row, right: Row) => {
+  const timestamp = (row: Row) => text(
+    row.submitted_at ?? row.requested_at ?? row.updated_at ?? row.created_at,
+  );
+  return timestamp(right).localeCompare(timestamp(left));
+};
 const ref = (prefix: string) =>
   `${prefix}-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
 const DEFAULT_QUOTATION_TERMS = [
@@ -4513,6 +4519,7 @@ function ProjectCalendar({
   const [progressDrafts, setProgressDrafts] = useState<Record<string, { percentage: string; remark: string }>>({});
   const [savingProgressId, setSavingProgressId] = useState<string | null>(null);
   const [remarkSchedule, setRemarkSchedule] = useState<Row | null>(null);
+  const [remarkDraft, setRemarkDraft] = useState("");
   const schedules = store.project_schedules.slice().sort((a, b) =>
     text(a.start_date, "").localeCompare(text(b.start_date, "")),
   );
@@ -4727,7 +4734,10 @@ function ProjectCalendar({
       await reload();
       notice(rejectedSchedule ? "Project resubmitted for General Manager approval." : "Project submitted for General Manager approval.");
     } catch (error) {
-      notice(error instanceof Error ? error.message : "Project scheduling could not be saved.");
+      const message = error && typeof error === "object" && "message" in error && typeof error.message === "string"
+        ? error.message
+        : "Project scheduling could not be saved.";
+      notice(message);
     } finally {
       setSaving(false);
     }
@@ -4834,10 +4844,20 @@ function ProjectCalendar({
       percentage: text(schedule.progress_percentage, "0"),
       remark: text(schedule.progress_remark),
     };
-  const saveProgress = async (schedule: Row) => {
-    const progress = projectProgress(schedule);
+  const openRemark = (schedule: Row) => {
+    setRemarkDraft(projectProgress(schedule).remark);
+    setRemarkSchedule(schedule);
+  };
+  const saveProgress = async (
+    schedule: Row,
+    progressOverride?: { percentage: string; remark: string },
+  ) => {
+    const progress = progressOverride ?? projectProgress(schedule);
     const percentage = n(progress.percentage);
-    if (percentage < 0 || percentage > 100) return notice("Progress percentage must be between 0 and 100.");
+    if (percentage < 0 || percentage > 100) {
+      notice("Progress percentage must be between 0 and 100.");
+      return false;
+    }
     setSavingProgressId(text(schedule.id));
     const { error } = await createClient().rpc("update_project_schedule_progress", {
       p_schedule_id: schedule.id,
@@ -4845,7 +4865,10 @@ function ProjectCalendar({
       p_progress_remark: progress.remark,
     });
     setSavingProgressId(null);
-    if (error) return notice(error.message);
+    if (error) {
+      notice(error.message);
+      return false;
+    }
     setProgressDrafts((current) => {
       const next = { ...current };
       delete next[text(schedule.id)];
@@ -4853,6 +4876,15 @@ function ProjectCalendar({
     });
     notice("Project progress updated.");
     await reload();
+    return true;
+  };
+  const saveRemark = async () => {
+    if (!remarkSchedule) return;
+    const saved = await saveProgress(remarkSchedule, {
+      ...projectProgress(remarkSchedule),
+      remark: remarkDraft,
+    });
+    if (saved) setRemarkSchedule(null);
   };
   return (
     <Panel
@@ -5038,11 +5070,11 @@ function ProjectCalendar({
               <td className="px-4 py-2"><Status value={schedule.completed_at ? "completed" : hasPendingScheduleCompletion(schedule) ? "completion pending" : "active"} /></td>
               <td className="px-4 py-2"><span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full" style={{ backgroundColor: calendarColorForProjectType(scheduleProjectType(schedule)) }} aria-hidden="true" />{scheduleProjectType(schedule)}</span></td>
               <td className="px-4 py-2">{role === "project_manager" && !schedule.completed_at ? <input aria-label={`Progress percentage for ${text(schedule.project_name, text(schedule.quotation_no))}`} type="number" min="0" max="100" step="0.01" value={projectProgress(schedule).percentage} onChange={(event) => setProgressDrafts((current) => ({ ...current, [text(schedule.id)]: { ...projectProgress(schedule), percentage: event.target.value } }))} className="input mt-0 w-20 text-center" /> : `${n(schedule.progress_percentage)}%`}</td>
-              <td className="px-4 py-2">{role === "project_manager" ? (!schedule.completed_at ? <textarea aria-label={`Project note for ${text(schedule.project_name, text(schedule.quotation_no))}`} rows={2} value={projectProgress(schedule).remark} onChange={(event) => setProgressDrafts((current) => ({ ...current, [text(schedule.id)]: { ...projectProgress(schedule), remark: event.target.value } }))} placeholder="Add project note" maxLength={1000} className="input mt-0 min-w-48 resize-y" /> : text(schedule.progress_remark, "â€”")) : <ActionIcon label="View project remark" confirm={false} onClick={() => setRemarkSchedule(schedule)}><MessageSquareText size={15} /></ActionIcon>}</td>
+              <td className="px-4 py-2 text-center"><ActionIcon label={role === "project_manager" && !schedule.completed_at ? "Edit project remark" : "View project remark"} confirm={false} onClick={() => openRemark(schedule)}><MessageSquareText size={15} /></ActionIcon></td>
               {role !== "project_manager" && <td className="px-4 py-2">{officerName(schedule)}</td>}
               <td className="px-4 py-2">
                 {showProjectActions ? <div className="flex items-center gap-1">
-                  {role === "project_manager" && !schedule.completed_at && <ActionIcon label="Save project progress" tone="green" loading={savingProgressId === schedule.id} disabled={savingProgressId === schedule.id} onClick={() => void saveProgress(schedule)}><Save size={15} /></ActionIcon>}
+                  {role === "project_manager" && !schedule.completed_at && <ActionIcon label="Save project progress" tone="green" loading={savingProgressId === text(schedule.id)} disabled={savingProgressId === text(schedule.id)} onClick={() => void saveProgress(schedule)}><Save size={15} /></ActionIcon>}
                   {canRequestScheduleCompletion(schedule) && (
                     <ActionIcon
                       label={
@@ -5106,8 +5138,31 @@ function ProjectCalendar({
                 </div>
                 <button type="button" onClick={() => setRemarkSchedule(null)} aria-label="Close project remark" className="grid size-8 place-items-center rounded-md text-[#8a95a6] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938]"><X size={18} /></button>
               </div>
-              <p className="mt-5 whitespace-pre-wrap break-words text-[13px] leading-6 text-[#303949]">{text(remarkSchedule.progress_remark, "No project remark was added.")}</p>
-              <div className="mt-6 flex justify-end"><Button secondary onClick={() => setRemarkSchedule(null)}>Close</Button></div>
+              {role === "project_manager" && !remarkSchedule.completed_at ? (
+                <label className="mt-5 block text-[12px] font-medium text-[#202938]">
+                  Remark
+                  <textarea
+                    aria-label={`Project remark for ${text(remarkSchedule.project_name, text(remarkSchedule.quotation_no))}`}
+                    rows={5}
+                    value={remarkDraft}
+                    onChange={(event) => setRemarkDraft(event.target.value)}
+                    placeholder="Add project note"
+                    maxLength={1000}
+                    className="input mt-1 min-h-28 resize-y"
+                  />
+                </label>
+              ) : (
+                <p className="mt-5 whitespace-pre-wrap break-words text-[13px] leading-6 text-[#303949]">{text(remarkSchedule.progress_remark, "No project remark was added.")}</p>
+              )}
+              <div className="mt-6 flex justify-end gap-2">
+                <Button secondary onClick={() => setRemarkSchedule(null)}>Close</Button>
+                {role === "project_manager" && !remarkSchedule.completed_at && (
+                  <Button tone="green" loading={savingProgressId === text(remarkSchedule.id)} disabled={savingProgressId === text(remarkSchedule.id)} onClick={() => void saveRemark()}>
+                    <Save size={14} />
+                    Save remark
+                  </Button>
+                )}
+              </div>
             </section>
           </div>
         )}
@@ -8997,12 +9052,34 @@ function PriceQuotationSubmissions({
   notice: (message: string) => void;
 }) {
   const [selectedPriceQuotation, setSelectedPriceQuotation] = useState<Row | null>(null);
+  const [search, setSearch] = useState("");
+  const [month, setMonth] = useState("");
+  const [submissionType, setSubmissionType] = useState<"all" | "new" | "revised">("all");
   const pendingPriceQuotations = store.quotations.filter(
     (quotation) =>
       text(quotation.status) === "pending" &&
       text(quotation.document_type) === "price_quotation" &&
       !quotation.costing_source_id,
-  );
+  ).sort(newestActivityFirst);
+  const normalizedSearch = search.trim().toLowerCase();
+  const filteredPriceQuotations = pendingPriceQuotations.filter((quotation) => {
+    const submittedAt = text(quotation.submitted_at);
+    const preparedBy = store.profiles.find((profile) => profile.id === (quotation.prepared_by_user_id ?? quotation.submitted_by ?? quotation.created_by))?.full_name;
+    const matchesSearch = !normalizedSearch || [quotation.quotation_no, quotation.client_name, quotation.project_name, preparedBy]
+      .some((value) => text(value).toLowerCase().includes(normalizedSearch));
+    const matchesMonth = !month || submittedAt.startsWith(month);
+    const revised = n(quotation.resubmission_count) > 0;
+    const matchesSubmission = submissionType === "all" || (submissionType === "new" ? !revised : revised);
+    return matchesSearch && matchesMonth && matchesSubmission;
+  }).sort((left, right) => {
+    const submittedDifference = new Date(text(right.submitted_at, "")).getTime() - new Date(text(left.submitted_at, "")).getTime();
+    if (Number.isFinite(submittedDifference) && submittedDifference !== 0) return submittedDifference;
+    return new Date(text(right.created_at, "")).getTime() - new Date(text(left.created_at, "")).getTime();
+  });
+  const submissionLabel = (quotation: Row) => {
+    const count = n(quotation.resubmission_count);
+    return count === 0 ? "New" : count === 1 ? "Revised" : `Revised ${count}×`;
+  };
   const officerName = (quotation: Row) =>
     text(
       store.profiles.find(
@@ -9018,13 +9095,19 @@ function PriceQuotationSubmissions({
       variant="page"
       hideHeading
     >
-      {pendingPriceQuotations.length ? (
+      <div className="flex flex-wrap items-end gap-2 border-b border-[#edf0f5] px-4 py-3 sm:px-5">
+        <label className="min-w-[190px] flex-1 text-[11px] font-medium text-[#687386]">Search<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Quotation, client, or project" className="input mt-1" /></label>
+        <label className="text-[11px] font-medium text-[#687386]">Month<input type="month" value={month} onClick={(event) => event.currentTarget.showPicker?.()} onChange={(event) => setMonth(event.target.value)} className="input mt-1 w-[155px]" /></label>
+        <label className="text-[11px] font-medium text-[#687386]">Submission<select value={submissionType} onChange={(event) => setSubmissionType(event.target.value as "all" | "new" | "revised")} className="input mt-1 w-[130px]"><option value="all">All</option><option value="new">New</option><option value="revised">Revised</option></select></label>
+        {(search || month || submissionType !== "all") && <Button secondary onClick={() => { setSearch(""); setMonth(""); setSubmissionType("all"); }}>Clear filters</Button>}
+      </div>
+      {filteredPriceQuotations.length ? (
         <Table labels={["Price Quotation", "Client", "Prepared by", "Submitted", "Review"]}>
-          {pendingPriceQuotations.map((quotation) => {
+          {filteredPriceQuotations.map((quotation) => {
             const lead = store.leads.find((item) => item.id === quotation.lead_id);
             return (
               <tr key={text(quotation.id)}>
-                <td className="px-5 py-3"><b>{text(quotation.quotation_no)}</b><small>{text(quotation.project_name, text(lead?.project_name))}</small></td>
+                <td className="px-5 py-3"><div className="flex items-center gap-2"><b>{text(quotation.quotation_no)}</b><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${n(quotation.resubmission_count) > 0 ? "bg-[#fff4dd] text-[#9a6700]" : "bg-[#edf5ff] text-[#175cd3]"}`}>{submissionLabel(quotation)}</span></div><small>{text(quotation.project_name, text(lead?.project_name))}</small></td>
                 <td className="px-5 py-3 font-medium">{text(quotation.client_name, text(lead?.client_name))}</td>
                 <td className="px-5 py-3">{officerName(quotation)}</td>
                 <td className="px-5 py-3">{day(quotation.submitted_at)}</td>
@@ -9036,7 +9119,7 @@ function PriceQuotationSubmissions({
           })}
         </Table>
       ) : (
-        <Empty>No Price Quotations are awaiting review.</Empty>
+        <Empty>{pendingPriceQuotations.length ? "No Price Quotations match the selected filters." : "No Price Quotations are awaiting review."}</Empty>
       )}
       {selectedPriceQuotation && (
         <PriceQuotationReview
@@ -9154,7 +9237,7 @@ function PriceQuotationWorkspace({
       preparedByName(quote),
     ].map((value) => text(value).toLowerCase()).join(" ");
     return searchable.includes(quotationQuery.trim().toLowerCase());
-  });
+  }).sort(newestActivityFirst);
   const availableLeads = store.leads.filter(
     (lead) =>
       !["won", "lost"].includes(text(lead.status)) &&
@@ -9653,6 +9736,7 @@ function ProductCostingsSection({
   setVatRate,
   costings,
   setCostings,
+  pricingDefaults,
 }: {
   projectName: string;
   lines: Row[];
@@ -9660,6 +9744,7 @@ function ProductCostingsSection({
   setVatRate: (value: string) => void;
   costings: ProductCostingDraft[];
   setCostings: (next: ProductCostingDraft[] | ((current: ProductCostingDraft[]) => ProductCostingDraft[])) => void;
+  pricingDefaults: Record<string, unknown>;
 }) {
   const displayProjectName = projectName.trim() || "Project";
   const updateCosting = (key: string, update: (costing: ProductCostingDraft) => ProductCostingDraft) =>
@@ -9671,7 +9756,15 @@ function ProductCostingsSection({
         <div><h3 className="text-[14px] font-semibold text-[#202938]">Internal product costings</h3><p className="mt-1 text-[12px] text-[#687386]">General Manager / Pricing Officer only. Add one costing table for each finished product; all internal costs and markups calculate the quotation price automatically.</p></div>
         <Button secondary disabled={!canAddCosting} onClick={() => {
           const nextLine = lines.find((line) => !costings.some((costing) => costing.quotationItemId === line.id));
-          if (nextLine?.id) setCostings((current) => [...current, newProductCostingDraft(text(nextLine.id))]);
+          if (nextLine?.id) setCostings((current) => [...current, {
+            ...newProductCostingDraft(text(nextLine.id)),
+            markups: [
+              { key: `markup-${crypto.randomUUID()}`, label: "Profit Margin", rate: text(pricingDefaults.default_profit_margin, "75") },
+              { key: `markup-${crypto.randomUUID()}`, label: "Overhead Expense", rate: text(pricingDefaults.default_overhead_rate, "0") },
+              { key: `markup-${crypto.randomUUID()}`, label: "Buffer Margin", rate: text(pricingDefaults.default_buffer_margin, "20") },
+              { key: `markup-${crypto.randomUUID()}`, label: "Additional Markup", rate: text(pricingDefaults.default_additional_markup, "15") },
+            ],
+          }]);
         }}><Plus size={14} /> Add costing table</Button>
       </div>
       {costings.length === 0 ? <p className="mt-4 rounded-lg border border-dashed border-[#ccd5e0] bg-white px-3 py-3 text-[12px] text-[#687386]">No internal costing table has been added. You can still use the existing manual price review for historical quotations.</p> : <div className="mt-4 space-y-4">{costings.map((costing, costingIndex) => {
@@ -9684,7 +9777,7 @@ function ProductCostingsSection({
           </div>
           <div className="mt-3"><div className="mb-3"><h4 className="text-[12px] font-semibold text-[#344054]">Internal costs</h4></div>
             <Table labels={["Mode", "Description", "Quantity", "Unit Cost", "Amount", ""]} minWidth={0} className="table-fixed" scrollable={false} compact columnWidths={["12%", "42%", "12%", "12%", "12%", "10%"]} alignRightLabels={["Quantity", "Unit Cost"]}>{costing.costLines.map((line, lineIndex) => { const isFixedAmount = line.calculationType === "fixed_amount"; const lineAmount = isFixedAmount ? n(line.amount) : n(line.quantity) * n(line.unitCost); const setCalculationType = (value: "quantity_unit_cost" | "fixed_amount") => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, calculationType: value, amount: value === "fixed_amount" && item.calculationType !== "fixed_amount" ? String(n(item.quantity) * n(item.unitCost)) : item.amount } : item) })); return <tr key={line.key}><td className="min-w-0 px-1 py-2"><div aria-label={`Cost ${lineIndex + 1} calculation type`} role="group" className="inline-flex w-full items-center justify-center whitespace-nowrap overflow-hidden rounded-md border border-[#d9e0e9] text-[10px] font-semibold"><button type="button" aria-pressed={!isFixedAmount} onClick={() => setCalculationType("quantity_unit_cost")} className={`min-w-0 flex-1 min-h-6 px-1 transition-colors ${!isFixedAmount ? "bg-[#c43b43] text-white" : "bg-white text-[#687386] hover:bg-[#f5f7fa]"}`}>Q×C</button><button type="button" aria-pressed={isFixedAmount} onClick={() => setCalculationType("fixed_amount")} className={`min-w-0 flex-1 min-h-6 px-1 transition-colors ${isFixedAmount ? "bg-[#c43b43] text-white" : "bg-white text-[#687386] hover:bg-[#f5f7fa]"}`}>Fixed</button></div></td><td className="min-w-0 !whitespace-normal break-words px-2 py-2"><input aria-label={`Cost ${lineIndex + 1} description`} value={line.description} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, description: titleCaseEntry(event.target.value, "description") } : item) }))} className="input mt-0 min-w-0 max-w-full px-2" placeholder="Material, labor, logistics" /></td><td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-end text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} quantity`} type="number" min="0.001" step="any" value={line.quantity} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, quantity: event.target.value } : item) }))} className="input mt-0 min-w-0 max-w-full px-1 text-right" />}</td><td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-end text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} unit cost`} type="number" min="0" step="any" value={line.unitCost} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, unitCost: event.target.value } : item) }))} className="input mt-0 min-w-0 max-w-full px-1 text-right" />}</td><td className="min-w-0 px-2 py-2">{isFixedAmount ? <input aria-label={`Cost ${lineIndex + 1} fixed amount`} type="number" min="0" step="any" value={line.amount} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, amount: event.target.value } : item) }))} className="input mt-0 min-w-0 max-w-full px-1 text-right" /> : <span className="flex min-h-9 items-center justify-end whitespace-nowrap font-medium">{peso.format(lineAmount)}</span>}</td><td className="px-1 py-2 text-center"><ActionIcon label={`Remove cost ${lineIndex + 1}`} tone="red" disabled={costing.costLines.length === 1} onClick={() => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.filter((item) => item.key !== line.key) }))}><Trash2 size={14} /></ActionIcon></td></tr>; })}</Table><div className="mt-2 mb-2 flex items-center justify-between gap-3"><h4 className="text-[12px] font-semibold text-[#344054]">Markup, VAT &amp; Expenses</h4><Button onClick={() => updateCosting(costing.key, (current) => ({ ...current, costLines: [...current.costLines, { key: `cost-line-${crypto.randomUUID()}`, description: "", calculationType: "quantity_unit_cost", quantity: "1", unitCost: "0", amount: "0" }] }))}><Plus size={13} /> Add cost</Button></div></div>
-          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]"><div><div className="mt-1 space-y-2 w-fit"><div aria-hidden="true" className="grid grid-cols-[auto_104px_88px] gap-4 px-1 text-[10px] font-medium uppercase tracking-wide text-[#8b92a1]"><span>Category</span><span className="text-center">Rate</span><span className="text-right">Total</span></div>{costing.markups.map((markup) => { const markupAmount = Math.round(totals.cogs * n(markup.rate) * 100) / 10000; return <div key={markup.key} className="grid grid-cols-[auto_104px_88px] gap-4"><span className="flex min-h-9 items-center px-1 text-[12px] font-medium text-[#344054]">{markup.label}</span><div className="flex items-center gap-1"><input aria-label={`${markup.label || "Markup"} percentage`} type="number" min="0" step="any" value={markup.rate} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, markups: current.markups.map((item) => item.key === markup.key ? { ...item, rate: event.target.value } : item) }))} className="input mt-0 w-[78px] text-center" /><span className="text-[12px] text-[#687386]">%</span></div><output aria-label={`${markup.label || "Markup"} total`} className="flex min-h-9 items-center justify-end whitespace-nowrap text-[12px] font-medium text-[#344054]">{peso.format(markupAmount)}</output></div>; })}<div className="grid grid-cols-[auto_104px_88px] gap-4"><span className="flex min-h-9 items-center px-1 text-[12px] font-medium text-[#344054]">VAT</span><div className="flex items-center gap-1"><input aria-label="VAT percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input mt-0 w-[78px] text-center" /><span className="text-[12px] text-[#687386]">%</span></div><output aria-label="VAT total" className="flex min-h-9 items-center justify-end whitespace-nowrap text-[12px] font-medium text-[#344054]">{peso.format(totals.vat)}</output></div></div></div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]"><div><div className="mt-1 space-y-2 w-fit"><p className="px-1 text-[12px] text-[#687386]">Pricing defaults are managed by the General Manager.</p><div className="grid grid-cols-[auto_104px_88px] gap-4"><span className="flex min-h-9 items-center px-1 text-[12px] font-medium text-[#344054]">VAT</span><div className="flex items-center gap-1"><input aria-label="VAT percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input mt-0 w-[78px] text-center" /><span className="text-[12px] text-[#687386]">%</span></div><output aria-label="VAT total" className="flex min-h-9 items-center justify-end whitespace-nowrap text-[12px] font-medium text-[#344054]">{peso.format(totals.vat)}</output></div></div></div>
             <dl className="overflow-hidden rounded-lg border border-[#d9e0e9] text-[12px]"><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Total Direct Cost</dt><dd className="font-medium">{peso.format(totals.cogs)}</dd></div><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>All markups</dt><dd>{peso.format(totals.markupTotal)}</dd></div><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Selling Price VAT EX (total)</dt><dd>{peso.format(totals.sellingExVat)}</dd></div><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>VAT ({n(vatRate)}%)</dt><dd>{peso.format(totals.vat)}</dd></div><div className="flex justify-between bg-[#f8fbff] px-3 py-2"><dt>Selling Price VAT EX / Piece</dt><dd>{peso.format(totals.unitExVat)}</dd></div><div className="flex justify-between bg-[#eff7f1] px-3 py-2 font-semibold text-[#176b40]"><dt>Selling Price VAT INC / Piece</dt><dd>{peso.format(totals.unitIncVat)}</dd></div></dl></div>
         </article>;
       })}</div>}
@@ -9698,6 +9791,7 @@ type PriceQuotationReviewContentProps = {
   projectType: string;
   illustrations: { id: string; description: string; imageUrl: string }[];
   productCostings: ProductCostingDraft[];
+  pricingDefaults: Row;
   setProductCostings: (next: ProductCostingDraft[] | ((current: ProductCostingDraft[]) => ProductCostingDraft[])) => void;
   prices: Record<string, string>;
   setPrices: (next: Record<string, string> | ((current: Record<string, string>) => Record<string, string>)) => void;
@@ -9718,12 +9812,13 @@ type PriceQuotationReviewContentProps = {
   saving: boolean;
   working: boolean;
   review: (decision: "approved" | "needs_revision") => Promise<void>;
+  finalApproval: boolean;
 };
 
 function PriceQuotationReviewContent({
-  lines, projectName, projectType, illustrations, productCostings, setProductCostings, prices, setPrices, subtotal, vatRate, setVatRate, tax,
+  lines, projectName, projectType, illustrations, productCostings, pricingDefaults, setProductCostings, prices, setPrices, subtotal, vatRate, setVatRate, tax,
   total, terms, setTerms, bankDetails, setBankDetails, priceBasis, setPriceBasis,
-  revisionNote, setRevisionNote, close, saving, working, review,
+  revisionNote, setRevisionNote, close, saving, working, review, finalApproval,
 }: PriceQuotationReviewContentProps) {
   const vatMultiplier = 1 + n(vatRate) / 100;
   const priceLabel = "Selling Price / Unit";
@@ -9737,7 +9832,7 @@ function PriceQuotationReviewContent({
         </dl>
         {illustrations.length > 0 && <div className="mt-4"><p className="text-[12px] font-medium text-[#687386]">Illustrations</p><div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">{illustrations.map((illustration) => <a key={illustration.id} href={illustration.imageUrl} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><img src={illustration.imageUrl} alt={illustration.description || "Quotation illustration"} className="aspect-square w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{illustration.description}</p></a>)}</div></div>}
       </section>
-      <ProductCostingsSection projectName={projectName} lines={lines} vatRate={vatRate} setVatRate={setVatRate} costings={productCostings} setCostings={setProductCostings} />
+      <ProductCostingsSection projectName={projectName} lines={lines} vatRate={vatRate} setVatRate={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} />
       <section>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <p className="text-[12px] text-[#687386]">Choose how the selling price is entered. The quotation always saves its VAT-exclusive price.</p>
@@ -9785,7 +9880,7 @@ function PriceQuotationReviewContent({
         <div className="mt-3 flex justify-end"><Button onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div>
       </section>
       <label className="block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label>
-      <div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary loading={saving || working} disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div>
+      <div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary loading={saving || working} disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> {finalApproval ? "Approve Price Quotation" : "Submit to General Manager"}</Button></div>
     </div>
   );
 }
@@ -9797,6 +9892,7 @@ function PriceQuotationReview({
   close,
   notice,
   reload,
+  finalApproval = false,
 }: {
   quotation: Row;
   store: Store;
@@ -9804,6 +9900,7 @@ function PriceQuotationReview({
   close: () => void;
   notice: (message: string) => void;
   reload: () => Promise<void>;
+  finalApproval?: boolean;
 }) {
   const [prices, setPrices] = useState<Record<string, string>>(() =>
     Object.fromEntries(
@@ -9970,8 +10067,12 @@ function PriceQuotationReview({
         rate: n(markup.rate),
       })),
     }));
-    const { error } = productCostings.length > 0
-      ? await createClient().rpc("review_price_quotation_with_product_costings", {
+    const { error } = finalApproval && decision === "needs_revision"
+      ? await createClient().rpc("return_price_quotation_from_gm", { p_quotation_id: quotation.id, p_note: revisionNote })
+      : finalApproval && decision === "approved"
+      ? await createClient().rpc("final_approve_price_quotation", { p_quotation_id: quotation.id })
+      : productCostings.length > 0
+      ? await createClient().rpc("pricing_review_price_quotation", {
           p_quotation_id: quotation.id,
           p_decision: decision,
           p_vat_rate: n(vatRate),
@@ -9993,14 +10094,14 @@ function PriceQuotationReview({
     setWorking(false);
     if (error) return notice(error.message);
     close();
-    notice(decision === "approved" ? "Price Quotation approved." : "Price Quotation returned for revision.");
+    notice(decision === "approved" ? (finalApproval ? "Price Quotation approved." : "Price Quotation submitted to the General Manager.") : "Price Quotation returned for revision.");
     await reload();
   };
   /*
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} shipping={shipping} setShipping={setShipping} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} · {text(quotation.client_name)} · Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><div className="mt-5 grid gap-5 lg:grid-cols-[1.45fr_.75fr]"><div><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><section className="mt-5 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="mt-4 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="mt-4 block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label></div><aside><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><div className="border-b border-[#edf0f5] px-4 py-3"><h3 className="text-[14px] font-semibold">Quotation Total</h3></div><Table labels={["Category", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section></aside></div><div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary loading={saving || working} disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></section></div>;
   */
-  return <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectName={text(quotation.project_name, "")} projectType={text(quotation.project_types, "")} illustrations={illustrations} productCostings={productCostings} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} priceBasis={priceBasis} setPriceBasis={setPriceBasis} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
+  return <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - {finalApproval ? "Finalize approval." : "Complete pricing and submit to General Manager."}</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectName={text(quotation.project_name, "")} projectType={text(quotation.project_types, "")} illustrations={illustrations} productCostings={productCostings} pricingDefaults={store.business_settings.find((setting) => text(setting.organization_id) === text(quotation.organization_id)) ?? {}} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} priceBasis={priceBasis} setPriceBasis={setPriceBasis} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} finalApproval={finalApproval} /></section></div>;
 }
 
 function GeneralManagerCostingReview({
@@ -10614,15 +10715,15 @@ function Submissions({
   const [pdfWindow, setPdfWindow] = useState<Window | null>(null);
   const pendingPriceQuotations = store.quotations.filter(
     (quotation) =>
-      text(quotation.status) === "pending" &&
+      text(quotation.status) === "pending_gm_approval" &&
       text(quotation.document_type) === "price_quotation" &&
       !quotation.costing_source_id,
-  );
+  ).sort(newestActivityFirst);
   const pendingCostings = store.quotations.filter(
     (quotation) =>
       text(quotation.status) === "pending" &&
       text(quotation.document_type) === "costing_breakdown",
-  );
+  ).sort(newestActivityFirst);
   const officerName = (quotation: Row) =>
     text(
       store.profiles.find(
@@ -10854,27 +10955,27 @@ function Submissions({
   };
   const pendingProjectEdits = store.project_edit_requests.filter(
     (request) => text(request.status) === "pending",
-  );
+  ).sort(newestActivityFirst);
   const pendingLeadChanges = store.lead_change_requests.filter(
     (request) => text(request.status) === "pending",
-  );
+  ).sort(newestActivityFirst);
   const pendingQuotationRevisions = store.quotation_revision_requests.filter(
     (request) => text(request.status) === "pending",
-  );
+  ).sort(newestActivityFirst);
   const pendingPriceQuotationRevisions = store.price_quotation_revision_requests.filter(
     (request) => text(request.status) === "pending",
-  );
+  ).sort(newestActivityFirst);
   const pendingProjectSchedules = store.project_schedules.filter(
     (schedule) => text(schedule.status) === "pending",
-  );
+  ).sort(newestActivityFirst);
   const pendingProjectScheduleRevisions =
     store.project_schedule_revision_requests.filter(
       (request) => text(request.status) === "pending",
-    );
+    ).sort(newestActivityFirst);
   const pendingProjectScheduleCompletions =
     store.project_schedule_completion_requests.filter(
       (request) => text(request.status) === "pending",
-    );
+    ).sort(newestActivityFirst);
   const projectOfficerName = (request: Row) =>
     text(
       store.profiles.find((profile) => profile.id === request.submitted_by)
@@ -11107,6 +11208,7 @@ function Submissions({
           quotation={selectedPriceQuotation}
           store={store}
           saving={savingId === selectedPriceQuotation.id}
+          finalApproval
           close={() => setSelectedPriceQuotation(null)}
           notice={notice}
           reload={reload}
@@ -13253,6 +13355,7 @@ function Dashboard({
           <input
             type="month"
             value={selectedMonth}
+            onClick={(event) => event.currentTarget.showPicker?.()}
             onChange={(event) => setSelectedMonth(event.target.value)}
             className="border-0 bg-transparent p-0 text-[12px] font-medium text-[#202124] outline-none"
           />
@@ -13602,6 +13705,20 @@ function Approvals({
   );
 }
 
+function CommissionsView({ role }: { role: string }) {
+  const [rows, setRows] = useState<Row[]>([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    void createClient().rpc("sales_project_officer_commissions").then(({ data }) => {
+      setRows((data ?? []) as Row[]);
+      setLoading(false);
+    });
+  }, []);
+  const paid = rows.reduce((sum, row) => sum + n(row.paid_amount), 0);
+  const earned = rows.reduce((sum, row) => sum + n(row.earned_commission), 0);
+  return <div className="space-y-5"><Panel title={role === "project_manager" ? "My commissions" : "Sales Project Officer commissions"} detail="Commission is earned only from actual customer payments: first ₱400,000 at 3%, then the balance at 5%."><div className="grid gap-3 p-4 sm:grid-cols-2"><div className="rounded-lg bg-[#f8fbff] p-3 text-[12px]"><p className="text-[#687386]">Actual collections</p><p className="mt-1 text-lg font-semibold">{peso.format(paid)}</p></div><div className="rounded-lg bg-[#eff7f1] p-3 text-[12px]"><p className="text-[#687386]">Commission earned</p><p className="mt-1 text-lg font-semibold text-[#176b40]">{peso.format(earned)}</p></div></div>{loading ? <Empty>Loading commissions…</Empty> : rows.length ? <Table labels={role === "project_manager" ? ["Quotation", "Client", "Paid to date", "Projected", "Earned"] : ["Officer", "Quotation", "Client", "Paid to date", "Earned"]}>{rows.map((row) => <tr key={text(row.quotation_id)}>{role !== "project_manager" && <td className="px-4 py-3">{text(row.officer_user_id)}</td>}<td className="px-4 py-3"><b>{text(row.quotation_no)}</b><small>{text(row.project_name)}</small></td><td className="px-4 py-3">{text(row.client_name)}</td><td className="px-4 py-3 text-right">{peso.format(n(row.paid_amount))}</td>{role !== "project_manager" && <td className="px-4 py-3 text-right">{peso.format(n(row.projected_commission))}</td>}<td className="px-4 py-3 text-right font-semibold">{peso.format(n(row.earned_commission))}</td></tr>)}</Table> : <Empty>No approved quotations with commission eligibility yet.</Empty>}</Panel></div>;
+}
+
 function SettingsView({
   store,
   orgId,
@@ -13618,6 +13735,8 @@ function SettingsView({
   const [bankDetailsOpen, setBankDetailsOpen] = useState(false);
   const [defaultBankDetails, setDefaultBankDetails] = useState<BankDetail[]>([]);
   const [savingBankDetails, setSavingBankDetails] = useState(false);
+  const [pricingDefaultsOpen, setPricingDefaultsOpen] = useState(false);
+  const [pricingDefaults, setPricingDefaults] = useState<Record<string, string>>({});
   const setting = store.business_settings[0];
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileValues, setProfileValues] = useState<Record<string, string>>(
@@ -13722,9 +13841,28 @@ function SettingsView({
     notice("Default bank details saved.");
     await reload();
   };
+  const savePricingDefaults = async () => {
+    const { error } = await createClient().from("business_settings").upsert({
+      organization_id: orgId,
+      default_profit_margin: n(pricingDefaults.default_profit_margin),
+      default_overhead_rate: n(pricingDefaults.default_overhead_rate),
+      default_buffer_margin: n(pricingDefaults.default_buffer_margin),
+      production_commission: n(pricingDefaults.production_commission),
+      default_additional_markup: n(pricingDefaults.default_additional_markup),
+      vat_rate: n(pricingDefaults.vat_rate),
+    });
+    if (error) return notice(error.message);
+    setPricingDefaultsOpen(false);
+    notice("Pricing defaults saved.");
+    await reload();
+  };
   return (
     <div className="space-y-5">
       <AccountProfileDialog open embedded fullWidth role={role} />
+      <Panel title="Pricing defaults" detail="Applied automatically to new product costings. Pricing Officers can view and adjust VAT only." action={<Button secondary onClick={() => { setPricingDefaults({ default_profit_margin: text(setting?.default_profit_margin, "75"), default_overhead_rate: text(setting?.default_overhead_rate, "0"), default_buffer_margin: text(setting?.default_buffer_margin, "20"), production_commission: text(setting?.production_commission, "0"), default_additional_markup: text(setting?.default_additional_markup, "15"), vat_rate: text(setting?.vat_rate, "12") }); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button>}>
+        <Table labels={["Profit margin", "Overhead expense", "Buffer margin", "Commission", "Additional markup", "VAT"]}><tr><td className="px-4 py-3">{text(setting?.default_profit_margin, "75")}%</td><td className="px-4 py-3">{text(setting?.default_overhead_rate, "0")}%</td><td className="px-4 py-3">{text(setting?.default_buffer_margin, "20")}%</td><td className="px-4 py-3">{text(setting?.production_commission, "0")}%</td><td className="px-4 py-3">{text(setting?.default_additional_markup, "15")}%</td><td className="px-4 py-3">{text(setting?.vat_rate, "12")}%</td></tr></Table>
+      </Panel>
+      {pricingDefaultsOpen && <Dialog title="Pricing defaults" fields={[{ key: "default_profit_margin", label: "Profit Margin %", type: "number" }, { key: "default_overhead_rate", label: "Overhead Expense %", type: "number" }, { key: "default_buffer_margin", label: "Buffer Margin %", type: "number" }, { key: "production_commission", label: "Commission %", type: "number" }, { key: "default_additional_markup", label: "Additional Markup %", type: "number" }, { key: "vat_rate", label: "Default VAT %", type: "number" }]} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => setPricingDefaultsOpen(false)} saving={false} saveLabel="Save pricing defaults" />}
       <Panel
         title="Default bank details"
         detail="Shown on new Price Quotations."
@@ -14117,6 +14255,7 @@ export function HuswellWorkspace({
       "Submissions",
       "Policy",
       "Settings",
+      "Commissions",
     ],
     owner: [
       "Dashboard",
@@ -14128,6 +14267,7 @@ export function HuswellWorkspace({
       "Submissions",
       "Policy",
       "Settings",
+      "Commissions",
     ],
     admin: [
       "Dashboard",
@@ -14139,6 +14279,7 @@ export function HuswellWorkspace({
       "Submissions",
       "Policy",
       "Settings",
+      "Commissions",
     ],
     project_manager: [
       "Dashboard",
@@ -14147,6 +14288,7 @@ export function HuswellWorkspace({
       "Mockups",
       "Price Quotations",
       "Policy",
+      "Commissions",
     ],
     sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Policy"],
     pricing_officer: [
@@ -14197,6 +14339,7 @@ export function HuswellWorkspace({
       label: "Business",
       items: [
         { view: "Finance", icon: Wallet },
+        { view: "Commissions", icon: PhilippinePeso },
         { view: "Policy", icon: ScrollText },
         { view: "Settings", icon: Settings },
       ],
@@ -14224,6 +14367,7 @@ export function HuswellWorkspace({
         { view: "Mockups", icon: ImageIcon },
         { view: "Projects", icon: ClipboardCheck },
         { view: "Suppliers & Materials", icon: UsersRound },
+        { view: "Commissions", icon: PhilippinePeso },
       ],
     },
     {
@@ -14360,6 +14504,10 @@ export function HuswellWorkspace({
     Settings: {
       title: "Business settings",
       detail: "Manage business defaults, profile details, and staff access.",
+    },
+    Commissions: {
+      title: role === "project_manager" ? "My commissions" : "Sales Project Officer commissions",
+      detail: "Track commission earned from actual customer payments.",
     },
     Policy: {
       title: "Announcements & Policy",
@@ -14559,6 +14707,8 @@ export function HuswellWorkspace({
         policyAction={policyAction}
         onPolicyActionHandled={() => setPolicyAction(null)}
       />
+    ) : active === "Commissions" ? (
+      <CommissionsView role={role} />
     ) : (
       <SettingsView
         store={store}
