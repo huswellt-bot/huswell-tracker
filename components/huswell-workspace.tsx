@@ -101,6 +101,7 @@ type View =
   | "Quotation Costing Overview"
   | "Costing Breakdown"
   | "Price Quotations"
+  | "Price Quotation Review"
   | "Materials List"
   | "Suppliers & Materials"
   | "Suppliers"
@@ -929,6 +930,7 @@ const workspaceViewTables = (
     return ["quotations", "quotation_items", "price_quotation_product_costings", "price_quotation_costing_lines", "price_quotation_costing_markups", "price_quotation_illustrations", "quotation_signed_proofs", "leads", "customers", "business_settings", "profiles", "pricing_officer_project_types"];
   if (
     view === "Price Quotations" ||
+    view === "Price Quotation Review" ||
     (view === "Leads" && leadMode === "quotation")
   )
     return [
@@ -4575,14 +4577,19 @@ function MockupQuotationWorkspace({
   reload: () => Promise<void>;
   notice: (message: string) => void;
   role: string;
-}) {
+  }) {
   type RequestItem = {
     sourceItemId: string;
     description: string;
     quantity: string;
   };
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [statusTab, setStatusTab] = useState<"all" | "draft" | "pending" | "needs_revision" | "pending_gm_approval" | "approved">("all");
+  const defaultStatusTab = memberRole(role)
+    ? "pending_gm_approval"
+    : isPricingOfficerRole(role)
+      ? "pending"
+      : "draft";
+  const [statusTab, setStatusTab] = useState<"draft" | "pending" | "needs_revision" | "pending_gm_approval" | "approved">(defaultStatusTab);
   const [requestOpen, setRequestOpen] = useState(false);
   const [editingQuote, setEditingQuote] = useState<Row | null>(null);
   const [sourceQuotationId, setSourceQuotationId] = useState("");
@@ -4646,7 +4653,7 @@ function MockupQuotationWorkspace({
     (quote) => text(quote.status) === "pending" && !isOwner(quote),
   );
   const filteredQuotations = mockupQuotations.filter(
-    (quote) => statusTab === "all" || text(quote.status) === statusTab,
+    (quote) => text(quote.status) === statusTab,
   );
   const resetRequest = () => {
     setRequestOpen(false);
@@ -4768,7 +4775,6 @@ function MockupQuotationWorkspace({
         <div className="mb-4">
           <nav aria-label="Mockup quotation statuses" className="flex gap-1 overflow-x-auto border-b border-[#e4e8ef]">
             {([
-              ["all", "All"],
               ["draft", "Draft"],
               ["pending", "Pending Review"],
               ["needs_revision", "Needs Revision"],
@@ -4782,7 +4788,7 @@ function MockupQuotationWorkspace({
                 aria-current={statusTab === value ? "page" : undefined}
                 className={"shrink-0 px-3 py-2 text-[12px] font-medium " + (statusTab === value ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1] hover:text-[#4b5565]")}
               >
-                {label} ({mockupQuotations.filter((quote) => value === "all" || text(quote.status) === value).length})
+                {label} ({mockupQuotations.filter((quote) => text(quote.status) === value).length})
               </button>
             ))}
           </nav>
@@ -15047,6 +15053,7 @@ export function HuswellWorkspace({
       "Projects",
       "Mockups",
       "Price Quotations",
+      "Price Quotation Review",
       "Quotation Costing Overview",
       "Policy",
       "Commissions",
@@ -15107,6 +15114,7 @@ export function HuswellWorkspace({
         { view: "Dashboard", icon: LayoutDashboard },
         { view: "Leads", icon: ClipboardCheck },
         { view: "Price Quotations", icon: FileText },
+        { view: "Price Quotation Review", icon: ClipboardCheck },
         { view: "Mockups", icon: ImageIcon },
         { view: "Quotation Costing Overview", icon: ReceiptText },
         { view: "Projects", icon: ClipboardCheck },
@@ -15182,10 +15190,14 @@ export function HuswellWorkspace({
             : "Price Quotations",
       detail:
         role === "sales_pricing_officer"
-            ? "Prepare your quotations and review assigned pricing submissions for your project types."
+            ? "Prepare and manage your Price Quotations from assigned leads."
             : isManagementRole
             ? "Review officer-submitted quotations, set commercial terms and pricing, then approve or return them for revision."
             : "Prepare quotations from leads, then submit them for General Manager pricing and approval.",
+    },
+    "Price Quotation Review": {
+      title: "Price Quotation Review",
+      detail: "Review submitted Price Quotations assigned to your project types, then return them or submit their costing for General Manager approval.",
     },
     "Materials List": {
       title: "Materials List",
@@ -15279,17 +15291,17 @@ export function HuswellWorkspace({
     ) : loading ? (
       <Panel
         title={
-          active === "Leads" ? leads.title : active === "Projects" ? projects.title : active === "Mockups" ? "Mockup Quotation" : "Loading workspace"
+          active === "Leads" ? leads.title : active === "Projects" ? projects.title : active === "Mockups" ? "Mockup Quotation" : active === "Price Quotation Review" ? "Price Quotation Review" : "Loading workspace"
         }
         detail={
-          active === "Leads" || active === "Projects" || active === "Mockups"
-            ? (active === "Projects" ? projects.detail : active === "Mockups" ? "Loading Mockup Quotation workflow." : leads.detail)
+          active === "Leads" || active === "Projects" || active === "Mockups" || active === "Price Quotation Review"
+            ? (active === "Projects" ? projects.detail : active === "Mockups" ? "Loading Mockup Quotation workflow." : active === "Price Quotation Review" ? "Loading Price Quotation review queue." : leads.detail)
             : "Loading business data."
         }
       >
         <div
           className={
-            active === "Leads" || active === "Projects" || active === "Mockups" ? "min-h-[280px]" : undefined
+            active === "Leads" || active === "Projects" || active === "Mockups" || active === "Price Quotation Review" ? "min-h-[280px]" : undefined
           }
         >
           <Empty>Loading records…</Empty>
@@ -15320,24 +15332,13 @@ export function HuswellWorkspace({
         notice={setMessage}
         role={role}
       />
+    ) : active === "Price Quotation Review" ? (
+      <PriceQuotationSubmissions
+        store={store}
+        reload={reload}
+        notice={setMessage}
+      />
     ) : active === "Price Quotations" ? (
-      role === "sales_pricing_officer" ? (
-          <div className="space-y-4">
-            <PriceQuotationSubmissions
-              store={store}
-              reload={reload}
-              notice={setMessage}
-            />
-            <PriceQuotationWorkspace
-              store={store}
-              orgId={organizationId}
-              reload={reload}
-              notice={setMessage}
-              role={role}
-              profileName={profileName}
-            />
-          </div>
-        ) : (
         <PriceQuotationWorkspace
           store={store}
           orgId={organizationId}
@@ -15346,7 +15347,6 @@ export function HuswellWorkspace({
           role={role}
           profileName={profileName}
         />
-        )
     ) : active === "Leads" ? (
         <Records
           module={leads}
@@ -15697,7 +15697,7 @@ export function HuswellWorkspace({
             )}
           </div>
         </header>
-        <div className={`workspace-content ${(["Projects", "Price Quotations"].includes(active) || active === "Policy") ? "p-0" : "p-2 sm:p-3 lg:p-4"}`}>
+        <div className={`workspace-content ${(["Projects", "Price Quotations", "Price Quotation Review"].includes(active) || active === "Policy") ? "p-0" : "p-2 sm:p-3 lg:p-4"}`}>
           {message && (
             <div className="fixed inset-0 z-[60] grid place-items-center bg-[#061426]/30 p-4">
               <section

@@ -512,7 +512,7 @@ export function SuperAdminConsole({
         <div className="fixed inset-0 z-50 grid place-items-center bg-[#151922]/40 p-4">
           <form
             onSubmit={submitEdit}
-            className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl"
+            className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-2xl bg-white p-5 shadow-2xl"
           >
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -689,7 +689,7 @@ export function SuperAdminConsole({
         <div className="fixed inset-0 z-50 grid place-items-center bg-[#151922]/40 p-4">
           <form
             onSubmit={submit}
-            className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl"
+            className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-2xl bg-white p-5 shadow-2xl"
           >
             <div className="flex items-start justify-between gap-4">
               <div>
