@@ -424,6 +424,20 @@ const leadClientLabel = (lead: Row) => {
   if (clientName && companyName) return `${clientName} - ${companyName}`;
   return clientName || companyName || "Client";
 };
+const quotationParty = (quote: Row, store: Store) => {
+  const lead = store.leads.find((item) => item.id === quote.lead_id);
+  const customer = store.customers.find((item) => item.id === quote.customer_id);
+  return {
+    clientName: text(
+      quote.client_contact_name,
+      text(lead?.contact_name, text(customer?.contact_name, "-")),
+    ),
+    companyName: text(
+      quote.client_name,
+      text(lead?.client_name, text(customer?.company_name, "-")),
+    ),
+  };
+};
 const costingSizeUnit = (value: unknown) =>
   /\s+cm\s*$/i.test(String(value)) ? "Cm" : "Inch";
 const costingDimensions = (value: unknown) =>
@@ -4336,14 +4350,16 @@ function PriceQuotationMockups({
     >
       {approvedQuotations.length ? (
         <div className="px-4 py-4 sm:px-5 lg:px-6">
-          <Table labels={["Price Quotation", "Client", "Approved", "Mockup Status", "Actions"]} minWidth={700} className="!w-full">
+          <Table labels={["Price Quotation", "Client's Name", "Company Name", "Approved", "Mockup Status", "Actions"]} minWidth={860} className="!w-full">
             {approvedQuotations.map((quote) => {
               const lead = store.leads.find((item) => item.id === quote.lead_id);
+              const party = quotationParty(quote, store);
               const mockupStatus = mockupStatusFor(text(quote.id));
               return (
                 <tr key={text(quote.id)}>
                   <td className="px-5 py-3"><b>{text(quote.quotation_no)}</b><small>{text(quote.project_name, text(lead?.project_name))}</small></td>
-                  <td className="px-5 py-3 font-medium">{text(quote.client_name, text(lead?.client_name))}</td>
+                  <td className="px-5 py-3 font-medium">{party.clientName}</td>
+                  <td className="px-5 py-3">{party.companyName}</td>
                   <td className="px-5 py-3">{day(quote.approved_at ?? quote.issue_date)}</td>
                   <td className="px-5 py-3"><MockupStatusBadge value={mockupStatus} /></td>
                   <td className="px-5 py-3">
@@ -5042,7 +5058,7 @@ function ProjectCalendar({
         <Table
           labels={[
             "Quotation No.",
-            "Client Name",
+            "Client's Name",
             "Company Name",
             "Start Date",
             "Due Date",
@@ -9065,7 +9081,8 @@ function PriceQuotationSubmissions({
   const filteredPriceQuotations = pendingPriceQuotations.filter((quotation) => {
     const submittedAt = text(quotation.submitted_at);
     const preparedBy = store.profiles.find((profile) => profile.id === (quotation.prepared_by_user_id ?? quotation.submitted_by ?? quotation.created_by))?.full_name;
-    const matchesSearch = !normalizedSearch || [quotation.quotation_no, quotation.client_name, quotation.project_name, preparedBy]
+    const party = quotationParty(quotation, store);
+    const matchesSearch = !normalizedSearch || [quotation.quotation_no, party.clientName, party.companyName, quotation.project_name, preparedBy]
       .some((value) => text(value).toLowerCase().includes(normalizedSearch));
     const matchesMonth = !month || submittedAt.startsWith(month);
     const revised = n(quotation.resubmission_count) > 0;
@@ -9102,13 +9119,15 @@ function PriceQuotationSubmissions({
         {(search || month || submissionType !== "all") && <Button secondary onClick={() => { setSearch(""); setMonth(""); setSubmissionType("all"); }}>Clear filters</Button>}
       </div>
       {filteredPriceQuotations.length ? (
-        <Table labels={["Price Quotation", "Client", "Prepared by", "Submitted", "Review"]}>
+        <Table labels={["Price Quotation", "Client's Name", "Company Name", "Prepared by", "Submitted", "Review"]} minWidth={860}>
           {filteredPriceQuotations.map((quotation) => {
             const lead = store.leads.find((item) => item.id === quotation.lead_id);
+            const party = quotationParty(quotation, store);
             return (
               <tr key={text(quotation.id)}>
                 <td className="px-5 py-3"><div className="flex items-center gap-2"><b>{text(quotation.quotation_no)}</b><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${n(quotation.resubmission_count) > 0 ? "bg-[#fff4dd] text-[#9a6700]" : "bg-[#edf5ff] text-[#175cd3]"}`}>{submissionLabel(quotation)}</span></div><small>{text(quotation.project_name, text(lead?.project_name))}</small></td>
-                <td className="px-5 py-3 font-medium">{text(quotation.client_name, text(lead?.client_name))}</td>
+                <td className="px-5 py-3 font-medium">{party.clientName}</td>
+                <td className="px-5 py-3">{party.companyName}</td>
                 <td className="px-5 py-3">{officerName(quotation)}</td>
                 <td className="px-5 py-3">{day(quotation.submitted_at)}</td>
                 <td className="px-5 py-3">
@@ -9565,12 +9584,13 @@ function PriceQuotationWorkspace({
       </div>
       {filteredQuotations.length ? (
         <Table
-          labels={role === "project_manager" ? ["Quotation", "Client / Project", "Status", "Date", "Actions"] : ["Quotation", "Client / Project", "Prepared by", "Status", "Date", "Actions"]}
-          minWidth={role === "project_manager" ? 720 : 860}
+          labels={role === "project_manager" ? ["Quotation", "Client's Name", "Company Name", "Status", "Date", "Actions"] : ["Quotation", "Client's Name", "Company Name", "Prepared by", "Status", "Date", "Actions"]}
+          minWidth={role === "project_manager" ? 860 : 1000}
           className="!w-full"
         >
           {filteredQuotations.map((quote) => {
             const lead = store.leads.find((item) => item.id === quote.lead_id);
+            const party = quotationParty(quote, store);
             const preparedBy = preparedByName(quote);
             const isLegacy = Boolean(quote.costing_source_id);
             const editable = !isLegacy && ["draft", "needs_revision"].includes(text(quote.status));
@@ -9590,7 +9610,8 @@ function PriceQuotationWorkspace({
             return (
               <tr key={text(quote.id)}>
                 <td className="px-5 py-3"><b>{text(quote.quotation_no)}</b><small>{day(quote.issue_date)}</small></td>
-                <td className="px-5 py-3"><b>{text(quote.client_name, text(lead?.client_name))}</b><small>{text(quote.project_name, text(lead?.project_name))}</small></td>
+                <td className="px-5 py-3"><b>{party.clientName}</b><small>{text(quote.project_name, text(lead?.project_name))}</small></td>
+                <td className="px-5 py-3">{party.companyName}</td>
                 {role !== "project_manager" && <td className="px-5 py-3">{preparedBy}</td>}
                 <td className="px-5 py-3"><div className="flex items-center gap-1.5"><Status value={quote.status} />{priceRevisionRequest && <span className="text-[11px] text-[#a76605]">Revision requested</span>}{text(quote.status) === "needs_revision" && <ActionIcon label="View revision note" tone="amber" confirm={false} onClick={() => setRevisionNoteQuote(quote)}><MessageSquareText size={15} /></ActionIcon>}</div></td>
                 <td className="px-5 py-3">{text(quote.status) === "approved" ? day(quote.approved_at) : day(quote.submitted_at)}</td>
@@ -9652,8 +9673,14 @@ function PriceQuotationWorkspace({
       {role === "project_manager" && recipientEndorsements.length > 0 && (
         <section className="border-t border-[#edf0f5] px-4 py-4 sm:px-5 lg:px-6">
           <div className="mb-3"><h3 className="text-[14px] font-semibold text-[#202938]">Endorsed to Me</h3><p className="mt-0.5 text-[12px] text-[#687386]">Read-only PDF copies shared by another Sales Project Officer.</p></div>
-          <Table labels={["Price Quotation", "Client / Project", "Endorsed", "PDF"]} minWidth={640}>
-            {recipientEndorsements.map((endorsement) => <tr key={text(endorsement.id)}><td className="px-5 py-3 font-medium">{text(endorsement.quotation_no)}</td><td className="px-5 py-3"><b>{text(endorsement.client_name)}</b><small>{text(endorsement.project_name)}</small></td><td className="px-5 py-3">{day(endorsement.activated_at ?? endorsement.created_at)}</td><td className="px-5 py-3"><ActionIcon label="View endorsed Price Quotation PDF" confirm={false} loading={openingEndorsementId === text(endorsement.id)} onClick={() => void openEndorsedSnapshot(endorsement)}><FileText size={15} /></ActionIcon></td></tr>)}
+          <Table labels={["Price Quotation", "Client's Name", "Company Name", "Endorsed", "PDF"]} minWidth={800}>
+            {recipientEndorsements.map((endorsement) => {
+              const quotation = store.quotations.find((item) => item.id === endorsement.quotation_id);
+              const party = quotation
+                ? quotationParty(quotation, store)
+                : { clientName: "-", companyName: text(endorsement.client_name) };
+              return <tr key={text(endorsement.id)}><td className="px-5 py-3 font-medium">{text(endorsement.quotation_no)}</td><td className="px-5 py-3"><b>{party.clientName}</b><small>{text(endorsement.project_name)}</small></td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{day(endorsement.activated_at ?? endorsement.created_at)}</td><td className="px-5 py-3"><ActionIcon label="View endorsed Price Quotation PDF" confirm={false} loading={openingEndorsementId === text(endorsement.id)} onClick={() => void openEndorsedSnapshot(endorsement)}><FileText size={15} /></ActionIcon></td></tr>;
+            })}
           </Table>
         </section>
       )}
@@ -11012,15 +11039,19 @@ function Submissions({
         <button type="button" onClick={() => setTab("leads")} className={`px-3 py-2 text-[12px] font-medium ${tab === "leads" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Lead Changes ({pendingLeadChanges.length})</button>
       </div>
       {tab === "quotations" && (pendingPriceQuotations.length ? (
-        <Table labels={["Price Quotation", "Client", "Prepared by", "Submitted", "Review"]}>
-          {pendingPriceQuotations.map((quotation) => <tr key={text(quotation.id)}><td className="px-5 py-3"><b>{text(quotation.quotation_no)}</b><small>{text(quotation.project_name)}</small></td><td className="px-5 py-3 font-medium">{text(quotation.client_name)}</td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3"><ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>)}
+        <Table labels={["Price Quotation", "Client's Name", "Company Name", "Prepared by", "Submitted", "Review"]} minWidth={860}>
+          {pendingPriceQuotations.map((quotation) => {
+            const party = quotationParty(quotation, store);
+            return <tr key={text(quotation.id)}><td className="px-5 py-3"><b>{text(quotation.quotation_no)}</b><small>{text(quotation.project_name)}</small></td><td className="px-5 py-3 font-medium">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3"><ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>;
+          })}
         </Table>
       ) : <Empty>No Price Quotations are awaiting review.</Empty>)}
       {tab === "price_revisions" && (pendingPriceQuotationRevisions.length ? (
-        <Table labels={["Price Quotation", "Client", "Project Officer", "Requested", "Review"]}>
+        <Table labels={["Price Quotation", "Client's Name", "Company Name", "Project Officer", "Requested", "Review"]} minWidth={860}>
           {pendingPriceQuotationRevisions.map((request) => {
             const quotation = store.quotations.find((item) => item.id === request.quotation_id);
-            return <tr key={text(request.id)}><td className="px-5 py-3"><b>{text(quotation?.quotation_no, "Price Quotation")}</b><small>{text(quotation?.project_name)}</small></td><td className="px-5 py-3">{text(quotation?.client_name)}</td><td className="px-5 py-3">{projectOfficerName(request)}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>;
+            const party = quotation ? quotationParty(quotation, store) : { clientName: "-", companyName: "-" };
+            return <tr key={text(request.id)}><td className="px-5 py-3"><b>{text(quotation?.quotation_no, "Price Quotation")}</b><small>{text(quotation?.project_name)}</small></td><td className="px-5 py-3">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{projectOfficerName(request)}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>;
           })}
         </Table>
       ) : <Empty>No Price Quotation revisions are awaiting review.</Empty>)}
