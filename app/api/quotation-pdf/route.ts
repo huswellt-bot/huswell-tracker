@@ -46,9 +46,16 @@ export async function POST(request: Request) {
   if (
     typeof documentId !== "string" ||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(documentId) ||
-    documentType !== "price_quotation"
+    !["price_quotation", "mockup_quotation"].includes(String(documentType))
   ) {
     return Response.json({ error: "A valid document reference is required." }, { status: 400 });
+  }
+  const supportedDocumentType =
+    documentType === "price_quotation" || documentType === "mockup_quotation"
+      ? documentType
+      : null;
+  if (!supportedDocumentType) {
+    return Response.json({ error: "A supported quotation type is required." }, { status: 400 });
   }
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -57,7 +64,7 @@ export async function POST(request: Request) {
     .from("quotations")
     .select("id, organization_id, document_type, status")
     .eq("id", documentId)
-    .eq("document_type", documentType)
+    .eq("document_type", supportedDocumentType)
     .maybeSingle();
   if (documentError || !document) {
     return Response.json({ error: "You do not have access to this document." }, { status: 403 });
@@ -68,7 +75,7 @@ export async function POST(request: Request) {
     return new Response(body.buffer, {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": "inline; filename=Price Quotation.pdf",
+        "Content-Disposition": `inline; filename=${supportedDocumentType === "mockup_quotation" ? "Mockup Quotation.pdf" : "Price Quotation.pdf"}`,
         "Cache-Control": "no-store",
       },
     });

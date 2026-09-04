@@ -14,6 +14,7 @@ import {
   Document as PdfDocument,
   Font as PdfFont,
   Image as PdfImage,
+  Link as PdfLink,
   Page as PdfPage,
   StyleSheet as PdfStyleSheet,
   Text as PdfText,
@@ -39,6 +40,7 @@ import {
   LogOut,
   Menu,
   MessageSquareText,
+  Paperclip,
   Pencil,
   Plus,
   Printer,
@@ -96,6 +98,7 @@ type View =
   | "Leads"
   | "Projects"
   | "Mockups"
+  | "Quotation Costing Overview"
   | "Costing Breakdown"
   | "Price Quotations"
   | "Materials List"
@@ -133,6 +136,8 @@ type TableName =
   | "price_quotation_costing_markups"
   | "price_quotation_mockups"
   | "price_quotation_endorsements"
+  | "quotation_signed_proofs"
+  | "pricing_officer_project_types"
   | "announcements"
   | "policies"
   | "production_jobs"
@@ -162,6 +167,17 @@ type TableName =
   | "organization_members";
 type Row = { id?: string; [key: string]: unknown };
 type Store = Record<TableName, Row[]>;
+export type QuotationPdfRow = Row;
+export type QuotationPdfStore = Pick<
+  Store,
+  | "quotations"
+  | "quotation_items"
+  | "price_quotation_product_costings"
+  | "price_quotation_costing_lines"
+  | "price_quotation_costing_markups"
+  | "customers"
+  | "leads"
+>;
 type PendingCostLine = {
   id: string;
   inventory_item_id?: string;
@@ -302,6 +318,8 @@ const tables: TableName[] = [
   "price_quotation_costing_markups",
   "price_quotation_mockups",
   "price_quotation_endorsements",
+  "quotation_signed_proofs",
+  "pricing_officer_project_types",
   "announcements",
   "policies",
   "production_jobs",
@@ -385,7 +403,9 @@ const policyStoragePath = (value: unknown, organizationId: string) => {
 };
 const projectOfficerOptions = (store: Store) =>
   store.organization_members
-    .filter((member) => text(member.role, "") === "project_manager")
+    .filter((member) =>
+      ["project_manager", "sales_pricing_officer"].includes(text(member.role, "")),
+    )
     .map((member) => {
       const id = text(member.user_id, "");
       return {
@@ -539,6 +559,7 @@ const DEFAULT_QUOTATION_TERMS = [
   "Payment Terms: 50% downpayment is required upon approval of the quotation. The remaining 50% balance must be paid prior to release or delivery.",
   "Cancellations: Orders cannot be cancelled once production has started",
   "Artwork Revisions: Any revisions or changes requested after the artwork has been approved may result in an adjustment of the production lead time. The revised delivery schedule will be based on the scope and timing of the requested changes.",
+  "Two revisions only.",
 ].join("\n");
 
 const PRICE_QUOTATION_PROJECT_TYPES = [
@@ -638,8 +659,16 @@ const doneDealStatusLabel = (value: unknown) =>
   statusLabel(doneDealStatuses, value);
 const memberRole = (role: string) =>
   ["super_admin", "owner", "admin"].includes(role);
+const isProjectOfficerRole = (role: string) =>
+  ["project_manager", "sales_pricing_officer"].includes(role);
+const isPricingOfficerRole = (role: string) =>
+  role === "sales_pricing_officer";
+const roleCapabilityRoles = (role: string) =>
+  role === "sales_pricing_officer"
+    ? ["project_manager", "pricing"]
+    : [role];
 const canReviewPriceQuotations = (role: string) =>
-  memberRole(role) || role === "pricing_officer";
+  memberRole(role) || isPricingOfficerRole(role);
 type AccessAction = "create" | "update" | "archive" | "approve" | "request";
 const rolePermissions: Record<
   string,
@@ -723,7 +752,7 @@ const rolePermissions: Record<
     ],
     update: ["production_jobs", "finished_product_stock_ins"],
   },
-  pricing_officer: {
+  pricing: {
     update: [
       "leads",
       "customers",
@@ -737,7 +766,9 @@ const rolePermissions: Record<
 };
 const canAccess = (role: string, resource: string, action: AccessAction) =>
   memberRole(role) ||
-  (rolePermissions[role]?.[action] ?? []).includes(resource);
+  roleCapabilityRoles(role).some((capability) =>
+    (rolePermissions[capability]?.[action] ?? []).includes(resource),
+  );
 const roleReadableTables: Record<string, TableName[]> = {
   project_manager: [
     "profiles",
@@ -757,11 +788,13 @@ const roleReadableTables: Record<string, TableName[]> = {
     "price_quotation_revision_requests",
     "price_quotation_mockups",
     "price_quotation_endorsements",
+    "quotation_signed_proofs",
+    "pricing_officer_project_types",
     "announcements",
     "policies",
     "project_schedules",
   ],
-  pricing_officer: [
+  pricing: [
     "profiles",
     "organization_members",
     "business_settings",
@@ -774,9 +807,11 @@ const roleReadableTables: Record<string, TableName[]> = {
     "price_quotation_costing_lines",
     "price_quotation_costing_markups",
     "price_quotation_mockups",
+    "quotation_signed_proofs",
     "announcements",
     "policies",
     "price_quotation_revision_requests",
+    "pricing_officer_project_types",
   ],
   sales: [
     "business_settings",
@@ -861,14 +896,16 @@ const roleReadableTables: Record<string, TableName[]> = {
 };
 const canReadTable = (role: string, table: TableName) =>
   memberRole(role) ||
-  (roleReadableTables[role] ?? roleReadableTables.viewer).includes(table);
+  roleCapabilityRoles(role).some((capability) =>
+    (roleReadableTables[capability] ?? roleReadableTables.viewer).includes(table),
+  );
 const workspaceViewTables = (
   view: View,
   leadMode: LeadWorkspaceMode,
   role: string,
 ): TableName[] => {
   if (view === "Dashboard")
-    return role === "project_manager"
+    return isProjectOfficerRole(role)
       ? ["leads", "quotations", "project_schedules"]
       : ["invoices", "payments", "target_goals", "quotations", "leads"];
   if (
@@ -887,7 +924,9 @@ const workspaceViewTables = (
       "project_schedule_completion_requests",
     ];
   if (view === "Mockups")
-    return ["price_quotation_mockups", "quotations", "quotation_items", "leads", "profiles", "organization_members"];
+    return ["quotations", "quotation_items", "price_quotation_illustrations", "price_quotation_product_costings", "price_quotation_costing_lines", "price_quotation_costing_markups", "quotation_signed_proofs", "leads", "profiles", "organization_members", "pricing_officer_project_types"];
+  if (view === "Quotation Costing Overview")
+    return ["quotations", "quotation_items", "price_quotation_product_costings", "price_quotation_costing_lines", "price_quotation_costing_markups", "price_quotation_illustrations", "quotation_signed_proofs", "leads", "customers", "business_settings", "profiles", "pricing_officer_project_types"];
   if (
     view === "Price Quotations" ||
     (view === "Leads" && leadMode === "quotation")
@@ -906,6 +945,8 @@ const workspaceViewTables = (
       "profiles",
       "price_quotation_revision_requests",
       "price_quotation_endorsements",
+      "quotation_signed_proofs",
+      "pricing_officer_project_types",
     ];
   if (view === "Suppliers & Materials")
     return [
@@ -1762,7 +1803,10 @@ function quotationTextUnits(value: unknown, charactersPerLine: number) {
   return Math.max(1, Math.ceil(content.length / charactersPerLine));
 }
 
-function salesQuotationPageDensity(quote: Row, store: Store): SalesQuotationPageDensity {
+function salesQuotationPageDensity(
+  quote: Row,
+  store: Pick<Store, "quotation_items">,
+): SalesQuotationPageDensity {
   const lines = store.quotation_items.filter((item) => item.quotation_id === quote.id);
   const terms = text(quote.terms_conditions, DEFAULT_QUOTATION_TERMS)
     .split(/\r?\n+/)
@@ -1846,7 +1890,16 @@ function PriceQuotationSignature({ label, name, signatureSource, compact = false
   return <PdfView style={[priceQuotationPdfStyles.signatureLine, compact ? priceQuotationPdfCompactStyles.signatureLine : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureLine : undefined]}><PdfText style={[priceQuotationPdfStyles.signatureLabel, compact ? priceQuotationPdfCompactStyles.signatureLabel : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureLabel : undefined]}>{label}</PdfText><PdfView style={[priceQuotationPdfStyles.signatureSignatory, compact ? priceQuotationPdfCompactStyles.signatureSignatory : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureSignatory : undefined]}>{signatureSource && <PdfImage src={signatureSource} style={[priceQuotationPdfStyles.signatureImage, compact ? priceQuotationPdfCompactStyles.signatureImage : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureImage : undefined]} />}<PdfText style={[priceQuotationPdfStyles.signatureName, compact ? priceQuotationPdfCompactStyles.signatureName : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureName : undefined]}>{name}</PdfText></PdfView></PdfView>;
 }
 
-function PriceQuotationPdf({ quote, store, origin, showInternalCosting = false }: { quote: Row; store: Store; origin: string; showInternalCosting?: boolean }) {
+export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = false }: { quote: QuotationPdfRow; store: QuotationPdfStore; origin: string; showInternalCosting?: boolean }) {
+  const isMockupQuotation = text(quote.document_type) === "mockup_quotation";
+  const documentLabel = isMockupQuotation ? "Mockup Quotation" : "Price Quotation";
+  const documentTitle = documentLabel.toUpperCase();
+  const sourceQuotation = isMockupQuotation
+    ? store.quotations.find((item) => item.id === quote.source_price_quotation_id)
+    : null;
+  const sourceQuotationUrl = sourceQuotation?.id
+    ? `${origin.replace(/\/$/, "")}/quotation-viewer?quotationId=${encodeURIComponent(text(sourceQuotation.id))}`
+    : undefined;
   const customer = store.customers.find((item) => item.id === quote.customer_id);
   const lead = store.leads.find((item) => item.id === quote.lead_id);
   const lines = store.quotation_items.filter((item) => item.quotation_id === quote.id);
@@ -1896,8 +1949,13 @@ function PriceQuotationPdf({ quote, store, origin, showInternalCosting = false }
         <PdfText style={[priceQuotationPdfStyles.businessDetail, compact ? priceQuotationPdfCompactStyles.businessDetail : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.businessDetail : undefined]}>www.huswelltrading.com</PdfText>
       </PdfView>
       <PdfView style={[priceQuotationPdfStyles.quoteColumn, compact ? priceQuotationPdfCompactStyles.quoteColumn : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.quoteColumn : undefined]}>
-        <PdfText style={[priceQuotationPdfStyles.title, compact ? priceQuotationPdfCompactStyles.title : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.title : undefined]}>PRICE QUOTATION</PdfText>
-        {[["Quotation No.", text(quote.quotation_no)], ["Quotation Date", issueDate], ["Prepared By", text(quote.representative, "Sales Project Officer")]].map(([label, value]) => <PdfView key={label} style={priceQuotationPdfStyles.quoteMetaRow}><PdfText style={[priceQuotationPdfStyles.quoteMetaLabel, compact ? priceQuotationPdfCompactStyles.quoteMetaLabel : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.quoteMetaLabel : undefined]}>{label}</PdfText><PdfText style={[priceQuotationPdfStyles.quoteMetaColon, compact ? priceQuotationPdfCompactStyles.quoteMetaColon : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.quoteMetaColon : undefined]}>:</PdfText><PdfText style={[priceQuotationPdfStyles.quoteMetaValue, compact ? priceQuotationPdfCompactStyles.quoteMetaValue : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.quoteMetaValue : undefined]}>{value}</PdfText></PdfView>)}
+        <PdfText style={[priceQuotationPdfStyles.title, compact ? priceQuotationPdfCompactStyles.title : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.title : undefined]}>{documentTitle}</PdfText>
+        {[
+          ["Quotation No.", text(quote.quotation_no)],
+          ...(sourceQuotation ? [["Source Price Quotation", text(sourceQuotation.quotation_no)]] : []),
+          ["Quotation Date", issueDate],
+          ["Prepared By", text(quote.representative, "Sales Project Officer")],
+        ].map(([label, value]) => <PdfView key={label} style={priceQuotationPdfStyles.quoteMetaRow}><PdfText style={[priceQuotationPdfStyles.quoteMetaLabel, compact ? priceQuotationPdfCompactStyles.quoteMetaLabel : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.quoteMetaLabel : undefined]}>{label}</PdfText><PdfText style={[priceQuotationPdfStyles.quoteMetaColon, compact ? priceQuotationPdfCompactStyles.quoteMetaColon : undefined, superCompact ? priceQuotationPdfCompactStyles.quoteMetaColon : undefined]}>:</PdfText>{label === "Source Price Quotation" && sourceQuotationUrl ? <PdfLink src={sourceQuotationUrl} style={[priceQuotationPdfStyles.quoteMetaValue, compact ? priceQuotationPdfCompactStyles.quoteMetaValue : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.quoteMetaValue : undefined, { color: "#1769e8", textDecoration: "underline" }]}>{value}</PdfLink> : <PdfText style={[priceQuotationPdfStyles.quoteMetaValue, compact ? priceQuotationPdfCompactStyles.quoteMetaValue : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.quoteMetaValue : undefined]}>{value}</PdfText>}</PdfView>)}
       </PdfView>
     </PdfView>
   );
@@ -1937,7 +1995,7 @@ function PriceQuotationPdf({ quote, store, origin, showInternalCosting = false }
   const footerSection = (
     <PdfView style={[priceQuotationPdfStyles.footer, compact ? priceQuotationPdfCompactStyles.footer : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.footer : undefined]}><PdfText style={[priceQuotationPdfStyles.footerItalic, compact ? priceQuotationPdfCompactStyles.footerItalic : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.footerItalic : undefined]}>Thank you for the opportunity to provide this quotation.{`\n`}We look forward to working with you.</PdfText><PdfText style={[priceQuotationPdfStyles.footerAddress, compact ? priceQuotationPdfCompactStyles.footerAddress : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.footerAddress : undefined]}>Business Address: 72 Adrian St., North Fairview Park Subd., Brgy. North Fairview, Quezon City, Metro Manila</PdfText></PdfView>
   );
-  return <PdfDocument title={`Price Quotation ${text(quote.quotation_no)}`}>
+  return <PdfDocument title={`${documentLabel} ${text(quote.quotation_no)}`}>
     {overflow ? (
       <>
         {/* Overflow: page 1 keeps the complete client-facing document; terms and bank details flow to page 2. */}
@@ -2805,13 +2863,13 @@ function Records({
   const canUpdate = canAccess(role, module.table, "update");
   const canArchive = canAccess(role, module.table, "archive");
   const ownProjectEditRequests =
-    isProjectsPage && role === "project_manager"
+    isProjectsPage && isProjectOfficerRole(role)
       ? store.project_edit_requests.filter(
           (request) => text(request.submitted_by, "") === currentUserId,
         )
       : [];
   const ownLeadChangeRequests =
-    isLeadChangeRequestsPage && role === "project_manager"
+    isLeadChangeRequestsPage && isProjectOfficerRole(role)
       ? store.lead_change_requests.filter(
           (request) => text(request.submitted_by, "") === currentUserId,
         )
@@ -3002,7 +3060,7 @@ function Records({
   const isOfficerSettingDroppedClient =
     module.table === "leads" &&
     !isProjectsPage &&
-    role === "project_manager" &&
+    isProjectOfficerRole(role) &&
     Boolean(editing?.id) &&
     text(values.evaluation_number, "").split("|")[0] === "3" &&
     n(editing?.evaluation_number) !== 3;
@@ -3091,7 +3149,7 @@ function Records({
     if (
       module.table === "leads" &&
       !payload.assigned_to &&
-      role === "project_manager"
+      isProjectOfficerRole(role)
     )
       payload.assigned_to = payload.created_by;
     if (module.table === "leads" && !payload.project_name)
@@ -3114,7 +3172,7 @@ function Records({
       editing?.id &&
       module.table === "leads" &&
       !isProjectsPage &&
-      role === "project_manager"
+      isProjectOfficerRole(role)
     ) {
       if (isOfficerSettingDroppedClient && !requestNote) {
         setSaving(false);
@@ -3137,7 +3195,7 @@ function Records({
     if (
       editing?.id &&
       isProjectsPage &&
-      role === "project_manager"
+      isProjectOfficerRole(role)
     ) {
       const { error } = await client.rpc("request_project_edit", {
         p_project_id: editing.id,
@@ -3231,7 +3289,7 @@ function Records({
   const canRequestLeadDeletion = (row: Row) =>
     module.table === "leads" &&
     !isProjectsPage &&
-    role === "project_manager" &&
+    isProjectOfficerRole(role) &&
     text(row.assigned_to ?? row.created_by, "") === currentUserId;
   const canEditRow = (row: Row) =>
     canUpdate &&
@@ -3330,7 +3388,7 @@ function Records({
             active={leadMode}
             onChange={onLeadModeChange}
             className={contentPadding}
-            showLeadChangeRequests={role === "project_manager"}
+            showLeadChangeRequests={isProjectOfficerRole(role)}
           />
           <header className={`${contentPadding} border-t border-[#edf0f5] py-4`}>
             <h2 className="text-[15px] font-semibold text-[#202938]">My Lead Change Requests</h2>
@@ -3397,7 +3455,7 @@ function Records({
           : "space-y-5"
       }
     >
-      {isProjectsPage && role === "project_manager" && ownProjectEditRequests.length > 0 && (
+      {isProjectsPage && isProjectOfficerRole(role) && ownProjectEditRequests.length > 0 && (
         <Panel title="My Project Edit Requests" detail="Edit the project, submit it for review, and use Edit again if the General Manager returns it for revision.">
           <Table labels={["Project", "Submitted", "Status", "General Manager note", "Actions"]} minWidth={720}>
             {ownProjectEditRequests.map((request) => (
@@ -3425,7 +3483,7 @@ function Records({
           </Table>
         </Panel>
       )}
-      {!isProjectsPage && role === "project_manager" && ownLeadChangeRequests.length > 0 && (
+      {!isProjectsPage && isProjectOfficerRole(role) && ownLeadChangeRequests.length > 0 && (
         <Panel title="My Lead Change Requests" detail="Edit the lead, submit it for review, and use Edit again if the General Manager returns it for revision.">
           <Table labels={["Lead", "Requested", "Change", "Status", "General Manager note"]} minWidth={720}>
             {ownLeadChangeRequests.map((request) => {
@@ -3457,7 +3515,7 @@ function Records({
                 setValues({
                   ...initial(),
                   ...(module.table === "leads" &&
-                  role === "project_manager" &&
+                  isProjectOfficerRole(role) &&
                   currentUserId
                     ? { assigned_to: currentUserId }
                     : {}),
@@ -3479,7 +3537,7 @@ function Records({
             active={leadMode}
             onChange={onLeadModeChange}
             className={contentPadding}
-            showLeadChangeRequests={role === "project_manager"}
+            showLeadChangeRequests={isProjectOfficerRole(role)}
           />
         )}
         {module.table === "leads" && isGeneralManager && !isProjectsPage && (
@@ -3725,7 +3783,7 @@ function Records({
           }}
           saving={saving}
           saveLabel={
-            editing && module.table === "leads" && role === "project_manager"
+            editing && module.table === "leads" && isProjectOfficerRole(role)
               ? "Submit for review"
               : undefined
           }
@@ -4505,6 +4563,589 @@ function PriceQuotationMockups({
   );
 }
 
+function MockupQuotationWorkspace({
+  store,
+  orgId,
+  reload,
+  notice,
+  role,
+}: {
+  store: Store;
+  orgId: string;
+  reload: () => Promise<void>;
+  notice: (message: string) => void;
+  role: string;
+}) {
+  type RequestItem = {
+    sourceItemId: string;
+    description: string;
+    quantity: string;
+  };
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [statusTab, setStatusTab] = useState<"all" | "draft" | "pending" | "needs_revision" | "pending_gm_approval" | "approved">("all");
+  const [requestOpen, setRequestOpen] = useState(false);
+  const [editingQuote, setEditingQuote] = useState<Row | null>(null);
+  const [sourceQuotationId, setSourceQuotationId] = useState("");
+  const [requestItems, setRequestItems] = useState<RequestItem[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [reviewing, setReviewing] = useState<Row | null>(null);
+  const [pdfQuote, setPdfQuote] = useState<Row | null>(null);
+  const [pdfWindow, setPdfWindow] = useState<Window | null>(null);
+  const [proofQuote, setProofQuote] = useState<Row | null>(null);
+  const canPrepare = isProjectOfficerRole(role);
+  const canReview = isPricingOfficerRole(role);
+  const isGeneralManager = memberRole(role);
+
+  useEffect(() => {
+    let active = true;
+    void createClient().auth.getUser().then(({ data }) => {
+      if (active) setCurrentUserId(data.user?.id ?? null);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const mockupQuotations = store.quotations
+    .filter((quote) => text(quote.document_type) === "mockup_quotation")
+    .sort(newestActivityFirst);
+  const sourceQuotations = store.quotations
+    .filter(
+      (quote) =>
+        text(quote.document_type) === "price_quotation" &&
+        !quote.costing_source_id &&
+        text(quote.status) === "approved" &&
+        [quote.created_by, quote.prepared_by_user_id].some(
+          (userId) => text(userId, "") === currentUserId,
+        ),
+    )
+    .sort(newestActivityFirst);
+  const activeSourceIds = new Set(
+    mockupQuotations
+      .filter((quote) =>
+        ["draft", "pending", "needs_revision", "pending_gm_approval", "approved"].includes(
+          text(quote.status),
+        ),
+      )
+      .map((quote) => text(quote.source_price_quotation_id, "")),
+  );
+  const availableSourceQuotations = sourceQuotations.filter(
+    (quote) => !activeSourceIds.has(text(quote.id, "")),
+  );
+  const sourceFor = (quote: Row) =>
+    store.quotations.find((source) => source.id === quote.source_price_quotation_id);
+  const itemRowsFor = (quotationId: string) =>
+    store.quotation_items
+      .filter((item) => item.quotation_id === quotationId)
+      .sort((left, right) => n(left.sort_order) - n(right.sort_order));
+  const isOwner = (quote: Row) =>
+    [quote.created_by, quote.prepared_by_user_id].some(
+      (userId) => text(userId, "") === currentUserId,
+    );
+  const pendingPricing = mockupQuotations.filter(
+    (quote) => text(quote.status) === "pending" && !isOwner(quote),
+  );
+  const filteredQuotations = mockupQuotations.filter(
+    (quote) => statusTab === "all" || text(quote.status) === statusTab,
+  );
+  const resetRequest = () => {
+    setRequestOpen(false);
+    setEditingQuote(null);
+    setSourceQuotationId("");
+    setRequestItems([]);
+  };
+  const selectSource = (sourceId: string) => {
+    setSourceQuotationId(sourceId);
+    const sourceItems = itemRowsFor(sourceId);
+    setRequestItems(
+      sourceItems.map((item) => ({
+        sourceItemId: text(item.id),
+        description: text(item.description, ""),
+        quantity: text(item.quantity, "1"),
+      })),
+    );
+  };
+  const openRequest = () => {
+    if (!availableSourceQuotations.length) {
+      return notice(
+        "No approved Price Quotations are available for a new Mockup Quotation. Each source can have one active Mockup Quotation.",
+      );
+    }
+    setEditingQuote(null);
+    setSourceQuotationId("");
+    setRequestItems([]);
+    setRequestOpen(true);
+  };
+  const openEdit = (quote: Row) => {
+    const source = sourceFor(quote);
+    if (!source?.id) return notice("The approved source Price Quotation could not be found.");
+    const sourceItems = itemRowsFor(text(source.id));
+    const quoteItems = itemRowsFor(text(quote.id));
+    setEditingQuote(quote);
+    setSourceQuotationId(text(source.id));
+    setRequestItems(
+      sourceItems.map((sourceItem, index) => ({
+        sourceItemId: text(sourceItem.id),
+        description: text(quoteItems[index]?.description, text(sourceItem.description, "")),
+        quantity: text(quoteItems[index]?.quantity, text(sourceItem.quantity, "1")),
+      })),
+    );
+    setRequestOpen(true);
+  };
+  const openPdf = (quote: Row) => {
+    if (text(quote.status) !== "approved") {
+      return notice("Only approved quotations can be opened as PDFs.");
+    }
+    const nextWindow = window.open("about:blank", "_blank");
+    if (!nextWindow) return notice("Allow pop-ups to open the quotation PDF.");
+    nextWindow.opener = null;
+    setPdfWindow(nextWindow);
+    setPdfQuote(quote);
+  };
+  const saveRequest = async () => {
+    const source = store.quotations.find((quote) => quote.id === sourceQuotationId);
+    if (!source) return notice("Select an approved Price Quotation first.");
+    if (
+      requestItems.length === 0 ||
+      requestItems.some((item) => !item.description.trim() || n(item.quantity) <= 0)
+    ) {
+      return notice("Each Mockup Quotation item needs a description and quantity greater than zero.");
+    }
+    setSaving(true);
+    const client = createClient();
+    try {
+      const { data, error } = await client.rpc("save_mockup_quotation_draft", {
+        p_mockup_quotation_id: editingQuote?.id ?? null,
+        p_source_price_quotation_id: source.id,
+        p_items: requestItems.map((item) => ({
+          source_item_id: item.sourceItemId,
+          description: item.description,
+          quantity: n(item.quantity),
+        })),
+      });
+      if (error) throw error;
+      const mockupQuotationId = text(data, "");
+      const { error: submitError } = await client.rpc("submit_mockup_quotation", {
+        p_mockup_quotation_id: mockupQuotationId,
+      });
+      if (submitError) {
+        resetRequest();
+        await reload();
+        return notice("Mockup Quotation saved as a draft, but could not be submitted: " + submitError.message);
+      }
+      resetRequest();
+      notice("Mockup Quotation submitted to the assigned Sales & Pricing Officer.");
+      await reload();
+    } catch (error) {
+      notice(error instanceof Error ? error.message : "Mockup Quotation could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const documentName = (quote: Row) =>
+    text(quote.document_type) === "mockup_quotation" ? "Mockup Quotation" : "Price Quotation";
+  return (
+    <Panel
+      title="Mockup Quotation"
+      detail={
+        canReview
+          ? "Review Mockup Quotation requests assigned to your project types, add independent costing, and submit them to the General Manager."
+          : canPrepare
+            ? "Select an approved Price Quotation, confirm the mockup requirements, and request an independent Mockup Quotation."
+            : "Review Mockup Quotation statuses and approved documents."
+      }
+      variant="page"
+      hideHeading
+      action={
+        canPrepare ? (
+          <Button onClick={openRequest}>
+            <Plus size={14} /> Request Mockup Quotation
+          </Button>
+        ) : undefined
+      }
+    >
+      <div className="px-4 py-4 sm:px-5 lg:px-6">
+        <div className="mb-4">
+          <nav aria-label="Mockup quotation statuses" className="flex gap-1 overflow-x-auto border-b border-[#e4e8ef]">
+            {([
+              ["all", "All"],
+              ["draft", "Draft"],
+              ["pending", "Pending Review"],
+              ["needs_revision", "Needs Revision"],
+              ["pending_gm_approval", "GM Review"],
+              ["approved", "Approved"],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setStatusTab(value)}
+                aria-current={statusTab === value ? "page" : undefined}
+                className={"shrink-0 px-3 py-2 text-[12px] font-medium " + (statusTab === value ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1] hover:text-[#4b5565]")}
+              >
+                {label} ({mockupQuotations.filter((quote) => value === "all" || text(quote.status) === value).length})
+              </button>
+            ))}
+          </nav>
+          {canReview && (
+            <p className="border-b border-[#edf0f5] py-3 text-[12px] text-[#687386]">
+              {pendingPricing.length
+                ? pendingPricing.length + " Mockup Quotation request" + (pendingPricing.length === 1 ? "" : "s") + " are waiting in your assigned project-type queue."
+                : "Pending Mockup Quotation requests for your assigned project types will appear here."}
+            </p>
+          )}
+        </div>
+        {filteredQuotations.length ? (
+          <Table
+            labels={["Mockup Quotation", "Source Price Quotation", "Client", "Project Type", "Status", "Date", "Actions"]}
+            minWidth={1100}
+            className="!w-full"
+          >
+            {filteredQuotations.map((quote) => {
+              const source = sourceFor(quote);
+              const party = quotationParty(quote, store);
+              const owner = isOwner(quote);
+              const status = text(quote.status);
+              const proofCount = store.quotation_signed_proofs.filter(
+                (proof) => proof.quotation_id === quote.id,
+              ).length;
+              return (
+                <tr key={text(quote.id)}>
+                  <td className="px-5 py-3"><b>{text(quote.quotation_no)}</b><small>{text(quote.project_name)}</small></td>
+                  <td className="px-5 py-3">
+                    {source?.id ? (
+                      <button type="button" onClick={() => openPdf(source)} className="font-medium text-[#1769e8] underline decoration-[#b9d2fb] underline-offset-2 hover:text-[#1256bf]">
+                        {text(source.quotation_no)}
+                      </button>
+                    ) : (
+                      text(quote.source_price_quotation_id)
+                    )}
+                  </td>
+                  <td className="px-5 py-3"><b>{party.clientName}</b><small>{party.companyName}</small></td>
+                  <td className="px-5 py-3">{text(quote.project_types)}</td>
+                  <td className="px-5 py-3"><Status value={status} /></td>
+                  <td className="px-5 py-3">{day(status === "approved" ? quote.approved_at : quote.submitted_at ?? quote.created_at)}</td>
+                  <td className="px-5 py-3">
+                    <div className="flex items-center gap-1">
+                      {canReview && status === "pending" && !owner && (
+                        <ActionIcon label="Review Mockup Quotation" confirm={false} onClick={() => setReviewing(quote)}><FileText size={15} /></ActionIcon>
+                      )}
+                      {isGeneralManager && status === "pending_gm_approval" && (
+                        <ActionIcon label="Review Mockup Quotation for General Manager approval" confirm={false} onClick={() => setReviewing(quote)}><FileText size={15} /></ActionIcon>
+                      )}
+                      {canPrepare && owner && ["draft", "needs_revision"].includes(status) && (
+                        <ActionIcon label="Edit Mockup Quotation" confirm={false} onClick={() => openEdit(quote)}><Pencil size={15} /></ActionIcon>
+                      )}
+                      {status === "approved" && (
+                        <ActionIcon label={"View " + documentName(quote) + " PDF"} confirm={false} onClick={() => openPdf(quote)}><FileText size={15} /></ActionIcon>
+                      )}
+                      {status === "approved" && (
+                        <ActionIcon label={"View signed client proof" + (proofCount ? " (" + proofCount + "/5)" : "")} confirm={false} onClick={() => setProofQuote(quote)}><Paperclip size={15} /></ActionIcon>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </Table>
+        ) : (
+          <Empty>
+            {mockupQuotations.length
+              ? "No Mockup Quotations match the selected status."
+              : canPrepare
+                ? "No Mockup Quotations yet. Request one from an approved Price Quotation."
+                : "No Mockup Quotations are visible for this account."}
+          </Empty>
+        )}
+      </div>
+      {requestOpen && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/30 p-4">
+          <section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
+            <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4">
+              <div>
+                <h2 className="text-[17px] font-semibold text-[#202938]">{editingQuote ? "Edit Mockup Quotation" : "Request Mockup Quotation"}</h2>
+                <p className="mt-1 text-[12px] text-[#687386]">Choose one approved Price Quotation. The project type is inherited and the costing is calculated independently.</p>
+              </div>
+              <button type="button" onClick={resetRequest} aria-label="Close Mockup Quotation request" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button>
+            </div>
+            <label className="mt-5 block text-[12px] font-medium text-[#202938]">
+              Approved Price Quotation
+              <select
+                value={sourceQuotationId}
+                disabled={Boolean(editingQuote)}
+                onChange={(event) => selectSource(event.target.value)}
+                className="input mt-1"
+              >
+                <option value="">Select an approved Price Quotation</option>
+                {(editingQuote ? [sourceFor(editingQuote)].filter(Boolean) : availableSourceQuotations).map((source) => (
+                  <option key={text(source?.id)} value={text(source?.id)}>{text(source?.quotation_no)} - {text(source?.client_name, "Client")}</option>
+                ))}
+              </select>
+            </label>
+            {sourceQuotationId && (
+              <div className="mt-4 grid gap-3 rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4 sm:grid-cols-3">
+                <div><p className="text-[11px] font-medium uppercase tracking-wide text-[#7b8494]">Client</p><p className="mt-1 text-[13px] font-medium text-[#202938]">{text(store.quotations.find((quote) => quote.id === sourceQuotationId)?.client_name, "—")}</p></div>
+                <div><p className="text-[11px] font-medium uppercase tracking-wide text-[#7b8494]">Project Type</p><p className="mt-1 text-[13px] font-medium text-[#202938]">{text(store.quotations.find((quote) => quote.id === sourceQuotationId)?.project_types, "—")}</p></div>
+                <div><p className="text-[11px] font-medium uppercase tracking-wide text-[#7b8494]">Source ID</p><p className="mt-1 text-[13px] font-medium text-[#202938]">{text(store.quotations.find((quote) => quote.id === sourceQuotationId)?.quotation_no, "—")}</p></div>
+              </div>
+            )}
+            {sourceQuotationId && requestItems.length > 0 && (
+              <section className="mt-5">
+                <h3 className="text-[14px] font-semibold text-[#202938]">Mockup requirements</h3>
+                <p className="mt-1 text-[12px] text-[#687386]">Descriptions and quantities can be adjusted for this Mockup Quotation. The source Price Quotation remains unchanged.</p>
+                <Table labels={["#", "Description", "Quantity"]} minWidth={0} className="mt-3 table-fixed" columnWidths={["8%", "72%", "20%"]}>
+                  {requestItems.map((item, index) => (
+                    <tr key={item.sourceItemId}>
+                      <td className="px-3 py-2 text-center">{index + 1}</td>
+                      <td className="px-3 py-2"><textarea rows={2} aria-label={"Mockup item " + (index + 1) + " description"} value={item.description} onChange={(event) => setRequestItems((current) => current.map((value) => value.sourceItemId === item.sourceItemId ? { ...value, description: titleCase(event.target.value) } : value))} className="input mt-0 min-h-[58px] resize-y" /></td>
+                      <td className="px-3 py-2"><input aria-label={"Mockup item " + (index + 1) + " quantity"} type="number" min="0.001" step="any" value={item.quantity} onChange={(event) => setRequestItems((current) => current.map((value) => value.sourceItemId === item.sourceItemId ? { ...value, quantity: event.target.value } : value))} className="input mt-0 text-center" /></td>
+                    </tr>
+                  ))}
+                </Table>
+              </section>
+            )}
+            <div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4">
+              <Button secondary disabled={saving} onClick={resetRequest}>Cancel</Button>
+              <Button loading={saving} disabled={saving || !sourceQuotationId || requestItems.length === 0} onClick={() => void saveRequest()}>
+                {editingQuote ? "Save and resubmit" : "Submit Mockup Quotation Request"}
+              </Button>
+            </div>
+          </section>
+        </div>
+      )}
+      {reviewing && (
+        <PriceQuotationReview
+          quotation={reviewing}
+          quotationKind="mockup_quotation"
+          store={store}
+          saving={false}
+          finalApproval={isGeneralManager}
+          close={() => setReviewing(null)}
+          notice={notice}
+          reload={reload}
+        />
+      )}
+      {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); notice(message); }} autoExportPdf pdfWindow={pdfWindow} hidden showInternalCosting={isGeneralManager} />}
+      {proofQuote && <SignedProofDialog quote={proofQuote} store={store} canUpload={isProjectOfficerRole(role) && isOwner(proofQuote)} close={() => setProofQuote(null)} notice={notice} reload={reload} />}
+    </Panel>
+  );
+}
+
+function SignedProofDialog({
+  quote,
+  store,
+  canUpload,
+  close,
+  notice,
+  reload,
+}: {
+  quote: Row;
+  store: Store;
+  canUpload: boolean;
+  close: () => void;
+  notice: (message: string) => void;
+  reload: () => Promise<void>;
+}) {
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+  const [uploading, setUploading] = useState(false);
+  const proofs = useMemo(
+    () =>
+      store.quotation_signed_proofs
+        .filter((proof) => proof.quotation_id === quote.id)
+        .sort((left, right) => n(left.sort_order) - n(right.sort_order)),
+    [quote.id, store.quotation_signed_proofs],
+  );
+  const proofKey = proofs
+    .map((proof) => `${text(proof.id)}:${text(proof.storage_path)}`)
+    .join("|");
+  useEffect(() => {
+    let active = true;
+    const loadUrls = async () => {
+      const client = createClient();
+      const results = await Promise.all(
+        proofs.map(async (proof) => {
+          const { data, error } = await client.storage
+            .from("quotation-signed-proofs")
+            .createSignedUrl(text(proof.storage_path), 5 * 60);
+          return error || !data?.signedUrl
+            ? null
+            : [text(proof.id), data.signedUrl] as const;
+        }),
+      );
+      if (active) setSignedUrls(Object.fromEntries(results.filter(Boolean) as [string, string][]));
+    };
+    void loadUrls();
+    return () => {
+      active = false;
+    };
+  }, [proofKey, proofs, quote.id]);
+  const addFiles = async (fileList: FileList | null) => {
+    if (!fileList) return;
+    const selected = Array.from(fileList);
+    const remaining = 5 - proofs.length;
+    if (selected.length > remaining) {
+      return notice("You can upload up to five signed proof images. " + remaining + " slot" + (remaining === 1 ? "" : "s") + " remaining.");
+    }
+    const validTypes = ["image/jpeg", "image/png", "image/webp"];
+    const invalid = selected.find((file) => !validTypes.includes(file.type) || file.size > 10 * 1024 * 1024);
+    if (invalid) return notice("Signed proof images must be JPEG, PNG, or WebP files no larger than 10 MB each.");
+    setUploading(true);
+    const client = createClient();
+    try {
+      for (const file of selected) {
+        const extension = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
+        const path = text(quote.organization_id) + "/" + text(quote.id) + "/" + crypto.randomUUID() + "." + extension;
+        const { error: uploadError } = await client.storage.from("quotation-signed-proofs").upload(path, file, { contentType: file.type, upsert: false });
+        if (uploadError) throw uploadError;
+        const { error: registerError } = await client.rpc("register_quotation_signed_proof", {
+          p_quotation_id: quote.id,
+          p_storage_path: path,
+          p_file_name: file.name,
+          p_content_type: file.type,
+          p_file_size: file.size,
+        });
+        if (registerError) {
+          await client.storage.from("quotation-signed-proofs").remove([path]);
+          throw registerError;
+        }
+      }
+      notice("Signed client proof uploaded privately.");
+      await reload();
+    } catch (error) {
+      notice(error instanceof Error ? error.message : "The signed proof could not be uploaded.");
+    } finally {
+      setUploading(false);
+    }
+  };
+  const removeProof = async (proof: Row) => {
+    setUploading(true);
+    const client = createClient();
+    try {
+      const { error: storageError } = await client.storage.from("quotation-signed-proofs").remove([text(proof.storage_path)]);
+      if (storageError) throw storageError;
+      const { error } = await client.rpc("delete_quotation_signed_proof", { p_proof_id: proof.id });
+      if (error) throw error;
+      notice("Signed client proof removed.");
+      await reload();
+    } catch (error) {
+      notice(error instanceof Error ? error.message : "The signed proof could not be removed.");
+    } finally {
+      setUploading(false);
+    }
+  };
+  const label = text(quote.document_type) === "mockup_quotation" ? "Mockup Quotation" : "Price Quotation";
+  return (
+    <div className="fixed inset-0 z-[70] grid place-items-center bg-[#151922]/40 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
+      <section role="dialog" aria-modal="true" aria-labelledby="signed-proof-title" className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
+        <div className="flex items-start justify-between gap-4">
+          <div><h2 id="signed-proof-title" className="text-[16px] font-semibold text-[#202938]">Signed client proof</h2><p className="mt-1 text-[12px] text-[#687386]">{label} {text(quote.quotation_no)} · Private attachment, separate from quotation illustrations.</p></div>
+          <button type="button" onClick={close} aria-label="Close signed client proof" className="rounded-md p-1 text-[#687386] hover:bg-[#f0f3f7]"><X size={18} /></button>
+        </div>
+        {canUpload && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3"><div><p className="text-[12px] font-medium text-[#202938]">Upload proof images ({proofs.length}/5)</p><p className="mt-0.5 text-[11px] text-[#687386]">JPEG, PNG, or WebP · up to 10 MB each</p></div><label className={"inline-flex min-h-8 cursor-pointer items-center rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-semibold text-[#344054] hover:bg-[#f5f7fa] " + (proofs.length >= 5 || uploading ? "pointer-events-none opacity-50" : "")}><Paperclip size={13} className="mr-1" /> Add images<input type="file" accept="image/jpeg,image/png,image/webp" multiple className="sr-only" disabled={proofs.length >= 5 || uploading} onChange={(event) => { void addFiles(event.target.files); event.currentTarget.value = ""; }} /></label></div>}
+        {proofs.length ? <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">{proofs.map((proof, index) => <div key={text(proof.id)} className="group relative overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2"><a href={signedUrls[text(proof.id)]} target="_blank" rel="noreferrer" className="block aspect-square">{signedUrls[text(proof.id)] ? <img src={signedUrls[text(proof.id)]} alt={text(proof.file_name, "Signed proof " + (index + 1))} className="size-full rounded-md object-cover" /> : <span className="grid size-full place-items-center text-[11px] text-[#8b92a1]">Loading…</span>}</a><p className="mt-2 truncate text-[11px] text-[#344054]" title={text(proof.file_name)}>{text(proof.file_name)}</p>{canUpload && <button type="button" onClick={() => void removeProof(proof)} disabled={uploading} aria-label={"Remove " + text(proof.file_name, "signed proof " + (index + 1))} className="absolute right-2 top-2 grid size-7 place-items-center rounded-md bg-white/90 text-[#8b92a1] shadow-sm hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={14} /></button>}</div>)}</div> : <div className="mt-5 rounded-lg border border-dashed border-[#ccd5e0] px-4 py-8 text-center text-[12px] text-[#8b92a1]">{canUpload ? "No signed client proof uploaded yet." : "No signed client proof is available yet."}</div>}
+        <div className="mt-5 flex justify-end"><Button secondary onClick={close}>Close</Button></div>
+      </section>
+    </div>
+  );
+}
+
+function QuotationCostingOverview({
+  store,
+  reload,
+  notice,
+  role,
+}: {
+  store: Store;
+  reload: () => Promise<void>;
+  notice: (message: string) => void;
+  role: string;
+}) {
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [tab, setTab] = useState<"price_quotation" | "mockup_quotation">("price_quotation");
+  const [pdfQuote, setPdfQuote] = useState<Row | null>(null);
+  const [pdfWindow, setPdfWindow] = useState<Window | null>(null);
+  useEffect(() => {
+    let active = true;
+    void createClient().auth.getUser().then(({ data }) => {
+      if (active) setCurrentUserId(data.user?.id ?? null);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+  const costedQuotationIds = new Set(
+    store.price_quotation_product_costings
+      .filter((costing) => text(costing.created_by, "") === currentUserId)
+      .map((costing) => text(costing.quotation_id, "")),
+  );
+  const costedQuotations = store.quotations
+    .filter(
+      (quote) =>
+        text(quote.document_type) === tab &&
+        (text(quote.pricing_reviewed_by, "") === currentUserId ||
+          costedQuotationIds.has(text(quote.id, ""))),
+    )
+    .sort(newestActivityFirst);
+  const openPdf = (quote: Row) => {
+    if (text(quote.status) !== "approved") return notice("Only approved quotations can be opened as PDFs.");
+    const nextWindow = window.open("about:blank", "_blank");
+    if (!nextWindow) return notice("Allow pop-ups to open the quotation PDF.");
+    nextWindow.opener = null;
+    setPdfWindow(nextWindow);
+    setPdfQuote(quote);
+  };
+  const sourceFor = (quote: Row) =>
+    store.quotations.find((source) => source.id === quote.source_price_quotation_id);
+  return (
+    <Panel
+      title="Quotation Costing Overview"
+      detail="Review Price Quotations and Mockup Quotations that you have costed, including their current approval status."
+      variant="page"
+      hideHeading
+    >
+      <div className="px-4 py-4 sm:px-5 lg:px-6">
+        <nav aria-label="Costed quotation types" className="flex gap-1 overflow-x-auto border-b border-[#e4e8ef]">
+          {([
+            ["price_quotation", "Price Quotations"],
+            ["mockup_quotation", "Mockup Quotations"],
+          ] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setTab(value)}
+              aria-current={tab === value ? "page" : undefined}
+              className={"shrink-0 px-3 py-2 text-[12px] font-medium " + (tab === value ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1] hover:text-[#4b5565]")}
+            >
+              {label} ({store.quotations.filter((quote) => text(quote.document_type) === value && (text(quote.pricing_reviewed_by, "") === currentUserId || costedQuotationIds.has(text(quote.id, "")))).length})
+            </button>
+          ))}
+        </nav>
+        {costedQuotations.length ? (
+          <Table labels={tab === "mockup_quotation" ? ["Mockup Quotation", "Source Price Quotation", "Client", "Project Type", "Status", "Costed", "PDF"] : ["Price Quotation", "Client", "Project Type", "Status", "Costed", "PDF"]} minWidth={tab === "mockup_quotation" ? 1000 : 850} className="!w-full">
+            {costedQuotations.map((quote) => {
+              const source = sourceFor(quote);
+              const party = quotationParty(quote, store);
+              return (
+                <tr key={text(quote.id)}>
+                  <td className="px-5 py-3"><b>{text(quote.quotation_no)}</b><small>{text(quote.project_name)}</small></td>
+                  {tab === "mockup_quotation" && <td className="px-5 py-3">{source?.id ? <button type="button" onClick={() => openPdf(source)} className="font-medium text-[#1769e8] underline decoration-[#b9d2fb] underline-offset-2 hover:text-[#1256bf]">{text(source.quotation_no)}</button> : text(quote.source_price_quotation_id)}</td>}
+                  <td className="px-5 py-3"><b>{party.clientName}</b><small>{party.companyName}</small></td>
+                  <td className="px-5 py-3">{text(quote.project_types)}</td>
+                  <td className="px-5 py-3"><Status value={quote.status} /></td>
+                  <td className="px-5 py-3">{day(quote.pricing_reviewed_at ?? quote.updated_at)}</td>
+                  <td className="px-5 py-3">{text(quote.status) === "approved" ? <ActionIcon label={"View " + (tab === "mockup_quotation" ? "Mockup Quotation" : "Price Quotation") + " PDF"} confirm={false} onClick={() => openPdf(quote)}><FileText size={15} /></ActionIcon> : <span className="text-[11px] text-[#8b92a1]">Available after approval</span>}</td>
+                </tr>
+              );
+            })}
+          </Table>
+        ) : (
+          <Empty>{tab === "mockup_quotation" ? "No Mockup Quotations costed by this account yet." : "No Price Quotations costed by this account yet."}</Empty>
+        )}
+      </div>
+      {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); notice(message); }} autoExportPdf pdfWindow={pdfWindow} hidden />}
+    </Panel>
+  );
+}
+
 function ProjectCalendar({
   store,
   orgId,
@@ -4566,7 +5207,7 @@ function ProjectCalendar({
         ? text(schedule.due_date, "")
         : text(schedule.completed_at, "");
     if (selectedMonthFilter && date.slice(0, 7) !== selectedMonthFilter) return false;
-    if (role !== "project_manager" && projectOfficerFilter !== "all" && text(schedule.assigned_to) !== projectOfficerFilter) return false;
+    if (!isProjectOfficerRole(role) && projectOfficerFilter !== "all" && text(schedule.assigned_to) !== projectOfficerFilter) return false;
     const quotation = store.quotations.find((quote) => quote.id === schedule.quotation_id);
     const lead = store.leads.find((leadItem) => leadItem.id === quotation?.lead_id);
     const query = [
@@ -4583,17 +5224,17 @@ function ProjectCalendar({
   });
   const myScheduleRequests = schedules.filter(
     (schedule) =>
-      role === "project_manager" &&
+      isProjectOfficerRole(role) &&
       text(schedule.assigned_to, "") === text(schedule.created_by, ""),
   );
   const myScheduleRevisionRequests = store.project_schedule_revision_requests.filter(
     (request) =>
-      role === "project_manager" &&
+      isProjectOfficerRole(role) &&
       text(request.submitted_by, "") === currentUserId,
   );
   const myScheduleCompletionRequests = store.project_schedule_completion_requests.filter(
     (request) =>
-      role === "project_manager" &&
+      isProjectOfficerRole(role) &&
       text(request.submitted_by, "") === currentUserId,
   );
   const scheduledQuoteIds = new Set(
@@ -4607,7 +5248,7 @@ function ProjectCalendar({
       text(quote.status, "") === "approved" &&
       !scheduledQuoteIds.has(text(quote.id, "")),
   );
-  const canCreateSchedule = role === "project_manager";
+  const canCreateSchedule = isProjectOfficerRole(role);
   const isGeneralManager = memberRole(role);
   const scheduleProjectType = (schedule: Row) =>
     text(
@@ -4824,7 +5465,7 @@ function ProjectCalendar({
   const canRequestScheduleRevision = (schedule: Row) =>
     !schedule.completed_at &&
     !hasPendingScheduleCompletion(schedule) &&
-    role === "project_manager" &&
+    isProjectOfficerRole(role) &&
     text(schedule.assigned_to, "") === currentUserId &&
     text(schedule.created_by, "") === currentUserId;
   const hasPendingScheduleRevision = (schedule: Row) =>
@@ -4833,13 +5474,13 @@ function ProjectCalendar({
         text(request.schedule_id, "") === text(schedule.id, "") &&
         text(request.status, "") === "pending",
     );
-  const showScheduleRevisionActions = role === "project_manager";
+  const showScheduleRevisionActions = isProjectOfficerRole(role);
   const showProjectActions =
     showScheduleRevisionActions && projectStatusTab === "active";
   const canRequestScheduleCompletion = (schedule: Row) =>
     !schedule.completed_at &&
     !hasPendingScheduleRevision(schedule) &&
-    role === "project_manager" &&
+    isProjectOfficerRole(role) &&
     text(schedule.assigned_to, "") === currentUserId &&
     text(schedule.created_by, "") === currentUserId;
   const hasPendingScheduleCompletion = (schedule: Row) =>
@@ -5052,7 +5693,7 @@ function ProjectCalendar({
                 className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px] text-[#202938] outline-none focus:border-[#c43b43]"
               />
             </label>
-            {role !== "project_manager" && <><label className="sr-only" htmlFor="project-officer-filter">Sales Project Officer</label><select id="project-officer-filter" value={projectOfficerFilter} onChange={(event) => setProjectOfficerFilter(event.target.value)} className={`min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${projectOfficerFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}><option value="all">All Sales Project Officers</option>{projectOfficerOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></>}
+            {!isProjectOfficerRole(role) && <><label className="sr-only" htmlFor="project-officer-filter">Sales Project Officer</label><select id="project-officer-filter" value={projectOfficerFilter} onChange={(event) => setProjectOfficerFilter(event.target.value)} className={`min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${projectOfficerFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}><option value="all">All Sales Project Officers</option>{projectOfficerOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></>}
           </div>
         </div>
         <Table
@@ -5067,10 +5708,10 @@ function ProjectCalendar({
             "Project Type",
             "Percentage",
             "Remark",
-            ...(role !== "project_manager" ? ["Sales Project Officer"] : []),
+            ...(!isProjectOfficerRole(role) ? ["Sales Project Officer"] : []),
             "Actions",
           ]}
-          minWidth={role === "project_manager" ? 1340 : 1520}
+          minWidth={isProjectOfficerRole(role) ? 1340 : 1520}
           className="modern-page-table"
         >
           {filteredTableSchedules.map((schedule) => {
@@ -5085,12 +5726,12 @@ function ProjectCalendar({
               <td className="px-4 py-2 whitespace-nowrap">{totalLeadTime(schedule)}</td>
               <td className="px-4 py-2"><Status value={schedule.completed_at ? "completed" : hasPendingScheduleCompletion(schedule) ? "completion pending" : "active"} /></td>
               <td className="px-4 py-2"><span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full" style={{ backgroundColor: calendarColorForProjectType(scheduleProjectType(schedule)) }} aria-hidden="true" />{scheduleProjectType(schedule)}</span></td>
-              <td className="px-4 py-2">{role === "project_manager" && !schedule.completed_at ? <input aria-label={`Progress percentage for ${text(schedule.project_name, text(schedule.quotation_no))}`} type="number" min="0" max="100" step="0.01" value={projectProgress(schedule).percentage} onChange={(event) => setProgressDrafts((current) => ({ ...current, [text(schedule.id)]: { ...projectProgress(schedule), percentage: event.target.value } }))} className="input mt-0 w-20 text-center" /> : `${n(schedule.progress_percentage)}%`}</td>
-              <td className="px-4 py-2 text-center"><ActionIcon label={role === "project_manager" && !schedule.completed_at ? "Edit project remark" : "View project remark"} confirm={false} onClick={() => openRemark(schedule)}><MessageSquareText size={15} /></ActionIcon></td>
-              {role !== "project_manager" && <td className="px-4 py-2">{officerName(schedule)}</td>}
+              <td className="px-4 py-2">{isProjectOfficerRole(role) && !schedule.completed_at ? <input aria-label={`Progress percentage for ${text(schedule.project_name, text(schedule.quotation_no))}`} type="number" min="0" max="100" step="0.01" value={projectProgress(schedule).percentage} onChange={(event) => setProgressDrafts((current) => ({ ...current, [text(schedule.id)]: { ...projectProgress(schedule), percentage: event.target.value } }))} className="input mt-0 w-20 text-center" /> : `${n(schedule.progress_percentage)}%`}</td>
+              <td className="px-4 py-2 text-center"><ActionIcon label={isProjectOfficerRole(role) && !schedule.completed_at ? "Edit project remark" : "View project remark"} confirm={false} onClick={() => openRemark(schedule)}><MessageSquareText size={15} /></ActionIcon></td>
+              {!isProjectOfficerRole(role) && <td className="px-4 py-2">{officerName(schedule)}</td>}
               <td className="px-4 py-2">
                 {showProjectActions ? <div className="flex items-center gap-1">
-                  {role === "project_manager" && !schedule.completed_at && <ActionIcon label="Save project progress" tone="green" loading={savingProgressId === text(schedule.id)} disabled={savingProgressId === text(schedule.id)} onClick={() => void saveProgress(schedule)}><Save size={15} /></ActionIcon>}
+                  {isProjectOfficerRole(role) && !schedule.completed_at && <ActionIcon label="Save project progress" tone="green" loading={savingProgressId === text(schedule.id)} disabled={savingProgressId === text(schedule.id)} onClick={() => void saveProgress(schedule)}><Save size={15} /></ActionIcon>}
                   {canRequestScheduleCompletion(schedule) && (
                     <ActionIcon
                       label={
@@ -5154,7 +5795,7 @@ function ProjectCalendar({
                 </div>
                 <button type="button" onClick={() => setRemarkSchedule(null)} aria-label="Close project remark" className="grid size-8 place-items-center rounded-md text-[#8a95a6] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938]"><X size={18} /></button>
               </div>
-              {role === "project_manager" && !remarkSchedule.completed_at ? (
+              {isProjectOfficerRole(role) && !remarkSchedule.completed_at ? (
                 <label className="mt-5 block text-[12px] font-medium text-[#202938]">
                   Remark
                   <textarea
@@ -5172,7 +5813,7 @@ function ProjectCalendar({
               )}
               <div className="mt-6 flex justify-end gap-2">
                 <Button secondary onClick={() => setRemarkSchedule(null)}>Close</Button>
-                {role === "project_manager" && !remarkSchedule.completed_at && (
+                {isProjectOfficerRole(role) && !remarkSchedule.completed_at && (
                   <Button tone="green" loading={savingProgressId === text(remarkSchedule.id)} disabled={savingProgressId === text(remarkSchedule.id)} onClick={() => void saveRemark()}>
                     <Save size={14} />
                     Save remark
@@ -5182,7 +5823,7 @@ function ProjectCalendar({
             </section>
           </div>
         )}
-        {role === "project_manager" && myScheduleRequests.length > 0 && (
+        {isProjectOfficerRole(role) && myScheduleRequests.length > 0 && (
           <div className="mt-5 rounded-xl border border-[#e4e8ef] bg-[#fafbfe] p-4">
             <h2 className="text-[13px] font-semibold text-[#202938]">My project submissions</h2>
             <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -5197,7 +5838,7 @@ function ProjectCalendar({
             </div>
           </div>
         )}
-        {role === "project_manager" && myScheduleRevisionRequests.length > 0 && (
+        {isProjectOfficerRole(role) && myScheduleRevisionRequests.length > 0 && (
           <div className="mt-5 rounded-xl border border-[#e4e8ef] bg-[#fafbfe] p-4">
             <h2 className="text-[13px] font-semibold text-[#202938]">My project schedule revision requests</h2>
             <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -5230,7 +5871,7 @@ function ProjectCalendar({
             </div>
           </div>
         )}
-        {role === "project_manager" && myScheduleCompletionRequests.length > 0 && (
+        {isProjectOfficerRole(role) && myScheduleCompletionRequests.length > 0 && (
           <div className="mt-5 rounded-xl border border-[#e4e8ef] bg-[#fafbfe] p-4">
             <h2 className="text-[13px] font-semibold text-[#202938]">My project completion requests</h2>
             <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
@@ -6263,6 +6904,11 @@ function QuotationDocument({
   const costingSource = store.quotations.find(
     (item) => item.id === quote.costing_source_id,
   );
+  const isMockupQuotation = text(quote.document_type) === "mockup_quotation";
+  const documentLabel = isMockupQuotation ? "Mockup Quotation" : "Price Quotation";
+  const sourceQuotation = isMockupQuotation
+    ? store.quotations.find((item) => item.id === quote.source_price_quotation_id)
+    : null;
   const hasGeneralManagerApproval =
     text(quote.status) === "approved" ||
     text(costingSource?.status) === "approved";
@@ -6431,10 +7077,11 @@ function QuotationDocument({
                   fontWeight: 500,
                 }}
               >
-                PRICE QUOTATION
+                {documentLabel.toUpperCase()}
               </h1>
               <div style={{ fontWeight: 500, lineHeight: 1.32 }}>
                 <p>Quotation No.: {text(quote.quotation_no)}</p>
+                {sourceQuotation && <p>Source Price Quotation: {text(sourceQuotation.quotation_no)}</p>}
                 <p>Quotation Date: {fullIssueDate}</p>
               </div>
               <div
@@ -7426,9 +8073,9 @@ function Quotations({
   const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
   const canGenerateCostingPdf = ["owner", "admin"].includes(role);
   const canDeleteQuote = ["owner", "admin"].includes(role);
-  const canRequestCostingRevision = ["project_manager", "owner", "admin"].includes(role);
+  const canRequestCostingRevision = isProjectOfficerRole(role) || ["owner", "admin"].includes(role);
   const canCreateQuote = mode === "costing"
-    ? role === "project_manager" || isGeneralManager
+    ? isProjectOfficerRole(role) || isGeneralManager
     : false;
   const canUpdateQuote = canAccess(role, "quotations", "update");
   const canCreateQuoteLine = canAccess(role, "quotation_items", "create");
@@ -9071,11 +9718,26 @@ function PriceQuotationSubmissions({
   const [search, setSearch] = useState("");
   const [month, setMonth] = useState("");
   const [submissionType, setSubmissionType] = useState<"all" | "new" | "revised">("all");
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    void createClient().auth.getUser().then(({ data }) => {
+      if (active) setCurrentUserId(data.user?.id ?? null);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
   const pendingPriceQuotations = store.quotations.filter(
     (quotation) =>
       text(quotation.status) === "pending" &&
       text(quotation.document_type) === "price_quotation" &&
-      !quotation.costing_source_id,
+      !quotation.costing_source_id &&
+      ![
+        quotation.created_by,
+        quotation.prepared_by_user_id,
+        quotation.submitted_by,
+      ].some((userId) => text(userId, "") === currentUserId),
   ).sort(newestActivityFirst);
   const normalizedSearch = search.trim().toLowerCase();
   const filteredPriceQuotations = pendingPriceQuotations.filter((quotation) => {
@@ -9195,7 +9857,7 @@ function PriceQuotationWorkspace({
     QuotationIllustrationDraft[]
   >([]);
   const [saving, setSaving] = useState(false);
-  const [quotationTab, setQuotationTab] = useState<"draft" | "pending" | "needs_revision" | "approved">(() => role === "project_manager" ? "draft" : "pending");
+  const [quotationTab, setQuotationTab] = useState<"draft" | "pending" | "needs_revision" | "approved">(() => isProjectOfficerRole(role) ? "draft" : "pending");
   const [quotationQuery, setQuotationQuery] = useState("");
   const [quotationMonth, setQuotationMonth] = useState(currentMonth);
   const [preparedByFilter, setPreparedByFilter] = useState("all");
@@ -9205,12 +9867,13 @@ function PriceQuotationWorkspace({
   const [reviewing, setReviewing] = useState<Row | null>(null);
   const [revisionNoteQuote, setRevisionNoteQuote] = useState<Row | null>(null);
   const [illustrationQuote, setIllustrationQuote] = useState<Row | null>(null);
+  const [proofQuote, setProofQuote] = useState<Row | null>(null);
   const [endorseQuote, setEndorseQuote] = useState<Row | null>(null);
   const [endorsementValues, setEndorsementValues] = useState<Record<string, string>>({ recipient_user_id: "", note: "" });
   const [endorsing, setEndorsing] = useState(false);
   const [openingEndorsementId, setOpeningEndorsementId] = useState<string | null>(null);
-  const canPrepare = role === "project_manager";
-  const isGeneralManager = canReviewPriceQuotations(role);
+  const canPrepare = isProjectOfficerRole(role);
+  const isGeneralManager = memberRole(role);
   useEffect(() => {
     let active = true;
     void createClient().auth.getUser().then(({ data }) => {
@@ -9218,8 +9881,14 @@ function PriceQuotationWorkspace({
     });
     return () => { active = false; };
   }, []);
+  const isCombinedRole = role === "sales_pricing_officer";
   const quotations = store.quotations.filter(
-    (quote) => text(quote.document_type) === "price_quotation",
+    (quote) =>
+      text(quote.document_type) === "price_quotation" &&
+      (!isCombinedRole ||
+        [quote.created_by, quote.prepared_by_user_id, quote.submitted_by].some(
+          (userId) => text(userId, "") === currentUserId,
+        )),
   );
   const preparedByKey = (quote: Row) =>
     text(quote.prepared_by_user_id ?? quote.created_by ?? quote.representative);
@@ -9260,7 +9929,7 @@ function PriceQuotationWorkspace({
   const availableLeads = store.leads.filter(
     (lead) =>
       !["won", "lost"].includes(text(lead.status)) &&
-      (role !== "project_manager" || Boolean(currentUserId) && lead.assigned_to === currentUserId),
+      (!isProjectOfficerRole(role) || Boolean(currentUserId) && lead.assigned_to === currentUserId),
   );
   const resetEditor = () => {
     setEditorOpen(false);
@@ -9416,7 +10085,7 @@ function PriceQuotationWorkspace({
       return notice(error.message);
     }
     const resubmitRevision =
-      role === "project_manager" &&
+      isProjectOfficerRole(role) &&
       text(editing?.status) === "needs_revision";
     if (resubmitRevision) {
       const { error: submitError } = await client.rpc("submit_price_quotation", {
@@ -9484,7 +10153,7 @@ function PriceQuotationWorkspace({
   };
   const canDeletePriceQuotation = (quote: Row) =>
     isGeneralManager ||
-    (role === "project_manager" &&
+    (isProjectOfficerRole(role) &&
       !quote.costing_source_id &&
       quote.created_by === currentUserId &&
       ["draft", "needs_revision"].includes(text(quote.status)));
@@ -9563,7 +10232,7 @@ function PriceQuotationWorkspace({
       action={
         canPrepare ? (
           <Button onClick={openNew}>
-            <Plus size={14} /> Add Price Quotation
+            <Plus size={14} /> Request Price Quotation
           </Button>
         ) : undefined
       }
@@ -9579,13 +10248,13 @@ function PriceQuotationWorkspace({
         <div className="flex flex-wrap items-center gap-2 border-b border-[#edf0f5] py-3">
           <label className="relative min-w-0 flex-1 sm:min-w-56 sm:max-w-sm" htmlFor="price-quotation-search"><Search className="pointer-events-none absolute left-3 top-2.5 text-[#8b92a1]" size={15} /><span className="sr-only">Search quotations</span><input id="price-quotation-search" type="search" value={quotationQuery} onChange={(event) => setQuotationQuery(event.target.value)} placeholder="Search quotations" className="w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]" /></label>
           <label className="flex items-center gap-2 text-[12px] text-[#687386]"><span className="whitespace-nowrap">Month</span><input type="month" value={quotationMonth} onClick={(event) => event.currentTarget.showPicker?.()} onChange={(event) => setQuotationMonth(event.target.value)} className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px] text-[#202938] outline-none focus:border-[#c43b43]" /></label>
-          {role !== "project_manager" && <><label className="sr-only" htmlFor="price-quotation-officer">Sales Project Officer</label><select id="price-quotation-officer" value={preparedByFilter} onChange={(event) => setPreparedByFilter(event.target.value)} className={`min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${preparedByFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}><option value="all">All Sales Project Officers</option>{quotationPreparers.map((officer) => <option key={officer.id} value={officer.id}>{officer.name}</option>)}</select></>}
+          {!isProjectOfficerRole(role) && <><label className="sr-only" htmlFor="price-quotation-officer">Sales Project Officer</label><select id="price-quotation-officer" value={preparedByFilter} onChange={(event) => setPreparedByFilter(event.target.value)} className={`min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${preparedByFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}><option value="all">All Sales Project Officers</option>{quotationPreparers.map((officer) => <option key={officer.id} value={officer.id}>{officer.name}</option>)}</select></>}
         </div>
       </div>
       {filteredQuotations.length ? (
         <Table
-          labels={role === "project_manager" ? ["Quotation", "Client's Name", "Company Name", "Status", "Date", "Actions"] : ["Quotation", "Client's Name", "Company Name", "Prepared by", "Status", "Date", "Actions"]}
-          minWidth={role === "project_manager" ? 860 : 1000}
+          labels={isProjectOfficerRole(role) ? ["Quotation", "Client's Name", "Company Name", "Status", "Date", "Actions"] : ["Quotation", "Client's Name", "Company Name", "Prepared by", "Status", "Date", "Actions"]}
+          minWidth={isProjectOfficerRole(role) ? 860 : 1000}
           className="!w-full"
         >
           {filteredQuotations.map((quote) => {
@@ -9607,25 +10276,28 @@ function PriceQuotationWorkspace({
                 (item) =>
                   item.quotation_id === quote.id && Boolean(text(item.image_url, "")),
               ).length;
+            const proofCount = store.quotation_signed_proofs.filter(
+              (proof) => proof.quotation_id === quote.id,
+            ).length;
             return (
               <tr key={text(quote.id)}>
                 <td className="px-5 py-3"><b>{text(quote.quotation_no)}</b><small>{day(quote.issue_date)}</small></td>
                 <td className="px-5 py-3"><b>{party.clientName}</b><small>{text(quote.project_name, text(lead?.project_name))}</small></td>
                 <td className="px-5 py-3">{party.companyName}</td>
-                {role !== "project_manager" && <td className="px-5 py-3">{preparedBy}</td>}
+                {!isProjectOfficerRole(role) && <td className="px-5 py-3">{preparedBy}</td>}
                 <td className="px-5 py-3"><div className="flex items-center gap-1.5"><Status value={quote.status} />{priceRevisionRequest && <span className="text-[11px] text-[#a76605]">Revision requested</span>}{text(quote.status) === "needs_revision" && <ActionIcon label="View revision note" tone="amber" confirm={false} onClick={() => setRevisionNoteQuote(quote)}><MessageSquareText size={15} /></ActionIcon>}</div></td>
                 <td className="px-5 py-3">{text(quote.status) === "approved" ? day(quote.approved_at) : day(quote.submitted_at)}</td>
                 <td className="px-5 py-3"><div className="flex items-center gap-1">
                   {editable && canPrepare && (
                     <ActionIcon label="Edit Price Quotation" onClick={() => openEdit(quote)}><Pencil size={15} /></ActionIcon>
                   )}
-                  {role === "project_manager" && editable && (
+                  {isProjectOfficerRole(role) && editable && (
                     <ActionIcon label="Submit for General Manager review" tone="green" loading={saving} disabled={saving} onClick={() => void submit(quote)}><Send size={15} /></ActionIcon>
                   )}
-                  {role === "project_manager" && text(quote.status) === "pending" && (
+                  {isProjectOfficerRole(role) && text(quote.status) === "pending" && (
                     <ActionIcon label="Unsubmit and return to draft" tone="amber" loading={saving} disabled={saving} onClick={() => void unsubmit(quote)}><RotateCcw size={15} /></ActionIcon>
                   )}
-                  {role === "project_manager" && priceRevisionRequest && (
+                  {isProjectOfficerRole(role) && priceRevisionRequest && (
                     <ActionIcon
                       label="Unsubmit Price Quotation revision request"
                       tone="amber"
@@ -9637,10 +10309,10 @@ function PriceQuotationWorkspace({
                       <RotateCcw size={15} />
                     </ActionIcon>
                   )}
-                  {role === "project_manager" && !isLegacy && text(quote.status) === "approved" && (
+                  {isProjectOfficerRole(role) && !isLegacy && text(quote.status) === "approved" && (
                     <ActionIcon label="Edit and resubmit Price Quotation" tone="amber" loading={saving} disabled={saving || Boolean(priceRevisionRequest)} onClick={() => void beginRevision(quote)}><RotateCcw size={15} /></ActionIcon>
                   )}
-                  {role === "project_manager" && !isLegacy && text(quote.status) === "approved" && preparedByKey(quote) === currentUserId && (
+                  {isProjectOfficerRole(role) && !isLegacy && text(quote.status) === "approved" && preparedByKey(quote) === currentUserId && (
                     <ActionIcon label="Endorse approved Price Quotation" confirm={false} disabled={endorsing} onClick={() => openEndorsement(quote)}><Send size={15} /></ActionIcon>
                   )}
                   {isGeneralManager && text(quote.status) === "pending" && (
@@ -9663,6 +10335,7 @@ function PriceQuotationWorkspace({
                   )}
                   {illustrationCount > 0 && <ActionIcon label="View quotation illustrations" confirm={false} onClick={() => setIllustrationQuote(quote)}><ImageIcon size={15} /></ActionIcon>}
                   {text(quote.status) === "approved" && <ActionIcon label={isGeneralManager ? "View Internal Costing PDF" : "View Price Quotation PDF"} onClick={() => openPdf(quote)}><FileText size={15} /></ActionIcon>}
+                  {text(quote.status) === "approved" && <ActionIcon label={"View signed client proof" + (proofCount ? " (" + proofCount + "/5)" : "")} confirm={false} onClick={() => setProofQuote(quote)}><Paperclip size={15} /></ActionIcon>}
                 </div></td>
               </tr>
             );
@@ -9670,7 +10343,7 @@ function PriceQuotationWorkspace({
         </Table>
       ) : <Empty>{quotations.length ? "No Price Quotations match the selected filters." : "No Price Quotations yet. Create one from a lead to begin."}</Empty>}
       </div>
-      {role === "project_manager" && recipientEndorsements.length > 0 && (
+      {isProjectOfficerRole(role) && recipientEndorsements.length > 0 && (
         <section className="border-t border-[#edf0f5] px-4 py-4 sm:px-5 lg:px-6">
           <div className="mb-3"><h3 className="text-[14px] font-semibold text-[#202938]">Endorsed to Me</h3><p className="mt-0.5 text-[12px] text-[#687386]">Read-only PDF copies shared by another Sales Project Officer.</p></div>
           <Table labels={["Price Quotation", "Client's Name", "Company Name", "Endorsed", "PDF"]} minWidth={800}>
@@ -9692,7 +10365,7 @@ function PriceQuotationWorkspace({
       {editorOpen && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/30 p-4">
           <section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
-            <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">{editing ? "Edit Price Quotation" : "Add Price Quotation"}</h2><p className="mt-1 text-[12px] text-[#687386]">Add the requested materials and quantities. Selling prices are entered by the General Manager.</p></div><button type="button" onClick={resetEditor} aria-label="Close" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div>
+            <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">{editing ? "Edit Price Quotation" : "Request Price Quotation"}</h2><p className="mt-1 text-[12px] text-[#687386]">Add the requested materials and quantities. Selling prices are entered by the General Manager.</p></div><button type="button" onClick={resetEditor} aria-label="Close" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div>
             <label className="mt-5 block text-[12px] font-medium text-[#202938]">Client&apos;s Name - Company Name<select value={leadId} onChange={(event) => setLeadId(event.target.value)} className="input mt-1" required><option value="">Select a lead</option>{availableLeads.map((lead) => <option key={text(lead.id)} value={text(lead.id)}>{leadClientLabel(lead)}</option>)}</select></label>
             <label className="mt-4 block text-[12px] font-medium text-[#202938]">Project Type<select value={projectType} onChange={(event) => setProjectType(event.target.value)} className={`input mt-1 ${projectType ? "text-[#151922]" : "text-[#8b92a1]"}`} required><option value="">Select project type</option>{PRICE_QUOTATION_PROJECT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
             <section className="mt-5 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-4">
@@ -9746,6 +10419,7 @@ function PriceQuotationWorkspace({
       )}
       {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); notice(message); }} autoExportPdf pdfWindow={pdfWindow} hidden showInternalCosting={isGeneralManager} />}
       {reviewing && <PriceQuotationReview quotation={reviewing} store={store} saving={saving} close={() => setReviewing(null)} notice={notice} reload={reload} />}
+      {proofQuote && <SignedProofDialog quote={proofQuote} store={store} canUpload={isProjectOfficerRole(role) && preparedByKey(proofQuote) === currentUserId} close={() => setProofQuote(null)} notice={notice} reload={reload} />}
     </Panel>
   );
 }
@@ -9780,7 +10454,7 @@ function ProductCostingsSection({
   return (
     <section className="rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div><h3 className="text-[14px] font-semibold text-[#202938]">Internal product costings</h3><p className="mt-1 text-[12px] text-[#687386]">General Manager / Pricing Officer only. Add one costing table for each finished product; all internal costs and markups calculate the quotation price automatically.</p></div>
+        <div><h3 className="text-[14px] font-semibold text-[#202938]">Internal product costings</h3><p className="mt-1 text-[12px] text-[#687386]">General Manager / Sales &amp; Pricing Officer only. Add one costing table for each finished product; all internal costs and markups calculate the quotation price automatically.</p></div>
         <Button secondary disabled={!canAddCosting} onClick={() => {
           const nextLine = lines.find((line) => !costings.some((costing) => costing.quotationItemId === line.id));
           if (nextLine?.id) setCostings((current) => [...current, {
@@ -9840,22 +10514,26 @@ type PriceQuotationReviewContentProps = {
   working: boolean;
   review: (decision: "approved" | "needs_revision") => Promise<void>;
   finalApproval: boolean;
+  documentLabel?: string;
+  sourceQuotationNo?: string;
 };
 
 function PriceQuotationReviewContent({
   lines, projectName, projectType, illustrations, productCostings, pricingDefaults, setProductCostings, prices, setPrices, subtotal, vatRate, setVatRate, tax,
   total, terms, setTerms, bankDetails, setBankDetails, priceBasis, setPriceBasis,
   revisionNote, setRevisionNote, close, saving, working, review, finalApproval,
+  documentLabel = "Price Quotation", sourceQuotationNo,
 }: PriceQuotationReviewContentProps) {
   const vatMultiplier = 1 + n(vatRate) / 100;
   const priceLabel = "Selling Price / Unit";
   return (
     <div className="mt-5 space-y-5">
       <section className="rounded-xl border border-[#e1e6ee] p-4">
-        <h3 className="text-[14px] font-semibold">Project details</h3>
+        <h3 className="text-[14px] font-semibold">{documentLabel} details</h3>
         <dl className="mt-3 grid gap-1 text-[13px] sm:grid-cols-[120px_1fr]">
           <dt className="text-[#687386]">Project type</dt>
           <dd className="font-medium text-[#202938]">{projectType || "—"}</dd>
+          {sourceQuotationNo && <><dt className="text-[#687386]">Source Price Quotation</dt><dd className="font-medium text-[#1769e8]">{sourceQuotationNo}</dd></>}
         </dl>
         {illustrations.length > 0 && <div className="mt-4"><p className="text-[12px] font-medium text-[#687386]">Illustrations</p><div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">{illustrations.map((illustration) => <a key={illustration.id} href={illustration.imageUrl} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><img src={illustration.imageUrl} alt={illustration.description || "Quotation illustration"} className="aspect-square w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{illustration.description}</p></a>)}</div></div>}
       </section>
@@ -9907,7 +10585,7 @@ function PriceQuotationReviewContent({
         <div className="mt-3 flex justify-end"><Button onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div>
       </section>
       <label className="block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label>
-      <div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary loading={saving || working} disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> {finalApproval ? "Approve Price Quotation" : "Submit to General Manager"}</Button></div>
+      <div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary loading={saving || working} disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> {finalApproval ? `Approve ${documentLabel}` : `Submit ${documentLabel} to General Manager`}</Button></div>
     </div>
   );
 }
@@ -9920,6 +10598,7 @@ function PriceQuotationReview({
   notice,
   reload,
   finalApproval = false,
+  quotationKind = "price_quotation",
 }: {
   quotation: Row;
   store: Store;
@@ -9928,7 +10607,16 @@ function PriceQuotationReview({
   notice: (message: string) => void;
   reload: () => Promise<void>;
   finalApproval?: boolean;
+  quotationKind?: "price_quotation" | "mockup_quotation";
 }) {
+  const isMockupQuotation = quotationKind === "mockup_quotation";
+  const documentLabel = isMockupQuotation ? "Mockup Quotation" : "Price Quotation";
+  const sourceQuotation = isMockupQuotation
+    ? store.quotations.find((quote) => quote.id === quotation.source_price_quotation_id)
+    : null;
+  const illustrationQuotationId = isMockupQuotation
+    ? text(quotation.source_price_quotation_id, "")
+    : text(quotation.id, "");
   const [prices, setPrices] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       store.quotation_items
@@ -10020,7 +10708,7 @@ function PriceQuotationReview({
   }, [quotation.id]);
   const [galleryIllustrations, setGalleryIllustrations] = useState<Row[]>(() =>
     store.price_quotation_illustrations.filter(
-      (illustration) => illustration.quotation_id === quotation.id,
+      (illustration) => illustration.quotation_id === illustrationQuotationId,
     ),
   );
   useEffect(() => {
@@ -10028,7 +10716,7 @@ function PriceQuotationReview({
     void createClient()
       .from("price_quotation_illustrations")
       .select("*")
-      .eq("quotation_id", quotation.id)
+      .eq("quotation_id", illustrationQuotationId)
       .order("sort_order", { ascending: true })
       .then(({ data }) => {
         if (active && data) setGalleryIllustrations(data as Row[]);
@@ -10036,7 +10724,7 @@ function PriceQuotationReview({
     return () => {
       active = false;
     };
-  }, [quotation.id]);
+  }, [illustrationQuotationId]);
   const lines = store.quotation_items.filter((item) => item.quotation_id === quotation.id);
   useEffect(() => {
     if (!productCostings.length) return;
@@ -10076,7 +10764,10 @@ function PriceQuotationReview({
   const tax = Math.round(subtotal * n(vatRate)) / 100;
   const total = subtotal + tax;
   const review = async (decision: "approved" | "needs_revision") => {
-    if (productCostings.length > 0 && productCostings.length !== lines.length) {
+    if (!finalApproval && isMockupQuotation && productCostings.length !== lines.length) {
+      return notice("Add one costing table for every Mockup Quotation product before reviewing.");
+    }
+    if (!isMockupQuotation && productCostings.length > 0 && productCostings.length !== lines.length) {
       return notice("Add one costing table for every quotation product before reviewing.");
     }
     setWorking(true);
@@ -10095,9 +10786,19 @@ function PriceQuotationReview({
       })),
     }));
     const { error } = finalApproval && decision === "needs_revision"
-      ? await createClient().rpc("return_price_quotation_from_gm", { p_quotation_id: quotation.id, p_note: revisionNote })
+      ? await createClient().rpc(isMockupQuotation ? "return_mockup_quotation_from_gm" : "return_price_quotation_from_gm", { p_quotation_id: quotation.id, p_note: revisionNote })
       : finalApproval && decision === "approved"
-      ? await createClient().rpc("final_approve_price_quotation", { p_quotation_id: quotation.id })
+      ? await createClient().rpc(isMockupQuotation ? "final_approve_mockup_quotation" : "final_approve_price_quotation", { p_quotation_id: quotation.id })
+      : isMockupQuotation
+      ? await createClient().rpc("pricing_review_mockup_quotation", {
+          p_quotation_id: quotation.id,
+          p_decision: decision,
+          p_vat_rate: n(vatRate),
+          p_terms_conditions: terms.filter((term) => term.trim()).join("\n"),
+          p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
+          p_costings: costingsPayload,
+          p_revision_note: revisionNote,
+        })
       : productCostings.length > 0
       ? await createClient().rpc("pricing_review_price_quotation", {
           p_quotation_id: quotation.id,
@@ -10121,14 +10822,14 @@ function PriceQuotationReview({
     setWorking(false);
     if (error) return notice(error.message);
     close();
-    notice(decision === "approved" ? (finalApproval ? "Price Quotation approved." : "Price Quotation submitted to the General Manager.") : "Price Quotation returned for revision.");
+    notice(decision === "approved" ? (finalApproval ? `${documentLabel} approved.` : `${documentLabel} submitted to the General Manager.`) : `${documentLabel} returned for revision.`);
     await reload();
   };
   /*
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} shipping={shipping} setShipping={setShipping} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} · {text(quotation.client_name)} · Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><div className="mt-5 grid gap-5 lg:grid-cols-[1.45fr_.75fr]"><div><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><section className="mt-5 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="mt-4 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="mt-4 block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label></div><aside><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><div className="border-b border-[#edf0f5] px-4 py-3"><h3 className="text-[14px] font-semibold">Quotation Total</h3></div><Table labels={["Category", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section></aside></div><div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary loading={saving || working} disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></section></div>;
   */
-  return <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - {finalApproval ? "Finalize approval." : "Complete pricing and submit to General Manager."}</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectName={text(quotation.project_name, "")} projectType={text(quotation.project_types, "")} illustrations={illustrations} productCostings={productCostings} pricingDefaults={store.business_settings.find((setting) => text(setting.organization_id) === text(quotation.organization_id)) ?? {}} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} priceBasis={priceBasis} setPriceBasis={setPriceBasis} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} finalApproval={finalApproval} /></section></div>;
+  return <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review {documentLabel}</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - {finalApproval ? "Finalize approval." : `Complete pricing and submit ${documentLabel} to the General Manager.`}</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectName={text(quotation.project_name, "")} projectType={text(quotation.project_types, "")} sourceQuotationNo={text(sourceQuotation?.quotation_no, "") || undefined} documentLabel={documentLabel} illustrations={illustrations} productCostings={productCostings} pricingDefaults={store.business_settings.find((setting) => text(setting.organization_id) === text(quotation.organization_id)) ?? {}} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} priceBasis={priceBasis} setPriceBasis={setPriceBasis} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} finalApproval={finalApproval} /></section></div>;
 }
 
 function GeneralManagerCostingReview({
@@ -10734,7 +11435,7 @@ function Submissions({
 }) {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Row | null>(null);
-  const [tab, setTab] = useState<"quotations" | "price_revisions" | "costings" | "projects" | "leads" | "revisions" | "calendar_projects" | "calendar_revisions" | "calendar_completions">("quotations");
+  const [tab, setTab] = useState<"quotations" | "mockup_quotations" | "price_revisions" | "costings" | "projects" | "leads" | "revisions" | "calendar_projects" | "calendar_revisions" | "calendar_completions">("quotations");
   const [selectedProjectEdit, setSelectedProjectEdit] = useState<Row | null>(null);
   const [selectedLeadChange, setSelectedLeadChange] = useState<Row | null>(null);
   const [selectedPriceQuotation, setSelectedPriceQuotation] = useState<Row | null>(null);
@@ -10745,6 +11446,11 @@ function Submissions({
       text(quotation.status) === "pending_gm_approval" &&
       text(quotation.document_type) === "price_quotation" &&
       !quotation.costing_source_id,
+  ).sort(newestActivityFirst);
+  const pendingMockupQuotations = store.quotations.filter(
+    (quotation) =>
+      text(quotation.status) === "pending_gm_approval" &&
+      text(quotation.document_type) === "mockup_quotation",
   ).sort(newestActivityFirst);
   const pendingCostings = store.quotations.filter(
     (quotation) =>
@@ -11031,6 +11737,7 @@ function Submissions({
     >
       <div className="flex gap-1 overflow-x-auto border-b border-[#e4e8ef] px-5">
         <button type="button" onClick={() => setTab("quotations")} className={`px-3 py-2 text-[12px] font-medium ${tab === "quotations" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Price Quotations ({pendingPriceQuotations.length})</button>
+        <button type="button" onClick={() => setTab("mockup_quotations")} className={`px-3 py-2 text-[12px] font-medium ${tab === "mockup_quotations" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Mockup Quotations ({pendingMockupQuotations.length})</button>
         <button type="button" onClick={() => setTab("price_revisions")} className={`px-3 py-2 text-[12px] font-medium ${tab === "price_revisions" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Quotation Revisions ({pendingPriceQuotationRevisions.length})</button>
         <button type="button" onClick={() => setTab("calendar_projects")} className={`px-3 py-2 text-[12px] font-medium ${tab === "calendar_projects" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Project Calendar ({pendingProjectSchedules.length})</button>
         <button type="button" onClick={() => setTab("calendar_revisions")} className={`px-3 py-2 text-[12px] font-medium ${tab === "calendar_revisions" ? "border-b-2 border-[#c43b43] text-[#151922]" : "text-[#8b92a1]"}`}>Project Revisions ({pendingProjectScheduleRevisions.length})</button>
@@ -11046,6 +11753,15 @@ function Submissions({
           })}
         </Table>
       ) : <Empty>No Price Quotations are awaiting review.</Empty>)}
+      {tab === "mockup_quotations" && (pendingMockupQuotations.length ? (
+        <Table labels={["Mockup Quotation", "Source Price Quotation", "Client's Name", "Project Type", "Prepared by", "Submitted", "Review"]} minWidth={1120}>
+          {pendingMockupQuotations.map((quotation) => {
+            const source = store.quotations.find((item) => item.id === quotation.source_price_quotation_id);
+            const party = quotationParty(quotation, store);
+            return <tr key={text(quotation.id)}><td className="px-5 py-3"><b>{text(quotation.quotation_no)}</b><small>{text(quotation.project_name)}</small></td><td className="px-5 py-3 font-medium">{source?.id ? <button type="button" onClick={() => openQuotationPdf(source)} className="text-[#1769e8] underline decoration-[#b9d2fb] underline-offset-2 hover:text-[#1256bf]">{text(source.quotation_no)}</button> : text(quotation.source_price_quotation_id, "—")}</td><td className="px-5 py-3 font-medium">{party.clientName}<small>{party.companyName}</small></td><td className="px-5 py-3">{text(quotation.project_types)}</td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3"><ActionIcon label="Review Mockup Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>;
+          })}
+        </Table>
+      ) : <Empty>No Mockup Quotations are awaiting General Manager review.</Empty>)}
       {tab === "price_revisions" && (pendingPriceQuotationRevisions.length ? (
         <Table labels={["Price Quotation", "Client's Name", "Company Name", "Project Officer", "Requested", "Review"]} minWidth={860}>
           {pendingPriceQuotationRevisions.map((request) => {
@@ -11239,6 +11955,7 @@ function Submissions({
           quotation={selectedPriceQuotation}
           store={store}
           saving={savingId === selectedPriceQuotation.id}
+          quotationKind={text(selectedPriceQuotation.document_type) === "mockup_quotation" ? "mockup_quotation" : "price_quotation"}
           finalApproval
           close={() => setSelectedPriceQuotation(null)}
           notice={notice}
@@ -13243,7 +13960,7 @@ function Dashboard({
     month: "long",
     year: "numeric",
   }).format(monthDate);
-  const isProjectOfficer = role === "project_manager";
+  const isProjectOfficer = isProjectOfficerRole(role);
   useEffect(() => {
     if (isProjectOfficer) return;
     let active = true;
@@ -13747,7 +14464,7 @@ function CommissionsView({ role }: { role: string }) {
   }, []);
   const paid = rows.reduce((sum, row) => sum + n(row.paid_amount), 0);
   const earned = rows.reduce((sum, row) => sum + n(row.earned_commission), 0);
-  return <div className="space-y-5"><Panel title={role === "project_manager" ? "My commissions" : "Sales Project Officer commissions"} detail="Commission is earned only from actual customer payments: first ₱400,000 at 3%, then the balance at 5%."><div className="grid gap-3 p-4 sm:grid-cols-2"><div className="rounded-lg bg-[#f8fbff] p-3 text-[12px]"><p className="text-[#687386]">Actual collections</p><p className="mt-1 text-lg font-semibold">{peso.format(paid)}</p></div><div className="rounded-lg bg-[#eff7f1] p-3 text-[12px]"><p className="text-[#687386]">Commission earned</p><p className="mt-1 text-lg font-semibold text-[#176b40]">{peso.format(earned)}</p></div></div>{loading ? <Empty>Loading commissions…</Empty> : rows.length ? <Table labels={role === "project_manager" ? ["Quotation", "Client", "Paid to date", "Projected", "Earned"] : ["Officer", "Quotation", "Client", "Paid to date", "Earned"]}>{rows.map((row) => <tr key={text(row.quotation_id)}>{role !== "project_manager" && <td className="px-4 py-3">{text(row.officer_user_id)}</td>}<td className="px-4 py-3"><b>{text(row.quotation_no)}</b><small>{text(row.project_name)}</small></td><td className="px-4 py-3">{text(row.client_name)}</td><td className="px-4 py-3 text-right">{peso.format(n(row.paid_amount))}</td>{role !== "project_manager" && <td className="px-4 py-3 text-right">{peso.format(n(row.projected_commission))}</td>}<td className="px-4 py-3 text-right font-semibold">{peso.format(n(row.earned_commission))}</td></tr>)}</Table> : <Empty>No approved quotations with commission eligibility yet.</Empty>}</Panel></div>;
+  return <div className="space-y-5"><Panel title={isProjectOfficerRole(role) ? "My commissions" : "Sales Project Officer commissions"} detail="Commission is earned only from actual customer payments: first ₱400,000 at 3%, then the balance at 5%."><div className="grid gap-3 p-4 sm:grid-cols-2"><div className="rounded-lg bg-[#f8fbff] p-3 text-[12px]"><p className="text-[#687386]">Actual collections</p><p className="mt-1 text-lg font-semibold">{peso.format(paid)}</p></div><div className="rounded-lg bg-[#eff7f1] p-3 text-[12px]"><p className="text-[#687386]">Commission earned</p><p className="mt-1 text-lg font-semibold text-[#176b40]">{peso.format(earned)}</p></div></div>{loading ? <Empty>Loading commissions…</Empty> : rows.length ? <Table labels={isProjectOfficerRole(role) ? ["Quotation", "Client", "Paid to date", "Projected", "Earned"] : ["Officer", "Quotation", "Client", "Paid to date", "Earned"]}>{rows.map((row) => <tr key={text(row.quotation_id)}>{!isProjectOfficerRole(role) && <td className="px-4 py-3">{text(row.officer_user_id)}</td>}<td className="px-4 py-3"><b>{text(row.quotation_no)}</b><small>{text(row.project_name)}</small></td><td className="px-4 py-3">{text(row.client_name)}</td><td className="px-4 py-3 text-right">{peso.format(n(row.paid_amount))}</td>{!isProjectOfficerRole(role) && <td className="px-4 py-3 text-right">{peso.format(n(row.projected_commission))}</td>}<td className="px-4 py-3 text-right font-semibold">{peso.format(n(row.earned_commission))}</td></tr>)}</Table> : <Empty>No approved quotations with commission eligibility yet.</Empty>}</Panel></div>;
 }
 
 function SettingsView({
@@ -13890,7 +14607,7 @@ function SettingsView({
   return (
     <div className="space-y-5">
       <AccountProfileDialog open embedded fullWidth role={role} />
-      <Panel title="Pricing defaults" detail="Applied automatically to new product costings. Pricing Officers can view and adjust VAT only." action={<Button secondary onClick={() => { setPricingDefaults({ default_profit_margin: text(setting?.default_profit_margin, "75"), default_overhead_rate: text(setting?.default_overhead_rate, "0"), default_buffer_margin: text(setting?.default_buffer_margin, "20"), production_commission: text(setting?.production_commission, "0"), default_additional_markup: text(setting?.default_additional_markup, "15"), vat_rate: text(setting?.vat_rate, "12") }); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button>}>
+      <Panel title="Pricing defaults" detail="Applied automatically to new product costings. Sales &amp; Pricing Officers can view and adjust VAT only." action={<Button secondary onClick={() => { setPricingDefaults({ default_profit_margin: text(setting?.default_profit_margin, "75"), default_overhead_rate: text(setting?.default_overhead_rate, "0"), default_buffer_margin: text(setting?.default_buffer_margin, "20"), production_commission: text(setting?.production_commission, "0"), default_additional_markup: text(setting?.default_additional_markup, "15"), vat_rate: text(setting?.vat_rate, "12") }); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button>}>
         <Table labels={["Profit margin", "Overhead expense", "Buffer margin", "Commission", "Additional markup", "VAT"]}><tr><td className="px-4 py-3">{text(setting?.default_profit_margin, "75")}%</td><td className="px-4 py-3">{text(setting?.default_overhead_rate, "0")}%</td><td className="px-4 py-3">{text(setting?.default_buffer_margin, "20")}%</td><td className="px-4 py-3">{text(setting?.production_commission, "0")}%</td><td className="px-4 py-3">{text(setting?.default_additional_markup, "15")}%</td><td className="px-4 py-3">{text(setting?.vat_rate, "12")}%</td></tr></Table>
       </Panel>
       {pricingDefaultsOpen && <Dialog title="Pricing defaults" fields={[{ key: "default_profit_margin", label: "Profit Margin %", type: "number" }, { key: "default_overhead_rate", label: "Overhead Expense %", type: "number" }, { key: "default_buffer_margin", label: "Buffer Margin %", type: "number" }, { key: "production_commission", label: "Commission %", type: "number" }, { key: "default_additional_markup", label: "Additional Markup %", type: "number" }, { key: "vat_rate", label: "Default VAT %", type: "number" }]} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => setPricingDefaultsOpen(false)} saving={false} saveLabel="Save pricing defaults" />}
@@ -13944,6 +14661,7 @@ function SettingsView({
                     {[
                       "admin",
                       "project_manager",
+                      "sales_pricing_officer",
                       "sales",
                       "production",
                       "warehouse",
@@ -13965,7 +14683,9 @@ function SettingsView({
                         ? "Super Admin"
                         : text(m.role) === "owner"
                           ? "Owner / General Manager"
-                          : m.role
+                          : text(m.role) === "sales_pricing_officer"
+                              ? "Sales & Pricing Officer"
+                              : m.role
                     }
                   />
                 )}
@@ -13977,7 +14697,7 @@ function SettingsView({
                     ? "Owner access"
                     : text(m.role) === "admin"
                       ? "Administrator access"
-                      : text(m.role) === "project_manager"
+                      : isProjectOfficerRole(text(m.role))
                         ? "Projects & quotations"
                         : "Scoped access"}
               </td>
@@ -13988,8 +14708,8 @@ function SettingsView({
       )}
       {isSuperAdmin && (
         <Panel
-          title="Project Manager Accounts"
-          detail="Create the secure sign-in accounts used by Project Managers."
+          title="Project Officer Accounts"
+          detail="Create the secure sign-in accounts used by Sales Project Officers."
           action={
             <Button
               onClick={() => {
@@ -14007,11 +14727,11 @@ function SettingsView({
           }
         >
           {store.organization_members.some(
-            (member) => text(member.role) === "project_manager",
+            (member) => isProjectOfficerRole(text(member.role)),
           ) ? (
-            <Table labels={["Project Manager", "Account Status"]}>
+            <Table labels={["Project Officer", "Account Status"]}>
               {store.organization_members
-                .filter((member) => text(member.role) === "project_manager")
+                .filter((member) => isProjectOfficerRole(text(member.role)))
                 .map((member) => (
                   <tr key={text(member.user_id)}>
                     <td className="px-5 py-3 font-medium">
@@ -14125,7 +14845,7 @@ export function HuswellWorkspace({
   const loadedTables = useRef(new Set<TableName>());
   const initialViewLoaded = useRef(false);
   const pendingRealtimeTables = useRef(new Set<TableName>());
-  const canEditOwnProfile = ["owner", "admin", "project_manager"].includes(
+  const canEditOwnProfile = ["owner", "admin", "project_manager", "sales_pricing_officer"].includes(
     role,
   );
   const selectLeadWorkspaceMode = useCallback((mode: LeadWorkspaceMode) => {
@@ -14321,13 +15041,17 @@ export function HuswellWorkspace({
       "Policy",
       "Commissions",
     ],
-    sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Policy"],
-    pricing_officer: [
+    sales_pricing_officer: [
       "Dashboard",
+      "Leads",
+      "Projects",
       "Mockups",
       "Price Quotations",
+      "Quotation Costing Overview",
       "Policy",
+      "Commissions",
     ],
+    sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Policy"],
     warehouse: ["Dashboard", "Catalog", "Inventory", "Production", "Policy"],
     accountant: ["Finance", "Policy"],
     payroll: ["Dashboard", "Payroll & Leave", "Directory", "Policy"],
@@ -14362,6 +15086,7 @@ export function HuswellWorkspace({
       items: [
         { view: "Price Quotations", icon: FileText },
         { view: "Mockups", icon: ImageIcon },
+        { view: "Quotation Costing Overview", icon: ReceiptText },
         { view: "Projects", icon: ClipboardCheck },
         { view: "Submissions", icon: ClipboardCheck },
       ],
@@ -14375,19 +15100,6 @@ export function HuswellWorkspace({
         { view: "Settings", icon: Settings },
       ],
     },
-  ] : role === "pricing_officer" ? [
-    {
-      label: "Pricing",
-      items: [
-        { view: "Dashboard", icon: LayoutDashboard },
-        { view: "Price Quotations", icon: FileText },
-        { view: "Mockups", icon: ImageIcon },
-      ],
-    },
-    {
-      label: "Company",
-      items: [{ view: "Policy", icon: ScrollText }],
-    },
   ] : [
     {
       label: "Project operations",
@@ -14396,6 +15108,7 @@ export function HuswellWorkspace({
         { view: "Leads", icon: ClipboardCheck },
         { view: "Price Quotations", icon: FileText },
         { view: "Mockups", icon: ImageIcon },
+        { view: "Quotation Costing Overview", icon: ReceiptText },
         { view: "Projects", icon: ClipboardCheck },
         { view: "Suppliers & Materials", icon: UsersRound },
         { view: "Commissions", icon: PhilippinePeso },
@@ -14427,9 +15140,9 @@ export function HuswellWorkspace({
     .filter((group) => group.items.length > 0);
   const pageHeader: Record<View, { title: string; detail: string }> = {
     Dashboard: {
-      title: role === "project_manager" || role === "admin" ? "KPI Dashboard" : "Dashboard",
+      title: isProjectOfficerRole(role) || role === "admin" ? "KPI Dashboard" : "Dashboard",
       detail:
-        role === "project_manager"
+        isProjectOfficerRole(role)
           ? "Track your lead, quotation, and supplier key performance indicators."
           : "Monitor business performance and current work.",
     },
@@ -14446,10 +15159,14 @@ export function HuswellWorkspace({
         : projects.detail,
     },
     Mockups: {
-      title: isManagementRole ? "Mockup oversight" : "Mockups",
+      title: "Mockup Quotation",
       detail: isManagementRole
-        ? "Monitor all active mockups, deadlines, and officer updates in real time."
-        : "Create and update mockups for your assigned leads.",
+        ? "Review Mockup Quotation requests, pricing submissions, and approved documents."
+        : "Request Mockup Quotations from approved Price Quotations and track their status.",
+    },
+    "Quotation Costing Overview": {
+      title: "Quotation Costing Overview",
+      detail: "Review Price Quotations and Mockup Quotations that you have costed and their current statuses.",
     },
     "Costing Breakdown": {
       title: "Costing Breakdown",
@@ -14458,15 +15175,15 @@ export function HuswellWorkspace({
     },
     "Price Quotations": {
       title:
-        role === "pricing_officer"
-          ? "Price Quotation Submissions"
-          : isManagementRole
+        role === "sales_pricing_officer"
+            ? "Price Quotations"
+            : isManagementRole
             ? "Price Quotation Review"
             : "Price Quotations",
       detail:
-        role === "pricing_officer"
-          ? "Review submitted Price Quotations from the Sales Project Officers, set pricing, and approve or return them for revision."
-          : isManagementRole
+        role === "sales_pricing_officer"
+            ? "Prepare your quotations and review assigned pricing submissions for your project types."
+            : isManagementRole
             ? "Review officer-submitted quotations, set commercial terms and pricing, then approve or return them for revision."
             : "Prepare quotations from leads, then submit them for General Manager pricing and approval.",
     },
@@ -14537,7 +15254,7 @@ export function HuswellWorkspace({
       detail: "Manage business defaults, profile details, and staff access.",
     },
     Commissions: {
-      title: role === "project_manager" ? "My commissions" : "Sales Project Officer commissions",
+      title: isProjectOfficerRole(role) ? "My commissions" : "Sales Project Officer commissions",
       detail: "Track commission earned from actual customer payments.",
     },
     Policy: {
@@ -14562,11 +15279,11 @@ export function HuswellWorkspace({
     ) : loading ? (
       <Panel
         title={
-          active === "Leads" ? leads.title : active === "Projects" ? projects.title : active === "Mockups" ? "Mockups" : "Loading workspace"
+          active === "Leads" ? leads.title : active === "Projects" ? projects.title : active === "Mockups" ? "Mockup Quotation" : "Loading workspace"
         }
         detail={
           active === "Leads" || active === "Projects" || active === "Mockups"
-            ? (active === "Projects" ? projects.detail : active === "Mockups" ? "Track mockup deadlines and status updates." : leads.detail)
+            ? (active === "Projects" ? projects.detail : active === "Mockups" ? "Loading Mockup Quotation workflow." : leads.detail)
             : "Loading business data."
         }
       >
@@ -14589,20 +15306,37 @@ export function HuswellWorkspace({
         role={role}
       />
     ) : active === "Mockups" ? (
-      <PriceQuotationMockups
+      <MockupQuotationWorkspace
         store={store}
         orgId={organizationId}
         reload={reload}
         notice={setMessage}
         role={role}
       />
+    ) : active === "Quotation Costing Overview" ? (
+      <QuotationCostingOverview
+        store={store}
+        reload={reload}
+        notice={setMessage}
+        role={role}
+      />
     ) : active === "Price Quotations" ? (
-        role === "pricing_officer" ? (
-          <PriceQuotationSubmissions
-            store={store}
-            reload={reload}
-            notice={setMessage}
-          />
+      role === "sales_pricing_officer" ? (
+          <div className="space-y-4">
+            <PriceQuotationSubmissions
+              store={store}
+              reload={reload}
+              notice={setMessage}
+            />
+            <PriceQuotationWorkspace
+              store={store}
+              orgId={organizationId}
+              reload={reload}
+              notice={setMessage}
+              role={role}
+              profileName={profileName}
+            />
+          </div>
         ) : (
         <PriceQuotationWorkspace
           store={store}
@@ -14797,16 +15531,16 @@ export function HuswellWorkspace({
               <div className="space-y-px">
                 {group.items.map(({ view, icon: Icon }) => {
                   const navigationLabel =
-                    view === "Dashboard" && ["project_manager", "admin"].includes(role)
+                    view === "Dashboard" && (isProjectOfficerRole(role) || role === "admin")
                       ? "KPI"
                       : view === "Policy"
                         ? "Announcements & Policy"
-                      : role === "pricing_officer" && view === "Price Quotations"
-                        ? "Price Quotation Submissions"
-                        : isManagementRole && view === "Leads"
+                      : isManagementRole && view === "Leads"
                           ? "Lead Management"
-                          : view === "Projects"
+                      : view === "Projects"
                             ? "Projects / Production"
+                            : view === "Mockups"
+                              ? "Mockup Quotation"
                             : isManagementRole && view === "Price Quotations"
                               ? "Price Quotation Review"
                               : view === "Submissions"
@@ -14963,7 +15697,7 @@ export function HuswellWorkspace({
             )}
           </div>
         </header>
-        <div className={`workspace-content ${(["Projects", "Price Quotations"].includes(active) && role !== "pricing_officer") || active === "Policy" ? "p-0" : "p-2 sm:p-3 lg:p-4"}`}>
+        <div className={`workspace-content ${(["Projects", "Price Quotations"].includes(active) || active === "Policy") ? "p-0" : "p-2 sm:p-3 lg:p-4"}`}>
           {message && (
             <div className="fixed inset-0 z-[60] grid place-items-center bg-[#061426]/30 p-4">
               <section

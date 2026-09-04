@@ -49,8 +49,8 @@ export function AccountProfileDialog({
         ? "General Manager"
         : role === "project_manager"
           ? "Project Manager"
-          : role === "pricing_officer"
-            ? "Pricing Officer"
+          : role === "sales_pricing_officer"
+            ? "Sales & Pricing Officer"
             : role.replaceAll("_", " ");
 
   useEffect(() => {

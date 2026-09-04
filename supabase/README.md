@@ -100,6 +100,9 @@
 98. Run `103_company_announcements.sql` to add General Manager announcements that every organization member can view. Run it after `102_secure_company_policy_storage.sql` and before deploying the matching app code.
 99. Run `104_price_quotation_endorsements.sql` to let a Sales Project Officer create an immutable, private PDF copy of their approved Price Quotation for another Sales Project Officer. Run it before deploying the matching app code.
 100. Create the first user through the app. Huswell Trading is initialized automatically after that first sign-in.
+101. Run migrations `105` through `114` in filename order, then run `115_sales_pricing_officer_project_type_routing.sql` followed by `116_disable_standalone_pricing_officer.sql` before deploying the matching app update. Migration `116` converts any legacy Pricing Officer memberships to Sales & Pricing Officer and prevents the standalone role from being assigned again.
+102. In Super Admin user management, create or edit the two Sales & Pricing Officer accounts and assign their project types. Assign `Premium Rigid Box`, `Regular Rigid Box`, and `Mock Up` to one officer; assign `Offset`, `Digital`, and `Mock Up` to the other. A quotation cannot be submitted until its project type has an assignment.
+103. Run `117_mockup_quotation_workflow.sql` after `116_disable_standalone_pricing_officer.sql`, then deploy the matching app update. It adds the approved Price Quotation -> Mockup Quotation flow, independent mockup costing and General Manager approval, the professional Quotation Costing Overview, long-bond Mockup Quotation PDFs, and private signed-client-proof attachments (up to five images per approved quotation). The previous Mockups screen is replaced, but the legacy mockup rows and storage objects are intentionally retained until authenticated role testing and an organization-scoped backup/preflight are complete.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 
@@ -107,7 +110,7 @@ The schema covers customers, suppliers, employees, product/service and supply in
 
 Every application table has Row Level Security enabled. Members can access only records belonging to their own organization; no service-role key is needed in the browser.
 
-Keep `SUPABASE_SERVICE_ROLE_KEY` server-only in `.env.local` (without the `NEXT_PUBLIC_` prefix). It is required only for the secure server route that creates Project Manager authentication accounts; never expose it in browser code.
+Keep `SUPABASE_SERVICE_ROLE_KEY` server-only in `.env.local` (without the `NEXT_PUBLIC_` prefix). It is required only for the secure server route that creates and manages workspace authentication accounts; never expose it in browser code.
 
 ## Confirmed chatbot leads
 

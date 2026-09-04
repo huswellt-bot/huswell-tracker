@@ -7,8 +7,7 @@ export default async function ProjectManagerPage() {
 
   if (access.role === "super_admin") redirect("/super-admin");
   if (["owner", "admin"].includes(access.role)) redirect("/admin");
-  if (access.role === "pricing_officer") redirect("/pricing-officer");
-  if (access.role !== "project_manager") redirect("/auth");
+  if (!["project_manager", "sales_pricing_officer"].includes(access.role)) redirect("/auth");
 
   return <HuswellWorkspace {...access} />;
 }

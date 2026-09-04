@@ -28,6 +28,7 @@ type ManagedUser = {
   full_name: string;
   email: string;
   role: string;
+  project_types: string[];
   banned: boolean;
   signature_url: string | null;
 };
@@ -37,14 +38,25 @@ type UserFormValues = {
   email: string;
   password: string;
   role: string;
+  project_types: string[];
 };
 
 const displayRole = (role: string) =>
   role === "admin"
     ? "General Manager"
-    : role === "pricing_officer"
-      ? "Pricing Officer"
+    : role === "sales_pricing_officer"
+      ? "Sales & Pricing Officer"
       : "Sales Project Officer";
+const pricingProjectTypes = [
+  "Premium Rigid Box",
+  "Regular Rigid Box",
+  "Corrugated",
+  "Offset",
+  "Digital",
+  "Mock Up",
+] as const;
+const isPricingRole = (role: string) =>
+  role === "sales_pricing_officer";
 const titleCase = (value: string) =>
   value.replace(
     /(^|[^A-Za-z])([a-z])/g,
@@ -78,12 +90,14 @@ export function SuperAdminConsole({
     email: "",
     password: "",
     role: "project_manager",
+    project_types: [],
   });
   const [editValues, setEditValues] = useState<UserFormValues>({
     full_name: "",
     email: "",
     password: "",
     role: "project_manager",
+    project_types: [],
   });
   const [signatureFile, setSignatureFile] = useState<File | null>(null);
   const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
@@ -128,6 +142,14 @@ export function SuperAdminConsole({
     return response.ok ? null : result.error ?? "Unable to save the signature.";
   };
 
+  const saveProjectTypeAssignments = async (userId: string, projectTypes: string[]) => {
+    const { error } = await createClient().rpc("set_pricing_officer_project_types", {
+      p_user_id: userId,
+      p_project_types: projectTypes,
+    });
+    return error?.message ?? null;
+  };
+
   const createUser = async () => {
     setConfirmCreate(false);
     setSaving(true);
@@ -145,8 +167,12 @@ export function SuperAdminConsole({
       return setMessage(result.error ?? "Unable to create the user account.");
     }
     const signatureError =
-      ["project_manager", "admin"].includes(values.role) && signatureFile && result.user_id
+      ["project_manager", "sales_pricing_officer", "admin"].includes(values.role) && signatureFile && result.user_id
         ? await uploadOfficerSignature(result.user_id, signatureFile)
+        : null;
+    const assignmentError =
+      isPricingRole(values.role) && result.user_id
+        ? await saveProjectTypeAssignments(result.user_id, values.project_types)
         : null;
     setSaving(false);
     setOpen(false);
@@ -156,12 +182,15 @@ export function SuperAdminConsole({
       email: "",
       password: "",
       role: "project_manager",
+      project_types: [],
     });
     setSignatureFile(null);
     setMessage(
       signatureError
         ? `User account created, but the signature could not be saved: ${signatureError}`
-        : "User account created.",
+        : assignmentError
+          ? `User account created, but project-type assignments could not be saved: ${assignmentError}`
+          : "User account created.",
     );
     await load();
   };
@@ -173,6 +202,7 @@ export function SuperAdminConsole({
       email: user.email,
       password: "",
       role: user.role,
+      project_types: user.project_types ?? [],
     });
     setEditSignatureFile(null);
     setShowNewPassword(false);
@@ -205,8 +235,12 @@ export function SuperAdminConsole({
       return setMessage(result.error ?? "Unable to update the user account.");
     }
     const signatureError =
-      ["project_manager", "admin"].includes(editValues.role) && editSignatureFile
+      ["project_manager", "sales_pricing_officer", "admin"].includes(editValues.role) && editSignatureFile
         ? await uploadOfficerSignature(editingUser.id, editSignatureFile)
+        : null;
+    const assignmentError =
+      isPricingRole(editValues.role)
+        ? await saveProjectTypeAssignments(editingUser.id, editValues.project_types)
         : null;
     setSaving(false);
     setEditingUser(null);
@@ -214,7 +248,9 @@ export function SuperAdminConsole({
     setMessage(
       signatureError
         ? `User account updated, but the signature could not be saved: ${signatureError}`
-        : result.message ?? "User account updated.",
+        : assignmentError
+          ? `User account updated, but project-type assignments could not be saved: ${assignmentError}`
+          : result.message ?? "User account updated.",
     );
     await load();
   };
@@ -327,12 +363,13 @@ export function SuperAdminConsole({
             </button>
           </div>
           <div className="max-h-[460px] overflow-auto rounded-lg border border-[#d6dee8] bg-white">
-            <table className="app-table w-full min-w-[760px] text-left text-[12px]">
+              <table className="app-table w-full min-w-[980px] text-left text-[12px]">
               <thead className="sticky top-0 z-10 border-b border-[#102f61] bg-[#102f61] text-[12px] font-bold text-white">
                 <tr>
                   <th className="px-4 py-2">User</th>
                   <th className="px-4 py-2">Email</th>
                   <th className="px-4 py-2">User Type</th>
+                  <th className="px-4 py-2">Assigned Project Types</th>
                   <th className="px-4 py-2">Account Status</th>
                   <th className="px-4 py-2 text-center">Actions</th>
                 </tr>
@@ -341,7 +378,7 @@ export function SuperAdminConsole({
                 {loading ? (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={6}
                       className="px-5 py-10 text-center text-[#7d8797]"
                     >
                       Loading Users…
@@ -358,6 +395,13 @@ export function SuperAdminConsole({
                         <span className="rounded-full bg-[#fceced] px-2.5 py-1 text-[12px] font-semibold text-[#a82e35]">
                           {displayRole(user.role)}
                         </span>
+                      </td>
+                      <td className="px-5 py-4 text-[#475467]">
+                        {isPricingRole(user.role)
+                          ? user.project_types?.length
+                            ? user.project_types.join(" · ")
+                            : "Not assigned"
+                          : "—"}
                       </td>
                       <td className="px-5 py-4">
                         {user.banned ? (
@@ -434,7 +478,7 @@ export function SuperAdminConsole({
                 ) : (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={6}
                       className="px-5 py-10 text-center text-[#7d8797]"
                     >
                       No Users Found.
@@ -523,10 +567,36 @@ export function SuperAdminConsole({
                 >
                   <option value="project_manager">Sales Project Officer</option>
                   <option value="admin">General Manager</option>
-                  <option value="pricing_officer">Pricing Officer</option>
+                  <option value="sales_pricing_officer">Sales &amp; Pricing Officer</option>
                 </select>
               </label>
-              {["project_manager", "admin"].includes(editValues.role) && (
+              {isPricingRole(editValues.role) && (
+                <fieldset className="rounded-lg border border-[#dfe5ed] bg-[#f8faff] p-3">
+                  <legend className="px-1 text-[13px] font-semibold">Assigned project types</legend>
+                  <p className="mt-1 text-[12px] font-normal text-[#7d8797]">Only quotations with these project types will be routed to this Sales &amp; Pricing Officer. Assign Mock Up to both officers when both should receive it.</p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {pricingProjectTypes.map((projectType) => (
+                      <label key={projectType} className="flex items-center gap-2 text-[12px] font-medium text-[#344054]">
+                        <input
+                          type="checkbox"
+                          checked={editValues.project_types.includes(projectType)}
+                          onChange={(event) =>
+                            setEditValues({
+                              ...editValues,
+                              project_types: event.target.checked
+                                ? [...editValues.project_types, projectType]
+                                : editValues.project_types.filter((item) => item !== projectType),
+                            })
+                          }
+                          className="size-4 accent-[#c43b43]"
+                        />
+                        {projectType}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              )}
+              {["project_manager", "sales_pricing_officer", "admin"].includes(editValues.role) && (
                 <label className="block text-[14px] font-semibold">
                   Signature image
                   <input
@@ -625,7 +695,7 @@ export function SuperAdminConsole({
               <div>
                 <h2 className="text-[17px] font-semibold">Add User</h2>
                 <p className="mt-1 text-[14px] text-[#7d8797]">
-                  Create a Sales Project Officer or General Manager login.
+                  Create a Sales Project Officer, General Manager, or Sales &amp; Pricing Officer login.
                 </p>
               </div>
               <button
@@ -677,10 +747,36 @@ export function SuperAdminConsole({
                 >
                   <option value="project_manager">Sales Project Officer</option>
                   <option value="admin">General Manager</option>
-                  <option value="pricing_officer">Pricing Officer</option>
+                  <option value="sales_pricing_officer">Sales &amp; Pricing Officer</option>
                 </select>
               </label>
-              {["project_manager", "admin"].includes(values.role) && (
+              {isPricingRole(values.role) && (
+                <fieldset className="rounded-lg border border-[#dfe5ed] bg-[#f8faff] p-3">
+                  <legend className="px-1 text-[13px] font-semibold">Assigned project types</legend>
+                  <p className="mt-1 text-[12px] font-normal text-[#7d8797]">Only quotations with these project types will be routed to this Sales &amp; Pricing Officer. Assign Mock Up to both officers when both should receive it.</p>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {pricingProjectTypes.map((projectType) => (
+                      <label key={projectType} className="flex items-center gap-2 text-[12px] font-medium text-[#344054]">
+                        <input
+                          type="checkbox"
+                          checked={values.project_types.includes(projectType)}
+                          onChange={(event) =>
+                            setValues({
+                              ...values,
+                              project_types: event.target.checked
+                                ? [...values.project_types, projectType]
+                                : values.project_types.filter((item) => item !== projectType),
+                            })
+                          }
+                          className="size-4 accent-[#c43b43]"
+                        />
+                        {projectType}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              )}
+              {["project_manager", "sales_pricing_officer", "admin"].includes(values.role) && (
                 <label className="block text-[14px] font-semibold">
                   Signature image
                   <input
@@ -759,7 +855,7 @@ export function SuperAdminConsole({
             <h2 className="text-[16px] font-semibold">Confirm User Creation</h2>
             <p className="mt-2 text-[14px] leading-5 text-[#667085]">
               Create this{" "}
-              {values.role === "admin" ? "General Manager" : "Sales Project Officer"}{" "}
+              {displayRole(values.role)}{" "}
               account?
             </p>
             <div className="mt-6 flex justify-end gap-2">

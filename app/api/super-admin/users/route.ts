@@ -84,11 +84,19 @@ export async function GET() {
     );
 
   const userIds = (memberships ?? []).map((member) => member.user_id);
-  const { data: profiles, error: profileError } = userIds.length
-    ? await admin.from("profiles").select("id, signature_url").in("id", userIds)
-    : { data: [], error: null };
-  if (profileError)
-    return json({ error: profileError.message }, 500);
+  const [{ data: profiles, error: profileError }, { data: projectTypeAssignments, error: assignmentError }] = await Promise.all([
+    userIds.length
+      ? admin.from("profiles").select("id, signature_url").in("id", userIds)
+      : Promise.resolve({ data: [], error: null }),
+    userIds.length
+      ? admin
+          .from("pricing_officer_project_types")
+          .select("pricing_officer_user_id, project_type")
+          .in("pricing_officer_user_id", userIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+  if (profileError || assignmentError)
+    return json({ error: profileError?.message ?? assignmentError?.message ?? "Unable to load user details." }, 500);
 
   const authUsers = new Map(
     (authData.users ?? []).map((user) => [user.id, user]),
@@ -96,6 +104,12 @@ export async function GET() {
   const profileByUserId = new Map(
     (profiles ?? []).map((profile) => [profile.id, profile]),
   );
+  const projectTypesByUserId = new Map<string, string[]>();
+  (projectTypeAssignments ?? []).forEach((assignment) => {
+    const userProjectTypes = projectTypesByUserId.get(assignment.pricing_officer_user_id) ?? [];
+    userProjectTypes.push(assignment.project_type);
+    projectTypesByUserId.set(assignment.pricing_officer_user_id, userProjectTypes);
+  });
   return Response.json({
     users: (memberships ?? [])
       .filter((member) => member.role !== "super_admin")
@@ -109,6 +123,7 @@ export async function GET() {
               : (user?.email ?? "Unnamed user"),
           email: user?.email ?? "—",
           role: member.role,
+          project_types: projectTypesByUserId.get(member.user_id) ?? [],
           signature_url: profileByUserId.get(member.user_id)?.signature_url ?? null,
           created_at: member.created_at,
           banned: Boolean(
@@ -145,7 +160,7 @@ export async function POST(request: Request) {
   const role =
     body?.role === "admin" ||
     body?.role === "project_manager" ||
-    body?.role === "pricing_officer"
+    body?.role === "sales_pricing_officer"
       ? body.role
       : null;
   if (
@@ -268,7 +283,7 @@ export async function PATCH(request: Request) {
   const role =
     body?.role === "admin" ||
     body?.role === "project_manager" ||
-    body?.role === "pricing_officer"
+    body?.role === "sales_pricing_officer"
       ? body.role
       : null;
   if (
@@ -300,6 +315,14 @@ export async function PATCH(request: Request) {
     .from("profiles")
     .upsert({ id: userId, full_name: fullName });
   if (profileError) return json({ error: profileError.message }, 500);
+  if (role !== "sales_pricing_officer") {
+    const { error: assignmentError } = await managed.admin
+      .from("pricing_officer_project_types")
+      .delete()
+      .eq("organization_id", organizationId)
+      .eq("pricing_officer_user_id", userId);
+    if (assignmentError) return json({ error: assignmentError.message }, 500);
+  }
   const { error: membershipError } = await managed.admin
     .from("organization_members")
     .update({ role })

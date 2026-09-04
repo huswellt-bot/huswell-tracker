@@ -7,9 +7,7 @@ export default async function ProfilePage() {
   if (access.role === "super_admin") redirect("/super-admin");
   if (["owner", "admin"].includes(access.role))
     return <HuswellWorkspace {...access} initialView="Settings" />;
-  if (access.role === "project_manager")
-    return <HuswellWorkspace {...access} initialView="Profile" />;
-  if (access.role === "pricing_officer")
+  if (["project_manager", "sales_pricing_officer"].includes(access.role))
     return <HuswellWorkspace {...access} initialView="Profile" />;
   redirect("/");
 }

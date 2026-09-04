@@ -75,7 +75,7 @@ export async function POST(request: Request) {
     .maybeSingle();
   if (membershipError || !membership)
     return json({ error: membershipError?.message ?? "This user is not assigned to this workspace." }, 404);
-  if (!['project_manager', 'admin'].includes(membership.role))
+  if (!['project_manager', 'sales_pricing_officer', 'admin'].includes(membership.role))
     return json({ error: "A signature can only be saved for a Sales Project Officer or General Manager." }, 400);
 
   const path = `${organizationId}/${userId}/signature.${extensions[signature.type]}`;
@@ -101,14 +101,16 @@ export async function POST(request: Request) {
     .eq("id", userId)
     .maybeSingle();
   const quotationPatch =
-    membership.role === "project_manager"
+    ['project_manager', 'sales_pricing_officer'].includes(membership.role)
       ? { prepared_by_signature_url: signatureUrl }
       : {
           approved_by_signature_url: signatureUrl,
           ...(profile?.full_name ? { approved_by_name: profile.full_name } : {}),
         };
   const quotationUserColumn =
-    membership.role === "project_manager" ? "prepared_by_user_id" : "approved_by";
+    ['project_manager', 'sales_pricing_officer'].includes(membership.role)
+      ? "prepared_by_user_id"
+      : "approved_by";
   const { error: quotationError } = await admin
     .from("quotations")
     .update(quotationPatch)
@@ -117,7 +119,7 @@ export async function POST(request: Request) {
   if (quotationError) return json({ error: quotationError.message }, 500);
 
   return Response.json({
-    message: `${membership.role === "project_manager" ? "Sales Project Officer" : "General Manager"} signature saved.`,
+    message: `${['project_manager', 'sales_pricing_officer'].includes(membership.role) ? "Sales Project Officer" : "General Manager"} signature saved.`,
     signature_url: signatureUrl,
   });
 }
