@@ -19,6 +19,16 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 For every feature or behavior change, perform a brief impact assessment before coding. This identifies required work; it does not authorize optional product changes.
 
+### Feature discovery and connected workflows
+
+Before confirming that a feature is feasible or proposing an implementation, trace the affected system rather than assessing an isolated page or component.
+
+- Inspect the existing user interface, data model, APIs/RPCs, authorization/RLS, role-specific screens, workflow states, navigation, reports/PDFs, integrations, and documentation that the feature may affect.
+- Identify the authoritative source of each new value or status. Do not duplicate business logic in the UI when the database or a server-side workflow must enforce it.
+- Explain what already exists, what must change for the feature to work end to end, and which requirements remain business-policy decisions for the user.
+- Do not describe a feature as connected or complete until the affected data flow, role access, related views, and failure/reversal paths have been checked.
+- Verify live Supabase, authenticated role behavior, and deployment separately from local code and static checks; state clearly when any of those cannot be confirmed.
+
 - Implement the user's explicit request plus only the changes required for it to work correctly and consistently.
 - Check affected dependencies: data, roles/access, workflows, related screens, navigation, reports/PDFs, integrations, and documentation.
 - Classify findings:

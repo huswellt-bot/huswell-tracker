@@ -116,6 +116,8 @@ type View =
   | "Directory"
   | "Targets"
   | "Approvals"
+  | "Payment Monitoring"
+  | "Payment Reviews"
   | "Submissions"
   | "Policy"
   | "Settings"
@@ -138,6 +140,7 @@ type TableName =
   | "price_quotation_mockups"
   | "price_quotation_endorsements"
   | "quotation_signed_proofs"
+  | "quotation_payment_records"
   | "pricing_officer_project_types"
   | "announcements"
   | "policies"
@@ -320,6 +323,7 @@ const tables: TableName[] = [
   "price_quotation_mockups",
   "price_quotation_endorsements",
   "quotation_signed_proofs",
+  "quotation_payment_records",
   "pricing_officer_project_types",
   "announcements",
   "policies",
@@ -460,6 +464,85 @@ const projectOfficerIdForQuote = (store: Store, quote: Row) => {
     "",
   );
 };
+type WorkspaceListFilterOption = { id: string; name: string };
+function WorkspaceListFilters({
+  query,
+  onQueryChange,
+  queryPlaceholder,
+  month,
+  onMonthChange,
+  monthLabel = "Month",
+  showOfficer = false,
+  officerFilter = "all",
+  onOfficerChange,
+  officerOptions = [],
+  officerLabel = "Sales staff",
+  onClear,
+  hasFilters,
+}: {
+  query: string;
+  onQueryChange: (value: string) => void;
+  queryPlaceholder: string;
+  month: string;
+  onMonthChange: (value: string) => void;
+  monthLabel?: string;
+  showOfficer?: boolean;
+  officerFilter?: string;
+  onOfficerChange?: (value: string) => void;
+  officerOptions?: WorkspaceListFilterOption[];
+  officerLabel?: string;
+  onClear: () => void;
+  hasFilters: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b border-[#edf0f5] py-3">
+      <label className="relative min-w-0 flex-1 sm:min-w-56 sm:max-w-sm" htmlFor={`${monthLabel.toLowerCase().replaceAll(" ", "-")}-list-search`}>
+        <Search className="pointer-events-none absolute left-3 top-2.5 text-[#8b92a1]" size={15} />
+        <span className="sr-only">Search records</span>
+        <input
+          id={`${monthLabel.toLowerCase().replaceAll(" ", "-")}-list-search`}
+          type="search"
+          value={query}
+          onChange={(event) => onQueryChange(event.target.value)}
+          placeholder={queryPlaceholder}
+          className="min-h-9 w-full rounded-lg border border-[#d9e0e9] bg-white py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
+        />
+      </label>
+      <label className="flex items-center gap-2 text-[12px] text-[#687386]">
+        <span className="whitespace-nowrap">{monthLabel}</span>
+        <input
+          type="month"
+          value={month}
+          aria-label={monthLabel}
+          onClick={(event) => event.currentTarget.showPicker?.()}
+          onChange={(event) => onMonthChange(event.target.value)}
+          className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px] text-[#202938] outline-none focus:border-[#c43b43]"
+        />
+      </label>
+      {showOfficer && onOfficerChange && (
+        <select
+          aria-label={officerLabel}
+          value={officerFilter}
+          onChange={(event) => onOfficerChange(event.target.value)}
+          className={`min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${officerFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}
+        >
+          <option value="all">All Sales Staff</option>
+          {officerOptions.map((officer) => (
+            <option key={officer.id} value={officer.id}>
+              {officer.name}
+            </option>
+          ))}
+        </select>
+      )}
+      {!month && <span className="text-[11px] text-[#8b92a1]">All months</span>}
+      {hasFilters && (
+        <Button secondary onClick={onClear}>
+          Clear filters
+        </Button>
+      )}
+    </div>
+  );
+}
 const titleCase = (value: string) =>
   value.replace(
     /(^|[^A-Za-z'])([a-z])/g,
@@ -641,16 +724,15 @@ const quotationBankDetails = (value: unknown): BankDetail[] => {
 };
 const statusStyle = (value: unknown) => {
   const v = text(value, "draft").toLowerCase();
-  return v.includes("paid") ||
-    v.includes("approved") ||
-    v.includes("completed") ||
-    v.includes("delivered")
-    ? "bg-[#edf9f2] text-[#218b55]"
-    : v.includes("rejected") || v.includes("cancelled") || v.includes("void")
-      ? "bg-[#fef3f2] text-[#b42318]"
-      : v.includes("pending") || v.includes("partial") || v.includes("review")
-        ? "bg-[#fff8e9] text-[#a76605]"
-        : "bg-[#f1f4f8] text-[#626b7a]";
+  return v.includes("rejected") || v.includes("cancelled") || v.includes("void") || v.includes("overpaid")
+    ? "bg-[#fef3f2] text-[#b42318]"
+    : v.includes("pending") || v.includes("partial") || v.includes("review")
+      ? "bg-[#fff8e9] text-[#a76605]"
+      : v.includes("unpaid") || v.includes("not_earned")
+        ? "bg-[#f1f4f8] text-[#626b7a]"
+        : v.includes("paid") || v.includes("verified") || v.includes("approved") || v.includes("completed") || v.includes("delivered")
+          ? "bg-[#edf9f2] text-[#218b55]"
+          : "bg-[#f1f4f8] text-[#626b7a]";
 };
 const Status = ({ value }: { value: unknown }) => (
   <span
@@ -698,6 +780,25 @@ const pricingProjectTypeKey = (value: unknown) => {
   const normalized = text(value, "").trim().toLowerCase().replace(/\s+/g, " ");
   return normalized === "mockup" ? "mock up" : normalized;
 };
+const assignedPaymentReviewerId = (
+  quote: Row,
+  payment: Row,
+  assignments: Row[],
+) =>
+  text(
+    payment.reviewer_user_id,
+    text(
+      quote.pricing_reviewed_by,
+      text(
+        assignments.find(
+          (assignment) =>
+            pricingProjectTypeKey(assignment.project_type) ===
+            pricingProjectTypeKey(quote.project_types),
+        )?.pricing_officer_user_id,
+        "",
+      ),
+    ),
+  );
 const roleCapabilityRoles = (role: string) =>
   role === "sales_pricing_officer"
     ? ["project_manager", "pricing"]
@@ -824,6 +925,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "price_quotation_mockups",
     "price_quotation_endorsements",
     "quotation_signed_proofs",
+    "quotation_payment_records",
     "pricing_officer_project_types",
     "announcements",
     "policies",
@@ -843,6 +945,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "price_quotation_costing_markups",
     "price_quotation_mockups",
     "quotation_signed_proofs",
+    "quotation_payment_records",
     "announcements",
     "policies",
     "price_quotation_revision_requests",
@@ -859,6 +962,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "invoices",
     "invoice_items",
     "payments",
+    "quotation_payment_records",
     "announcements",
     "policies",
   ],
@@ -868,6 +972,8 @@ const roleReadableTables: Record<string, TableName[]> = {
     "inventory_items",
     "inventory_movements",
     "production_jobs",
+    "quotation_signed_proofs",
+    "quotation_payment_records",
     "production_material_usage",
     "production_job_activity",
     "finished_product_stock_ins",
@@ -882,6 +988,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "invoices",
     "invoice_items",
     "payments",
+    "quotation_payment_records",
     "expenses",
     "cash_flow_entries",
     "supplier_payables",
@@ -902,6 +1009,8 @@ const roleReadableTables: Record<string, TableName[]> = {
     "inventory_items",
     "inventory_movements",
     "production_jobs",
+    "quotation_signed_proofs",
+    "quotation_payment_records",
     "production_material_usage",
     "production_job_activity",
     "finished_product_stock_ins",
@@ -954,14 +1063,16 @@ const workspaceViewTables = (
       "quotations",
       "leads",
       "profiles",
+      "quotation_signed_proofs",
+      "quotation_payment_records",
       "project_edit_requests",
       "project_schedule_revision_requests",
       "project_schedule_completion_requests",
     ];
   if (view === "Mockups")
-    return ["quotations", "quotation_items", "price_quotation_illustrations", "price_quotation_product_costings", "price_quotation_costing_lines", "price_quotation_costing_markups", "quotation_signed_proofs", "leads", "profiles", "organization_members", "pricing_officer_project_types"];
+    return ["quotations", "quotation_items", "price_quotation_illustrations", "price_quotation_product_costings", "price_quotation_costing_lines", "price_quotation_costing_markups", "quotation_signed_proofs", "quotation_payment_records", "leads", "profiles", "organization_members", "pricing_officer_project_types"];
   if (view === "Quotation Costing Overview")
-    return ["quotations", "quotation_items", "price_quotation_product_costings", "price_quotation_costing_lines", "price_quotation_costing_markups", "price_quotation_illustrations", "quotation_signed_proofs", "leads", "customers", "business_settings", "profiles", "pricing_officer_project_types"];
+    return ["quotations", "quotation_items", "price_quotation_product_costings", "price_quotation_costing_lines", "price_quotation_costing_markups", "price_quotation_illustrations", "quotation_signed_proofs", "quotation_payment_records", "leads", "customers", "business_settings", "profiles", "organization_members", "pricing_officer_project_types"];
   if (
     view === "Price Quotations" ||
     view === "Price Quotation Review" ||
@@ -982,6 +1093,7 @@ const workspaceViewTables = (
       "price_quotation_revision_requests",
       "price_quotation_endorsements",
       "quotation_signed_proofs",
+      "quotation_payment_records",
       "pricing_officer_project_types",
     ];
   if (view === "Suppliers & Materials")
@@ -1001,6 +1113,8 @@ const workspaceViewTables = (
       "production_jobs",
       "production_material_usage",
       "production_job_activity",
+      "quotation_signed_proofs",
+      "quotation_payment_records",
       "inventory_items",
       "inventory_movements",
       "finished_product_stock_ins",
@@ -1016,12 +1130,13 @@ const workspaceViewTables = (
       "finished_product_stock_ins",
     ];
   if (view === "Sales")
-    return ["invoices", "invoice_items", "payments", "customers", "inventory_items"];
+    return ["invoices", "invoice_items", "payments", "quotation_payment_records", "customers", "inventory_items"];
   if (view === "Expenses") return ["expenses", "suppliers"];
   if (view === "Finance")
     return [
       "invoices",
       "payments",
+      "quotation_payment_records",
       "expenses",
       "cash_flow_entries",
       "customers",
@@ -1032,14 +1147,41 @@ const workspaceViewTables = (
     return ["employees", "payroll_periods", "payroll_entries", "leave_requests"];
   if (view === "Directory") return ["customers", "suppliers", "employees"];
   if (view === "Targets") return ["target_goals"];
-  if (view === "Submissions")
+  if (view === "Payment Monitoring" || view === "Payment Reviews")
     return [
       "quotations",
       "quotation_items",
       "profiles",
-      "project_edit_requests",
       "leads",
+      "customers",
+      "quotation_payment_records",
+      "quotation_signed_proofs",
+      "business_settings",
+      "organization_members",
+      "pricing_officer_project_types",
+    ];
+  if (view === "Commissions") return ["quotations", "profiles", "organization_members"];
+  if (view === "Approvals" || view === "Submissions")
+    return [
+      "quotations",
+      "quotation_items",
+      "price_quotation_illustrations",
+      "price_quotation_product_costings",
+      "price_quotation_costing_lines",
+      "price_quotation_costing_markups",
+      "price_quotation_mockups",
+      "profiles",
+      "organization_members",
+      "customers",
+      "leads",
+      "business_settings",
+      "pricing_officer_project_types",
+      "quotation_signed_proofs",
+      "quotation_payment_records",
+      "approval_requests",
+      "project_edit_requests",
       "lead_change_requests",
+      "quotation_revision_requests",
       "price_quotation_revision_requests",
       "project_schedules",
       "project_schedule_revision_requests",
@@ -3547,7 +3689,7 @@ function Records({
         {module.table === "leads" && isGeneralManager && !isProjectsPage && (
           <div className={`${contentPadding} border-t border-[#edf0f5] py-3`}>
             <p className="text-[12px] text-[#687386]">
-              Manage all leads, add new opportunities, and assign each lead to a Sales Officer. Officer changes are reviewed from Submissions Approvals.
+              Manage all leads, add new opportunities, and assign each lead to a Sales Officer. Officer changes are reviewed from the Approval Center.
             </p>
           </div>
         )}
@@ -4636,11 +4778,14 @@ function MockupQuotationWorkspace({
   };
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const defaultStatusTab = memberRole(role)
-    ? "pending_gm_approval"
+    ? "approved"
     : isPricingOfficerRole(role)
       ? "pending"
       : "draft";
   const [statusTab, setStatusTab] = useState<"draft" | "pending" | "needs_revision" | "pending_gm_approval" | "approved">(defaultStatusTab);
+  const [mockupQuery, setMockupQuery] = useState("");
+  const [mockupMonth, setMockupMonth] = useState("");
+  const [mockupOfficerFilter, setMockupOfficerFilter] = useState("all");
   const [requestOpen, setRequestOpen] = useState(false);
   const [editingQuote, setEditingQuote] = useState<Row | null>(null);
   const [sourceQuotationId, setSourceQuotationId] = useState("");
@@ -4650,6 +4795,7 @@ function MockupQuotationWorkspace({
   const [pdfQuote, setPdfQuote] = useState<Row | null>(null);
   const [pdfWindow, setPdfWindow] = useState<Window | null>(null);
   const [proofQuote, setProofQuote] = useState<Row | null>(null);
+  const [paymentQuote, setPaymentQuote] = useState<Row | null>(null);
   const canPrepare = isProjectOfficerRole(role);
   const canReview = isPricingOfficerRole(role);
   const isGeneralManager = memberRole(role);
@@ -4700,12 +4846,40 @@ function MockupQuotationWorkspace({
     [quote.created_by, quote.prepared_by_user_id].some(
       (userId) => text(userId, "") === currentUserId,
     );
+  const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
+  const mockupOfficerId = (quote: Row) => {
+    const source = sourceFor(quote);
+    return text(
+      source?.prepared_by_user_id ??
+        source?.created_by ??
+        quote.prepared_by_user_id ??
+        quote.created_by ??
+        quote.submitted_by,
+      "",
+    );
+  };
   const pendingPricing = mockupQuotations.filter(
     (quote) => text(quote.status) === "pending" && !isOwner(quote),
   );
-  const filteredQuotations = mockupQuotations.filter(
-    (quote) => text(quote.status) === statusTab,
-  );
+  const filteredQuotations = mockupQuotations.filter((quote) => {
+    if (text(quote.status) !== statusTab) return false;
+    const source = sourceFor(quote);
+    const party = quotationParty(quote, store);
+    const date = text(quote.submitted_at ?? quote.created_at, "");
+    if (mockupMonth && date.slice(0, 7) !== mockupMonth) return false;
+    if (mockupOfficerFilter !== "all" && mockupOfficerId(quote) !== mockupOfficerFilter) return false;
+    const normalizedQuery = mockupQuery.trim().toLowerCase();
+    if (!normalizedQuery) return true;
+    return [
+      quote.quotation_no,
+      source?.quotation_no,
+      party.clientName,
+      party.companyName,
+      quote.project_name,
+      quote.project_types,
+      store.profiles.find((profile) => profile.id === mockupOfficerId(quote))?.full_name,
+    ].some((value) => text(value, "").toLowerCase().includes(normalizedQuery));
+  });
   const resetRequest = () => {
     setRequestOpen(false);
     setEditingQuote(null);
@@ -4843,6 +5017,24 @@ function MockupQuotationWorkspace({
               </button>
             ))}
           </nav>
+          <WorkspaceListFilters
+            query={mockupQuery}
+            onQueryChange={setMockupQuery}
+            queryPlaceholder="Search quotation, client, project, or staff"
+            month={mockupMonth}
+            onMonthChange={setMockupMonth}
+            monthLabel="Submission month"
+            showOfficer={isGeneralManager}
+            officerFilter={mockupOfficerFilter}
+            onOfficerChange={setMockupOfficerFilter}
+            officerOptions={projectOfficers}
+            onClear={() => {
+              setMockupQuery("");
+              setMockupMonth("");
+              setMockupOfficerFilter("all");
+            }}
+            hasFilters={Boolean(mockupQuery || mockupMonth || mockupOfficerFilter !== "all")}
+          />
           {canReview && (
             <p className="border-b border-[#edf0f5] py-3 text-[12px] text-[#687386]">
               {pendingPricing.length
@@ -4853,8 +5045,8 @@ function MockupQuotationWorkspace({
         </div>
         {filteredQuotations.length ? (
           <Table
-            labels={["Mockup Quotation", "Source Price Quotation", "Client", "Project Type", "Status", "Date", "Actions"]}
-            minWidth={1100}
+            labels={["Mockup Quotation", "Source Price Quotation", "Client", "Project Type", "Payment", "Status", "Date", "Actions"]}
+            minWidth={1220}
             className="!w-full"
           >
             {filteredQuotations.map((quote) => {
@@ -4865,6 +5057,12 @@ function MockupQuotationWorkspace({
               const proofCount = store.quotation_signed_proofs.filter(
                 (proof) => proof.quotation_id === quote.id,
               ).length;
+              const paymentSummary = source
+                ? quotationPaymentSummary(
+                    source,
+                    store.quotation_payment_records.filter((record) => record.quotation_id === source.id),
+                  )
+                : null;
               return (
                 <tr key={text(quote.id)}>
                   <td className="px-5 py-3">{stackedCell(quote.quotation_no, quote.project_name)}</td>
@@ -4879,15 +5077,13 @@ function MockupQuotationWorkspace({
                   </td>
                   <td className="px-5 py-3">{stackedCell(party.clientName, party.companyName)}</td>
                   <td className="px-5 py-3">{text(quote.project_types)}</td>
+                  <td className="px-5 py-3">{paymentSummary ? <div><PaymentStatusBadge status={paymentSummary.status} /><small>{peso.format(paymentSummary.verified)} / {peso.format(paymentSummary.total)}</small></div> : "-"}</td>
                   <td className="px-5 py-3"><Status value={status} /></td>
                   <td className="px-5 py-3">{day(status === "approved" ? quote.approved_at : quote.submitted_at ?? quote.created_at)}</td>
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-1">
                       {canReview && status === "pending" && !owner && (
                         <ActionIcon label="Review Mockup Quotation" confirm={false} onClick={() => setReviewing(quote)}><FileText size={15} /></ActionIcon>
-                      )}
-                      {isGeneralManager && status === "pending_gm_approval" && (
-                        <ActionIcon label="Review Mockup Quotation for General Manager approval" confirm={false} onClick={() => setReviewing(quote)}><FileText size={15} /></ActionIcon>
                       )}
                       {canPrepare && owner && ["draft", "needs_revision"].includes(status) && (
                         <ActionIcon label="Edit Mockup Quotation" confirm={false} onClick={() => openEdit(quote)}><Pencil size={15} /></ActionIcon>
@@ -4898,6 +5094,9 @@ function MockupQuotationWorkspace({
                       {status === "approved" && (
                         <ActionIcon label={"View signed client proof" + (proofCount ? " (" + proofCount + "/5)" : "")} confirm={false} onClick={() => setProofQuote(quote)}><Paperclip size={15} /></ActionIcon>
                       )}
+                      {status === "approved" && source?.id && (
+                        <ActionIcon label="View quotation payments" confirm={false} onClick={() => setPaymentQuote(source)}><ReceiptText size={15} /></ActionIcon>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -4907,7 +5106,7 @@ function MockupQuotationWorkspace({
         ) : (
           <Empty>
             {mockupQuotations.length
-              ? "No Mockup Quotations match the selected status."
+              ? "No Mockup Quotations match the selected filters."
               : canPrepare
                 ? "No Mockup Quotations yet. Request one from an approved Price Quotation."
                 : "No Mockup Quotations are visible for this account."}
@@ -4983,6 +5182,7 @@ function MockupQuotationWorkspace({
       )}
       {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); notice(message); }} autoExportPdf pdfWindow={pdfWindow} hidden showInternalCosting={isGeneralManager} />}
       {proofQuote && <SignedProofDialog quote={proofQuote} store={store} canUpload={isProjectOfficerRole(role) && isOwner(proofQuote)} close={() => setProofQuote(null)} notice={notice} reload={reload} />}
+      {paymentQuote && <QuotationPaymentDialog quote={paymentQuote} store={store} orgId={orgId} role={role} close={() => setPaymentQuote(null)} reload={reload} />}
     </Panel>
   );
 }
@@ -5077,10 +5277,10 @@ function SignedProofDialog({
     setUploading(true);
     const client = createClient();
     try {
-      const { error: storageError } = await client.storage.from("quotation-signed-proofs").remove([text(proof.storage_path)]);
-      if (storageError) throw storageError;
       const { error } = await client.rpc("delete_quotation_signed_proof", { p_proof_id: proof.id });
       if (error) throw error;
+      const { error: storageError } = await client.storage.from("quotation-signed-proofs").remove([text(proof.storage_path)]);
+      if (storageError) throw storageError;
       notice("Signed client proof removed.");
       await reload();
     } catch (error) {
@@ -5105,6 +5305,874 @@ function SignedProofDialog({
   );
 }
 
+function SignedProofThumbnails({
+  label,
+  proofs,
+  action,
+  compact = false,
+}: {
+  label: string;
+  proofs: Row[];
+  action?: ReactNode;
+  compact?: boolean;
+}) {
+  const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+  const proofKey = proofs
+    .map((proof) => `${text(proof.id)}:${text(proof.storage_path)}`)
+    .join("|");
+  // Keep thumbnail data stable while parent tables re-render around it.
+  const proofEntries = useMemo(
+    () => proofs.map((proof) => ({
+      id: text(proof.id, ""),
+      storagePath: text(proof.storage_path, ""),
+      fileName: text(proof.file_name, ""),
+    })),
+    // The serialized proof key is the stable dependency for this derived list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [proofKey],
+  );
+
+  useEffect(() => {
+    let active = true;
+    if (!proofEntries.length) {
+      setSignedUrls({});
+      return () => {
+        active = false;
+      };
+    }
+    const loadUrls = async () => {
+      const client = createClient();
+      const entries = await Promise.all(
+        proofEntries.map(async (proof) => {
+          const proofId = proof.id;
+          const storagePath = proof.storagePath;
+          if (!proofId || !storagePath) return [proofId, ""] as const;
+          const { data, error } = await client.storage
+            .from("quotation-signed-proofs")
+            .createSignedUrl(storagePath, 300);
+          return [proofId, error ? "" : text(data?.signedUrl, "")] as const;
+        }),
+      );
+      if (active) {
+        setSignedUrls(
+          Object.fromEntries(entries.filter(([id, url]) => id && url)),
+        );
+      }
+    };
+    void loadUrls();
+    return () => {
+      active = false;
+    };
+  }, [proofEntries]);
+
+  return (
+    <section className={compact ? "min-w-24" : "rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3"}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-semibold text-[#344054]">{label}</p>
+        {action}
+      </div>
+      {proofEntries.length ? (
+        <div className={`mt-2 flex flex-wrap gap-2 ${compact ? "" : "grid grid-cols-2 sm:grid-cols-3"}`}>
+          {proofEntries.map((proof, index) => {
+            const proofId = proof.id;
+            const signedUrl = signedUrls[proofId];
+            return (
+              <a
+                key={proofId || String(index)}
+                href={signedUrl || undefined}
+                target={signedUrl ? "_blank" : undefined}
+                rel={signedUrl ? "noreferrer" : undefined}
+                aria-label={`${label} ${index + 1}`}
+                className={`${compact ? "size-10" : "aspect-square min-h-20"} block overflow-hidden rounded-md border border-[#d9e0e9] bg-white`}
+              >
+                {signedUrl ? (
+                  <img
+                    src={signedUrl}
+                    alt={proof.fileName || `${label} ${index + 1}`}
+                    className="size-full object-cover"
+                  />
+                ) : (
+                  <span className="grid size-full place-items-center text-[10px] text-[#8b92a1]">Loading...</span>
+                )}
+              </a>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="mt-2 text-[11px] text-[#8b92a1]">No signed proof selected.</p>
+      )}
+    </section>
+  );
+}
+
+const quotationPaymentKinds = [
+  ["downpayment", "Downpayment"],
+  ["partial_payment", "Partial payment"],
+  ["full_payment", "Full payment"],
+] as const;
+const quotationPaymentMethods = [
+  ["cash", "Cash"],
+  ["bank_transfer", "Bank transfer"],
+  ["gcash", "GCash"],
+  ["card", "Card"],
+  ["check", "Check"],
+  ["other", "Other"],
+] as const;
+const quotationPaymentRequirementLabel = (quote: Row) => {
+  const requirement = text(quote.payment_requirement, "downpayment");
+  if (requirement === "none") return "No payment requirement";
+  if (requirement === "full_payment") return "Full payment";
+  return `${n(quote.downpayment_rate) || 50}% downpayment`;
+};
+const quotationPaymentKindLabel = (value: unknown) =>
+  quotationPaymentKinds.find(([key]) => key === text(value))?.[1] ?? text(value).replaceAll("_", " ");
+const quotationPaymentMethodLabel = (value: unknown) =>
+  quotationPaymentMethods.find(([key]) => key === text(value))?.[1] ?? text(value).replaceAll("_", " ");
+const roundQuotationPayment = (value: number) =>
+  Math.round((value + Number.EPSILON) * 100) / 100;
+const quotationPaymentDefaultKind = (
+  quote: Row,
+  summary?: Pick<QuotationPaymentSummary, "downpaymentRemaining" | "available">,
+) => {
+  const requirement = text(quote.payment_requirement, "downpayment");
+  if (requirement === "full_payment") return "full_payment";
+  if (requirement === "downpayment" && (!summary || summary.downpaymentRemaining > 0)) return "downpayment";
+  return "partial_payment";
+};
+const quotationPaymentSuggestedAmount = (
+  kind: string,
+  summary: Pick<QuotationPaymentSummary, "downpaymentRemaining" | "available">,
+) => {
+  const amount = kind === "downpayment" ? summary.downpaymentRemaining : kind === "full_payment" ? summary.available : 0;
+  return amount > 0 ? roundQuotationPayment(amount).toFixed(2) : "";
+};
+const quotationPaymentAmountsMatch = (left: number, right: number) =>
+  Math.abs(roundQuotationPayment(left) - roundQuotationPayment(right)) < 0.005;
+const quotationPaymentSource = (store: Store, quote: Row) =>
+  text(quote.document_type) === "mockup_quotation" && quote.source_price_quotation_id
+    ? store.quotations.find((source) => source.id === quote.source_price_quotation_id)
+    : quote;
+type QuotationPaymentSummary = {
+  total: number;
+  pending: number;
+  verified: number;
+  balance: number;
+  available: number;
+  downpaymentTarget: number;
+  downpaymentRemaining: number;
+  status: "unpaid" | "pending" | "partial" | "paid" | "overpaid";
+};
+const quotationPaymentSummary = (quote: Row, records: Row[]): QuotationPaymentSummary => {
+  const total = roundQuotationPayment(Math.max(0, n(quote.total_amount)));
+  const related = records.filter((record) => record.quotation_id === quote.id);
+  const pending = roundQuotationPayment(related
+    .filter((record) => text(record.status) === "pending")
+    .reduce((sum, record) => sum + n(record.amount), 0));
+  const verified = roundQuotationPayment(related
+    .filter((record) => text(record.status) === "verified")
+    .reduce((sum, record) => sum + n(record.amount), 0));
+  const requirement = text(quote.payment_requirement, "downpayment");
+  const downpaymentTarget = roundQuotationPayment(requirement === "none"
+    ? 0
+    : requirement === "full_payment"
+      ? total
+      : total * (n(quote.downpayment_rate) || 50) / 100);
+  const balance = roundQuotationPayment(Math.max(0, total - verified));
+  const available = roundQuotationPayment(Math.max(0, total - verified - pending));
+  const downpaymentRemaining = roundQuotationPayment(Math.max(0, downpaymentTarget - verified - pending));
+  const status = verified > total && total > 0
+    ? "overpaid"
+    : total > 0 && verified >= total
+      ? "paid"
+      : pending > 0 && verified <= 0
+        ? "pending"
+        : verified > 0
+          ? "partial"
+          : "unpaid";
+  return {
+    total,
+    pending,
+    verified,
+    balance,
+    available,
+    downpaymentTarget,
+    downpaymentRemaining,
+    status,
+  };
+};
+const quotationPaymentStatusLabel = (value: QuotationPaymentSummary["status"]) => ({
+  unpaid: "Unpaid",
+  pending: "Pending review",
+  partial: "Partially paid",
+  paid: "Paid",
+  overpaid: "Overpaid",
+}[value]);
+const PaymentStatusBadge = ({ status }: { status: QuotationPaymentSummary["status"] }) => (
+  <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${statusStyle(status === "pending" ? "pending" : status)}`}>
+    {quotationPaymentStatusLabel(status)}
+  </span>
+);
+
+function QuotationPaymentDialog({
+  quote,
+  store,
+  orgId,
+  role,
+  close,
+  reload,
+}: {
+  quote: Row;
+  store: Store;
+  orgId: string;
+  role: string;
+  close: () => void;
+  reload: () => Promise<void>;
+}) {
+  const liveQuote = store.quotations.find((item) => item.id === quote.id) ?? quote;
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const records = useMemo(
+    () => store.quotation_payment_records
+      .filter((record) => record.quotation_id === liveQuote.id)
+      .sort((left, right) => text(right.paid_at ?? right.created_at).localeCompare(text(left.paid_at ?? left.created_at))),
+    [liveQuote.id, store.quotation_payment_records],
+  );
+  const summary = quotationPaymentSummary(liveQuote, records);
+  const canSubmit = isProjectOfficerRole(role) && text(liveQuote.status) === "approved";
+  const canReviewAsManager = memberRole(role);
+  const paymentRequirement = text(liveQuote.payment_requirement, "downpayment");
+  const initialPaymentKind = quotationPaymentDefaultKind(liveQuote, summary);
+  const reviewerForPayment = (payment: Row) =>
+    assignedPaymentReviewerId(
+      liveQuote,
+      payment,
+      store.pricing_officer_project_types,
+    );
+  const canReviewPayment = (payment: Row) =>
+    canReviewAsManager ||
+    (isPricingOfficerRole(role) &&
+      reviewerForPayment(payment) === currentUserId &&
+      text(payment.submitted_by, "") !== currentUserId);
+  const [formOpen, setFormOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [termsSaving, setTermsSaving] = useState(false);
+  const [editingTerms, setEditingTerms] = useState(false);
+  const [paymentValues, setPaymentValues] = useState({
+    payment_kind: initialPaymentKind,
+    amount: "",
+    paid_at: isoToday(),
+    method: "cash",
+    reference_no: "",
+    notes: "",
+  });
+  const [paymentFile, setPaymentFile] = useState<File | null>(null);
+  const [termsValues, setTermsValues] = useState({
+    requirement: text(liveQuote.payment_requirement, "downpayment"),
+    rate: text(liveQuote.downpayment_rate, "50"),
+  });
+  const [workingPaymentId, setWorkingPaymentId] = useState<string | null>(null);
+  const [receiptUrls, setReceiptUrls] = useState<Record<string, string>>({});
+  const [feedback, setFeedback] = useState<{ tone: "error" | "success"; message: string } | null>(null);
+  const [noteRequest, setNoteRequest] = useState<{
+    payment: Row;
+    action: "reject" | "reverse";
+  } | null>(null);
+  const [notePayment, setNotePayment] = useState<Row | null>(null);
+  const [noteValue, setNoteValue] = useState("");
+  const paymentKey = records
+    .map((record) => `${text(record.id)}:${text(record.receipt_storage_path)}`)
+    .join("|");
+
+  useEffect(() => {
+    let active = true;
+    void createClient().auth.getUser().then(({ data }) => {
+      if (active) setCurrentUserId(data.user?.id ?? null);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    if (!records.length) {
+      setReceiptUrls({});
+      return () => {
+        active = false;
+      };
+    }
+    const loadReceiptUrls = async () => {
+      const client = createClient();
+      const entries = await Promise.all(records.map(async (record) => {
+        const { data, error } = await client.storage
+          .from("quotation-payment-receipts")
+          .createSignedUrl(text(record.receipt_storage_path), 5 * 60);
+        return [text(record.id), error || !data?.signedUrl ? "" : data.signedUrl] as const;
+      }));
+      if (active) setReceiptUrls(Object.fromEntries(entries.filter(([, url]) => url)));
+    };
+    void loadReceiptUrls();
+    return () => {
+      active = false;
+    };
+  }, [paymentKey, records]);
+
+  const resetPaymentForm = () => {
+    setFormOpen(false);
+    setPaymentFile(null);
+    setFeedback(null);
+    setPaymentValues({
+      payment_kind: initialPaymentKind,
+      amount: "",
+      paid_at: isoToday(),
+      method: "cash",
+      reference_no: "",
+      notes: "",
+    });
+  };
+  const openPaymentForm = () => {
+    const kind = quotationPaymentDefaultKind(liveQuote, summary);
+    setFeedback(null);
+    setPaymentValues({
+      payment_kind: kind,
+      amount: quotationPaymentSuggestedAmount(kind, summary),
+      paid_at: isoToday(),
+      method: "cash",
+      reference_no: "",
+      notes: "",
+    });
+    setFormOpen(true);
+  };
+  const changePaymentKind = (kind: string) => {
+    setPaymentValues((current) => ({
+      ...current,
+      payment_kind: kind,
+      amount: quotationPaymentSuggestedAmount(kind, summary),
+    }));
+    setFeedback(null);
+  };
+  const setError = (message: string) => setFeedback({ tone: "error", message });
+  const setSuccess = (message: string) => setFeedback({ tone: "success", message });
+  const openNoteRequest = (payment: Row, action: "reject" | "reverse") => {
+    setFeedback(null);
+    setNoteValue("");
+    setNoteRequest({ payment, action });
+  };
+  const closeNoteRequest = () => {
+    if (workingPaymentId) return;
+    setNoteRequest(null);
+    setNoteValue("");
+    setFeedback(null);
+  };
+  const paymentNotes = (payment: Row) => {
+    return [
+      { label: "Payment note", value: text(payment.notes, "") },
+      { label: "Verification note", value: text(payment.verification_note, "") },
+      { label: "Reversal note", value: text(payment.reversal_note, "") },
+    ].filter((entry) => entry.value);
+  };
+  const savePayment = async () => {
+    if (!paymentFile) return setError("Upload the client's payment receipt image.");
+    const amount = roundQuotationPayment(n(paymentValues.amount));
+    if (!paymentValues.amount || amount <= 0) return setError("Enter a payment amount greater than zero.");
+    if (!paymentValues.paid_at) return setError("Choose the date the client paid.");
+    if (summary.available <= 0) return setError("No unallocated quotation balance remains. Review the pending receipts first.");
+    if (paymentValues.payment_kind === "downpayment") {
+      if (paymentRequirement !== "downpayment") return setError("Set a downpayment term before recording a downpayment receipt.");
+      if (summary.downpaymentRemaining <= 0) return setError("The downpayment target is already covered by verified or pending payments.");
+      if (!quotationPaymentAmountsMatch(amount, summary.downpaymentRemaining)) {
+        return setError(`Downpayment must be ${peso.format(summary.downpaymentRemaining)} to reach the required target.`);
+      }
+    } else if (paymentValues.payment_kind === "full_payment") {
+      if (!quotationPaymentAmountsMatch(amount, summary.available)) {
+        return setError(`Full payment must equal the available balance of ${peso.format(summary.available)} after pending receipts.`);
+      }
+    } else if (amount >= summary.available) {
+      return setError(`Use Full payment for the entire available balance of ${peso.format(summary.available)}.`);
+    }
+    const validTypes = ["image/jpeg", "image/png", "image/webp"];
+    if (!validTypes.includes(paymentFile.type) || paymentFile.size > 10 * 1024 * 1024) {
+      return setError("Payment receipts must be JPEG, PNG, or WebP files no larger than 10 MB.");
+    }
+    setSaving(true);
+    const client = createClient();
+    const paymentId = crypto.randomUUID();
+    const extension = paymentFile.type === "image/png" ? "png" : paymentFile.type === "image/webp" ? "webp" : "jpg";
+    const path = `${orgId}/${liveQuote.id}/${paymentId}.${extension}`;
+    try {
+      const { error: uploadError } = await client.storage
+        .from("quotation-payment-receipts")
+        .upload(path, paymentFile, { contentType: paymentFile.type, upsert: false });
+      if (uploadError) throw uploadError;
+      const { error: registerError } = await client.rpc("register_quotation_payment", {
+        p_payment_id: paymentId,
+        p_quotation_id: liveQuote.id,
+        p_payment_kind: paymentValues.payment_kind,
+        p_amount: amount,
+        p_paid_at: paymentValues.paid_at,
+        p_method: paymentValues.method,
+        p_reference_no: paymentValues.reference_no.trim() || null,
+        p_notes: paymentValues.notes.trim() || null,
+        p_receipt_storage_path: path,
+        p_receipt_file_name: paymentFile.name,
+        p_receipt_content_type: paymentFile.type,
+        p_receipt_file_size: paymentFile.size,
+      });
+      if (registerError) throw registerError;
+      resetPaymentForm();
+      setSuccess("Payment receipt submitted for review.");
+      await reload();
+    } catch (error) {
+      await client.storage.from("quotation-payment-receipts").remove([path]);
+      setError(error instanceof Error ? error.message : "Payment receipt could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const saveTerms = async () => {
+    const requirement = termsValues.requirement;
+    const rate = n(termsValues.rate);
+    if (requirement === "downpayment" && (rate <= 0 || rate >= 100)) {
+      return setError("Downpayment percentage must be greater than 0 and less than 100.");
+    }
+    setTermsSaving(true);
+    try {
+      const { error } = await createClient().rpc("set_quotation_payment_terms", {
+        p_quotation_id: liveQuote.id,
+        p_payment_requirement: requirement,
+        p_downpayment_rate: rate,
+      });
+      if (error) throw error;
+      setEditingTerms(false);
+      setSuccess("Payment terms saved.");
+      await reload();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Payment terms could not be saved.");
+    } finally {
+      setTermsSaving(false);
+    }
+  };
+  const reviewPayment = async (payment: Row, decision: "verified" | "rejected", decisionNote = "") => {
+    const note = decisionNote.trim();
+    if (decision === "rejected" && !note) {
+      setError("Enter a reason before rejecting the payment.");
+      return false;
+    }
+    setWorkingPaymentId(`${text(payment.id)}:${decision}`);
+    try {
+      const { error } = await createClient().rpc("review_quotation_payment", {
+        p_payment_id: payment.id,
+        p_decision: decision,
+        p_decision_note: note || null,
+      });
+      if (error) throw error;
+      setSuccess(decision === "verified" ? "Payment marked as verified." : "Payment receipt rejected.");
+      await reload();
+      return true;
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Payment review could not be saved.");
+      return false;
+    } finally {
+      setWorkingPaymentId(null);
+    }
+  };
+  const reversePayment = async (payment: Row, reversalNote = "") => {
+    const note = reversalNote.trim();
+    if (!note) {
+      setError("Enter a reason before undoing the verification.");
+      return false;
+    }
+    setWorkingPaymentId(`${text(payment.id)}:reversed`);
+    try {
+      const { error } = await createClient().rpc("reverse_quotation_payment", {
+        p_payment_id: payment.id,
+        p_reversal_note: note,
+      });
+      if (error) throw error;
+      setSuccess("Payment verification was undone.");
+      await reload();
+      return true;
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Payment verification could not be undone.");
+      return false;
+    } finally {
+      setWorkingPaymentId(null);
+    }
+  };
+  const submitNoteRequest = async () => {
+    if (!noteRequest) return;
+    const note = noteValue.trim();
+    if (!note) {
+      setError(noteRequest.action === "reject" ? "Enter a reason before rejecting the payment." : "Enter a reason before undoing the verification.");
+      return;
+    }
+    const saved = noteRequest.action === "reject"
+      ? await reviewPayment(noteRequest.payment, "rejected", note)
+      : await reversePayment(noteRequest.payment, note);
+    if (saved) {
+      setNoteRequest(null);
+      setNoteValue("");
+    }
+  };
+  const noteDialogBusy = noteRequest
+    ? workingPaymentId === `${text(noteRequest.payment.id)}:${noteRequest.action === "reject" ? "rejected" : "reversed"}`
+    : false;
+  const paymentAmountHint = paymentValues.payment_kind === "downpayment"
+    ? `Required remaining downpayment: ${peso.format(summary.downpaymentRemaining)}`
+    : paymentValues.payment_kind === "full_payment"
+      ? `Must equal available balance: ${peso.format(summary.available)}`
+      : summary.available > 0
+        ? `Enter an installment below ${peso.format(summary.available)}`
+        : "No unallocated balance is available while pending receipts are under review";
+  const paymentAmountReadOnly = paymentValues.payment_kind !== "partial_payment";
+  const partialPaymentMax = summary.available > 0
+    ? roundQuotationPayment(summary.available - 0.01).toFixed(2)
+    : undefined;
+
+  return (
+    <>
+      <div
+        className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-[#151922]/40 px-3 py-4 sm:px-5 sm:py-7"
+        role="presentation"
+        onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !saving && !termsSaving && !workingPaymentId) close();
+        }}
+      >
+        <section
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="quotation-payment-title"
+          className="flex max-h-[calc(100dvh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-[8px] border border-[#d9e0e9] bg-white shadow-none sm:max-h-[calc(100dvh-3.5rem)]"
+        >
+          <header className="flex items-start justify-between gap-4 border-b border-[#e1e6ee] px-4 py-4 sm:px-5">
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-[#7b8494]">Payment review</p>
+              <h2 id="quotation-payment-title" className="mt-1 truncate text-[16px] font-semibold text-[#202938]">Quotation payments</h2>
+              <p className="mt-1 truncate text-[12px] text-[#687386]">{text(liveQuote.quotation_no)} <span className="px-1 text-[#b7bfca]">·</span> {text(liveQuote.client_name, "Client")}</p>
+            </div>
+            <div className="flex shrink-0 items-start gap-3">
+              <PaymentStatusBadge status={summary.status} />
+              <button type="button" onClick={close} disabled={saving || termsSaving || Boolean(workingPaymentId)} aria-label="Close quotation payments" className="grid size-8 place-items-center rounded-[6px] text-[#687386] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938] disabled:cursor-not-allowed disabled:opacity-50"><X size={18} /></button>
+            </div>
+          </header>
+
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5 sm:py-5">
+            {feedback && !noteRequest && (
+              <div role="alert" className={`mb-4 flex items-start gap-2 rounded-[6px] border px-3 py-2.5 text-[12px] ${feedback.tone === "error" ? "border-[#f2b8b5] bg-[#fff5f4] text-[#b42318]" : "border-[#b7dfc5] bg-[#f1fbf4] text-[#176b40]"}`}>
+                {feedback.tone === "error" ? <XCircle size={15} className="mt-0.5 shrink-0" /> : <Check size={15} className="mt-0.5 shrink-0" />}
+                <span>{feedback.message}</span>
+              </div>
+            )}
+
+            <div className="grid gap-2 sm:grid-cols-4">
+              <div className="rounded-[8px] border border-[#e1e6ee] bg-[#fafbfc] p-3"><p className="text-[11px] uppercase tracking-wide text-[#7b8494]">Payment status</p><div className="mt-1"><PaymentStatusBadge status={summary.status} /></div></div>
+              <div className="rounded-[8px] border border-[#e1e6ee] bg-[#fafbfc] p-3"><p className="text-[11px] uppercase tracking-wide text-[#7b8494]">Quotation total</p><p className="mt-1 text-[14px] font-semibold text-[#202938]">{peso.format(summary.total)}</p></div>
+              <div className="rounded-[8px] border border-[#e1e6ee] bg-[#fafbfc] p-3"><p className="text-[11px] uppercase tracking-wide text-[#7b8494]">Verified paid</p><p className="mt-1 text-[14px] font-semibold text-[#218b55]">{peso.format(summary.verified)}</p></div>
+              <div className="rounded-[8px] border border-[#e1e6ee] bg-[#fafbfc] p-3"><p className="text-[11px] uppercase tracking-wide text-[#7b8494]">Remaining balance</p><p className="mt-1 text-[14px] font-semibold text-[#202938]">{peso.format(summary.balance)}</p></div>
+            </div>
+
+            <section className="mt-4 rounded-[8px] border border-[#e1e6ee]">
+              <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+                <div>
+                  <h3 className="text-[13px] font-semibold text-[#202938]">Payment terms</h3>
+                  {!editingTerms ? <p className="mt-1 text-[12px] text-[#687386]">{quotationPaymentRequirementLabel(liveQuote)}{summary.downpaymentTarget > 0 ? ` · target ${peso.format(summary.downpaymentTarget)}` : ""}</p> : <div className="mt-2 flex flex-wrap items-center gap-2"><select value={termsValues.requirement} onChange={(event) => setTermsValues((current) => ({ ...current, requirement: event.target.value }))} className="input mt-0 w-auto"><option value="none">No payment requirement</option><option value="downpayment">Downpayment</option><option value="full_payment">Full payment</option></select>{termsValues.requirement === "downpayment" && <label className="flex items-center gap-2 text-[12px] text-[#687386]"><span>Rate</span><input type="number" min="1" max="99" step="1" value={termsValues.rate} onChange={(event) => setTermsValues((current) => ({ ...current, rate: event.target.value }))} className="input mt-0 w-20" /><span>%</span></label>}</div>}
+                </div>
+                {(canSubmit || canReviewAsManager) && <div className="flex gap-2">{editingTerms ? <><Button secondary disabled={termsSaving} onClick={() => setEditingTerms(false)}>Cancel</Button><Button loading={termsSaving} disabled={termsSaving} onClick={() => void saveTerms()}><Save size={13} /> Save terms</Button></> : <Button secondary onClick={() => { setFeedback(null); setTermsValues({ requirement: text(liveQuote.payment_requirement, "downpayment"), rate: text(liveQuote.downpayment_rate, "50") }); setEditingTerms(true); }}><Pencil size={13} /> Edit terms</Button>}</div>}
+              </div>
+            </section>
+
+            {canSubmit && <section className="mt-4 rounded-[8px] border border-[#e1e6ee]">
+              <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
+                <div className="min-w-0">
+                  <h3 className="text-[13px] font-semibold text-[#202938]">Client payment receipt</h3>
+                  <p className="mt-1 max-w-3xl text-[12px] leading-[1.45] text-[#687386]">Record each client payment separately. The assigned Sales &amp; Pricing Officer verifies the receipt before it counts as paid; the General Manager can override exceptions.</p>
+                </div>
+                {!formOpen && <Button disabled={summary.available <= 0} onClick={openPaymentForm}><ReceiptText size={14} /> Add payment</Button>}
+              </div>
+              {formOpen && <div className="grid gap-3 border-t border-[#edf0f5] px-4 py-4 sm:grid-cols-2 lg:grid-cols-4">
+                <label className="text-[12px] font-medium text-[#202938]">Payment type<select value={paymentValues.payment_kind} onChange={(event) => changePaymentKind(event.target.value)} className="input mt-1">{quotationPaymentKinds.map(([key, label]) => <option key={key} value={key} disabled={key === "downpayment" && paymentRequirement !== "downpayment"}>{label}{key === "downpayment" && paymentRequirement !== "downpayment" ? " (set terms first)" : ""}</option>)}</select></label>
+                <label className="text-[12px] font-medium text-[#202938]">Amount<input type="number" min="0.01" max={paymentValues.payment_kind === "partial_payment" ? partialPaymentMax : undefined} step="0.01" readOnly={paymentAmountReadOnly} value={paymentValues.amount} onChange={(event) => setPaymentValues((current) => ({ ...current, amount: event.target.value }))} className={`input mt-1 ${paymentAmountReadOnly ? "bg-[#f6f8fb] text-[#687386]" : ""}`} placeholder="0.00" /><span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">{paymentAmountHint}</span></label>
+                <label className="text-[12px] font-medium text-[#202938]">Paid date<input type="date" value={paymentValues.paid_at} onChange={(event) => setPaymentValues((current) => ({ ...current, paid_at: event.target.value }))} className="input mt-1" /></label>
+                <label className="text-[12px] font-medium text-[#202938]">Method<select value={paymentValues.method} onChange={(event) => setPaymentValues((current) => ({ ...current, method: event.target.value }))} className="input mt-1">{quotationPaymentMethods.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+                <label className="text-[12px] font-medium text-[#202938] sm:col-span-2">Reference number (optional)<input value={paymentValues.reference_no} onChange={(event) => setPaymentValues((current) => ({ ...current, reference_no: event.target.value }))} className="input mt-1" placeholder="Receipt or transaction reference" /></label>
+                <label className="text-[12px] font-medium text-[#202938] sm:col-span-2">Receipt image<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setPaymentFile(event.target.files?.[0] ?? null)} className="input mt-1 py-1.5" />{paymentFile && <span className="mt-1 block truncate text-[11px] font-normal text-[#687386]">{paymentFile.name}</span>}</label>
+                <div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-3 sm:col-span-2 lg:col-span-4"><Button secondary disabled={saving} onClick={resetPaymentForm}>Cancel</Button><Button loading={saving} disabled={saving} onClick={() => void savePayment()}><Send size={13} /> Submit receipt</Button></div>
+              </div>}
+            </section>}
+
+            <section className="mt-4">
+              <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+                <div>
+                  <h3 className="text-[13px] font-semibold text-[#202938]">Payment history</h3>
+                  <p className="mt-1 text-[12px] text-[#687386]">Pending receipts do not increase the verified paid amount.</p>
+                </div>
+                {summary.pending > 0 && <span className="text-[11px] font-medium text-[#a76605]">{peso.format(summary.pending)} pending review</span>}
+              </div>
+              {records.length ? <div className="overflow-x-auto rounded-[8px] border border-[#e1e6ee]">
+                <Table labels={["Paid date", "Type", "Amount", "Method", "Receipt", "Status", "Notes", "Review"]} minWidth={1020}>
+                  {records.map((payment) => {
+                    const paymentId = text(payment.id);
+                    const status = text(payment.status);
+                    const working = workingPaymentId?.startsWith(`${paymentId}:`) ?? false;
+                    const reviewerId = reviewerForPayment(payment);
+                    return <tr key={paymentId}>
+                      <td className="px-3 py-2.5">{day(payment.paid_at)}</td>
+                      <td className="px-3 py-2.5">{quotationPaymentKindLabel(payment.payment_kind)}</td>
+                      <td className="px-3 py-2.5 font-semibold">{peso.format(n(payment.amount))}</td>
+                      <td className="px-3 py-2.5">{quotationPaymentMethodLabel(payment.method)}<small>{text(payment.reference_no)}</small></td>
+                      <td className="px-3 py-2.5">{receiptUrls[paymentId] ? <a href={receiptUrls[paymentId]} target="_blank" rel="noreferrer" className="inline-flex size-11 overflow-hidden rounded-[6px] border border-[#d9e0e9] bg-[#fafbfc]"><img src={receiptUrls[paymentId]} alt={text(payment.receipt_file_name, "Payment receipt")} className="size-full object-cover" /></a> : <span className="inline-flex items-center gap-1 text-[11px] text-[#8b92a1]"><ReceiptText size={14} /> Loading</span>}</td>
+                      <td className="px-3 py-2.5"><Status value={status} /></td>
+                      <td className="px-3 py-2.5">
+                        {paymentNotes(payment).length ? (
+                          <ActionIcon label="View payment notes" confirm={false} onClick={() => setNotePayment(payment)}>
+                            <MessageSquareText size={15} />
+                          </ActionIcon>
+                        ) : (
+                          <span className="text-[11px] text-[#8b92a1]">-</span>
+                        )}
+                      </td>
+                      <td className="min-w-44 px-3 py-2.5">
+                        {canReviewPayment(payment) && status === "pending" ? (
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <button type="button" disabled={working} onClick={() => void reviewPayment(payment, "verified")} className="inline-flex min-h-7 items-center gap-1 rounded-[6px] bg-[#218b55] px-2.5 text-[11px] font-semibold text-white transition-colors hover:bg-[#176b40] disabled:cursor-not-allowed disabled:opacity-50"><Check size={13} /> Verify</button>
+                            <button type="button" disabled={working} onClick={() => openNoteRequest(payment, "reject")} className="inline-flex min-h-7 items-center gap-1 rounded-[6px] border border-[#e3a7a2] bg-white px-2.5 text-[11px] font-semibold text-[#b42318] transition-colors hover:bg-[#fff5f4] disabled:cursor-not-allowed disabled:opacity-50"><XCircle size={13} /> Reject</button>
+                          </div>
+                        ) : canReviewAsManager && status === "verified" ? (
+                          <button type="button" disabled={working} onClick={() => openNoteRequest(payment, "reverse")} className="inline-flex min-h-7 items-center gap-1 rounded-[6px] border border-[#e3a7a2] bg-white px-2.5 text-[11px] font-semibold text-[#b42318] transition-colors hover:bg-[#fff5f4] disabled:cursor-not-allowed disabled:opacity-50"><RotateCcw size={13} /> Undo verification</button>
+                        ) : (
+                          <span className="text-[11px] text-[#8b92a1]">{status === "pending" ? (reviewerId ? (reviewerId === text(payment.submitted_by, "") ? "Awaiting General Manager exception review" : "Awaiting Sales & Pricing Officer") : "Awaiting General Manager") : text(payment.verified_at ?? payment.reversed_at, "-")}</span>
+                        )}
+                      </td>
+                    </tr>;
+                  })}
+                </Table>
+              </div> : <div className="rounded-[8px] border border-dashed border-[#ccd5e0] px-4 py-8 text-center text-[12px] text-[#8b92a1]">No payment receipts recorded yet.</div>}
+            </section>
+          </div>
+          <footer className="flex justify-end border-t border-[#e1e6ee] px-4 py-3 sm:px-5">
+            <Button secondary disabled={saving || termsSaving || Boolean(workingPaymentId)} onClick={close}>Close</Button>
+          </footer>
+        </section>
+      </div>
+
+      {noteRequest && (
+        <div
+          className="fixed inset-0 z-[100] grid place-items-center bg-[#151922]/50 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeNoteRequest();
+          }}
+        >
+          <section role="dialog" aria-modal="true" aria-labelledby="payment-note-title" className="w-full max-w-md rounded-[8px] border border-[#d9e0e9] bg-white p-4 shadow-none sm:p-5">
+            <div className="flex items-start justify-between gap-4 border-b border-[#e1e6ee] pb-3">
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-[#7b8494]">Payment review note</p>
+                <h2 id="payment-note-title" className="mt-1 text-[16px] font-semibold text-[#202938]">{noteRequest.action === "reject" ? "Reject receipt" : "Undo verification"}</h2>
+              </div>
+              <button type="button" onClick={closeNoteRequest} disabled={noteDialogBusy} aria-label="Close payment review note" className="grid size-8 place-items-center rounded-[6px] text-[#687386] hover:bg-[#f0f3f7] disabled:cursor-not-allowed disabled:opacity-50"><X size={18} /></button>
+            </div>
+            <p className="mt-4 text-[12px] leading-[1.45] text-[#687386]">{noteRequest.action === "reject" ? "Explain why this client receipt cannot be accepted. The payment will remain unverified." : "Use this only when a previously verified receipt was invalidated, refunded, or entered incorrectly. Its amount will stop counting toward Verified Paid."}</p>
+            {feedback && <div role="alert" className={`mt-4 flex items-start gap-2 rounded-[6px] border px-3 py-2.5 text-[12px] ${feedback.tone === "error" ? "border-[#f2b8b5] bg-[#fff5f4] text-[#b42318]" : "border-[#b7dfc5] bg-[#f1fbf4] text-[#176b40]"}`}><XCircle size={15} className="mt-0.5 shrink-0" /><span>{feedback.message}</span></div>}
+            <label className="mt-4 block text-[12px] font-medium text-[#202938]">Reason<textarea autoFocus rows={4} value={noteValue} onChange={(event) => { setNoteValue(event.target.value); if (feedback?.tone === "error") setFeedback(null); }} className="input mt-1 min-h-[96px] resize-y" placeholder={noteRequest.action === "reject" ? "Reason for rejecting this receipt" : "Reason for undoing the verification"} /></label>
+            <div className="mt-5 flex justify-end gap-2 border-t border-[#e1e6ee] pt-3">
+              <Button secondary disabled={noteDialogBusy} onClick={closeNoteRequest}>Cancel</Button>
+              <button type="button" disabled={noteDialogBusy} onClick={() => void submitNoteRequest()} className="inline-flex min-h-8 items-center gap-1.5 rounded-[6px] bg-[#b42318] px-3 text-[13px] font-medium text-white transition-colors hover:bg-[#8f1d14] disabled:cursor-not-allowed disabled:opacity-50">{noteDialogBusy && <LoaderCircle size={14} className="animate-spin" />}{noteRequest.action === "reject" ? <><XCircle size={14} /> Reject receipt</> : <><RotateCcw size={14} /> Undo verification</>}</button>
+            </div>
+          </section>
+        </div>
+      )}
+      {notePayment && (
+        <div
+          className="fixed inset-0 z-[100] grid place-items-center bg-[#151922]/50 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setNotePayment(null);
+          }}
+        >
+          <section role="dialog" aria-modal="true" aria-labelledby="payment-notes-title" className="w-full max-w-md rounded-[8px] border border-[#d9e0e9] bg-white p-4 shadow-none sm:p-5">
+            <div className="flex items-start justify-between gap-4 border-b border-[#e1e6ee] pb-3">
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-[#7b8494]">Payment record</p>
+                <h2 id="payment-notes-title" className="mt-1 text-[16px] font-semibold text-[#202938]">Payment notes</h2>
+                <p className="mt-1 text-[12px] text-[#687386]">{quotationPaymentKindLabel(notePayment.payment_kind)} · {peso.format(n(notePayment.amount))}</p>
+              </div>
+              <button type="button" onClick={() => setNotePayment(null)} aria-label="Close payment notes" className="grid size-8 place-items-center rounded-[6px] text-[#687386] hover:bg-[#f0f3f7] hover:text-[#202938]"><X size={18} /></button>
+            </div>
+            <div className="mt-4 space-y-3">
+              {paymentNotes(notePayment).map((entry) => (
+                <div key={entry.label} className="rounded-[6px] border border-[#e1e6ee] bg-[#fafbfc] p-3">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-[#7b8494]">{entry.label}</p>
+                  <p className="mt-1 whitespace-pre-wrap break-words text-[13px] leading-5 text-[#303949]">{entry.value}</p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-5 flex justify-end border-t border-[#e1e6ee] pt-3">
+              <Button secondary onClick={() => setNotePayment(null)}>Close</Button>
+            </div>
+          </section>
+        </div>
+      )}
+    </>
+  );
+}
+
+function PaymentMonitoring({
+  store,
+  orgId,
+  reload,
+  role,
+  assignedOnly = false,
+}: {
+  store: Store;
+  orgId: string;
+  reload: () => Promise<void>;
+  role: string;
+  assignedOnly?: boolean;
+}) {
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [paymentQuote, setPaymentQuote] = useState<Row | null>(null);
+  const [scope, setScope] = useState<"pending" | "all">("pending");
+  const [paymentQuery, setPaymentQuery] = useState("");
+  const [paymentMonth, setPaymentMonth] = useState("");
+  const [paymentOfficerFilter, setPaymentOfficerFilter] = useState("all");
+  const isGeneralManager = memberRole(role);
+  const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
+  useEffect(() => {
+    let active = true;
+    void createClient().auth.getUser().then(({ data }) => {
+      if (active) setCurrentUserId(data.user?.id ?? null);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+  const approvedQuotes = store.quotations
+    .filter(
+      (quote) =>
+        text(quote.document_type) === "price_quotation" &&
+        !quote.costing_source_id &&
+        text(quote.status) === "approved",
+    )
+    .map((quote) => {
+      const allRecords = store.quotation_payment_records
+        .filter((record) => record.quotation_id === quote.id)
+        .sort((left, right) => text(right.paid_at ?? right.submitted_at ?? right.created_at).localeCompare(text(left.paid_at ?? left.submitted_at ?? left.created_at)));
+      const records = allRecords.filter((record) => {
+        const receiptDate = text(record.paid_at ?? record.submitted_at ?? record.created_at, "");
+        return !paymentMonth || receiptDate.slice(0, 7) === paymentMonth;
+      });
+      const party = quotationParty(quote, store);
+      const preparedById = projectOfficerIdForQuote(store, quote);
+      const preparedByName = text(
+        store.profiles.find((profile) => profile.id === preparedById)?.full_name,
+        text(quote.representative, "Sales Executive"),
+      );
+      const normalizedQuery = paymentQuery.trim().toLowerCase();
+      const matchesSearch = !normalizedQuery || [
+        quote.quotation_no,
+        quote.project_name,
+        party.clientName,
+        party.companyName,
+        preparedByName,
+        ...allRecords.flatMap((record) => [
+          record.reference_no,
+          record.method,
+          record.payment_kind,
+          record.receipt_file_name,
+        ]),
+      ].some((value) => text(value, "").toLowerCase().includes(normalizedQuery));
+      const matchesOfficer = paymentOfficerFilter === "all" || preparedById === paymentOfficerFilter;
+      const pendingForReview = records.filter(
+        (record) =>
+          text(record.status) === "pending" &&
+          assignedPaymentReviewerId(
+            quote,
+            record,
+            store.pricing_officer_project_types,
+          ) === currentUserId &&
+          text(record.submitted_by, "") !== currentUserId,
+      );
+      return {
+        quote,
+        records,
+        pendingForReview,
+        summary: quotationPaymentSummary(quote, records),
+        matchesSearch,
+        matchesOfficer,
+      };
+    })
+    .filter(({ matchesSearch, matchesOfficer, records }) => matchesSearch && matchesOfficer && records.length > 0);
+  const rows = approvedQuotes.filter(({ records, summary, pendingForReview }) => assignedOnly ? pendingForReview.length > 0 : scope === "all" ? records.length > 0 : summary.pending > 0);
+  const pendingCount = assignedOnly
+    ? approvedQuotes.reduce((count, { pendingForReview }) => count + pendingForReview.length, 0)
+    : approvedQuotes.filter(({ summary }) => summary.pending > 0).length;
+  const pendingAmount = assignedOnly
+    ? approvedQuotes.reduce((sum, { pendingForReview }) => sum + pendingForReview.reduce((total, payment) => total + n(payment.amount), 0), 0)
+    : approvedQuotes.reduce((sum, { summary }) => sum + summary.pending, 0);
+  const verifiedAmount = approvedQuotes.reduce((sum, { summary }) => sum + summary.verified, 0);
+  return (
+    <Panel
+      title={assignedOnly ? "Payment Reviews" : "Payment Monitoring"}
+      detail={assignedOnly ? "Verify client payment receipts assigned to you. Rejected or self-submitted receipts require General Manager review." : "Monitor client receipt submissions separately from quotation and production approvals. Assigned Sales & Pricing Officers review normal receipts; General Managers can override exceptions."}
+      variant="page"
+      hideHeading
+    >
+      <div className="px-4 py-4 sm:px-5 lg:px-6">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3"><p className="text-[11px] uppercase tracking-wide text-[#7b8494]">{assignedOnly ? "Receipts assigned to me" : "Pending receipts"}</p><p className="mt-1 text-[16px] font-semibold text-[#a76605]">{pendingCount}</p><p className="mt-1 text-[11px] text-[#687386]">{peso.format(pendingAmount)} awaiting review</p></div>
+          <div className="rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3"><p className="text-[11px] uppercase tracking-wide text-[#7b8494]">Verified paid</p><p className="mt-1 text-[16px] font-semibold text-[#218b55]">{peso.format(verifiedAmount)}</p><p className="mt-1 text-[11px] text-[#687386]">Approved receipt total</p></div>
+          <div className="rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3"><p className="text-[11px] uppercase tracking-wide text-[#7b8494]">Recorded quotations</p><p className="mt-1 text-[16px] font-semibold text-[#202938]">{approvedQuotes.filter(({ records }) => records.length > 0).length}</p><p className="mt-1 text-[11px] text-[#687386]">Approved quotations with receipts</p></div>
+        </div>
+        <WorkspaceListFilters
+          query={paymentQuery}
+          onQueryChange={setPaymentQuery}
+          queryPlaceholder="Search quotation, client, project, or receipt"
+          month={paymentMonth}
+          onMonthChange={setPaymentMonth}
+          monthLabel="Receipt month"
+          showOfficer={isGeneralManager}
+          officerFilter={paymentOfficerFilter}
+          onOfficerChange={setPaymentOfficerFilter}
+          officerOptions={projectOfficers}
+          onClear={() => {
+            setPaymentQuery("");
+            setPaymentMonth("");
+            setPaymentOfficerFilter("all");
+          }}
+          hasFilters={Boolean(paymentQuery || paymentMonth || paymentOfficerFilter !== "all")}
+        />
+        {!assignedOnly && <nav aria-label="Payment monitoring scope" className="app-tabs mt-4">
+          <button type="button" onClick={() => setScope("pending")} aria-current={scope === "pending" ? "page" : undefined} className="app-tab">Pending review ({pendingCount})</button>
+          <button type="button" onClick={() => setScope("all")} aria-current={scope === "all" ? "page" : undefined} className="app-tab">All recorded ({approvedQuotes.filter(({ records }) => records.length > 0).length})</button>
+        </nav>}
+        {rows.length ? (
+          <Table labels={["Price Quotation", "Client", "Prepared by", "Payment status", "Pending", "Verified / Total", "Last receipt", "Review"]} minWidth={1120}>
+            {rows.map(({ quote, records, pendingForReview, summary }) => {
+              const party = quotationParty(quote, store);
+              const preparedBy = text(store.profiles.find((profile) => profile.id === (quote.prepared_by_user_id ?? quote.created_by))?.full_name, text(quote.representative, "Sales Executive"));
+              const pendingAmountForRow = assignedOnly
+                ? pendingForReview.reduce((sum, payment) => sum + n(payment.amount), 0)
+                : summary.pending;
+              return <tr key={text(quote.id)}>
+                <td className="px-5 py-3">{stackedCell(quote.quotation_no, quote.project_name)}</td>
+                <td className="px-5 py-3">{stackedCell(party.clientName, party.companyName)}</td>
+                <td className="px-5 py-3">{preparedBy}</td>
+                <td className="px-5 py-3"><PaymentStatusBadge status={summary.status} /></td>
+                <td className="px-5 py-3 font-medium text-[#a76605]">{peso.format(pendingAmountForRow)}</td>
+                <td className="px-5 py-3">{peso.format(summary.verified)} / {peso.format(summary.total)}</td>
+                <td className="px-5 py-3">{records[0] ? day(records[0].paid_at ?? records[0].submitted_at ?? records[0].created_at) : "-"}</td>
+                <td className="px-5 py-3"><ActionIcon label="Review quotation payments" confirm={false} onClick={() => setPaymentQuote(quote)}><ReceiptText size={15} /></ActionIcon></td>
+              </tr>;
+            })}
+          </Table>
+        ) : (
+          <Empty>{assignedOnly ? "No payment receipts are currently assigned to you." : scope === "pending" ? "No quotation payment receipts are awaiting review." : "No quotation payment receipts have been recorded yet."}</Empty>
+        )}
+      </div>
+      {paymentQuote && <QuotationPaymentDialog quote={paymentQuote} store={store} orgId={orgId} role={role} close={() => setPaymentQuote(null)} reload={reload} />}
+    </Panel>
+  );
+}
+
 function QuotationCostingOverview({
   store,
   reload,
@@ -5121,8 +6189,11 @@ function QuotationCostingOverview({
   const [costedQuery, setCostedQuery] = useState("");
   const [costedMonth, setCostedMonth] = useState(currentMonth);
   const [costedStatus, setCostedStatus] = useState("all");
+  const [costedOfficerFilter, setCostedOfficerFilter] = useState("all");
   const [pdfQuote, setPdfQuote] = useState<Row | null>(null);
   const [pdfWindow, setPdfWindow] = useState<Window | null>(null);
+  const isGeneralManager = memberRole(role);
+  const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
   useEffect(() => {
     let active = true;
     void createClient().auth.getUser().then(({ data }) => {
@@ -5137,16 +6208,29 @@ function QuotationCostingOverview({
       .filter((costing) => text(costing.created_by, "") === currentUserId)
       .map((costing) => text(costing.quotation_id, "")),
   );
+  const allCostedQuotationIds = new Set(
+    store.price_quotation_product_costings.map((costing) => text(costing.quotation_id, "")),
+  );
+  const sourceFor = (quote: Row) =>
+    store.quotations.find((source) => source.id === quote.source_price_quotation_id);
+  const isCostedQuote = (quote: Row) =>
+    isGeneralManager
+      ? Boolean(text(quote.pricing_reviewed_by, "")) || allCostedQuotationIds.has(text(quote.id, ""))
+      : text(quote.pricing_reviewed_by, "") === currentUserId || costedQuotationIds.has(text(quote.id, ""));
   const costedQuotations = store.quotations
     .filter(
       (quote) =>
         text(quote.document_type) === tab &&
-        (text(quote.pricing_reviewed_by, "") === currentUserId ||
-          costedQuotationIds.has(text(quote.id, ""))),
+        isCostedQuote(quote),
     )
     .sort(newestActivityFirst);
-  const sourceFor = (quote: Row) =>
-    store.quotations.find((source) => source.id === quote.source_price_quotation_id);
+  const costedOfficerId = (quote: Row) =>
+    projectOfficerIdForQuote(store, sourceFor(quote) ?? quote);
+  const costedOfficerName = (quote: Row) =>
+    text(
+      store.profiles.find((profile) => profile.id === costedOfficerId(quote))?.full_name,
+      text(quote.representative, "Sales Executive"),
+    );
   const normalizedCostedQuery = costedQuery.trim().toLowerCase();
   const filteredCostedQuotations = costedQuotations.filter((quote) => {
     const source = sourceFor(quote);
@@ -5154,6 +6238,7 @@ function QuotationCostingOverview({
     const costedDate = text(quote.pricing_reviewed_at ?? quote.updated_at);
     if (costedMonth && costedDate.slice(0, 7) !== costedMonth) return false;
     if (costedStatus !== "all" && text(quote.status) !== costedStatus) return false;
+    if (costedOfficerFilter !== "all" && costedOfficerId(quote) !== costedOfficerFilter) return false;
     if (!normalizedCostedQuery) return true;
     return [
       quote.quotation_no,
@@ -5163,6 +6248,7 @@ function QuotationCostingOverview({
       quote.project_name,
       quote.project_types,
       quote.status,
+      costedOfficerName(quote),
     ].some((value) => text(value).toLowerCase().includes(normalizedCostedQuery));
   });
   const openPdf = (quote: Row) => {
@@ -5176,7 +6262,7 @@ function QuotationCostingOverview({
   return (
     <Panel
       title="Quotation Costing Overview"
-      detail="Review Price Quotations and Mockup Quotations that you have costed, including their current approval status."
+      detail={isGeneralManager ? "Review all costed Price Quotations and Mockup Quotations with their current approval status." : "Review Price Quotations and Mockup Quotations that you have costed, including their current approval status."}
       variant="page"
       hideHeading
     >
@@ -5193,7 +6279,7 @@ function QuotationCostingOverview({
               aria-current={tab === value ? "page" : undefined}
               className="app-tab"
             >
-              {label} ({store.quotations.filter((quote) => text(quote.document_type) === value && (text(quote.pricing_reviewed_by, "") === currentUserId || costedQuotationIds.has(text(quote.id, "")))).length})
+              {label} ({store.quotations.filter((quote) => text(quote.document_type) === value && isCostedQuote(quote)).length})
             </button>
           ))}
         </nav>
@@ -5220,6 +6306,21 @@ function QuotationCostingOverview({
               className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px] text-[#202938] outline-none focus:border-[#c43b43]"
             />
           </label>
+          {isGeneralManager && (
+            <select
+              aria-label="Filter by sales staff"
+              value={costedOfficerFilter}
+              onChange={(event) => setCostedOfficerFilter(event.target.value)}
+              className={`min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${costedOfficerFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}
+            >
+              <option value="all">All Sales Staff</option>
+              {projectOfficers.map((officer) => (
+                <option key={officer.id} value={officer.id}>
+                  {officer.name}
+                </option>
+              ))}
+            </select>
+          )}
           <select
             aria-label="Filter by quotation status"
             value={costedStatus}
@@ -5232,8 +6333,8 @@ function QuotationCostingOverview({
             <option value="needs_revision">Needs Revision</option>
             <option value="approved">Approved</option>
           </select>
-          {(costedQuery || costedMonth !== currentMonth() || costedStatus !== "all") && (
-            <Button secondary onClick={() => { setCostedQuery(""); setCostedMonth(currentMonth()); setCostedStatus("all"); }}>
+          {(costedQuery || costedMonth !== currentMonth() || costedStatus !== "all" || costedOfficerFilter !== "all") && (
+            <Button secondary onClick={() => { setCostedQuery(""); setCostedMonth(currentMonth()); setCostedStatus("all"); setCostedOfficerFilter("all"); }}>
               Clear filters
             </Button>
           )}
@@ -5296,6 +6397,7 @@ function ProjectCalendar({
   const [savingProgressId, setSavingProgressId] = useState<string | null>(null);
   const [remarkSchedule, setRemarkSchedule] = useState<Row | null>(null);
   const [remarkDraft, setRemarkDraft] = useState("");
+  const [proofQuote, setProofQuote] = useState<Row | null>(null);
   const schedules = store.project_schedules.slice().sort((a, b) =>
     text(a.start_date, "").localeCompare(text(b.start_date, "")),
   );
@@ -5361,10 +6463,24 @@ function ProjectCalendar({
       .filter((schedule) => text(schedule.status, "approved") !== "rejected")
       .map((schedule) => text(schedule.quotation_id, "")),
   );
+  const approvedMockupsFor = (priceQuotationId: string) =>
+    store.quotations
+      .filter(
+        (quote) =>
+          text(quote.document_type, "") === "mockup_quotation" &&
+          text(quote.status, "") === "approved" &&
+          text(quote.source_price_quotation_id, "") === priceQuotationId,
+      )
+      .sort((left, right) =>
+        text(right.approved_at ?? right.created_at, "").localeCompare(
+          text(left.approved_at ?? left.created_at, ""),
+        ),
+      );
   const approvedQuotes = store.quotations.filter(
     (quote) =>
       text(quote.document_type, "") === "price_quotation" &&
       text(quote.status, "") === "approved" &&
+      approvedMockupsFor(text(quote.id, "")).length > 0 &&
       !scheduledQuoteIds.has(text(quote.id, "")),
   );
   const canCreateSchedule = isProjectOfficerRole(role);
@@ -5390,6 +6506,26 @@ function ProjectCalendar({
         text(schedule.id, "") !== text(excludeScheduleId, "") &&
         text(schedule.status, "pending") !== "rejected",
     );
+  const selectedPriceQuotationId = (values.quotation_id ?? "").split("|")[0];
+  const selectedMockupQuotationId = (values.mockup_quotation_id ?? "").split("|")[0];
+  const selectedPriceQuotation = store.quotations.find(
+    (quote) => text(quote.id, "") === selectedPriceQuotationId,
+  );
+  const selectedMockupQuotation = store.quotations.find(
+    (quote) => text(quote.id, "") === selectedMockupQuotationId,
+  );
+  const priceProofs = store.quotation_signed_proofs.filter(
+    (proof) => text(proof.quotation_id, "") === selectedPriceQuotationId,
+  );
+  const mockupProofs = store.quotation_signed_proofs.filter(
+    (proof) => text(proof.quotation_id, "") === selectedMockupQuotationId,
+  );
+  const selectedPriceProof = priceProofs.filter(
+    (proof) => text(proof.id, "") === (values.price_signed_proof_id ?? "").split("|")[0],
+  );
+  const selectedMockupProof = mockupProofs.filter(
+    (proof) => text(proof.id, "") === (values.mockup_signed_proof_id ?? "").split("|")[0],
+  );
   const scheduleFields: Field[] = [
     {
       key: "quotation_id",
@@ -5400,6 +6536,39 @@ function ProjectCalendar({
         (quote) =>
           `${text(quote.id)}|${text(quote.quotation_no)} - ${text(quote.client_name, "Client")}`,
       ),
+    },
+    {
+      key: "mockup_quotation_id",
+      label: "Approved Mockup Quotation",
+      type: "select",
+      required: true,
+      options: approvedMockupsFor(selectedPriceQuotationId).map(
+        (quote) =>
+          `${text(quote.id)}|${text(quote.quotation_no)} - ${text(quote.client_name, "Client")}`,
+      ),
+      hint: selectedPriceQuotationId
+        ? "Only the approved Mockup Quotation linked to this Price Quotation is available."
+        : "Select an approved Price Quotation first.",
+    },
+    {
+      key: "price_signed_proof_id",
+      label: "Price Quotation signed proof",
+      type: "select",
+      required: true,
+      options: priceProofs.map(
+        (proof) => `${text(proof.id)}|${text(proof.file_name, "Signed proof image")}`,
+      ),
+      hint: "Choose one uploaded signed proof image.",
+    },
+    {
+      key: "mockup_signed_proof_id",
+      label: "Mockup Quotation signed proof",
+      type: "select",
+      required: true,
+      options: mockupProofs.map(
+        (proof) => `${text(proof.id)}|${text(proof.file_name, "Signed proof image")}`,
+      ),
+      hint: "Choose one uploaded signed proof image.",
     },
     { key: "start_date", label: "Start date", type: "date", required: true },
     { key: "due_date", label: "Due Date", type: "date", required: true, hint: "Each Project Type can use a due date once." },
@@ -5458,14 +6627,26 @@ function ProjectCalendar({
       }
       return;
     }
-    const quotationId = values.quotation_id.split("|")[0];
-    if (!quotationId || !values.start_date || !values.due_date)
-      return notice("Select an approved price quotation, then enter the start and due dates.");
+    const quotationId = (values.quotation_id ?? "").split("|")[0];
+    const mockupQuotationId = (values.mockup_quotation_id ?? "").split("|")[0];
+    const priceSignedProofId = (values.price_signed_proof_id ?? "").split("|")[0];
+    const mockupSignedProofId = (values.mockup_signed_proof_id ?? "").split("|")[0];
+    if (!quotationId || !mockupQuotationId || !priceSignedProofId || !mockupSignedProofId || !values.start_date || !values.due_date)
+      return notice("Select both approved quotations, one signed proof for each, and the production dates.");
     if (values.due_date < values.start_date)
       return notice("The deadline cannot be before the start date.");
     const quotation = approvedQuotes.find((quote) => text(quote.id, "") === quotationId);
     if (!quotation)
-      return notice("Select an approved Price Quotation before scheduling the project.");
+      return notice("Select an approved Price Quotation with an approved Mockup Quotation before requesting production.");
+    const mockupQuotation = approvedMockupsFor(quotationId).find(
+      (quote) => text(quote.id, "") === mockupQuotationId,
+    );
+    if (!mockupQuotation)
+      return notice("Select the approved Mockup Quotation linked to the Price Quotation.");
+    if (!priceProofs.some((proof) => text(proof.id, "") === priceSignedProofId))
+      return notice("Select an uploaded signed proof for the Price Quotation.");
+    if (!mockupProofs.some((proof) => text(proof.id, "") === mockupSignedProofId))
+      return notice("Select an uploaded signed proof for the Mockup Quotation.");
     const lead = store.leads.find((item) => item.id === quotation.lead_id);
     const firstItem = store.quotation_items.find((item) => item.quotation_id === quotation.id);
     const projectName = text(quotation.project_name ?? lead?.project_name ?? quotation.quotation_no, "Untitled project");
@@ -5491,11 +6672,22 @@ function ProjectCalendar({
         quantity,
         start_date: values.start_date,
         due_date: values.due_date,
+        mockup_quotation_id: mockupQuotationId,
+        price_signed_proof_id: priceSignedProofId,
+        mockup_signed_proof_id: mockupSignedProofId,
       };
       const { error } = rejectedSchedule?.id
         ? await client.rpc("resubmit_project_schedule", {
             p_schedule_id: rejectedSchedule.id,
-            ...payload,
+            p_project_name: payload.project_name,
+            p_client_name: payload.client_name,
+            p_product_name: payload.product_name,
+            p_quantity: payload.quantity,
+            p_start_date: payload.start_date,
+            p_due_date: payload.due_date,
+            p_mockup_quotation_id: payload.mockup_quotation_id,
+            p_price_signed_proof_id: payload.price_signed_proof_id,
+            p_mockup_signed_proof_id: payload.mockup_signed_proof_id,
           })
         : await client.from("project_schedules").insert({
             organization_id: orgId,
@@ -5504,11 +6696,14 @@ function ProjectCalendar({
             status: "pending",
             assigned_to: data.user.id,
             created_by: data.user.id,
+            mockup_quotation_id: mockupQuotationId,
+            price_signed_proof_id: priceSignedProofId,
+            mockup_signed_proof_id: mockupSignedProofId,
           });
       if (error) throw error;
       setOpen(false);
       await reload();
-      notice(rejectedSchedule ? "Project resubmitted for General Manager approval." : "Project submitted for General Manager approval.");
+      notice(rejectedSchedule ? "Production request resubmitted for General Manager approval." : "Production request submitted for General Manager approval.");
     } catch (error) {
       const message = error && typeof error === "object" && "message" in error && typeof error.message === "string"
         ? error.message
@@ -5667,8 +6862,8 @@ function ProjectCalendar({
       title={isGeneralManager ? "Project oversight" : "Project calendar"}
       detail={
         isGeneralManager
-          ? "Monitor all scheduled projects. Review new schedules, revisions, and completion requests from Submissions Approvals."
-          : "Approved Price Quotations scheduled for production."
+          ? "Monitor all scheduled projects. Review new schedules, revisions, and completion requests from the Approval Center."
+          : "Select approved Price and Mockup Quotations, attach signed proof images, and request production."
       }
       variant="page"
       hideHeading
@@ -5678,11 +6873,11 @@ function ProjectCalendar({
             disabled={!approvedQuotes.length}
             onClick={() => {
               setEditingSchedule(null);
-              setValues({ quotation_id: "", project_name: "", client_name: "", product_name: "", quantity: "", start_date: isoToday(), due_date: "" });
+              setValues({ quotation_id: "", mockup_quotation_id: "", price_signed_proof_id: "", mockup_signed_proof_id: "", start_date: isoToday(), due_date: "" });
               setOpen(true);
             }}
           >
-            <Plus size={14} /> Add project
+            <Plus size={14} /> Request production
           </Button>
         ) : undefined
       }
@@ -5818,6 +7013,8 @@ function ProjectCalendar({
         <Table
           labels={[
             "Quotation No.",
+            "Mockup Quotation",
+            "Signed proofs",
             "Client's Name",
             "Company Name",
             "Start Date",
@@ -5830,14 +7027,22 @@ function ProjectCalendar({
             ...(!isProjectOfficerRole(role) ? ["Sales Executive"] : []),
             "Actions",
           ]}
-          minWidth={isProjectOfficerRole(role) ? 1340 : 1520}
+          minWidth={isProjectOfficerRole(role) ? 1510 : 1690}
           className="modern-page-table"
         >
           {filteredTableSchedules.map((schedule) => {
             const quotation = store.quotations.find((quote) => quote.id === schedule.quotation_id);
+            const mockupQuotation = store.quotations.find((quote) => quote.id === schedule.mockup_quotation_id);
+            const scheduleProofs = store.quotation_signed_proofs.filter(
+              (proof) =>
+                text(proof.id, "") === text(schedule.price_signed_proof_id, "") ||
+                text(proof.id, "") === text(schedule.mockup_signed_proof_id, ""),
+            );
             const lead = store.leads.find((item) => item.id === quotation?.lead_id);
             return <tr key={text(schedule.id)} className="hover:bg-[#fbfcff]">
               <td className="px-4 py-2">{text(quotation?.quotation_no ?? schedule.quotation_no, "—")}</td>
+              <td className="px-4 py-2">{text(mockupQuotation?.quotation_no, "—")}</td>
+              <td className="px-4 py-2"><SignedProofThumbnails label="Signed proofs" proofs={scheduleProofs} compact /></td>
               <td className="px-4 py-2">{text(lead?.contact_name ?? quotation?.client_contact_name ?? schedule.client_name, "—")}</td>
               <td className="px-4 py-2">{text(lead?.client_name ?? quotation?.client_name ?? schedule.client_name, "—")}</td>
               <td className="px-4 py-2">{day(schedule.start_date)}</td>
@@ -6026,7 +7231,7 @@ function ProjectCalendar({
       </section>
       {open && (
         <Dialog
-          title={editingSchedule ? "Request project schedule revision" : "Submit project for approval"}
+          title={editingSchedule ? "Request project schedule revision" : "Request production"}
           fields={editingSchedule ? revisionFields : scheduleFields}
           values={values}
           setValues={setValues}
@@ -6036,15 +7241,75 @@ function ProjectCalendar({
             setEditingSchedule(null);
           }}
           saving={saving}
-          saveLabel={editingSchedule ? "Submit revision" : "Submit for approval"}
+          saveLabel={editingSchedule ? "Submit revision" : "Submit production request"}
           className="max-w-2xl"
           onFieldChange={(key, value, current) => {
-            if (editingSchedule || key !== "quotation_id") return { ...current, [key]: value };
+            if (editingSchedule) return { ...current, [key]: value };
+            if (key === "quotation_id") {
+              const priceQuotationId = value.split("|")[0];
+              const firstProof = store.quotation_signed_proofs.find(
+                (proof) => text(proof.quotation_id, "") === priceQuotationId,
+              );
+              return {
+                ...current,
+                quotation_id: value,
+                mockup_quotation_id: "",
+                price_signed_proof_id: firstProof ? text(firstProof.id, "") : "",
+                mockup_signed_proof_id: "",
+              };
+            }
+            if (key === "mockup_quotation_id") {
+              const mockupQuotationId = value.split("|")[0];
+              const firstProof = store.quotation_signed_proofs.find(
+                (proof) => text(proof.quotation_id, "") === mockupQuotationId,
+              );
+              return {
+                ...current,
+                mockup_quotation_id: value,
+                mockup_signed_proof_id: firstProof ? text(firstProof.id, "") : "",
+              };
+            }
             return {
               ...current,
-              quotation_id: value,
+              [key]: value,
             };
           }}
+        >
+          {!editingSchedule && (
+            <div className="mt-4 grid gap-3 border-t border-[#edf0f5] pt-4">
+              <div>
+                <h3 className="text-[12px] font-semibold text-[#202938]">Signed client proof images</h3>
+                <p className="mt-1 text-[11px] text-[#687386]">Choose one proof image for each approved quotation. Add proof images from the quotation record when needed.</p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <SignedProofThumbnails
+                  label="Price Quotation proof"
+                  proofs={selectedPriceProof.length ? selectedPriceProof : priceProofs}
+                  action={selectedPriceQuotation ? <Button secondary onClick={() => setProofQuote(selectedPriceQuotation)}><Paperclip size={13} /> View / add</Button> : undefined}
+                />
+                <SignedProofThumbnails
+                  label="Mockup Quotation proof"
+                  proofs={selectedMockupProof.length ? selectedMockupProof : mockupProofs}
+                  action={selectedMockupQuotation ? <Button secondary onClick={() => setProofQuote(selectedMockupQuotation)}><Paperclip size={13} /> View / add</Button> : undefined}
+                />
+              </div>
+            </div>
+          )}
+        </Dialog>
+      )}
+      {proofQuote && (
+        <SignedProofDialog
+          quote={proofQuote}
+          store={store}
+          canUpload={
+            isProjectOfficerRole(role) &&
+            [proofQuote.created_by, proofQuote.prepared_by_user_id].some(
+              (userId) => text(userId, "") === currentUserId,
+            )
+          }
+          close={() => setProofQuote(null)}
+          notice={notice}
+          reload={reload}
         />
       )}
     </Panel>
@@ -8188,7 +9453,7 @@ function Quotations({
     }
   };
   const isGeneralManager = memberRole(role);
-  const canFilterByProjectOfficer = role === "admin";
+  const canFilterByProjectOfficer = isGeneralManager;
   const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
   const canGenerateCostingPdf = ["owner", "admin"].includes(role);
   const canDeleteQuote = ["owner", "admin"].includes(role);
@@ -9974,9 +11239,10 @@ function PriceQuotationWorkspace({
     QuotationIllustrationDraft[]
   >([]);
   const [saving, setSaving] = useState(false);
-  const [quotationTab, setQuotationTab] = useState<"draft" | "pending" | "needs_revision" | "approved">(() => isProjectOfficerRole(role) ? "draft" : "pending");
+  const [quotationTab, setQuotationTab] = useState<"draft" | "pending" | "needs_revision" | "approved">(() => isProjectOfficerRole(role) ? "draft" : memberRole(role) ? "approved" : "pending");
   const [quotationQuery, setQuotationQuery] = useState("");
-  const [quotationMonth, setQuotationMonth] = useState(currentMonth);
+  const quotationDefaultMonth = isPricingOfficerRole(role) ? "" : currentMonth();
+  const [quotationMonth, setQuotationMonth] = useState(quotationDefaultMonth);
   const [preparedByFilter, setPreparedByFilter] = useState("all");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [pdfQuote, setPdfQuote] = useState<Row | null>(null);
@@ -9985,6 +11251,7 @@ function PriceQuotationWorkspace({
   const [revisionNoteQuote, setRevisionNoteQuote] = useState<Row | null>(null);
   const [illustrationQuote, setIllustrationQuote] = useState<Row | null>(null);
   const [proofQuote, setProofQuote] = useState<Row | null>(null);
+  const [paymentQuote, setPaymentQuote] = useState<Row | null>(null);
   const [endorseQuote, setEndorseQuote] = useState<Row | null>(null);
   const [endorsementValues, setEndorsementValues] = useState<Record<string, string>>({ recipient_user_id: "", note: "" });
   const [endorsing, setEndorsing] = useState(false);
@@ -10005,14 +11272,14 @@ function PriceQuotationWorkspace({
       (!isCombinedRole ||
         [quote.created_by, quote.prepared_by_user_id, quote.submitted_by].some(
           (userId) => text(userId, "") === currentUserId,
-        )),
+        ) || text(quote.pricing_reviewed_by, "") === currentUserId),
   );
   const preparedByKey = (quote: Row) =>
-    text(quote.prepared_by_user_id ?? quote.created_by ?? quote.representative);
+    projectOfficerIdForQuote(store, quote) || text(quote.representative, "");
   const preparedByName = (quote: Row) =>
     text(
       store.profiles.find(
-        (profile) => profile.id === (quote.prepared_by_user_id ?? quote.created_by),
+        (profile) => profile.id === preparedByKey(quote),
       )?.full_name,
       text(quote.representative, "Sales Executive"),
     );
@@ -10338,10 +11605,10 @@ function PriceQuotationWorkspace({
   };
   return (
     <Panel
-      title={isGeneralManager ? "Price Quotation Review" : "Price Quotations"}
+      title="Price Quotations"
       detail={
         isGeneralManager
-          ? "Review officer-submitted quotations, set commercial terms and pricing, then approve or return them for revision."
+          ? "View approved and historical quotation records. Management approval actions are collected in the Approval Center."
           : "Prepare a quotation from a lead, then submit it to the assigned Sales & Pricing Officer."
       }
       variant="page"
@@ -10366,12 +11633,14 @@ function PriceQuotationWorkspace({
           <label className="relative min-w-0 flex-1 sm:min-w-56 sm:max-w-sm" htmlFor="price-quotation-search"><Search className="pointer-events-none absolute left-3 top-2.5 text-[#8b92a1]" size={15} /><span className="sr-only">Search quotations</span><input id="price-quotation-search" type="search" value={quotationQuery} onChange={(event) => setQuotationQuery(event.target.value)} placeholder="Search quotations" className="w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]" /></label>
           <label className="flex items-center gap-2 text-[12px] text-[#687386]"><span className="whitespace-nowrap">Month</span><input type="month" value={quotationMonth} onClick={(event) => event.currentTarget.showPicker?.()} onChange={(event) => setQuotationMonth(event.target.value)} className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px] text-[#202938] outline-none focus:border-[#c43b43]" /></label>
           {!isProjectOfficerRole(role) && <><label className="sr-only" htmlFor="price-quotation-officer">Sales Officer</label><select id="price-quotation-officer" value={preparedByFilter} onChange={(event) => setPreparedByFilter(event.target.value)} className={`min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${preparedByFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}><option value="all">All Sales Officers</option>{quotationPreparers.map((officer) => <option key={officer.id} value={officer.id}>{officer.name}</option>)}</select></>}
+          {!quotationMonth && <span className="text-[11px] text-[#8b92a1]">All months</span>}
+          {(quotationQuery || quotationMonth !== quotationDefaultMonth || preparedByFilter !== "all") && <Button secondary onClick={() => { setQuotationQuery(""); setQuotationMonth(quotationDefaultMonth); setPreparedByFilter("all"); }}>Clear filters</Button>}
         </div>
       </div>
       {filteredQuotations.length ? (
         <Table
-          labels={isProjectOfficerRole(role) ? ["Quotation", "Client's Name", "Company Name", "Status", "Date", "Actions"] : ["Quotation", "Client's Name", "Company Name", "Prepared by", "Status", "Date", "Actions"]}
-          minWidth={isProjectOfficerRole(role) ? 860 : 1000}
+          labels={isProjectOfficerRole(role) ? ["Quotation", "Client's Name", "Company Name", "Status", "Payment status", "Paid / total", "Date", "Actions"] : ["Quotation", "Client's Name", "Company Name", "Prepared by", "Status", "Payment status", "Paid / total", "Date", "Actions"]}
+          minWidth={isProjectOfficerRole(role) ? 1120 : 1260}
           className="!w-full"
         >
           {filteredQuotations.map((quote) => {
@@ -10396,6 +11665,10 @@ function PriceQuotationWorkspace({
             const proofCount = store.quotation_signed_proofs.filter(
               (proof) => proof.quotation_id === quote.id,
             ).length;
+            const paymentSummary = quotationPaymentSummary(
+              quote,
+              store.quotation_payment_records.filter((record) => record.quotation_id === quote.id),
+            );
             return (
               <tr key={text(quote.id)}>
                 <td className="px-5 py-3">{stackedCell(quote.quotation_no, day(quote.issue_date))}</td>
@@ -10403,6 +11676,8 @@ function PriceQuotationWorkspace({
                 <td className="px-5 py-3">{party.companyName}</td>
                 {!isProjectOfficerRole(role) && <td className="px-5 py-3">{preparedBy}</td>}
                 <td className="px-5 py-3"><div className="flex items-center gap-1.5"><Status value={quote.status} />{priceRevisionRequest && <span className="text-[11px] text-[#a76605]">Revision requested</span>}{text(quote.status) === "needs_revision" && <ActionIcon label="View revision note" tone="amber" confirm={false} onClick={() => setRevisionNoteQuote(quote)}><MessageSquareText size={15} /></ActionIcon>}</div></td>
+                <td className="px-5 py-3"><PaymentStatusBadge status={paymentSummary.status} /></td>
+                <td className="px-5 py-3 text-right">{peso.format(paymentSummary.verified)} / {peso.format(paymentSummary.total)}</td>
                 <td className="px-5 py-3">{text(quote.status) === "approved" ? day(quote.approved_at) : day(quote.submitted_at)}</td>
                 <td className="px-5 py-3"><div className="flex items-center gap-1">
                   {editable && canPrepare && (
@@ -10432,9 +11707,6 @@ function PriceQuotationWorkspace({
                   {isProjectOfficerRole(role) && !isLegacy && text(quote.status) === "approved" && preparedByKey(quote) === currentUserId && (
                     <ActionIcon label="Endorse approved Price Quotation" confirm={false} disabled={endorsing} onClick={() => openEndorsement(quote)}><Send size={15} /></ActionIcon>
                   )}
-                  {isGeneralManager && text(quote.status) === "pending" && (
-                    <ActionIcon label="Review Price Quotation" onClick={() => void reload().then(() => setReviewing(quote))}><FileText size={15} /></ActionIcon>
-                  )}
                   {canDeletePriceQuotation(quote) && (
                     <ActionIcon
                       label="Delete Price Quotation"
@@ -10453,6 +11725,7 @@ function PriceQuotationWorkspace({
                   {illustrationCount > 0 && <ActionIcon label="View quotation illustrations" confirm={false} onClick={() => setIllustrationQuote(quote)}><ImageIcon size={15} /></ActionIcon>}
                   {text(quote.status) === "approved" && <ActionIcon label={isGeneralManager ? "View Internal Costing PDF" : "View Price Quotation PDF"} onClick={() => openPdf(quote)}><FileText size={15} /></ActionIcon>}
                   {text(quote.status) === "approved" && <ActionIcon label={"View signed client proof" + (proofCount ? " (" + proofCount + "/5)" : "")} confirm={false} onClick={() => setProofQuote(quote)}><Paperclip size={15} /></ActionIcon>}
+                  {text(quote.status) === "approved" && <ActionIcon label="View quotation payments" confirm={false} onClick={() => setPaymentQuote(quote)}><ReceiptText size={15} /></ActionIcon>}
                 </div></td>
               </tr>
             );
@@ -10537,6 +11810,7 @@ function PriceQuotationWorkspace({
       {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); notice(message); }} autoExportPdf pdfWindow={pdfWindow} hidden showInternalCosting={isGeneralManager} />}
       {reviewing && <PriceQuotationReview quotation={reviewing} store={store} saving={saving} close={() => setReviewing(null)} notice={notice} reload={reload} />}
       {proofQuote && <SignedProofDialog quote={proofQuote} store={store} canUpload={isProjectOfficerRole(role) && preparedByKey(proofQuote) === currentUserId} close={() => setProofQuote(null)} notice={notice} reload={reload} />}
+      {paymentQuote && <QuotationPaymentDialog quote={paymentQuote} store={store} orgId={orgId} role={role} close={() => setPaymentQuote(null)} reload={reload} />}
     </Panel>
   );
 }
@@ -11580,12 +12854,16 @@ function Submissions({
 }) {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Row | null>(null);
-  const [tab, setTab] = useState<"quotations" | "mockup_quotations" | "price_revisions" | "costings" | "projects" | "leads" | "revisions" | "calendar_projects" | "calendar_revisions" | "calendar_completions">("quotations");
+  const [tab, setTab] = useState<"all" | "quotations" | "mockup_quotations" | "price_revisions" | "costings" | "projects" | "leads" | "revisions" | "calendar_projects" | "calendar_revisions" | "calendar_completions" | "other">("all");
   const [selectedProjectEdit, setSelectedProjectEdit] = useState<Row | null>(null);
   const [selectedLeadChange, setSelectedLeadChange] = useState<Row | null>(null);
   const [selectedPriceQuotation, setSelectedPriceQuotation] = useState<Row | null>(null);
   const [pdfQuote, setPdfQuote] = useState<Row | null>(null);
   const [pdfWindow, setPdfWindow] = useState<Window | null>(null);
+  const [approvalQuery, setApprovalQuery] = useState("");
+  const [approvalMonth, setApprovalMonth] = useState("");
+  const [approvalOfficerFilter, setApprovalOfficerFilter] = useState("all");
+  const approvalOfficers = useMemo(() => projectOfficerOptions(store), [store]);
   const pendingPriceQuotations = store.quotations.filter(
     (quotation) =>
       text(quotation.status) === "pending_gm_approval" &&
@@ -11602,12 +12880,20 @@ function Submissions({
       text(quotation.status) === "pending" &&
       text(quotation.document_type) === "costing_breakdown",
   ).sort(newestActivityFirst);
+  const pendingApprovalRequests = store.approval_requests.filter(
+    (request) =>
+      text(request.status) === "pending" &&
+      text(request.resource_type) !== "quotation",
+  ).sort(newestActivityFirst);
+  const quotationOfficerId = (quotation: Row) => {
+    const source = text(quotation.document_type) === "mockup_quotation"
+      ? store.quotations.find((item) => item.id === quotation.source_price_quotation_id)
+      : quotation;
+    return projectOfficerIdForQuote(store, source ?? quotation);
+  };
   const officerName = (quotation: Row) =>
     text(
-      store.profiles.find(
-        (profile) =>
-          profile.id === (quotation.submitted_by ?? quotation.created_by),
-      )?.full_name,
+      store.profiles.find((profile) => profile.id === quotationOfficerId(quotation))?.full_name,
       "Sales Executive",
     );
   const decide = async (
@@ -11657,6 +12943,21 @@ function Submissions({
           : "Costing Breakdown approved and Price Quotation created."
         : "Returned to the Sales Executive for re-evaluation.",
     );
+    await reload();
+  };
+  const decideApprovalRequest = async (
+    request: Row,
+    decision: "approved" | "rejected",
+  ) => {
+    if (!request.id) return;
+    setSavingId(text(request.id));
+    const { error } = await createClient().rpc("review_approval_request", {
+      p_request_id: request.id,
+      p_decision: decision,
+    });
+    setSavingId(null);
+    if (error) return notice(error.message);
+    notice(decision === "approved" ? "Approval request approved." : "Approval request rejected.");
     await reload();
   };
   const decideProjectEdit = async (
@@ -11759,8 +13060,8 @@ function Submissions({
       if (error) throw error;
       notice(
         decision === "approved"
-          ? "Project approved and added to the production calendar."
-          : "Project schedule rejected.",
+          ? "Production request approved and linked to the production job."
+          : "Production request rejected.",
       );
       await reload();
     } catch (error) {
@@ -11866,6 +13167,138 @@ function Submissions({
         ?.full_name,
       "Sales Executive",
     );
+  const approvalStaffName = (userId: unknown) =>
+    text(
+      store.profiles.find((profile) => profile.id === userId)?.full_name,
+      "Sales Executive",
+    );
+  const approvalSearch = approvalQuery.trim().toLowerCase();
+  const matchesApprovalFilters = (
+    submittedAt: unknown,
+    officerId: unknown,
+    ...values: unknown[]
+  ) => {
+    if (approvalMonth && text(submittedAt, "").slice(0, 7) !== approvalMonth) return false;
+    if (approvalOfficerFilter !== "all" && text(officerId, "") !== approvalOfficerFilter) return false;
+    if (!approvalSearch) return true;
+    return values
+      .concat(approvalStaffName(officerId))
+      .some((value) => text(value, "").toLowerCase().includes(approvalSearch));
+  };
+  const visiblePendingPriceQuotations = pendingPriceQuotations.filter((quotation) => {
+    const party = quotationParty(quotation, store);
+    const officerId = quotationOfficerId(quotation);
+    return matchesApprovalFilters(
+      quotation.submitted_at ?? quotation.created_at,
+      officerId,
+      quotation.quotation_no,
+      quotation.project_name,
+      party.clientName,
+      party.companyName,
+    );
+  });
+  const visiblePendingMockupQuotations = pendingMockupQuotations.filter((quotation) => {
+    const source = store.quotations.find((item) => item.id === quotation.source_price_quotation_id);
+    const party = quotationParty(quotation, store);
+    const officerId = quotationOfficerId(quotation);
+    return matchesApprovalFilters(
+      quotation.submitted_at ?? quotation.created_at,
+      officerId,
+      quotation.quotation_no,
+      source?.quotation_no,
+      quotation.project_name,
+      quotation.project_types,
+      party.clientName,
+      party.companyName,
+    );
+  });
+  const visiblePendingCostings = pendingCostings.filter((quotation) => {
+    const lead = store.leads.find((item) => item.id === quotation.lead_id);
+    const officerId = quotationOfficerId(quotation);
+    return matchesApprovalFilters(
+      quotation.submitted_at ?? quotation.created_at,
+      officerId,
+      quotation.quotation_no,
+      quotation.project_name,
+      quotation.client_name,
+      lead?.client_name,
+      lead?.contact_name,
+    );
+  });
+  const visiblePendingPriceQuotationRevisions = pendingPriceQuotationRevisions.filter((request) => {
+    const quotation = store.quotations.find((item) => item.id === request.quotation_id);
+    return matchesApprovalFilters(
+      request.submitted_at ?? request.created_at,
+      request.submitted_by,
+      quotation?.quotation_no,
+      quotation?.project_name,
+    );
+  });
+  const visiblePendingQuotationRevisions = pendingQuotationRevisions.filter((request) => {
+    const quotation = store.quotations.find((item) => item.id === request.costing_id);
+    return matchesApprovalFilters(
+      request.submitted_at ?? request.created_at,
+      request.submitted_by,
+      quotation?.quotation_no,
+      quotation?.project_name,
+    );
+  });
+  const visiblePendingProjectSchedules = pendingProjectSchedules.filter((schedule) =>
+    matchesApprovalFilters(
+      schedule.created_at,
+      schedule.assigned_to,
+      schedule.quotation_no,
+      schedule.client_name,
+      schedule.product_name,
+      schedule.project_name,
+    ),
+  );
+  const visiblePendingProjectScheduleRevisions = pendingProjectScheduleRevisions.filter((request) => {
+    const schedule = store.project_schedules.find((item) => item.id === request.schedule_id);
+    return matchesApprovalFilters(
+      request.submitted_at ?? request.created_at,
+      request.submitted_by,
+      schedule?.quotation_no,
+      schedule?.client_name,
+      schedule?.product_name,
+    );
+  });
+  const visiblePendingProjectScheduleCompletions = pendingProjectScheduleCompletions.filter((request) => {
+    const schedule = store.project_schedules.find((item) => item.id === request.schedule_id);
+    return matchesApprovalFilters(
+      request.submitted_at ?? request.created_at,
+      request.submitted_by,
+      schedule?.quotation_no,
+      schedule?.client_name,
+      schedule?.product_name,
+    );
+  });
+  const visiblePendingProjectEdits = pendingProjectEdits.filter((request) => {
+    const project = store.leads.find((lead) => lead.id === request.project_id);
+    return matchesApprovalFilters(
+      request.submitted_at ?? request.created_at,
+      request.submitted_by,
+      project?.project_name,
+      project?.client_name,
+    );
+  });
+  const visiblePendingLeadChanges = pendingLeadChanges.filter((request) => {
+    const lead = store.leads.find((item) => item.id === request.lead_id);
+    return matchesApprovalFilters(
+      request.submitted_at ?? request.created_at,
+      request.submitted_by,
+      lead?.project_name,
+      lead?.client_name,
+    );
+  });
+  const visiblePendingApprovalRequests = pendingApprovalRequests.filter((request) =>
+    matchesApprovalFilters(
+      request.submitted_at ?? request.created_at,
+      request.submitted_by,
+      request.resource_type,
+      request.resource_id,
+    ),
+  );
   const openQuotationPdf = (quotation?: Row) => {
     if (!quotation) return notice("The Price Quotation for this project could not be found.");
     const nextWindow = window.open("about:blank", "_blank");
@@ -11874,49 +13307,214 @@ function Submissions({
     setPdfWindow(nextWindow);
     setPdfQuote(quotation);
   };
+  const pendingTotal = visiblePendingPriceQuotations.length + visiblePendingMockupQuotations.length + visiblePendingPriceQuotationRevisions.length + visiblePendingCostings.length + visiblePendingQuotationRevisions.length + visiblePendingProjectSchedules.length + visiblePendingProjectScheduleRevisions.length + visiblePendingProjectScheduleCompletions.length + visiblePendingProjectEdits.length + visiblePendingLeadChanges.length + visiblePendingApprovalRequests.length;
+  const pendingQueueItems: {
+    key: string;
+    category: string;
+    title: string;
+    detail: string;
+    requester: string;
+    submittedAt: unknown;
+    action: ReactNode;
+  }[] = [
+    ...visiblePendingPriceQuotations.map((quotation) => ({
+      key: `price-${text(quotation.id)}`,
+      category: "Price quotation",
+      title: text(quotation.quotation_no, "Price Quotation"),
+      detail: text(quotation.project_name),
+      requester: officerName(quotation),
+      submittedAt: quotation.submitted_at,
+      action: <ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon>,
+    })),
+    ...visiblePendingMockupQuotations.map((quotation) => ({
+      key: `mockup-${text(quotation.id)}`,
+      category: "Mockup quotation",
+      title: text(quotation.quotation_no, "Mockup Quotation"),
+      detail: text(quotation.project_name),
+      requester: officerName(quotation),
+      submittedAt: quotation.submitted_at,
+      action: <ActionIcon label="Review Mockup Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon>,
+    })),
+    ...visiblePendingPriceQuotationRevisions.map((request) => {
+      const quotation = store.quotations.find((item) => item.id === request.quotation_id);
+      return {
+        key: `price-revision-${text(request.id)}`,
+        category: "Price revision",
+        title: text(quotation?.quotation_no, "Price Quotation"),
+        detail: text(quotation?.project_name),
+        requester: projectOfficerName(request),
+        submittedAt: request.submitted_at,
+        action: <span className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></span>,
+      };
+    }),
+    ...visiblePendingCostings.map((quotation) => ({
+      key: `costing-${text(quotation.id)}`,
+      category: "Costing breakdown",
+      title: text(quotation.quotation_no, "Costing Breakdown"),
+      detail: text(quotation.project_name),
+      requester: officerName(quotation),
+      submittedAt: quotation.submitted_at,
+      action: <ActionIcon label="Review costing breakdown" confirm={false} onClick={() => setSelected(quotation)}><FileText size={15} /></ActionIcon>,
+    })),
+    ...visiblePendingQuotationRevisions.map((request) => {
+      const costing = store.quotations.find((item) => item.id === request.costing_id);
+      return {
+        key: `costing-revision-${text(request.id)}`,
+        category: "Costing revision",
+        title: text(costing?.quotation_no, "Costing Breakdown"),
+        detail: text(costing?.project_name),
+        requester: projectOfficerName(request),
+        submittedAt: request.submitted_at,
+        action: <span className="flex items-center gap-1"><ActionIcon label="Approve costing revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject costing revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></span>,
+      };
+    }),
+    ...visiblePendingProjectSchedules.map((schedule) => ({
+      key: `production-${text(schedule.id)}`,
+      category: "Production request",
+      title: text(schedule.quotation_no, "Production request"),
+      detail: text(schedule.client_name, text(schedule.product_name)),
+      requester: scheduleOfficerName(schedule),
+      submittedAt: schedule.created_at,
+      action: <span className="flex items-center gap-1"><ActionIcon label="View Price Quotation PDF" confirm={false} onClick={() => openQuotationPdf(store.quotations.find((item) => item.id === schedule.quotation_id))}><FileText size={15} /></ActionIcon><ActionIcon label="Approve production request" tone="green" loading={savingId === schedule.id} disabled={savingId === schedule.id} onClick={() => void decideProjectSchedule(schedule, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject production request" tone="red" loading={savingId === schedule.id} disabled={savingId === schedule.id} onClick={() => void decideProjectSchedule(schedule, "rejected")}><X size={15} /></ActionIcon></span>,
+    })),
+    ...visiblePendingProjectScheduleRevisions.map((request) => {
+      const schedule = store.project_schedules.find((item) => item.id === request.schedule_id);
+      return {
+        key: `schedule-revision-${text(request.id)}`,
+        category: "Schedule revision",
+        title: text(schedule?.quotation_no, "Project schedule"),
+        detail: text(schedule?.client_name, text(schedule?.product_name)),
+        requester: projectOfficerName(request),
+        submittedAt: request.submitted_at,
+        action: <span className="flex items-center gap-1"><ActionIcon label="Approve schedule revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideProjectScheduleRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject schedule revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideProjectScheduleRevision(request, "rejected")}><X size={15} /></ActionIcon></span>,
+      };
+    }),
+    ...visiblePendingProjectScheduleCompletions.map((request) => {
+      const schedule = store.project_schedules.find((item) => item.id === request.schedule_id);
+      return {
+        key: `completion-${text(request.id)}`,
+        category: "Project completion",
+        title: text(schedule?.quotation_no, "Project completion"),
+        detail: text(schedule?.client_name, text(schedule?.product_name)),
+        requester: projectOfficerName(request),
+        submittedAt: request.submitted_at,
+        action: <span className="flex items-center gap-1"><ActionIcon label="Approve project completion" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideProjectScheduleCompletion(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project completion" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideProjectScheduleCompletion(request, "rejected")}><X size={15} /></ActionIcon></span>,
+      };
+    }),
+    ...visiblePendingProjectEdits.map((request) => {
+      const project = store.leads.find((lead) => lead.id === request.project_id);
+      return {
+        key: `project-edit-${text(request.id)}`,
+        category: "Project change",
+        title: text(project?.project_name, "Project edit"),
+        detail: text(project?.client_name, "Requested project changes"),
+        requester: projectOfficerName(request),
+        submittedAt: request.submitted_at,
+        action: <ActionIcon label="Review project edit" confirm={false} onClick={() => setSelectedProjectEdit(request)}><FileText size={15} /></ActionIcon>,
+      };
+    }),
+    ...visiblePendingLeadChanges.map((request) => {
+      const lead = store.leads.find((item) => item.id === request.lead_id);
+      return {
+        key: `lead-change-${text(request.id)}`,
+        category: "Lead change",
+        title: text(lead?.project_name, "Lead change"),
+        detail: text(lead?.client_name, "Requested lead changes"),
+        requester: projectOfficerName(request),
+        submittedAt: request.submitted_at,
+        action: <ActionIcon label="Review lead change" confirm={false} onClick={() => setSelectedLeadChange(request)}><FileText size={15} /></ActionIcon>,
+      };
+    }),
+    ...visiblePendingApprovalRequests.map((request) => ({
+      key: `approval-${text(request.id)}`,
+      category: "Other approval",
+      title: text(request.resource_type, "Approval request").replaceAll("_", " "),
+      detail: text(request.resource_id),
+      requester: text(store.profiles.find((profile) => profile.id === request.submitted_by)?.full_name, "Team member"),
+      submittedAt: request.submitted_at,
+      action: <span className="flex items-center gap-1"><ActionIcon label="Approve request" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideApprovalRequest(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject request" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideApprovalRequest(request, "rejected")}><X size={15} /></ActionIcon></span>,
+    })),
+  ];
   return (
     <Panel
-      title="General Manager Submissions"
-      detail="Review submitted Price Quotations, project schedules, edits, and Lead change requests."
+      title="Management Approval Center"
+      detail="One queue for management decisions across quotations, production, project changes, leads, and other approval requests."
       hideHeading
     >
       <div className="app-tabs px-5">
-        <button type="button" onClick={() => setTab("quotations")} aria-current={tab === "quotations" ? "page" : undefined} className="app-tab">Price Quotations ({pendingPriceQuotations.length})</button>
-        <button type="button" onClick={() => setTab("mockup_quotations")} aria-current={tab === "mockup_quotations" ? "page" : undefined} className="app-tab">Mockup Quotations ({pendingMockupQuotations.length})</button>
-        <button type="button" onClick={() => setTab("price_revisions")} aria-current={tab === "price_revisions" ? "page" : undefined} className="app-tab">Quotation Revisions ({pendingPriceQuotationRevisions.length})</button>
-        <button type="button" onClick={() => setTab("calendar_projects")} aria-current={tab === "calendar_projects" ? "page" : undefined} className="app-tab">Project Calendar ({pendingProjectSchedules.length})</button>
-        <button type="button" onClick={() => setTab("calendar_revisions")} aria-current={tab === "calendar_revisions" ? "page" : undefined} className="app-tab">Project Revisions ({pendingProjectScheduleRevisions.length})</button>
-        <button type="button" onClick={() => setTab("calendar_completions")} aria-current={tab === "calendar_completions" ? "page" : undefined} className="app-tab">Project Completion ({pendingProjectScheduleCompletions.length})</button>
-        <button type="button" onClick={() => setTab("projects")} aria-current={tab === "projects" ? "page" : undefined} className="app-tab">Project Edits ({pendingProjectEdits.length})</button>
-        <button type="button" onClick={() => setTab("leads")} aria-current={tab === "leads" ? "page" : undefined} className="app-tab">Lead Changes ({pendingLeadChanges.length})</button>
+        <button type="button" onClick={() => setTab("all")} aria-current={tab === "all" ? "page" : undefined} className="app-tab">All Pending ({pendingTotal})</button>
+        <button type="button" onClick={() => setTab("quotations")} aria-current={tab === "quotations" ? "page" : undefined} className="app-tab">Price Quotations ({visiblePendingPriceQuotations.length})</button>
+        <button type="button" onClick={() => setTab("mockup_quotations")} aria-current={tab === "mockup_quotations" ? "page" : undefined} className="app-tab">Mockup Quotations ({visiblePendingMockupQuotations.length})</button>
+        <button type="button" onClick={() => setTab("price_revisions")} aria-current={tab === "price_revisions" ? "page" : undefined} className="app-tab">Quotation Revisions ({visiblePendingPriceQuotationRevisions.length})</button>
+        <button type="button" onClick={() => setTab("costings")} aria-current={tab === "costings" ? "page" : undefined} className="app-tab">Costing Breakdowns ({visiblePendingCostings.length})</button>
+        <button type="button" onClick={() => setTab("revisions")} aria-current={tab === "revisions" ? "page" : undefined} className="app-tab">Costing Revisions ({visiblePendingQuotationRevisions.length})</button>
+        <button type="button" onClick={() => setTab("calendar_projects")} aria-current={tab === "calendar_projects" ? "page" : undefined} className="app-tab">Production Requests ({visiblePendingProjectSchedules.length})</button>
+        <button type="button" onClick={() => setTab("calendar_revisions")} aria-current={tab === "calendar_revisions" ? "page" : undefined} className="app-tab">Project Revisions ({visiblePendingProjectScheduleRevisions.length})</button>
+        <button type="button" onClick={() => setTab("calendar_completions")} aria-current={tab === "calendar_completions" ? "page" : undefined} className="app-tab">Project Completion ({visiblePendingProjectScheduleCompletions.length})</button>
+        <button type="button" onClick={() => setTab("projects")} aria-current={tab === "projects" ? "page" : undefined} className="app-tab">Project Edits ({visiblePendingProjectEdits.length})</button>
+        <button type="button" onClick={() => setTab("leads")} aria-current={tab === "leads" ? "page" : undefined} className="app-tab">Lead Changes ({visiblePendingLeadChanges.length})</button>
+        <button type="button" onClick={() => setTab("other")} aria-current={tab === "other" ? "page" : undefined} className="app-tab">Other ({visiblePendingApprovalRequests.length})</button>
       </div>
-      {tab === "quotations" && (pendingPriceQuotations.length ? (
+      <div className="px-5">
+        <WorkspaceListFilters
+          query={approvalQuery}
+          onQueryChange={setApprovalQuery}
+          queryPlaceholder="Search quotation, client, project, or requester"
+          month={approvalMonth}
+          onMonthChange={setApprovalMonth}
+          monthLabel="Submission month"
+          showOfficer
+          officerFilter={approvalOfficerFilter}
+          onOfficerChange={setApprovalOfficerFilter}
+          officerOptions={approvalOfficers}
+          onClear={() => {
+            setApprovalQuery("");
+            setApprovalMonth("");
+            setApprovalOfficerFilter("all");
+          }}
+          hasFilters={Boolean(approvalQuery || approvalMonth || approvalOfficerFilter !== "all")}
+        />
+      </div>
+      {tab === "all" && (pendingQueueItems.length ? (
+        <Table labels={["Category", "Request", "Requester", "Submitted", "Review"]} minWidth={900}>
+          {pendingQueueItems.sort((left, right) => text(right.submittedAt).localeCompare(text(left.submittedAt))).map((item) => (
+            <tr key={item.key}>
+              <td className="px-5 py-3"><Status value={item.category} /></td>
+              <td className="px-5 py-3">{stackedCell(item.title, item.detail)}</td>
+              <td className="px-5 py-3">{item.requester}</td>
+              <td className="px-5 py-3">{day(item.submittedAt)}</td>
+              <td className="px-5 py-3"><div className="flex items-center gap-1">{item.action}</div></td>
+            </tr>
+          ))}
+        </Table>
+      ) : <Empty>No management approvals are awaiting review.</Empty>)}
+      {tab === "quotations" && (visiblePendingPriceQuotations.length ? (
         <Table labels={["Price Quotation", "Client's Name", "Company Name", "Prepared by", "Submitted", "Review"]} minWidth={860}>
-          {pendingPriceQuotations.map((quotation) => {
+          {visiblePendingPriceQuotations.map((quotation) => {
             const party = quotationParty(quotation, store);
             return <tr key={text(quotation.id)}><td className="px-5 py-3">{stackedCell(quotation.quotation_no, quotation.project_name)}</td><td className="px-5 py-3 font-medium">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3"><ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>;
           })}
         </Table>
       ) : <Empty>No Price Quotations are awaiting review.</Empty>)}
-      {tab === "mockup_quotations" && (pendingMockupQuotations.length ? (
+      {tab === "mockup_quotations" && (visiblePendingMockupQuotations.length ? (
         <Table labels={["Mockup Quotation", "Source Price Quotation", "Client's Name", "Project Type", "Prepared by", "Submitted", "Review"]} minWidth={1120}>
-          {pendingMockupQuotations.map((quotation) => {
+          {visiblePendingMockupQuotations.map((quotation) => {
             const source = store.quotations.find((item) => item.id === quotation.source_price_quotation_id);
             const party = quotationParty(quotation, store);
             return <tr key={text(quotation.id)}><td className="px-5 py-3">{stackedCell(quotation.quotation_no, quotation.project_name)}</td><td className="px-5 py-3 font-medium">{source?.id ? <button type="button" onClick={() => openQuotationPdf(source)} className="text-[#1769e8] underline decoration-[#b9d2fb] underline-offset-2 hover:text-[#1256bf]">{text(source.quotation_no)}</button> : text(quotation.source_price_quotation_id, "—")}</td><td className="px-5 py-3 font-medium">{stackedCell(party.clientName, party.companyName)}</td><td className="px-5 py-3">{text(quotation.project_types)}</td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3"><ActionIcon label="Review Mockup Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>;
           })}
         </Table>
       ) : <Empty>No Mockup Quotations are awaiting General Manager review.</Empty>)}
-      {tab === "price_revisions" && (pendingPriceQuotationRevisions.length ? (
+      {tab === "price_revisions" && (visiblePendingPriceQuotationRevisions.length ? (
         <Table labels={["Price Quotation", "Client's Name", "Company Name", "Sales Executive", "Requested", "Review"]} minWidth={860}>
-          {pendingPriceQuotationRevisions.map((request) => {
+          {visiblePendingPriceQuotationRevisions.map((request) => {
             const quotation = store.quotations.find((item) => item.id === request.quotation_id);
             const party = quotation ? quotationParty(quotation, store) : { clientName: "-", companyName: "-" };
             return <tr key={text(request.id)}><td className="px-5 py-3">{stackedCell(text(quotation?.quotation_no, "Price Quotation"), quotation?.project_name)}</td><td className="px-5 py-3">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{projectOfficerName(request)}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>;
           })}
         </Table>
       ) : <Empty>No Price Quotation revisions are awaiting review.</Empty>)}
-      {tab === "costings" && (pendingCostings.length ? (
+      {tab === "costings" && (visiblePendingCostings.length ? (
         <Table
           labels={[
             "Costing Breakdown",
@@ -11927,7 +13525,7 @@ function Submissions({
             "Review",
           ]}
         >
-          {pendingCostings.map((quotation) => {
+          {visiblePendingCostings.map((quotation) => {
             const lead = store.leads.find(
               (item) => item.id === quotation.lead_id,
             );
@@ -11971,9 +13569,9 @@ function Submissions({
           })}
         </Table>
       ) : <Empty>No costing breakdowns are awaiting review.</Empty>)}
-      {tab === "revisions" && (pendingQuotationRevisions.length ? (
+      {tab === "revisions" && (visiblePendingQuotationRevisions.length ? (
         <Table labels={["Costing Breakdown", "Sales Executive", "Requested", "Review"]}>
-          {pendingQuotationRevisions.map((request) => {
+          {visiblePendingQuotationRevisions.map((request) => {
             const costing = store.quotations.find((item) => item.id === request.costing_id);
             return <tr key={text(request.id)}>
               <td className="px-5 py-3">{stackedCell(text(costing?.quotation_no, "Costing Breakdown"), costing?.project_name)}</td>
@@ -11984,14 +13582,22 @@ function Submissions({
           })}
         </Table>
       ) : <Empty>No Costing Breakdown revisions are awaiting review.</Empty>)}
-      {tab === "calendar_projects" && (pendingProjectSchedules.length ? (
-        <Table labels={["Assigned Sales Executive", "Quotation Code", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1140}>
-          {pendingProjectSchedules.map((schedule) => {
+      {tab === "calendar_projects" && (visiblePendingProjectSchedules.length ? (
+        <Table labels={["Assigned Sales Executive", "Price Quotation", "Mockup Quotation", "Signed proofs", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1500}>
+          {visiblePendingProjectSchedules.map((schedule) => {
             const quotation = store.quotations.find((item) => item.id === schedule.quotation_id);
+            const mockupQuotation = store.quotations.find((item) => item.id === schedule.mockup_quotation_id);
+            const scheduleProofs = store.quotation_signed_proofs.filter(
+              (proof) =>
+                text(proof.id, "") === text(schedule.price_signed_proof_id, "") ||
+                text(proof.id, "") === text(schedule.mockup_signed_proof_id, ""),
+            );
             return (
             <tr key={text(schedule.id)}>
               <td className="px-5 py-3">{scheduleOfficerName(schedule)}</td>
               <td className="px-5 py-3">{text(schedule.quotation_no)}</td>
+              <td className="px-5 py-3">{text(mockupQuotation?.quotation_no, "—")}</td>
+              <td className="px-5 py-3"><SignedProofThumbnails label="Signed proofs" proofs={scheduleProofs} compact /></td>
               <td className="px-5 py-3">{text(schedule.client_name)}</td>
               <td className="px-5 py-3">{n(schedule.quantity).toLocaleString()}</td>
               <td className="px-5 py-3">{text(schedule.product_name)}</td>
@@ -12003,10 +13609,10 @@ function Submissions({
             );
           })}
         </Table>
-      ) : <Empty>No Project Calendar submissions are awaiting review.</Empty>)}
-      {tab === "calendar_revisions" && (pendingProjectScheduleRevisions.length ? (
+      ) : <Empty>No production requests are awaiting review.</Empty>)}
+      {tab === "calendar_revisions" && (visiblePendingProjectScheduleRevisions.length ? (
         <Table labels={["Assigned Sales Executive", "Quotation Code", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1140}>
-          {pendingProjectScheduleRevisions.map((request) => {
+          {visiblePendingProjectScheduleRevisions.map((request) => {
             const schedule = store.project_schedules.find(
               (item) => item.id === request.schedule_id,
             );
@@ -12026,9 +13632,9 @@ function Submissions({
           })}
         </Table>
       ) : <Empty>No Project Calendar revisions are awaiting review.</Empty>)}
-      {tab === "calendar_completions" && (pendingProjectScheduleCompletions.length ? (
+      {tab === "calendar_completions" && (visiblePendingProjectScheduleCompletions.length ? (
         <Table labels={["Assigned Sales Executive", "Quotation Code", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1140}>
-          {pendingProjectScheduleCompletions.map((request) => {
+          {visiblePendingProjectScheduleCompletions.map((request) => {
             const schedule = store.project_schedules.find(
               (item) => item.id === request.schedule_id,
             );
@@ -12048,9 +13654,9 @@ function Submissions({
           })}
         </Table>
       ) : <Empty>No Project Calendar completion requests are awaiting review.</Empty>)}
-      {tab === "projects" && (pendingProjectEdits.length ? (
+      {tab === "projects" && (visiblePendingProjectEdits.length ? (
         <Table labels={["Project", "Sales Executive", "Submitted", "Requested changes", "Review"]}>
-          {pendingProjectEdits.map((request) => {
+          {visiblePendingProjectEdits.map((request) => {
             const project = store.leads.find((lead) => lead.id === request.project_id);
             const changes = request.proposed_changes && typeof request.proposed_changes === "object" ? Object.keys(request.proposed_changes as Record<string, unknown>) : [];
             return <tr key={text(request.id)}>
@@ -12063,9 +13669,9 @@ function Submissions({
           })}
         </Table>
       ) : <Empty>No project edits are awaiting review.</Empty>)}
-      {tab === "leads" && (pendingLeadChanges.length ? (
+      {tab === "leads" && (visiblePendingLeadChanges.length ? (
         <Table labels={["Lead", "Sales Executive", "Requested", "Change", "Review"]}>
-          {pendingLeadChanges.map((request) => {
+          {visiblePendingLeadChanges.map((request) => {
             const lead = store.leads.find((item) => item.id === request.lead_id);
             const changes = request.proposed_changes && typeof request.proposed_changes === "object" ? Object.keys(request.proposed_changes as Record<string, unknown>) : [];
             const isDeletion = text(request.change_type, "") === "delete";
@@ -12085,6 +13691,11 @@ function Submissions({
           })}
         </Table>
       ) : <Empty>No lead changes are awaiting review.</Empty>)}
+      {tab === "other" && (visiblePendingApprovalRequests.length ? (
+        <Table labels={["Request", "Submitted by", "Submitted", "Review"]} minWidth={760}>
+          {visiblePendingApprovalRequests.map((request) => <tr key={text(request.id)}><td className="px-5 py-3"><b className="capitalize">{text(request.resource_type, "Approval request").replaceAll("_", " ")}</b><small>{text(request.resource_id)}</small></td><td className="px-5 py-3">{text(store.profiles.find((profile) => profile.id === request.submitted_by)?.full_name, "Team member")}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve request" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideApprovalRequest(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject request" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideApprovalRequest(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>)}
+        </Table>
+      ) : <Empty>No other approval requests are awaiting review.</Empty>)}
       {selected && (
         <GeneralManagerCostingReview
           quotation={selected}
@@ -12218,14 +13829,29 @@ function Production({
               "Job",
               "Customer / due",
               "Stage",
+              "Payment",
               "Material use",
+              "Signed proofs",
               "Actions",
             ]}
+            minWidth={920}
           >
             {store.production_jobs.map((job) => {
               const used = store.production_material_usage.filter(
                 (u) => u.production_job_id === job.id,
               ).length;
+              const proofs = store.quotation_signed_proofs.filter(
+                (proof) =>
+                  text(proof.id, "") === text(job.price_signed_proof_id, "") ||
+                  text(proof.id, "") === text(job.mockup_signed_proof_id, ""),
+              );
+              const jobQuote = store.quotations.find((quote) => quote.id === job.quotation_id);
+              const paymentSummary = jobQuote
+                ? quotationPaymentSummary(
+                    jobQuote,
+                    store.quotation_payment_records.filter((record) => record.quotation_id === jobQuote.id),
+                  )
+                : null;
               const late =
                 job.due_date &&
                 new Date(String(job.due_date)) < new Date() &&
@@ -12250,9 +13876,11 @@ function Production({
                   <td className="px-5 py-3">
                     <Status value={job.status} />
                   </td>
+                  <td className="px-5 py-3">{paymentSummary ? <div><PaymentStatusBadge status={paymentSummary.status} /><small>{peso.format(paymentSummary.verified)} / {peso.format(paymentSummary.total)}</small></div> : "-"}</td>
                   <td className="px-5 py-3">
                     {used} line{used === 1 ? "" : "s"}
                   </td>
+                  <td className="px-5 py-3"><SignedProofThumbnails label="Signed proofs" proofs={proofs} compact /></td>
                   <td className="px-5 py-3">
                     {canUpdateJob ? (
                       <select
@@ -14514,7 +16142,7 @@ function Approvals({
   const decide = async (r: Row, status: "approved" | "rejected") => {
     if (r.resource_type === "quotation") {
       return notice(
-            "Review submitted Price Quotations from General Manager Submissions.",
+            "Review submitted Price Quotations from the Management Approval Center.",
       );
     }
     const client = createClient();
@@ -14550,7 +16178,7 @@ function Approvals({
               <td className="px-5 py-3">
                 {admin && r.status === "pending" ? r.resource_type === "quotation" ? (
                   <span className="text-[12px] text-[#687386]">
-                    Review in General Manager Submissions
+                    Review in the Management Approval Center
                   </span>
                 ) : (
                   <>
@@ -14592,18 +16220,204 @@ function Approvals({
   );
 }
 
-function CommissionsView({ role }: { role: string }) {
+function CommissionsView({ store, role }: { store: Store; role: string }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    void createClient().rpc("sales_project_officer_commissions").then(({ data }) => {
+  const [loadError, setLoadError] = useState("");
+  const [commissionQuery, setCommissionQuery] = useState("");
+  const [commissionMonth, setCommissionMonth] = useState("");
+  const [commissionOfficerFilter, setCommissionOfficerFilter] = useState("all");
+  const [payoutRow, setPayoutRow] = useState<Row | null>(null);
+  const [payoutValues, setPayoutValues] = useState<Record<string, string>>({});
+  const [payoutSaving, setPayoutSaving] = useState(false);
+  const [payoutError, setPayoutError] = useState("");
+  const isGeneralManager = memberRole(role);
+  const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
+  const loadCommissions = useCallback(async () => {
+    setLoading(true);
+    setLoadError("");
+    const { data, error } = await createClient().rpc("sales_project_officer_commissions");
+    if (error) {
+      setRows([]);
+      setLoadError(error.message);
+    } else {
       setRows((data ?? []) as Row[]);
-      setLoading(false);
-    });
+    }
+    setLoading(false);
   }, []);
-  const paid = rows.reduce((sum, row) => sum + n(row.paid_amount), 0);
-  const earned = rows.reduce((sum, row) => sum + n(row.earned_commission), 0);
-  return <div className="space-y-5"><Panel title={isProjectOfficerRole(role) ? "My commissions" : "Sales Executive commissions"} detail="Commission is earned only from actual customer payments: first ₱400,000 at 3%, then the balance at 5%."><div className="grid gap-3 p-4 sm:grid-cols-2"><div className="rounded-lg bg-[#f8fbff] p-3 text-[12px]"><p className="text-[#687386]">Actual collections</p><p className="mt-1 text-lg font-semibold">{peso.format(paid)}</p></div><div className="rounded-lg bg-[#eff7f1] p-3 text-[12px]"><p className="text-[#687386]">Commission earned</p><p className="mt-1 text-lg font-semibold text-[#176b40]">{peso.format(earned)}</p></div></div>{loading ? <Empty>Loading commissions…</Empty> : rows.length ? <Table labels={isProjectOfficerRole(role) ? ["Quotation", "Client", "Paid to date", "Projected", "Earned"] : ["Officer", "Quotation", "Client", "Paid to date", "Earned"]}>{rows.map((row) => <tr key={text(row.quotation_id)}>{!isProjectOfficerRole(role) && <td className="px-4 py-3">{text(row.officer_user_id)}</td>}<td className="px-4 py-3">{stackedCell(row.quotation_no, row.project_name)}</td><td className="px-4 py-3">{text(row.client_name)}</td><td className="px-4 py-3 text-right">{peso.format(n(row.paid_amount))}</td>{!isProjectOfficerRole(role) && <td className="px-4 py-3 text-right">{peso.format(n(row.projected_commission))}</td>}<td className="px-4 py-3 text-right font-semibold">{peso.format(n(row.earned_commission))}</td></tr>)}</Table> : <Empty>No approved quotations with commission eligibility yet.</Empty>}</Panel></div>;
+  useEffect(() => {
+    void loadCommissions();
+  }, [loadCommissions]);
+  const quoteFor = (row: Row) => store.quotations.find((quote) => quote.id === row.quotation_id);
+  const officerName = (row: Row) =>
+    text(
+      store.profiles.find((profile) => profile.id === row.officer_user_id)?.full_name,
+      "Sales staff",
+    );
+  const normalizedQuery = commissionQuery.trim().toLowerCase();
+  const filteredRows = rows.filter((row) => {
+    const quotation = quoteFor(row);
+    const commissionDate = text(
+      row.last_verified_at ?? quotation?.approved_at ?? quotation?.issue_date ?? quotation?.created_at,
+      "",
+    );
+    if (commissionMonth && commissionDate.slice(0, 7) !== commissionMonth) return false;
+    if (isGeneralManager && commissionOfficerFilter !== "all" && text(row.officer_user_id, "") !== commissionOfficerFilter) return false;
+    if (!normalizedQuery) return true;
+    return [
+      row.quotation_no,
+      row.project_name,
+      row.client_name,
+      officerName(row),
+    ].some((value) => text(value, "").toLowerCase().includes(normalizedQuery));
+  });
+  const paid = filteredRows.reduce((sum, row) => sum + n(row.paid_amount), 0);
+  const earned = filteredRows.reduce((sum, row) => sum + n(row.earned_commission), 0);
+  const paidOut = filteredRows.reduce((sum, row) => sum + n(row.paid_out_commission), 0);
+  const payable = filteredRows.reduce((sum, row) => sum + n(row.payable_commission), 0);
+  const openPayout = (row: Row) => {
+    setPayoutError("");
+    setPayoutValues({
+      amount: n(row.payable_commission).toFixed(2),
+      reference_no: "",
+      notes: "",
+    });
+    setPayoutRow(row);
+  };
+  const savePayout = async () => {
+    if (!payoutRow) return;
+    const amount = n(payoutValues.amount);
+    const payableAmount = n(payoutRow.payable_commission);
+    if (amount <= 0) {
+      setPayoutError("Enter a payout amount greater than zero.");
+      return;
+    }
+    if (amount > payableAmount) {
+      setPayoutError(`Payout cannot exceed the earned unpaid commission of ${peso.format(payableAmount)}.`);
+      return;
+    }
+    setPayoutSaving(true);
+    setPayoutError("");
+    try {
+      const { error } = await createClient().rpc("mark_sales_commission_paid", {
+        p_quotation_id: payoutRow.quotation_id,
+        p_amount: amount,
+        p_reference_no: payoutValues.reference_no.trim() || null,
+        p_notes: payoutValues.notes.trim() || null,
+      });
+      if (error) throw error;
+      setPayoutRow(null);
+      await loadCommissions();
+    } catch (error) {
+      setPayoutError(error instanceof Error ? error.message : "Commission payout could not be saved.");
+    } finally {
+      setPayoutSaving(false);
+    }
+  };
+  return (
+    <div className="space-y-5">
+      <Panel
+        title={isProjectOfficerRole(role) ? "My commissions" : "Sales commissions"}
+        detail="Commission uses the VAT-exclusive quotation value. It earns from verified client receipts: first PHP 300,000 at 3%, then the balance at 5%."
+      >
+        <div className="grid gap-2 p-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px]"><p className="text-[#687386]">Verified client payments</p><p className="mt-1 text-[16px] font-semibold text-[#202938]">{peso.format(paid)}</p></div>
+          <div className="rounded-[8px] border border-[#b7dfc5] bg-[#f1fbf4] p-3 text-[12px]"><p className="text-[#687386]">Commission earned</p><p className="mt-1 text-[16px] font-semibold text-[#176b40]">{peso.format(earned)}</p></div>
+          <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px]"><p className="text-[#687386]">Commission paid out</p><p className="mt-1 text-[16px] font-semibold text-[#202938]">{peso.format(paidOut)}</p></div>
+          <div className="rounded-[8px] border border-[#f1d294] bg-[#fff8e9] p-3 text-[12px]"><p className="text-[#687386]">Commission payable</p><p className="mt-1 text-[16px] font-semibold text-[#a76605]">{peso.format(payable)}</p></div>
+        </div>
+        <div className="px-4 sm:px-5">
+          <WorkspaceListFilters
+            query={commissionQuery}
+            onQueryChange={setCommissionQuery}
+            queryPlaceholder="Search quotation, client, or staff"
+            month={commissionMonth}
+            onMonthChange={setCommissionMonth}
+            monthLabel="Commission month"
+            showOfficer={isGeneralManager}
+            officerFilter={commissionOfficerFilter}
+            onOfficerChange={setCommissionOfficerFilter}
+            officerOptions={projectOfficers}
+            onClear={() => {
+              setCommissionQuery("");
+              setCommissionMonth("");
+              setCommissionOfficerFilter("all");
+            }}
+            hasFilters={Boolean(commissionQuery || commissionMonth || commissionOfficerFilter !== "all")}
+          />
+        </div>
+        {loading ? (
+          <Empty>Loading commissions...</Empty>
+        ) : loadError ? (
+          <Empty>Commission data could not be loaded: {loadError}</Empty>
+        ) : filteredRows.length ? (
+          <Table
+            labels={isGeneralManager
+              ? ["Officer", "Quotation", "Client", "Base VAT excl.", "Client paid", "Payment", "Projected", "Earned", "Paid out", "Payable", "Payout", "Actions"]
+              : ["Quotation", "Client", "Base VAT excl.", "Client paid", "Payment", "Projected", "Earned", "Paid out", "Payable", "Payout"]}
+            minWidth={isGeneralManager ? 1540 : 1220}
+          >
+            {filteredRows.map((row) => (
+              <tr key={text(row.quotation_id)}>
+                {isGeneralManager && <td className="px-4 py-3 font-medium">{officerName(row)}</td>}
+                <td className="px-4 py-3">{stackedCell(row.quotation_no, row.project_name)}</td>
+                <td className="px-4 py-3">{text(row.client_name)}</td>
+                <td className="px-4 py-3 text-right">{peso.format(n(row.quoted_amount))}</td>
+                <td className="px-4 py-3 text-right">{peso.format(n(row.paid_amount))}</td>
+                <td className="px-4 py-3"><Status value={text(row.payment_status)} /></td>
+                <td className="px-4 py-3 text-right">{peso.format(n(row.projected_commission))}</td>
+                <td className="px-4 py-3 text-right font-semibold text-[var(--color-success)]">{peso.format(n(row.earned_commission))}</td>
+                <td className="px-4 py-3 text-right">{peso.format(n(row.paid_out_commission))}</td>
+                <td className="px-4 py-3 text-right font-semibold text-[var(--color-success)]">{peso.format(n(row.payable_commission))}</td>
+                <td className="px-4 py-3"><Status value={text(row.payout_status)} /></td>
+                {isGeneralManager && (
+                  <td className="px-4 py-3">
+                    <Button
+                      tone="green"
+                      compact
+                      onClick={() => openPayout(row)}
+                      disabled={n(row.payable_commission) <= 0}
+                    >
+                      <PhilippinePeso className="h-3.5 w-3.5" aria-hidden="true" />
+                      Pay
+                    </Button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </Table>
+        ) : (
+          <Empty>{rows.length ? "No commissions match the selected filters." : "No approved quotations with commission eligibility yet."}</Empty>
+        )}
+      </Panel>
+
+      {isGeneralManager && payoutRow && (
+        <Dialog
+          title="Record commission payout"
+          fields={[
+            { key: "amount", label: "Payout amount", type: "number", required: true, hint: `Earned unpaid commission: ${peso.format(n(payoutRow.payable_commission))}` },
+            { key: "reference_no", label: "Reference number", type: "text", placeholder: "Optional payout reference" },
+            { key: "notes", label: "Notes", type: "textarea", placeholder: "Optional payout note" },
+          ]}
+          values={payoutValues}
+          setValues={setPayoutValues}
+          save={() => void savePayout()}
+          close={() => {
+            if (payoutSaving) return;
+            setPayoutError("");
+            setPayoutRow(null);
+          }}
+          saving={payoutSaving}
+          saveLabel="Record payout"
+        >
+          <p className="mb-3 text-sm text-[var(--color-text-muted)]">
+            This records company payment to {officerName(payoutRow)}. It does not change the client payment receipt.
+          </p>
+          {payoutError && <p role="alert" className="mb-3 text-sm text-[var(--color-danger)]">{payoutError}</p>}
+        </Dialog>
+      )}
+    </div>
+  );
 }
 
 function SettingsView({
@@ -14970,6 +16784,8 @@ export function HuswellWorkspace({
   const [active, setActive] = useState<View>(
     initialView === "Costing Breakdown"
       ? "Price Quotations"
+      : initialView === "Submissions"
+        ? "Approvals"
       : initialView ?? (role === "accountant" ? "Finance" : "Dashboard"),
   );
   const [leadMode, setLeadMode] = useState<LeadWorkspaceMode>("leads");
@@ -14983,6 +16799,7 @@ export function HuswellWorkspace({
   const [signingOut, setSigningOut] = useState(false);
   const [navigationDate, setNavigationDate] = useState(() => new Date());
   const client = useMemo(() => createClient(), []);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const workspaceRefreshTimer = useRef<number | null>(null);
   const tableRequestIds = useRef(new Map<TableName, number>());
   const loadedTables = useRef(new Set<TableName>());
@@ -14997,6 +16814,10 @@ export function HuswellWorkspace({
   }, []);
   const navigate = useCallback((view: View) => {
     if (view === "Costing Breakdown") return selectLeadWorkspaceMode("quotation");
+    if (view === "Submissions") {
+      setActive("Approvals");
+      return;
+    }
     if (view === "Price Quotations") {
       setLeadMode("quotation");
       setActive("Price Quotations");
@@ -15145,8 +16966,9 @@ export function HuswellWorkspace({
       "Projects",
       "Mockups",
       "Price Quotations",
+      "Approvals",
+      "Payment Monitoring",
       "Finance",
-      "Submissions",
       "Policy",
       "Settings",
       "Commissions",
@@ -15157,8 +16979,9 @@ export function HuswellWorkspace({
       "Projects",
       "Mockups",
       "Price Quotations",
+      "Approvals",
+      "Payment Monitoring",
       "Finance",
-      "Submissions",
       "Policy",
       "Settings",
       "Commissions",
@@ -15169,8 +16992,9 @@ export function HuswellWorkspace({
       "Projects",
       "Mockups",
       "Price Quotations",
+      "Approvals",
+      "Payment Monitoring",
       "Finance",
-      "Submissions",
       "Policy",
       "Settings",
       "Commissions",
@@ -15192,6 +17016,7 @@ export function HuswellWorkspace({
       "Price Quotations",
       "Price Quotation Review",
       "Quotation Costing Overview",
+      "Payment Reviews",
       "Policy",
       "Commissions",
     ],
@@ -15214,34 +17039,136 @@ export function HuswellWorkspace({
     ],
   };
   const isManagementRole = memberRole(role);
+  const pendingManagementApprovalCount = isManagementRole
+    ? store.quotations.filter(
+        (quotation) =>
+          text(quotation.status) === "pending_gm_approval" &&
+          text(quotation.document_type) !== "costing_breakdown",
+      ).length
+      + store.quotations.filter(
+        (quotation) => text(quotation.status) === "pending" && text(quotation.document_type) === "costing_breakdown",
+      ).length
+      + store.price_quotation_revision_requests.filter((request) => text(request.status) === "pending").length
+      + store.quotation_revision_requests.filter((request) => text(request.status) === "pending").length
+      + store.project_schedules.filter((schedule) => text(schedule.status) === "pending").length
+      + store.project_schedule_revision_requests.filter((request) => text(request.status) === "pending").length
+      + store.project_schedule_completion_requests.filter((request) => text(request.status) === "pending").length
+      + store.project_edit_requests.filter((request) => text(request.status) === "pending").length
+      + store.lead_change_requests.filter((request) => text(request.status) === "pending").length
+      + store.approval_requests.filter((request) => text(request.status) === "pending" && text(request.resource_type) !== "quotation").length
+    : 0;
+  const assignedProjectTypes = new Set(
+    store.pricing_officer_project_types
+      .filter((assignment) => text(assignment.pricing_officer_user_id, "") === currentUserId)
+      .map((assignment) => pricingProjectTypeKey(assignment.project_type)),
+  );
+  const pendingPricingReviewCount = isPricingOfficerRole(role)
+    ? store.quotations.filter(
+        (quotation) =>
+          text(quotation.status) === "pending" &&
+          text(quotation.document_type) === "price_quotation" &&
+          !quotation.costing_source_id &&
+          assignedProjectTypes.has(pricingProjectTypeKey(quotation.project_types)),
+      ).length
+    : 0;
+  const pendingMockupReviewCount = isPricingOfficerRole(role)
+    ? store.quotations.filter(
+        (quotation) =>
+          text(quotation.status) === "pending" &&
+          text(quotation.document_type) === "mockup_quotation" &&
+          assignedProjectTypes.has(pricingProjectTypeKey(quotation.project_types)) &&
+          ![quotation.created_by, quotation.prepared_by_user_id].some(
+            (userId) => text(userId, "") === currentUserId,
+          ),
+      ).length
+    : 0;
+  const pendingPaymentReviewCount = isPricingOfficerRole(role)
+    ? store.quotations.reduce(
+        (count, quote) =>
+          count +
+          store.quotation_payment_records.filter(
+            (payment) =>
+              payment.quotation_id === quote.id &&
+              text(payment.status) === "pending" &&
+              assignedPaymentReviewerId(
+                quote,
+                payment,
+                store.pricing_officer_project_types,
+              ) === currentUserId &&
+              text(payment.submitted_by, "") !== currentUserId,
+          ).length,
+        0,
+      )
+    : 0;
+  useEffect(() => {
+    let active = true;
+    void client.auth.getUser().then(({ data }) => {
+      if (active) setCurrentUserId(data.user?.id ?? null);
+    });
+    return () => {
+      active = false;
+    };
+  }, [client]);
   const navBase: {
     label: string;
-    items: { view: View; icon: typeof LayoutDashboard }[];
+    items: { view: View; icon: typeof LayoutDashboard; badge?: number }[];
   }[] = isManagementRole ? [
     {
       label: "Management",
       items: [
         { view: "Dashboard", icon: LayoutDashboard },
+        { view: "Approvals", icon: ClipboardCheck, badge: pendingManagementApprovalCount },
         { view: "Leads", icon: ClipboardCheck },
       ],
     },
     {
-      label: "Reviews",
+      label: "Operations",
       items: [
         { view: "Price Quotations", icon: FileText },
         { view: "Mockups", icon: ImageIcon },
         { view: "Quotation Costing Overview", icon: ReceiptText },
         { view: "Projects", icon: ClipboardCheck },
-        { view: "Submissions", icon: ClipboardCheck },
       ],
     },
     {
       label: "Business",
       items: [
+        { view: "Payment Monitoring", icon: ReceiptText },
         { view: "Finance", icon: Wallet },
         { view: "Commissions", icon: PhilippinePeso },
         { view: "Policy", icon: ScrollText },
         { view: "Settings", icon: Settings },
+      ],
+    },
+  ] : role === "sales_pricing_officer" ? [
+    {
+      label: "My Work",
+      items: [
+        { view: "Dashboard", icon: LayoutDashboard },
+      ],
+    },
+    {
+      label: "Sales & Pricing",
+      items: [
+        { view: "Leads", icon: ClipboardCheck },
+        { view: "Price Quotations", icon: FileText },
+        { view: "Price Quotation Review", icon: ClipboardCheck, badge: pendingPricingReviewCount },
+        { view: "Mockups", icon: ImageIcon, badge: pendingMockupReviewCount },
+        { view: "Quotation Costing Overview", icon: ReceiptText },
+      ],
+    },
+    {
+      label: "Operations",
+      items: [
+        { view: "Projects", icon: ClipboardCheck },
+      ],
+    },
+    {
+      label: "Business",
+      items: [
+        { view: "Payment Reviews", icon: ReceiptText, badge: pendingPaymentReviewCount },
+        { view: "Commissions", icon: PhilippinePeso },
+        { view: "Policy", icon: ScrollText },
       ],
     },
   ] : [
@@ -15294,14 +17221,14 @@ export function HuswellWorkspace({
     Leads: {
       title: isManagementRole ? "Lead management" : leads.title,
       detail: isManagementRole
-        ? "Add and assign leads, then review officer-submitted lead changes from Submissions Approvals."
+        ? "Add and assign leads, then review officer-submitted lead changes from the Approval Center."
         : leads.detail,
     },
     Projects: {
       title: isManagementRole ? "Project oversight" : projects.title,
       detail: isManagementRole
-        ? "Monitor all project schedules and review officer submissions."
-        : projects.detail,
+        ? "Monitor all project schedules; management decisions are collected in the Approval Center."
+        : "Select approved Price and Mockup Quotations, attach signed proof images, and request production.",
     },
     Mockups: {
       title: "Mockup Quotation",
@@ -15322,18 +17249,16 @@ export function HuswellWorkspace({
       title:
         role === "sales_pricing_officer"
             ? "Price Quotations"
-            : isManagementRole
-            ? "Price Quotation Review"
             : "Price Quotations",
       detail:
         role === "sales_pricing_officer"
             ? "Prepare and manage your Price Quotations from assigned leads."
             : isManagementRole
-            ? "Review officer-submitted quotations, set commercial terms and pricing, then approve or return them for revision."
+            ? "View approved and historical quotation records. Management approval actions are collected in the Approval Center."
             : "Prepare quotations from leads, then submit them to the assigned Sales & Pricing Officer.",
     },
     "Price Quotation Review": {
-      title: "Price Quotation Review",
+      title: role === "sales_pricing_officer" ? "Quotation Review Queue" : "Price Quotation Review",
       detail: "Review submitted Price Quotations assigned to your project types, then return them or submit their costing for General Manager approval.",
     },
     "Materials List": {
@@ -15391,12 +17316,20 @@ export function HuswellWorkspace({
       detail: targets.detail,
     },
     Approvals: {
-      title: "Approvals & audit",
-      detail: "Review approval requests and activity history.",
+      title: "Management Approval Center",
+      detail: "Review every pending management decision from one queue.",
+    },
+    "Payment Monitoring": {
+      title: "Payment Monitoring",
+      detail: "Monitor quotation payment receipts and payment-review exceptions.",
+    },
+    "Payment Reviews": {
+      title: "Payment Reviews",
+      detail: "Verify client payment receipts assigned to you before they count as paid.",
     },
     Submissions: {
-      title: "Submissions Approvals",
-      detail: "Review submitted Price Quotations, project edits, and Lead change requests.",
+      title: "Management Approval Center",
+      detail: "Review every pending management decision from one queue.",
     },
     Settings: {
       title: "Business settings",
@@ -15428,17 +17361,17 @@ export function HuswellWorkspace({
     ) : loading ? (
       <Panel
         title={
-          active === "Leads" ? leads.title : active === "Projects" ? projects.title : active === "Mockups" ? "Mockup Quotation" : active === "Price Quotation Review" ? "Price Quotation Review" : "Loading workspace"
+          active === "Leads" ? leads.title : active === "Projects" ? projects.title : active === "Mockups" ? "Mockup Quotation" : active === "Price Quotation Review" ? "Price Quotation Review" : active === "Approvals" || active === "Submissions" ? "Management Approval Center" : active === "Payment Monitoring" ? "Payment Monitoring" : active === "Payment Reviews" ? "Payment Reviews" : "Loading workspace"
         }
         detail={
-          active === "Leads" || active === "Projects" || active === "Mockups" || active === "Price Quotation Review"
-            ? (active === "Projects" ? projects.detail : active === "Mockups" ? "Loading Mockup Quotation workflow." : active === "Price Quotation Review" ? "Loading Price Quotation review queue." : leads.detail)
+          active === "Leads" || active === "Projects" || active === "Mockups" || active === "Price Quotation Review" || active === "Approvals" || active === "Submissions" || active === "Payment Monitoring" || active === "Payment Reviews"
+            ? (active === "Projects" ? projects.detail : active === "Mockups" ? "Loading Mockup Quotation workflow." : active === "Price Quotation Review" ? "Loading Price Quotation review queue." : active === "Approvals" || active === "Submissions" ? "Loading management approval queue." : active === "Payment Monitoring" ? "Loading payment monitoring." : active === "Payment Reviews" ? "Loading assigned payment reviews." : leads.detail)
             : "Loading business data."
         }
       >
         <div
           className={
-            active === "Leads" || active === "Projects" || active === "Mockups" || active === "Price Quotation Review" ? "min-h-[280px]" : undefined
+            active === "Leads" || active === "Projects" || active === "Mockups" || active === "Price Quotation Review" || active === "Approvals" || active === "Submissions" || active === "Payment Monitoring" || active === "Payment Reviews" ? "min-h-[280px]" : undefined
           }
         >
           <Empty>Loading records…</Empty>
@@ -15585,19 +17518,27 @@ export function HuswellWorkspace({
         notice={setMessage}
         role={role}
       />
-    ) : active === "Approvals" ? (
-      <Panel
-        title="Approvals moved"
-        detail="Price Quotations are reviewed from Submissions."
-      >
-        <Empty>Use Submissions to review Price Quotations.</Empty>
-      </Panel>
-    ) : active === "Submissions" ? (
+    ) : active === "Approvals" || active === "Submissions" ? (
       <Submissions
         store={store}
         orgId={organizationId}
         reload={reload}
         notice={setMessage}
+      />
+    ) : active === "Payment Monitoring" ? (
+      <PaymentMonitoring
+        store={store}
+        orgId={organizationId}
+        reload={reload}
+        role={role}
+      />
+    ) : active === "Payment Reviews" ? (
+      <PaymentMonitoring
+        store={store}
+        orgId={organizationId}
+        reload={reload}
+        role={role}
+        assignedOnly
       />
     ) : active === "Policy" ? (
       <PolicyView
@@ -15610,7 +17551,7 @@ export function HuswellWorkspace({
         onPolicyActionHandled={() => setPolicyAction(null)}
       />
     ) : active === "Commissions" ? (
-      <CommissionsView role={role} />
+      <CommissionsView store={store} role={role} />
     ) : (
       <SettingsView
         store={store}
@@ -15666,7 +17607,7 @@ export function HuswellWorkspace({
           {nav.map((group) => (
             <div key={group.label}>
               <div className="space-y-px">
-                {group.items.map(({ view, icon: Icon }) => {
+                {group.items.map(({ view, icon: Icon, badge }) => {
                   const navigationLabel =
                     view === "Dashboard" && (isProjectOfficerRole(role) || role === "admin")
                       ? "KPI"
@@ -15675,13 +17616,19 @@ export function HuswellWorkspace({
                       : isManagementRole && view === "Leads"
                           ? "Lead Management"
                       : view === "Projects"
-                            ? "Projects / Production"
+                            ? "Production"
                             : view === "Mockups"
                               ? "Mockup Quotation"
+                              : role === "sales_pricing_officer" && view === "Price Quotation Review"
+                              ? "Quotation Review Queue"
                             : isManagementRole && view === "Price Quotations"
-                              ? "Price Quotation Review"
-                              : view === "Submissions"
-                                ? "Submissions Approvals"
+                              ? "Price Quotations"
+                              : view === "Approvals"
+                                ? "Approval Center"
+                                : view === "Payment Monitoring"
+                                  ? "Payment Monitoring"
+                                : view === "Payment Reviews"
+                                  ? "Payment Reviews"
                                 : view;
                   return (
                     <button
@@ -15705,6 +17652,7 @@ export function HuswellWorkspace({
                       className={`${active === view ? "text-[var(--color-on-accent)]" : "text-[var(--color-text-tertiary)] group-hover:text-[var(--color-text-tertiary)]"} shrink-0 transition-colors`}
                     />
                     <span className={`min-w-0 flex-1 truncate ${sidebarCollapsed ? "lg:hidden" : ""}`}>{navigationLabel}</span>
+                    {badge ? <span className={`min-w-5 rounded-full px-1.5 py-0.5 text-center text-[10px] font-semibold ${active === view ? "bg-white/20 text-white" : "bg-[var(--color-accent-subtle)] text-[var(--color-accent-text)]"}`}>{badge > 99 ? "99+" : badge}</span> : null}
                   </button>
                   );
                 })}
@@ -15835,7 +17783,7 @@ export function HuswellWorkspace({
             )}
           </div>
         </header>
-        <div className={`workspace-content ${(["Projects", "Price Quotations", "Price Quotation Review"].includes(active) || active === "Policy") ? "p-0" : "p-2 sm:p-3 lg:p-4"}`}>
+        <div className={`workspace-content ${(["Projects", "Price Quotations", "Price Quotation Review", "Approvals", "Payment Monitoring", "Payment Reviews"].includes(active) || active === "Policy") ? "p-0" : "p-2 sm:p-3 lg:p-4"}`}>
           {message && (
             <div className="fixed inset-0 z-[60] grid place-items-center bg-[color-mix(in_srgb,var(--color-text-primary)_30%,transparent)] p-4">
               <section
