@@ -694,6 +694,10 @@ const isProjectOfficerRole = (role: string) =>
   ["project_manager", "sales_pricing_officer"].includes(role);
 const isPricingOfficerRole = (role: string) =>
   role === "sales_pricing_officer";
+const pricingProjectTypeKey = (value: unknown) => {
+  const normalized = text(value, "").trim().toLowerCase().replace(/\s+/g, " ");
+  return normalized === "mockup" ? "mock up" : normalized;
+};
 const roleCapabilityRoles = (role: string) =>
   role === "sales_pricing_officer"
     ? ["project_manager", "pricing"]
@@ -9840,16 +9844,17 @@ function PriceQuotationSubmissions({
       active = false;
     };
   }, []);
+  const assignedProjectTypes = new Set(
+    store.pricing_officer_project_types
+      .filter((assignment) => text(assignment.pricing_officer_user_id, "") === currentUserId)
+      .map((assignment) => pricingProjectTypeKey(assignment.project_type)),
+  );
   const pendingPriceQuotations = store.quotations.filter(
     (quotation) =>
       text(quotation.status) === "pending" &&
       text(quotation.document_type) === "price_quotation" &&
       !quotation.costing_source_id &&
-      ![
-        quotation.created_by,
-        quotation.prepared_by_user_id,
-        quotation.submitted_by,
-      ].some((userId) => text(userId, "") === currentUserId),
+      assignedProjectTypes.has(pricingProjectTypeKey(quotation.project_types)),
   ).sort(newestActivityFirst);
   const normalizedSearch = search.trim().toLowerCase();
   const filteredPriceQuotations = pendingPriceQuotations.filter((quotation) => {
@@ -10580,7 +10585,7 @@ function ProductCostingsSection({
           }]);
         }}><Plus size={14} /> Add costing table</Button>
       </div>
-      {costings.length === 0 ? <p className="mt-4 rounded-lg border border-dashed border-[#ccd5e0] bg-white px-3 py-3 text-[12px] text-[#687386]">No internal costing table has been added. You can still use the existing manual price review for historical quotations.</p> : <div className="mt-4 space-y-4">{costings.map((costing, costingIndex) => {
+      {costings.length === 0 ? <p className="mt-4 rounded-lg border border-dashed border-[#ccd5e0] bg-white px-3 py-3 text-[12px] text-[#687386]">No internal costing table has been added. Add one costing table for each finished product before submitting for review.</p> : <div className="mt-4 space-y-4">{costings.map((costing, costingIndex) => {
         const product = lines.find((line) => line.id === costing.quotationItemId);
         const totals = productCostingTotals(costing, n(product?.quantity), n(vatRate));
         return <article key={costing.key} className="rounded-lg border border-[#d9e0e9] bg-white p-3">
@@ -10753,11 +10758,15 @@ function PriceQuotationReview({
       .split(/\r?\n+/)
       .filter((term) => term && !term.trim().toLowerCase().startsWith("validity:")),
   );
+  const businessSettings = store.business_settings.find(
+    (setting) => text(setting.organization_id) === text(quotation.organization_id),
+  );
+  const hasSavedBankDetails = quotation.bank_details !== null
+    && quotation.bank_details !== undefined
+    && quotation.bank_details !== "";
   const [bankDetails, setBankDetails] = useState<BankDetail[]>(() =>
     quotationBankDetails(
-      store.business_settings.find(
-        (setting) => text(setting.organization_id) === text(quotation.organization_id),
-      )?.default_bank_details,
+      hasSavedBankDetails ? quotation.bank_details : businessSettings?.default_bank_details,
     ),
   );
   useEffect(() => {
@@ -10770,7 +10779,7 @@ function PriceQuotationReview({
       .eq("organization_id", organizationId)
       .maybeSingle()
       .then(({ data, error }) => {
-        if (!active || error || data?.default_bank_details === undefined) return;
+        if (!active || error || data?.default_bank_details === undefined || hasSavedBankDetails) return;
         setBankDetails(quotationBankDetails(data.default_bank_details));
         if (!finalApproval && !isMockupQuotation && n(quotation.vat_rate) <= 0) {
           setVatRate((current) => (current === defaultVatRate ? text(data.vat_rate, "12") : current));
@@ -10779,7 +10788,7 @@ function PriceQuotationReview({
     return () => {
       active = false;
     };
-  }, [defaultVatRate, finalApproval, isMockupQuotation, quotation.organization_id, quotation.vat_rate]);
+  }, [defaultVatRate, finalApproval, hasSavedBankDetails, isMockupQuotation, quotation.organization_id, quotation.vat_rate]);
   const [revisionNote, setRevisionNote] = useState("");
   const [working, setWorking] = useState(false);
   const [productCostings, setProductCostings] = useState<ProductCostingDraft[]>(() =>
@@ -10892,7 +10901,7 @@ function PriceQuotationReview({
     if (!finalApproval && isMockupQuotation && productCostings.length !== lines.length) {
       return notice("Add one costing table for every Mockup Quotation product before reviewing.");
     }
-    if (!isMockupQuotation && productCostings.length > 0 && productCostings.length !== lines.length) {
+    if (!finalApproval && !isMockupQuotation && productCostings.length !== lines.length) {
       return notice("Add one costing table for every quotation product before reviewing.");
     }
     setWorking(true);
@@ -10913,7 +10922,18 @@ function PriceQuotationReview({
     const { error } = finalApproval && decision === "needs_revision"
       ? await createClient().rpc(isMockupQuotation ? "return_mockup_quotation_from_gm" : "return_price_quotation_from_gm", { p_quotation_id: quotation.id, p_note: revisionNote })
       : finalApproval && decision === "approved"
-      ? await createClient().rpc(isMockupQuotation ? "final_approve_mockup_quotation" : "final_approve_price_quotation", { p_quotation_id: quotation.id })
+      ? await createClient().rpc(
+          isMockupQuotation ? "final_approve_mockup_quotation" : "final_approve_price_quotation_with_edits",
+          isMockupQuotation
+            ? { p_quotation_id: quotation.id }
+            : {
+              p_quotation_id: quotation.id,
+              p_vat_rate: n(vatRate),
+              p_terms_conditions: terms.filter((term) => term.trim()).join("\n"),
+              p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
+              p_costings: costingsPayload,
+            },
+        )
       : isMockupQuotation
       ? await createClient().rpc("pricing_review_mockup_quotation", {
           p_quotation_id: quotation.id,
@@ -10924,7 +10944,7 @@ function PriceQuotationReview({
           p_costings: costingsPayload,
           p_revision_note: revisionNote,
         })
-      : productCostings.length > 0
+      : !finalApproval
       ? await createClient().rpc("pricing_review_price_quotation", {
           p_quotation_id: quotation.id,
           p_decision: decision,
