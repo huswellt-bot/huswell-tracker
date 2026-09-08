@@ -1,4 +1,4 @@
--- Route pending quotation-payment receipt reviews to the Sales & Pricing
+  -- Route pending quotation-payment receipt reviews to the Sales & Pricing
 -- Officer who priced the quotation, while retaining General Manager override
 -- access. Run after 123_quotation_payment_tracking.sql.
 -- Safe to re-run.

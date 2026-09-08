@@ -171,6 +171,34 @@ type TableName =
   | "organization_members";
 type Row = { id?: string; [key: string]: unknown };
 type Store = Record<TableName, Row[]>;
+type ApprovalDecision = "approved" | "rejected";
+type ApprovalQueueTab =
+  | "quotations"
+  | "mockup_quotations"
+  | "price_revisions"
+  | "costings"
+  | "projects"
+  | "leads"
+  | "revisions"
+  | "calendar_projects"
+  | "calendar_revisions"
+  | "calendar_completions"
+  | "other";
+type ApprovalCenterTab = "all" | ApprovalQueueTab;
+type ApprovalQueueItem = {
+  key: string;
+  tab: ApprovalQueueTab;
+  category: string;
+  title: string;
+  detail: string;
+  requester: string;
+  submittedAt: unknown;
+  selectable: boolean;
+  bulkAction?: (
+    decision: ApprovalDecision,
+  ) => Promise<{ error?: { message?: string } | null }>;
+  action: ReactNode;
+};
 export type QuotationPdfRow = Row;
 export type QuotationPdfStore = Pick<
   Store,
@@ -1883,6 +1911,38 @@ function ActionIcon({
         }}
       />}
     </>
+  );
+}
+
+function SelectionCheckbox({
+  checked,
+  indeterminate = false,
+  disabled = false,
+  label,
+  onChange,
+}: {
+  checked: boolean;
+  indeterminate?: boolean;
+  disabled?: boolean;
+  label: string;
+  onChange: () => void;
+}) {
+  const checkboxRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (checkboxRef.current) checkboxRef.current.indeterminate = indeterminate;
+  }, [indeterminate]);
+
+  return (
+    <input
+      ref={checkboxRef}
+      type="checkbox"
+      checked={checked}
+      disabled={disabled}
+      aria-label={label}
+      onChange={onChange}
+      className="size-4 accent-[var(--color-accent)] disabled:cursor-not-allowed"
+    />
   );
 }
 
@@ -12996,7 +13056,7 @@ function Submissions({
 }) {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Row | null>(null);
-  const [tab, setTab] = useState<"all" | "quotations" | "mockup_quotations" | "price_revisions" | "costings" | "projects" | "leads" | "revisions" | "calendar_projects" | "calendar_revisions" | "calendar_completions" | "other">("all");
+  const [tab, setTab] = useState<ApprovalCenterTab>("all");
   const [selectedProjectEdit, setSelectedProjectEdit] = useState<Row | null>(null);
   const [selectedLeadChange, setSelectedLeadChange] = useState<Row | null>(null);
   const [selectedPriceQuotation, setSelectedPriceQuotation] = useState<Row | null>(null);
@@ -13005,6 +13065,11 @@ function Submissions({
   const [approvalQuery, setApprovalQuery] = useState("");
   const [approvalMonth, setApprovalMonth] = useState("");
   const [approvalOfficerFilter, setApprovalOfficerFilter] = useState("all");
+  const [selectedApprovalKeys, setSelectedApprovalKeys] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [bulkDecision, setBulkDecision] = useState<ApprovalDecision | null>(null);
+  const [bulkSaving, setBulkSaving] = useState(false);
   const approvalOfficers = useMemo(() => projectOfficerOptions(store), [store]);
   const pendingPriceQuotations = store.quotations.filter(
     (quotation) =>
@@ -13450,108 +13515,138 @@ function Submissions({
     setPdfQuote(quotation);
   };
   const pendingTotal = visiblePendingPriceQuotations.length + visiblePendingMockupQuotations.length + visiblePendingPriceQuotationRevisions.length + visiblePendingCostings.length + visiblePendingQuotationRevisions.length + visiblePendingProjectSchedules.length + visiblePendingProjectScheduleRevisions.length + visiblePendingProjectScheduleCompletions.length + visiblePendingProjectEdits.length + visiblePendingLeadChanges.length + visiblePendingApprovalRequests.length;
-  const pendingQueueItems: {
-    key: string;
-    category: string;
-    title: string;
-    detail: string;
-    requester: string;
-    submittedAt: unknown;
-    action: ReactNode;
-  }[] = [
+  const pendingQueueItems: ApprovalQueueItem[] = [
     ...visiblePendingPriceQuotations.map((quotation) => ({
       key: `price-${text(quotation.id)}`,
+      tab: "quotations" as const,
       category: "Price quotation",
       title: text(quotation.quotation_no, "Price Quotation"),
       detail: text(quotation.project_name),
       requester: officerName(quotation),
       submittedAt: quotation.submitted_at,
+      selectable: false,
       action: <ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon>,
     })),
     ...visiblePendingMockupQuotations.map((quotation) => ({
       key: `mockup-${text(quotation.id)}`,
+      tab: "mockup_quotations" as const,
       category: "Mockup quotation",
       title: text(quotation.quotation_no, "Mockup Quotation"),
       detail: text(quotation.project_name),
       requester: officerName(quotation),
       submittedAt: quotation.submitted_at,
+      selectable: false,
       action: <ActionIcon label="Review Mockup Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon>,
     })),
     ...visiblePendingPriceQuotationRevisions.map((request) => {
       const quotation = store.quotations.find((item) => item.id === request.quotation_id);
       return {
         key: `price-revision-${text(request.id)}`,
+        tab: "price_revisions" as const,
         category: "Price revision",
         title: text(quotation?.quotation_no, "Price Quotation"),
         detail: text(quotation?.project_name),
         requester: projectOfficerName(request),
         submittedAt: request.submitted_at,
-        action: <span className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></span>,
+        selectable: true,
+        bulkAction: async (decision: ApprovalDecision) => createClient().rpc("review_price_quotation_revision", {
+          p_request_id: text(request.id),
+          p_decision: decision,
+        }),
+        action: <span className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></span>,
       };
     }),
     ...visiblePendingCostings.map((quotation) => ({
       key: `costing-${text(quotation.id)}`,
+      tab: "costings" as const,
       category: "Costing breakdown",
       title: text(quotation.quotation_no, "Costing Breakdown"),
       detail: text(quotation.project_name),
       requester: officerName(quotation),
       submittedAt: quotation.submitted_at,
+      selectable: false,
       action: <ActionIcon label="Review costing breakdown" confirm={false} onClick={() => setSelected(quotation)}><FileText size={15} /></ActionIcon>,
     })),
     ...visiblePendingQuotationRevisions.map((request) => {
       const costing = store.quotations.find((item) => item.id === request.costing_id);
       return {
         key: `costing-revision-${text(request.id)}`,
+        tab: "revisions" as const,
         category: "Costing revision",
         title: text(costing?.quotation_no, "Costing Breakdown"),
         detail: text(costing?.project_name),
         requester: projectOfficerName(request),
         submittedAt: request.submitted_at,
-        action: <span className="flex items-center gap-1"><ActionIcon label="Approve costing revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject costing revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></span>,
+        selectable: true,
+        bulkAction: async (decision: ApprovalDecision) => createClient().rpc("review_quotation_revision", {
+          p_request_id: text(request.id),
+          p_decision: decision,
+        }),
+        action: <span className="flex items-center gap-1"><ActionIcon label="Approve costing revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject costing revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></span>,
       };
     }),
     ...visiblePendingProjectSchedules.map((schedule) => ({
       key: `production-${text(schedule.id)}`,
+      tab: "calendar_projects" as const,
       category: "Production request",
       title: text(schedule.quotation_no, "Production request"),
       detail: text(schedule.client_name, text(schedule.product_name)),
       requester: scheduleOfficerName(schedule),
       submittedAt: schedule.created_at,
-      action: <span className="flex items-center gap-1"><ActionIcon label="View Price Quotation PDF" confirm={false} onClick={() => openQuotationPdf(store.quotations.find((item) => item.id === schedule.quotation_id))}><FileText size={15} /></ActionIcon><ActionIcon label="Approve production request" tone="green" loading={savingId === schedule.id} disabled={savingId === schedule.id} onClick={() => void decideProjectSchedule(schedule, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject production request" tone="red" loading={savingId === schedule.id} disabled={savingId === schedule.id} onClick={() => void decideProjectSchedule(schedule, "rejected")}><X size={15} /></ActionIcon></span>,
+      selectable: true,
+      bulkAction: async (decision: ApprovalDecision) => createClient().rpc("review_project_schedule", {
+        p_schedule_id: text(schedule.id),
+        p_decision: decision,
+      }),
+      action: <span className="flex items-center gap-1"><ActionIcon label="View Price Quotation PDF" confirm={false} disabled={bulkSaving} onClick={() => openQuotationPdf(store.quotations.find((item) => item.id === schedule.quotation_id))}><FileText size={15} /></ActionIcon><ActionIcon label="Approve production request" tone="green" loading={savingId === schedule.id} disabled={savingId === schedule.id || bulkSaving} onClick={() => void decideProjectSchedule(schedule, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject production request" tone="red" loading={savingId === schedule.id} disabled={savingId === schedule.id || bulkSaving} onClick={() => void decideProjectSchedule(schedule, "rejected")}><X size={15} /></ActionIcon></span>,
     })),
     ...visiblePendingProjectScheduleRevisions.map((request) => {
       const schedule = store.project_schedules.find((item) => item.id === request.schedule_id);
       return {
         key: `schedule-revision-${text(request.id)}`,
+        tab: "calendar_revisions" as const,
         category: "Schedule revision",
         title: text(schedule?.quotation_no, "Project schedule"),
         detail: text(schedule?.client_name, text(schedule?.product_name)),
         requester: projectOfficerName(request),
         submittedAt: request.submitted_at,
-        action: <span className="flex items-center gap-1"><ActionIcon label="Approve schedule revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideProjectScheduleRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject schedule revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideProjectScheduleRevision(request, "rejected")}><X size={15} /></ActionIcon></span>,
+        selectable: true,
+        bulkAction: async (decision: ApprovalDecision) => createClient().rpc("review_project_schedule_revision", {
+          p_request_id: text(request.id),
+          p_decision: decision,
+        }),
+        action: <span className="flex items-center gap-1"><ActionIcon label="Approve schedule revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideProjectScheduleRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject schedule revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideProjectScheduleRevision(request, "rejected")}><X size={15} /></ActionIcon></span>,
       };
     }),
     ...visiblePendingProjectScheduleCompletions.map((request) => {
       const schedule = store.project_schedules.find((item) => item.id === request.schedule_id);
       return {
         key: `completion-${text(request.id)}`,
+        tab: "calendar_completions" as const,
         category: "Project completion",
         title: text(schedule?.quotation_no, "Project completion"),
         detail: text(schedule?.client_name, text(schedule?.product_name)),
         requester: projectOfficerName(request),
         submittedAt: request.submitted_at,
-        action: <span className="flex items-center gap-1"><ActionIcon label="Approve project completion" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideProjectScheduleCompletion(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project completion" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideProjectScheduleCompletion(request, "rejected")}><X size={15} /></ActionIcon></span>,
+        selectable: true,
+        bulkAction: async (decision: ApprovalDecision) => createClient().rpc("review_project_schedule_completion", {
+          p_request_id: text(request.id),
+          p_decision: decision,
+        }),
+        action: <span className="flex items-center gap-1"><ActionIcon label="Approve project completion" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideProjectScheduleCompletion(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project completion" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideProjectScheduleCompletion(request, "rejected")}><X size={15} /></ActionIcon></span>,
       };
     }),
     ...visiblePendingProjectEdits.map((request) => {
       const project = store.leads.find((lead) => lead.id === request.project_id);
       return {
         key: `project-edit-${text(request.id)}`,
+        tab: "projects" as const,
         category: "Project change",
         title: text(project?.project_name, "Project edit"),
         detail: text(project?.client_name, "Requested project changes"),
         requester: projectOfficerName(request),
         submittedAt: request.submitted_at,
+        selectable: false,
         action: <ActionIcon label="Review project edit" confirm={false} onClick={() => setSelectedProjectEdit(request)}><FileText size={15} /></ActionIcon>,
       };
     }),
@@ -13559,24 +13654,131 @@ function Submissions({
       const lead = store.leads.find((item) => item.id === request.lead_id);
       return {
         key: `lead-change-${text(request.id)}`,
+        tab: "leads" as const,
         category: "Lead change",
         title: text(lead?.project_name, "Lead change"),
         detail: text(lead?.client_name, "Requested lead changes"),
         requester: projectOfficerName(request),
         submittedAt: request.submitted_at,
+        selectable: false,
         action: <ActionIcon label="Review lead change" confirm={false} onClick={() => setSelectedLeadChange(request)}><FileText size={15} /></ActionIcon>,
       };
     }),
     ...visiblePendingApprovalRequests.map((request) => ({
       key: `approval-${text(request.id)}`,
+      tab: "other" as const,
       category: "Other approval",
       title: text(request.resource_type, "Approval request").replaceAll("_", " "),
       detail: text(request.resource_id),
       requester: text(store.profiles.find((profile) => profile.id === request.submitted_by)?.full_name, "Team member"),
       submittedAt: request.submitted_at,
-      action: <span className="flex items-center gap-1"><ActionIcon label="Approve request" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideApprovalRequest(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject request" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideApprovalRequest(request, "rejected")}><X size={15} /></ActionIcon></span>,
+      selectable: true,
+      bulkAction: async (decision: ApprovalDecision) => createClient().rpc("review_approval_request", {
+        p_request_id: text(request.id),
+        p_decision: decision,
+      }),
+      action: <span className="flex items-center gap-1"><ActionIcon label="Approve request" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideApprovalRequest(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject request" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideApprovalRequest(request, "rejected")}><X size={15} /></ActionIcon></span>,
     })),
   ];
+  const pendingQueueItemByKey = new Map(
+    pendingQueueItems.map((item) => [item.key, item]),
+  );
+  const currentApprovalItems = tab === "all"
+    ? pendingQueueItems
+    : pendingQueueItems.filter((item) => item.tab === tab);
+  const currentSelectableItems = currentApprovalItems.filter(
+    (item) => item.selectable && item.bulkAction,
+  );
+  const selectedCurrentApprovalItems = currentSelectableItems.filter((item) =>
+    selectedApprovalKeys.has(item.key),
+  );
+  const allCurrentItemsSelected =
+    currentSelectableItems.length > 0 &&
+    selectedCurrentApprovalItems.length === currentSelectableItems.length;
+  const someCurrentItemsSelected =
+    selectedCurrentApprovalItems.length > 0 && !allCurrentItemsSelected;
+  const toggleApprovalSelection = (key: string) => {
+    setSelectedApprovalKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+  const toggleAllApprovalSelection = () => {
+    const currentKeys = currentSelectableItems.map((item) => item.key);
+    setSelectedApprovalKeys((current) => {
+      const next = new Set(current);
+      if (allCurrentItemsSelected) currentKeys.forEach((key) => next.delete(key));
+      else currentKeys.forEach((key) => next.add(key));
+      return next;
+    });
+  };
+  const runBulkDecision = async (decision: ApprovalDecision) => {
+    const items = currentSelectableItems.filter((item) =>
+      selectedApprovalKeys.has(item.key),
+    );
+    if (!items.length) {
+      notice("Select at least one approval with a one-click decision.");
+      return;
+    }
+
+    setBulkSaving(true);
+    const results = await Promise.allSettled(
+      items.map(async (item) => {
+        const result = await item.bulkAction?.(decision);
+        if (result?.error) {
+          throw new Error(result.error.message || "The approval could not be updated.");
+        }
+      }),
+    );
+    setBulkSaving(false);
+    setSelectedApprovalKeys(new Set());
+
+    const failures = results.filter(
+      (result): result is PromiseRejectedResult => result.status === "rejected",
+    );
+    const succeeded = results.length - failures.length;
+    const actionLabel = decision === "approved" ? "approved" : "rejected";
+    if (failures.length) {
+      const failureSummary = failures
+        .slice(0, 2)
+        .map((failure) =>
+          failure.reason instanceof Error
+            ? failure.reason.message
+            : "One approval could not be updated.",
+        )
+        .join(" ");
+      notice(
+        `${succeeded} approval${succeeded === 1 ? "" : "s"} ${actionLabel}; ${failures.length} failed. ${failureSummary}`,
+      );
+    } else {
+      notice(`${succeeded} approval${succeeded === 1 ? "" : "s"} ${actionLabel}.`);
+    }
+    await reload();
+  };
+  const renderSelectionCell = (key: string) => {
+    const item = pendingQueueItemByKey.get(key);
+    return (
+      <td className="px-5 py-3">
+        {item?.selectable && item.bulkAction ? (
+          <SelectionCheckbox
+            checked={selectedApprovalKeys.has(key)}
+            disabled={bulkSaving}
+            label={`Select ${item.category}: ${item.title}`}
+            onChange={() => toggleApprovalSelection(key)}
+          />
+        ) : (
+          <span
+            className="text-[11px] text-[#8b92a1]"
+            title="This request requires individual review"
+          >
+            —
+          </span>
+        )}
+      </td>
+    );
+  };
   return (
     <Panel
       title="Management Approval Center"
@@ -13617,10 +13819,63 @@ function Submissions({
           hasFilters={Boolean(approvalQuery || approvalMonth || approvalOfficerFilter !== "all")}
         />
       </div>
+      {currentSelectableItems.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#edf0f5] px-5 py-3">
+          <div className="flex items-center gap-2 text-[12px] text-[#687386]">
+            <SelectionCheckbox
+              checked={allCurrentItemsSelected}
+              indeterminate={someCurrentItemsSelected}
+              disabled={bulkSaving}
+              label="Select all selectable approvals currently shown"
+              onChange={toggleAllApprovalSelection}
+            />
+            <span>
+              {selectedCurrentApprovalItems.length
+                ? `${selectedCurrentApprovalItems.length} selected`
+                : "Select approvals with one-click decisions"}
+            </span>
+            <span className="hidden text-[11px] text-[#8b92a1] sm:inline">
+              Detailed quotation, costing, project, and lead reviews remain individual.
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              tone="green"
+              loading={bulkSaving && bulkDecision === "approved"}
+              disabled={bulkSaving || selectedCurrentApprovalItems.length === 0}
+              onClick={() => setBulkDecision("approved")}
+            >
+              <Check size={14} /> Approve selected
+            </Button>
+            <Button
+              secondary
+              loading={bulkSaving && bulkDecision === "rejected"}
+              disabled={bulkSaving || selectedCurrentApprovalItems.length === 0}
+              onClick={() => setBulkDecision("rejected")}
+            >
+              <X size={14} /> Reject selected
+            </Button>
+            {selectedCurrentApprovalItems.length > 0 && (
+              <Button
+                secondary
+                disabled={bulkSaving}
+                onClick={() => setSelectedApprovalKeys(new Set())}
+              >
+                Clear selection
+              </Button>
+            )}
+          </div>
+        </div>
+      ) : currentApprovalItems.length > 0 && tab !== "all" ? (
+        <div className="border-b border-[#edf0f5] px-5 py-3 text-[12px] text-[#687386]">
+          These requests require individual review before approval or revision.
+        </div>
+      ) : null}
       {tab === "all" && (pendingQueueItems.length ? (
-        <Table labels={["Category", "Request", "Requester", "Submitted", "Review"]} minWidth={900}>
+        <Table labels={["Select", "Category", "Request", "Requester", "Submitted", "Review"]} minWidth={940}>
           {pendingQueueItems.sort((left, right) => text(right.submittedAt).localeCompare(text(left.submittedAt))).map((item) => (
             <tr key={item.key}>
+              {renderSelectionCell(item.key)}
               <td className="px-5 py-3"><Status value={item.category} /></td>
               <td className="px-5 py-3">{stackedCell(item.title, item.detail)}</td>
               <td className="px-5 py-3">{item.requester}</td>
@@ -13648,11 +13903,11 @@ function Submissions({
         </Table>
       ) : <Empty>No Mockup Quotations are awaiting General Manager review.</Empty>)}
       {tab === "price_revisions" && (visiblePendingPriceQuotationRevisions.length ? (
-        <Table labels={["Price Quotation", "Client's Name", "Company Name", "Sales Executive", "Requested", "Review"]} minWidth={860}>
+        <Table labels={["Select", "Price Quotation", "Client's Name", "Company Name", "Sales Executive", "Requested", "Review"]} minWidth={900}>
           {visiblePendingPriceQuotationRevisions.map((request) => {
             const quotation = store.quotations.find((item) => item.id === request.quotation_id);
             const party = quotation ? quotationParty(quotation, store) : { clientName: "-", companyName: "-" };
-            return <tr key={text(request.id)}><td className="px-5 py-3">{stackedCell(text(quotation?.quotation_no, "Price Quotation"), quotation?.project_name)}</td><td className="px-5 py-3">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{projectOfficerName(request)}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>;
+            return <tr key={text(request.id)}>{renderSelectionCell(`price-revision-${text(request.id)}`)}<td className="px-5 py-3">{stackedCell(text(quotation?.quotation_no, "Price Quotation"), quotation?.project_name)}</td><td className="px-5 py-3">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{projectOfficerName(request)}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>;
           })}
         </Table>
       ) : <Empty>No Price Quotation revisions are awaiting review.</Empty>)}
@@ -13712,20 +13967,21 @@ function Submissions({
         </Table>
       ) : <Empty>No costing breakdowns are awaiting review.</Empty>)}
       {tab === "revisions" && (visiblePendingQuotationRevisions.length ? (
-        <Table labels={["Costing Breakdown", "Sales Executive", "Requested", "Review"]}>
+        <Table labels={["Select", "Costing Breakdown", "Sales Executive", "Requested", "Review"]}>
           {visiblePendingQuotationRevisions.map((request) => {
             const costing = store.quotations.find((item) => item.id === request.costing_id);
             return <tr key={text(request.id)}>
+              {renderSelectionCell(`costing-revision-${text(request.id)}`)}
               <td className="px-5 py-3">{stackedCell(text(costing?.quotation_no, "Costing Breakdown"), costing?.project_name)}</td>
               <td className="px-5 py-3">{projectOfficerName(request)}</td>
               <td className="px-5 py-3">{day(request.submitted_at)}</td>
-              <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve costing revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject costing revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td>
+              <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve costing revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject costing revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td>
             </tr>;
           })}
         </Table>
       ) : <Empty>No Costing Breakdown revisions are awaiting review.</Empty>)}
       {tab === "calendar_projects" && (visiblePendingProjectSchedules.length ? (
-        <Table labels={["Assigned Sales Executive", "Price Quotation", "Mockup Quotation", "Signed proofs", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1500}>
+        <Table labels={["Select", "Assigned Sales Executive", "Price Quotation", "Mockup Quotation", "Signed proofs", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1540}>
           {visiblePendingProjectSchedules.map((schedule) => {
             const quotation = store.quotations.find((item) => item.id === schedule.quotation_id);
             const mockupQuotation = store.quotations.find((item) => item.id === schedule.mockup_quotation_id);
@@ -13738,6 +13994,7 @@ function Submissions({
             const scheduleProofs = [...schedulePriceProofs, ...scheduleMockupProofs];
             return (
             <tr key={text(schedule.id)}>
+              {renderSelectionCell(`production-${text(schedule.id)}`)}
               <td className="px-5 py-3">{scheduleOfficerName(schedule)}</td>
               <td className="px-5 py-3">{text(schedule.quotation_no)}</td>
               <td className="px-5 py-3">{text(mockupQuotation?.quotation_no, "—")}</td>
@@ -13748,20 +14005,21 @@ function Submissions({
               <td className="px-5 py-3">{day(schedule.start_date)}</td>
               <td className="px-5 py-3">{day(schedule.due_date)}</td>
               <td className="px-5 py-3"><Status value={schedule.status} /></td>
-              <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="View Price Quotation PDF" confirm={false} onClick={() => openQuotationPdf(quotation)}><FileText size={15} /></ActionIcon><ActionIcon label="Approve project schedule" tone="green" loading={savingId === schedule.id} disabled={savingId === schedule.id} onClick={() => void decideProjectSchedule(schedule, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project schedule" tone="red" loading={savingId === schedule.id} disabled={savingId === schedule.id} onClick={() => void decideProjectSchedule(schedule, "rejected")}><X size={15} /></ActionIcon></div></td>
+              <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="View Price Quotation PDF" confirm={false} disabled={bulkSaving} onClick={() => openQuotationPdf(quotation)}><FileText size={15} /></ActionIcon><ActionIcon label="Approve project schedule" tone="green" loading={savingId === schedule.id} disabled={savingId === schedule.id || bulkSaving} onClick={() => void decideProjectSchedule(schedule, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project schedule" tone="red" loading={savingId === schedule.id} disabled={savingId === schedule.id || bulkSaving} onClick={() => void decideProjectSchedule(schedule, "rejected")}><X size={15} /></ActionIcon></div></td>
             </tr>
             );
           })}
         </Table>
       ) : <Empty>No production requests are awaiting review.</Empty>)}
       {tab === "calendar_revisions" && (visiblePendingProjectScheduleRevisions.length ? (
-        <Table labels={["Assigned Sales Executive", "Quotation Code", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1140}>
+        <Table labels={["Select", "Assigned Sales Executive", "Quotation Code", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1180}>
           {visiblePendingProjectScheduleRevisions.map((request) => {
             const schedule = store.project_schedules.find(
               (item) => item.id === request.schedule_id,
             );
             return (
               <tr key={text(request.id)}>
+                {renderSelectionCell(`schedule-revision-${text(request.id)}`)}
                 <td className="px-5 py-3">{projectOfficerName(request)}</td>
                 <td className="px-5 py-3">{text(schedule?.quotation_no)}</td>
                 <td className="px-5 py-3">{text(schedule?.client_name)}</td>
@@ -13770,20 +14028,21 @@ function Submissions({
                 <td className="px-5 py-3"><b>{day(request.proposed_start_date)}</b><small>Current: {day(schedule?.start_date)}</small></td>
                 <td className="px-5 py-3"><b>{day(request.proposed_due_date)}</b><small>Current: {day(schedule?.due_date)}</small></td>
                 <td className="px-5 py-3"><Status value="revision pending" /></td>
-                <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve project schedule revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideProjectScheduleRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project schedule revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideProjectScheduleRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td>
+                <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve project schedule revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideProjectScheduleRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project schedule revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideProjectScheduleRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td>
               </tr>
             );
           })}
         </Table>
       ) : <Empty>No Project Calendar revisions are awaiting review.</Empty>)}
       {tab === "calendar_completions" && (visiblePendingProjectScheduleCompletions.length ? (
-        <Table labels={["Assigned Sales Executive", "Quotation Code", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1140}>
+        <Table labels={["Select", "Assigned Sales Executive", "Quotation Code", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1180}>
           {visiblePendingProjectScheduleCompletions.map((request) => {
             const schedule = store.project_schedules.find(
               (item) => item.id === request.schedule_id,
             );
             return (
               <tr key={text(request.id)}>
+                {renderSelectionCell(`completion-${text(request.id)}`)}
                 <td className="px-5 py-3">{projectOfficerName(request)}</td>
                 <td className="px-5 py-3">{text(schedule?.quotation_no)}</td>
                 <td className="px-5 py-3">{text(schedule?.client_name)}</td>
@@ -13792,7 +14051,7 @@ function Submissions({
                 <td className="px-5 py-3">{day(schedule?.start_date)}</td>
                 <td className="px-5 py-3">{day(schedule?.due_date)}</td>
                 <td className="px-5 py-3"><Status value="completion pending" /></td>
-                <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve project completion" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideProjectScheduleCompletion(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project completion" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideProjectScheduleCompletion(request, "rejected")}><X size={15} /></ActionIcon></div></td>
+                <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve project completion" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideProjectScheduleCompletion(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project completion" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideProjectScheduleCompletion(request, "rejected")}><X size={15} /></ActionIcon></div></td>
               </tr>
             );
           })}
@@ -13836,10 +14095,23 @@ function Submissions({
         </Table>
       ) : <Empty>No lead changes are awaiting review.</Empty>)}
       {tab === "other" && (visiblePendingApprovalRequests.length ? (
-        <Table labels={["Request", "Submitted by", "Submitted", "Review"]} minWidth={760}>
-          {visiblePendingApprovalRequests.map((request) => <tr key={text(request.id)}><td className="px-5 py-3"><b className="capitalize">{text(request.resource_type, "Approval request").replaceAll("_", " ")}</b><small>{text(request.resource_id)}</small></td><td className="px-5 py-3">{text(store.profiles.find((profile) => profile.id === request.submitted_by)?.full_name, "Team member")}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve request" tone="green" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideApprovalRequest(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject request" tone="red" loading={savingId === request.id} disabled={savingId === request.id} onClick={() => void decideApprovalRequest(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>)}
+        <Table labels={["Select", "Request", "Submitted by", "Submitted", "Review"]} minWidth={800}>
+          {visiblePendingApprovalRequests.map((request) => <tr key={text(request.id)}>{renderSelectionCell(`approval-${text(request.id)}`)}<td className="px-5 py-3"><b className="capitalize">{text(request.resource_type, "Approval request").replaceAll("_", " ")}</b><small>{text(request.resource_id)}</small></td><td className="px-5 py-3">{text(store.profiles.find((profile) => profile.id === request.submitted_by)?.full_name, "Team member")}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve request" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideApprovalRequest(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject request" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideApprovalRequest(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>)}
         </Table>
       ) : <Empty>No other approval requests are awaiting review.</Empty>)}
+      {bulkDecision && (
+        <ConfirmationDialog
+          open
+          title={`${bulkDecision === "approved" ? "Approve" : "Reject"} selected approvals?`}
+          description={`This will ${bulkDecision === "approved" ? "approve" : "reject"} ${selectedCurrentApprovalItems.length} selected approval${selectedCurrentApprovalItems.length === 1 ? "" : "s"}. Each record will still be checked by its existing approval workflow.`}
+          onCancel={() => setBulkDecision(null)}
+          onConfirm={() => {
+            const decision = bulkDecision;
+            setBulkDecision(null);
+            void runBulkDecision(decision);
+          }}
+        />
+      )}
       {selected && (
         <GeneralManagerCostingReview
           quotation={selected}

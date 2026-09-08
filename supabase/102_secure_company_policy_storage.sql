@@ -10,7 +10,7 @@ insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_typ
 values (
   'policy-documents',
   'policy-documents',
-  false,
+  false, 
   10485760,
   array['application/pdf']::text[]
 )
