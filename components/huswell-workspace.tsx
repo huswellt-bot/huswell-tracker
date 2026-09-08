@@ -234,6 +234,23 @@ const calculationBasisShortLabels = {
   percentage: <Percent size={14} strokeWidth={1.75} aria-hidden="true" />,
   fixed_amount: <PhilippinePeso size={14} strokeWidth={1.75} aria-hidden="true" />,
 } as const;
+const calculationBasisLabel = (value: MarkupCalculationType) =>
+  calculationBasisOptions.find((option) => option.value === value)?.label ?? "Calculation basis";
+const CalculationBasisIcon = ({ value }: { value: MarkupCalculationType }) => (
+  <span
+    role="img"
+    aria-label={calculationBasisLabel(value)}
+    title={calculationBasisLabel(value)}
+    className="inline-flex items-center justify-center"
+  >
+    {calculationBasisShortLabels[value]}
+  </span>
+);
+const calculationBasisIconOptions = calculationBasisOptions.map((option) => ({
+  value: option.value,
+  label: <CalculationBasisIcon value={option.value} />,
+  ariaLabel: option.label,
+}));
 const costLineCalculationOptions = [
   { value: "quantity_unit_cost", label: "Q×C" },
   { value: "fixed_amount", label: "Fixed" },
@@ -12428,7 +12445,7 @@ function PricingMarkupEditor({
             <tr key={markup.key} className="hover:bg-[#fbfcff]">
               <td className="px-3 py-2 font-medium text-[#344054]">{label}</td>
               <td className="px-2 py-2">
-                {editable ? <SegmentedToggle ariaLabel={`${label} calculation basis`} value={type} options={calculationBasisOptions} size="compact" className="w-full" onChange={(value) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, calculationType: value as MarkupCalculationType } : item) })} /> : <span className="text-[11px] text-[#687386]">{type === "fixed_amount" ? "Amount (₱)" : "Percentage (%)"}</span>}
+                {editable ? <SegmentedToggle ariaLabel={`${label} calculation basis`} value={type} options={calculationBasisIconOptions} size="compact" className="w-full" onChange={(value) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, calculationType: value as MarkupCalculationType } : item) })} /> : <CalculationBasisIcon value={type} />}
               </td>
               <td className="px-2 py-2">
                 {editable ? <div className="flex items-center justify-end gap-1"><input aria-label={`${label} value`} type="number" min="0" step="any" value={markupValue(markup)} onChange={(event) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, value: event.target.value } : item) })} className="input mt-0 w-[92px] min-w-0 px-2 py-1.5 text-right tabular-nums" /><span className="w-4 text-[11px] text-[#687386]">{type === "fixed_amount" ? "₱" : "%"}</span></div> : <span className="block text-right tabular-nums text-[#687386]">{type === "fixed_amount" ? peso.format(n(markupValue(markup))) : `${n(markupValue(markup))}%`}</span>}
@@ -12677,7 +12694,7 @@ function ProductCostingsSectionWithPricing({
       <div className="mt-4 rounded-lg border border-[#d9e0e9] bg-white p-3">
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-48 flex-1"><h4 className="text-[12px] font-semibold text-[#344054]">Quotation VAT</h4><p className="mt-0.5 text-[11px] text-[#687386]">VAT is applied after the final VAT-exclusive selling price.</p></div>
-          <label className="text-[11px] font-medium text-[#344054]">Basis<SegmentedToggle ariaLabel="VAT calculation basis" value={vatCalculationType} options={calculationBasisOptions} size="compact" className="mt-1 min-w-36" onChange={(value) => setVatCalculationType(value as MarkupCalculationType)} /></label>
+          <label className="text-[11px] font-medium text-[#344054]">Basis<SegmentedToggle ariaLabel="VAT calculation basis" value={vatCalculationType} options={calculationBasisIconOptions} size="compact" className="mt-1 min-w-36" onChange={(value) => setVatCalculationType(value as MarkupCalculationType)} /></label>
           <label className="text-[11px] font-medium text-[#344054]">Value<div className="mt-1 flex items-center gap-1"><input aria-label="VAT value" type="number" min="0" step="any" value={vatValue} onChange={(event) => setVatValue(event.target.value)} className="input mt-0 w-28 px-2 py-1.5 text-right" /><span className="text-[#687386]">{vatCalculationType === "fixed_amount" ? "₱" : "%"}</span></div></label>
           <output aria-label="VAT total" className="min-w-28 text-right text-[12px] font-semibold text-[#344054]">{peso.format(vatTotal)}</output>
         </div>
@@ -17621,7 +17638,7 @@ function SettingsView({
       <AccountProfileDialog open embedded fullWidth role={role} />
       <Panel title="Pricing defaults - Internal" detail="Applied to new internal product costings. Existing quotations keep their saved pricing. Sales &amp; Pricing Officers can adjust VAT per quotation." action={memberRole(role) ? <Button secondary onClick={() => { const defaults = pricingMarkupDefaults(setting?.pricing_markup_defaults, setting); setPricingDefaults(Object.fromEntries(defaults.flatMap((definition) => [[`${definition.key}_value`, definition.value], [`${definition.key}_type`, definition.calculationType]]))); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button> : undefined}>
         <Table labels={["Pricing default", "Basis", "Default"]}>
-          {pricingMarkupDefaults(setting?.pricing_markup_defaults, setting).map((definition) => <tr key={definition.key}><td className="px-4 py-3 font-medium">{definition.label}</td><td className="px-4 py-3 text-[#687386]">{definition.calculationType === "fixed_amount" ? "Amount (₱)" : "Percentage (%)"}</td><td className="px-4 py-3 text-right">{definition.calculationType === "fixed_amount" ? peso.format(n(definition.value)) : `${n(definition.value)}%`}</td></tr>)}
+          {pricingMarkupDefaults(setting?.pricing_markup_defaults, setting).map((definition) => <tr key={definition.key}><td className="px-4 py-3 font-medium">{definition.label}</td><td className="px-4 py-3 text-center text-[#687386]"><CalculationBasisIcon value={definition.calculationType} /></td><td className="px-4 py-3 text-right">{definition.calculationType === "fixed_amount" ? peso.format(n(definition.value)) : `${n(definition.value)}%`}</td></tr>)}
         </Table>
       </Panel>
       {pricingDefaultsOpen && <Dialog title="Pricing defaults - Internal" fields={pricingMarkupDefinitions.flatMap((definition) => [{ key: `${definition.key}_value`, label: `${definition.label} value`, type: "number" as const, required: true }, { key: `${definition.key}_type`, label: `${definition.label} basis`, type: "toggle" as const, options: calculationBasisOptions.map((option) => `${option.value}|${option.label}`), shortLabels: calculationBasisShortLabels }])} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => { if (!savingPricingDefaults) setPricingDefaultsOpen(false); }} saving={savingPricingDefaults} saveLabel="Save pricing defaults" className="max-w-lg" compact />}
