@@ -263,6 +263,8 @@ Rules:
 
 ---
 
+Count badges inside an active sidebar item are an exception: use a white badge surface with `--color-accent-text` for the number so the count remains readable.
+
 ## 7.2 Tabs (Horizontal Tab Navigation)
 
 Active tab indicator is a **flat bottom line only** — no rounded corner borders, no boxed/pill tab backgrounds, no partial border framing around the tab.

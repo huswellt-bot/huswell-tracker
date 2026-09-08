@@ -17,13 +17,24 @@ const PDF_BROWSER_PROFILE_ROOT = join(
   process.env.PDF_BROWSER_PROFILE_DIR ?? "D:\\Temp\\agent-scratch",
   "huswell-pdf-renderer",
 );
+
+const PORTRAIT_PAGE_STYLE =
+  '<style data-huswell-pdf-orientation="portrait">@page { size: 8.5in 14in; }</style>';
+
+function enforcePortraitPageSize(html: string) {
+  if (/<\/head>/i.test(html)) {
+    return html.replace(/<\/head>/i, `${PORTRAIT_PAGE_STYLE}</head>`);
+  }
+  return `${PORTRAIT_PAGE_STYLE}${html}`;
+}
+
 async function createPdf(html: string) {
   await mkdir(PDF_BROWSER_PROFILE_ROOT, { recursive: true });
   const profileDir = await mkdtemp(join(PDF_BROWSER_PROFILE_ROOT, "edge-"));
   const htmlPath = join(profileDir, "quotation.html");
   const pdfPath = join(profileDir, "quotation.pdf");
   try {
-    await writeFile(htmlPath, html);
+    await writeFile(htmlPath, enforcePortraitPageSize(html));
     const edge = process.env.PDF_RENDERER_EXECUTABLE ?? "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
     const child = spawn(edge, ["--headless=new", "--disable-gpu", "--no-first-run", "--no-pdf-header-footer", `--user-data-dir=${join(profileDir, "profile")}`, `--print-to-pdf=${pdfPath}`, `file:///${htmlPath.replace(/\\/g, "/")}`], { windowsHide: true });
     await new Promise<void>((resolve, reject) => {

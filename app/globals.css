@@ -382,7 +382,7 @@ small {
 }
 @media print {
   @page {
-    size: 8.5in 13in;
+    size: 8.5in 14in;
     margin: 0;
   }
   body {
@@ -392,7 +392,7 @@ small {
     width: 8.5in;
   }
   .quotation-print-page {
-    min-height: 13in;
+    min-height: 14in;
     break-after: page;
   }
   .quotation-print-page:last-child {
@@ -436,7 +436,7 @@ select:not([multiple]) {
   width: 8.5in;
 }
 .quotation-print-page {
-  min-height: 13in;
+  min-height: 14in;
 }
 .huswell-workspace [data-pdf-document] {
   overflow-wrap: anywhere;
@@ -1009,6 +1009,11 @@ select option[value=""] {
 .compact-ui .sidebar-shell .sidebar-item[aria-current="page"] span,
 .compact-ui .sidebar-shell .sidebar-item[aria-current="page"] svg {
   color: var(--color-on-accent) !important;
+}
+
+.compact-ui .sidebar-shell .sidebar-item[aria-current="page"] .sidebar-badge {
+  background: var(--color-surface) !important;
+  color: var(--color-accent-text) !important;
 }
 
 .compact-ui header,

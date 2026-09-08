@@ -1903,7 +1903,7 @@ const generatedPdfStyles = PdfStyleSheet.create({
   description: { textAlign: "left" },
   total: { backgroundColor: "#f7f7f7", fontWeight: 700 },
   terms: { fontSize: 8, lineHeight: 1.7 },
-  bankTable: { width: 340, alignSelf: "center", borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111", marginTop: 5, marginBottom: 5 },
+  bankTable: { width: "100%", alignSelf: "center", borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111", marginTop: 5, marginBottom: 5 },
   bankRow: { flexDirection: "row" },
   bankCell: { borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#111", paddingVertical: 3, paddingHorizontal: 5, justifyContent: "center" },
   signatureRow: { flexDirection: "row", justifyContent: "space-between", marginTop: 38 },
@@ -1938,7 +1938,7 @@ function PdfBankDetails({ details }: { details: BankDetail[] }) {
   return <PdfView style={generatedPdfStyles.bankTable}>{details.map((detail, index) => <PdfView key={`${detail.bank_name}-${detail.account_number}-${index}`} style={generatedPdfStyles.bankRow}><PdfView style={[generatedPdfStyles.bankCell, { width: "35%" }]}><PdfText>{detail.bank_name}</PdfText></PdfView><PdfView style={[generatedPdfStyles.bankCell, { width: "65%" }]}><PdfText>{[detail.account_name, detail.account_number].filter(Boolean).join(" - ")}</PdfText></PdfView></PdfView>)}</PdfView>;
 }
 
-const LONG_BOND_PORTRAIT: [number, number] = [612, 936];
+const LEGAL_PORTRAIT: [number, number] = [612, 1008];
 type SalesQuotationPageDensity = "standard" | "compact" | "super-compact" | "overflow";
 
 function quotationTextUnits(value: unknown, charactersPerLine: number) {
@@ -1982,22 +1982,22 @@ function salesQuotationPageDensity(
 }
 
 const priceQuotationPdfStyles = PdfStyleSheet.create({
-  // 8.5 × 13 in (long bond paper) at React PDF's 72 points per inch.
-  page: { paddingTop: 18, paddingRight: 22, paddingBottom: 16, paddingLeft: 22, fontFamily: "SF Pro Display", fontSize: 7.5, color: "#111" },
-  topHeader: { flexDirection: "row", alignItems: "stretch", borderBottomWidth: 1.2, borderColor: "#111", paddingBottom: 8 },
-  logoColumn: { width: "27%", justifyContent: "center", paddingRight: 7 }, logo: { width: 126, height: 42, objectFit: "contain" },
-  businessColumn: { width: "38%", justifyContent: "center", paddingHorizontal: 7 }, businessDetail: { fontSize: 6.8, lineHeight: 1.25, marginBottom: 1 },
-  quoteColumn: { width: "35%", borderLeftWidth: 1, borderColor: "#555", paddingLeft: 15 }, title: { color: "#c92f35", fontSize: 16, fontWeight: 700, marginBottom: 5 },
-  quoteMetaRow: { flexDirection: "row", marginBottom: 1 }, quoteMetaLabel: { width: 69, fontSize: 7.2 }, quoteMetaColon: { width: 8, fontSize: 7.2 }, quoteMetaValue: { flex: 1, fontSize: 7.2 },
-  clientGrid: { flexDirection: "row", marginTop: 8, marginBottom: 7 }, clientColumn: { width: "50%", paddingRight: 12 }, clientColumnRight: { width: "50%", borderLeftWidth: 1, borderColor: "#777", paddingLeft: 16 },
-  clientField: { flexDirection: "row", alignItems: "flex-end", minHeight: 15, marginBottom: 2 }, clientLabel: { width: 73, fontWeight: 700, fontSize: 7.3 }, clientColon: { width: 8, fontWeight: 700, fontSize: 7.3 }, clientValue: { flex: 1, borderBottomWidth: 0.7, borderColor: "#555", paddingBottom: 1, fontSize: 7.2 },
-  salutation: { fontSize: 7.6, fontStyle: "italic", marginBottom: 7 }, table: { borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" }, row: { flexDirection: "row", alignItems: "stretch" },
-  cell: { borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#111", paddingVertical: 3, paddingHorizontal: 4, justifyContent: "center", alignSelf: "stretch", textAlign: "center", fontSize: 7.2, lineHeight: 1.15 }, tableHeader: { backgroundColor: "#efefef", fontWeight: 700 }, descriptionCell: { textAlign: "left" },
-  termsHeader: { borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#111", backgroundColor: "#efefef", paddingVertical: 4, paddingHorizontal: 6, fontSize: 7.5, fontWeight: 700 }, termsTable: { borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111", marginTop: 8 }, termNumber: { textAlign: "center" }, termTitle: { fontWeight: 700, textAlign: "left" }, termDescription: { textAlign: "left", lineHeight: 1.15 },
-  lowerSection: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginTop: 8 }, bankTable: { width: "52%", borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" }, totalTable: { width: "43%", borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" }, bankHeader: { fontWeight: 700, textAlign: "center" }, totalLabel: { fontSize: 7.2, fontWeight: 700, textAlign: "left" }, totalValue: { fontSize: 7.2, textAlign: "right" }, totalRow: { backgroundColor: "#efefef" }, totalLabelStrong: { fontSize: 7.2, fontWeight: 700, textAlign: "left" }, totalValueStrong: { fontSize: 7.2, fontWeight: 700, textAlign: "right" },
-  signatures: { flexDirection: "row", marginTop: 10 }, signatureColumn: { width: "50%", minHeight: 43, paddingRight: 13 }, signatureColumnRight: { width: "50%", minHeight: 43, borderLeftWidth: 1, borderColor: "#777", paddingLeft: 15 }, signatureLine: { flexDirection: "row", alignItems: "flex-end", minHeight: 16 }, signatureLabel: { width: 62, fontWeight: 700, fontSize: 7.3 }, signatureSignatory: { flex: 1, minHeight: 20, justifyContent: "flex-end" }, signatureImage: { width: 60, height: 22, objectFit: "contain", alignSelf: "center", marginBottom: -3 }, signatureName: { width: "100%", textAlign: "center", borderBottomWidth: 0.8, borderColor: "#111", paddingBottom: 1, fontSize: 7.3 }, signatureRole: { marginTop: 3, marginLeft: 62, fontSize: 7.1, textAlign: "center" },
-  footer: { borderTopWidth: 1, borderColor: "#111", marginTop: 8, paddingTop: 4 }, footerItalic: { textAlign: "center", fontSize: 7, fontStyle: "italic", lineHeight: 1.2 }, footerAddress: { textAlign: "center", fontSize: 6.6, marginTop: 3 },
-  internalTitle: { color: "#9d1f25", fontSize: 14, fontWeight: 700, marginBottom: 3 }, internalNote: { color: "#555", fontSize: 7.5, marginBottom: 10 }, internalProductTitle: { fontSize: 8.5, fontWeight: 700, marginTop: 9, marginBottom: 4 }, internalSummary: { marginTop: 4, marginLeft: "42%", borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" },
+  // 8.5 × 14 in (Legal paper) at React PDF's 72 points per inch.
+  page: { paddingTop: 28, paddingRight: 30, paddingBottom: 28, paddingLeft: 30, fontFamily: "SF Pro Display", fontSize: 11, color: "#111" },
+  topHeader: { flexDirection: "row", alignItems: "stretch", borderBottomWidth: 1.2, borderColor: "#111", paddingBottom: 10 },
+  logoColumn: { width: "27%", justifyContent: "center", paddingRight: 8 }, logo: { width: 130, height: 44, objectFit: "contain" },
+  businessColumn: { width: "38%", justifyContent: "center", paddingHorizontal: 8 }, businessDetail: { fontSize: 9.5, lineHeight: 1.2, marginBottom: 1 },
+  quoteColumn: { width: "35%", borderLeftWidth: 1, borderColor: "#555", paddingLeft: 13 }, title: { color: "#c92f35", fontSize: 17, fontWeight: 700, marginBottom: 5 },
+  quoteMetaRow: { flexDirection: "row", marginBottom: 1 }, quoteMetaLabel: { width: 76, fontSize: 10 }, quoteMetaColon: { width: 8, fontSize: 10 }, quoteMetaValue: { flex: 1, fontSize: 10 },
+  clientGrid: { flexDirection: "row", marginTop: 14, marginBottom: 12 }, clientColumn: { width: "50%", paddingRight: 14 }, clientColumnRight: { width: "50%", borderLeftWidth: 1, borderColor: "#777", paddingLeft: 16 },
+  clientField: { flexDirection: "row", alignItems: "flex-end", minHeight: 23, marginBottom: 3 }, clientLabel: { width: 88, fontWeight: 700, fontSize: 11 }, clientColon: { width: 9, fontWeight: 700, fontSize: 11 }, clientValue: { flex: 1, borderBottomWidth: 0.7, borderColor: "#555", paddingBottom: 2, fontSize: 11 },
+  salutation: { fontSize: 11, fontStyle: "italic", lineHeight: 1.35, marginBottom: 12 }, table: { borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" }, row: { flexDirection: "row", alignItems: "stretch" },
+  cell: { borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#111", paddingVertical: 5, paddingHorizontal: 5, justifyContent: "center", alignSelf: "stretch", textAlign: "center", fontSize: 11, lineHeight: 1.25 }, tableHeader: { backgroundColor: "#efefef", fontWeight: 700 }, descriptionCell: { textAlign: "left" },
+  termsHeader: { borderRightWidth: 1, borderBottomWidth: 1, borderColor: "#111", backgroundColor: "#efefef", paddingVertical: 6, paddingHorizontal: 7, fontSize: 11, fontWeight: 700 }, termsTable: { borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111", marginTop: 12 }, termNumber: { textAlign: "center" }, termTitle: { fontWeight: 700, textAlign: "left" }, termDescription: { textAlign: "left", lineHeight: 1.25 },
+  lowerSection: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginTop: 12 }, bankTable: { width: "100%", borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" }, totalTable: { width: "43%", borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" }, bankHeader: { fontWeight: 700, textAlign: "center" }, totalLabel: { fontSize: 11, fontWeight: 700, textAlign: "left" }, totalValue: { fontSize: 11, textAlign: "right" }, totalRow: { backgroundColor: "#efefef" }, totalLabelStrong: { fontSize: 11, fontWeight: 700, textAlign: "left" }, totalValueStrong: { fontSize: 11, fontWeight: 700, textAlign: "right" },
+  signatures: { flexDirection: "row", marginTop: 16 }, signatureColumn: { width: "50%", minHeight: 62, paddingRight: 14 }, signatureColumnRight: { width: "50%", minHeight: 62, borderLeftWidth: 1, borderColor: "#777", paddingLeft: 16 }, signatureLine: { flexDirection: "row", alignItems: "flex-end", minHeight: 23 }, signatureLabel: { width: 76, fontWeight: 700, fontSize: 11 }, signatureSignatory: { flex: 1, minHeight: 28, justifyContent: "flex-end" }, signatureImage: { width: 70, height: 26, objectFit: "contain", alignSelf: "center", marginBottom: -4 }, signatureName: { width: "100%", textAlign: "center", borderBottomWidth: 0.8, borderColor: "#111", paddingBottom: 2, fontSize: 11 }, signatureRole: { marginTop: 4, marginLeft: 76, fontSize: 11, textAlign: "center" },
+  footer: { borderTopWidth: 1, borderColor: "#111", marginTop: 12, paddingTop: 5 }, footerItalic: { textAlign: "center", fontSize: 9.5, fontStyle: "italic", lineHeight: 1.3 }, footerAddress: { textAlign: "center", fontSize: 9.5, marginTop: 4 },
+  internalTitle: { color: "#9d1f25", fontSize: 16, fontWeight: 700, marginBottom: 4 }, internalNote: { color: "#555", fontSize: 10.5, marginBottom: 12 }, internalProductTitle: { fontSize: 12, fontWeight: 700, marginTop: 12, marginBottom: 6 }, internalSummary: { marginTop: 6, marginLeft: "42%", borderTopWidth: 1, borderLeftWidth: 1, borderColor: "#111" },
 });
 
 const priceQuotationPdfCompactStyles = PdfStyleSheet.create({
@@ -2026,7 +2026,7 @@ function PriceQuotationPdfCell({ children, width, header = false, description = 
 }
 
 function PriceQuotationTermCell({ children, width, heading = false, compact = false, superCompact = false }: { children: string; width: string; heading?: boolean; compact?: boolean; superCompact?: boolean }) {
-  return <PdfView style={[priceQuotationPdfStyles.cell, { width, justifyContent: "center" }, compact ? priceQuotationPdfCompactStyles.cell : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.cell : undefined]}><PdfText style={{ fontSize: superCompact ? 5.5 : compact ? 6.2 : 7.1, lineHeight: superCompact ? 1 : compact ? 1.05 : 1.15, textAlign: "left", fontWeight: heading ? 700 : 400 }}>{children}</PdfText></PdfView>;
+  return <PdfView style={[priceQuotationPdfStyles.cell, { width, justifyContent: "center" }, compact ? priceQuotationPdfCompactStyles.cell : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.cell : undefined]}><PdfText style={{ fontSize: 11, lineHeight: 1.25, textAlign: "left", fontWeight: heading ? 700 : 400 }}>{children}</PdfText></PdfView>;
 }
 
 function PriceQuotationSignature({ label, name, signatureSource, compact = false, superCompact = false }: { label: string; name: string; signatureSource?: string; compact?: boolean; superCompact?: boolean }) {
@@ -2073,14 +2073,13 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
   const subtotal = n(quote.subtotal);
   const tax = n(quote.vat_amount);
   const shipping = n(quote.shipping_handling);
-  const density = salesQuotationPageDensity(quote, store);
-  const compact = density === "compact" || density === "super-compact";
-  const superCompact = density === "super-compact";
-  const overflow = density === "overflow";
+  // Keep the customer document readable; React-PDF creates another Legal page for longer content.
+  const compact = false;
+  const superCompact = false;
   const productCostings = showInternalCosting
     ? store.price_quotation_product_costings.filter((costing) => costing.quotation_id === quote.id)
     : [];
-  const pageStyle = [priceQuotationPdfStyles.page, compact ? priceQuotationPdfCompactStyles.page : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.page : undefined];
+  const pageStyle = priceQuotationPdfStyles.page;
   const clientField = (label: string, value: string) => <PdfView key={label} style={[priceQuotationPdfStyles.clientField, compact ? priceQuotationPdfCompactStyles.clientField : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientField : undefined]}><PdfText style={[priceQuotationPdfStyles.clientLabel, compact ? priceQuotationPdfCompactStyles.clientLabel : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientLabel : undefined]}>{label}</PdfText><PdfText style={[priceQuotationPdfStyles.clientColon, compact ? priceQuotationPdfCompactStyles.clientColon : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientColon : undefined]}>:</PdfText><PdfText style={[priceQuotationPdfStyles.clientValue, compact ? priceQuotationPdfCompactStyles.clientValue : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientValue : undefined]}>{value}</PdfText></PdfView>;
   const headerSection = (
     <PdfView style={[priceQuotationPdfStyles.topHeader, compact ? priceQuotationPdfCompactStyles.topHeader : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.topHeader : undefined]}>
@@ -2125,8 +2124,8 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
   );
   const bankSection = (
     <PdfView style={[priceQuotationPdfStyles.bankTable, compact ? priceQuotationPdfCompactStyles.bankTable : { marginTop: 8 }, superCompact ? priceQuotationPdfSuperCompactStyles.bankTable : undefined]}>
-        <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="30%" header style={priceQuotationPdfStyles.bankHeader}>BANK</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="70%" header style={priceQuotationPdfStyles.bankHeader}>ACCOUNT NAME / NUMBER</PriceQuotationPdfCell></PdfView>
-        {bankDetails.map((detail, index) => <PdfView key={`${detail.bank_name}-${detail.account_number}-${index}`} style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="30%" description>{detail.bank_name}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="70%" description>{[detail.account_name, detail.account_number].filter(Boolean).join(" - ")}</PriceQuotationPdfCell></PdfView>)}
+        <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="35%" header style={priceQuotationPdfStyles.bankHeader}>BANK</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="65%" header style={priceQuotationPdfStyles.bankHeader}>ACCOUNT NAME / NUMBER</PriceQuotationPdfCell></PdfView>
+        {bankDetails.map((detail, index) => <PdfView key={`${detail.bank_name}-${detail.account_number}-${index}`} style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="35%" description>{detail.bank_name}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="65%" description>{[detail.account_name, detail.account_number].filter(Boolean).join(" - ")}</PriceQuotationPdfCell></PdfView>)}
     </PdfView>
   );
   const signatureSection = (
@@ -2139,22 +2138,11 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
     <PdfView style={[priceQuotationPdfStyles.footer, compact ? priceQuotationPdfCompactStyles.footer : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.footer : undefined]}><PdfText style={[priceQuotationPdfStyles.footerItalic, compact ? priceQuotationPdfCompactStyles.footerItalic : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.footerItalic : undefined]}>Thank you for the opportunity to provide this quotation.{`\n`}We look forward to working with you.</PdfText><PdfText style={[priceQuotationPdfStyles.footerAddress, compact ? priceQuotationPdfCompactStyles.footerAddress : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.footerAddress : undefined]}>Business Address: 72 Adrian St., North Fairview Park Subd., Brgy. North Fairview, Quezon City, Metro Manila</PdfText></PdfView>
   );
   return <PdfDocument title={`${documentLabel} ${text(quote.quotation_no)}`}>
-    {overflow ? (
-      <>
-        {/* Overflow: page 1 keeps the complete client-facing document; terms and bank details flow to page 2. */}
-        <PdfPage size={LONG_BOND_PORTRAIT} style={[priceQuotationPdfStyles.page, priceQuotationPdfCompactStyles.page, priceQuotationPdfSuperCompactStyles.page]} wrap={false}>
-          {headerSection}{clientSection}{salutationSection}{tableSection}{signatureSection}{footerSection}
-        </PdfPage>
-        <PdfPage size={LONG_BOND_PORTRAIT} style={[priceQuotationPdfStyles.page, priceQuotationPdfCompactStyles.page, priceQuotationPdfSuperCompactStyles.page]} wrap={false}>
-          {termsSection}{bankSection}
-        </PdfPage>
-      </>
-    ) : (
-      <PdfPage size={LONG_BOND_PORTRAIT} style={pageStyle} wrap={false}>
-        {headerSection}{clientSection}{salutationSection}{tableSection}{termsSection}{bankSection}{signatureSection}{footerSection}
-      </PdfPage>
-    )}
-    {showInternalCosting && productCostings.length > 0 && <PdfPage size={LONG_BOND_PORTRAIT} style={priceQuotationPdfStyles.page}>
+    {/* React-PDF collapses a fixed page height when PdfPage has wrap={false}. */}
+    <PdfPage size={LEGAL_PORTRAIT} orientation="portrait" style={pageStyle}>
+      {headerSection}{clientSection}{salutationSection}{tableSection}{termsSection}{bankSection}{signatureSection}{footerSection}
+    </PdfPage>
+    {showInternalCosting && productCostings.length > 0 && <PdfPage size={LEGAL_PORTRAIT} orientation="portrait" style={priceQuotationPdfStyles.page}>
       <PdfText style={priceQuotationPdfStyles.internalTitle}>INTERNAL PRODUCT COSTINGS</PdfText>
       <PdfText style={priceQuotationPdfStyles.internalNote}>General Manager confidential — do not share with the client or Sales Executive.</PdfText>
       {productCostings.map((costing, costingIndex) => {
@@ -2207,7 +2195,7 @@ function PriceQuotationPdfLegacy({ quote, store, origin }: { quote: Row; store: 
   const tax = n(quote.vat_amount);
   const shipping = n(quote.shipping_handling);
   return <PdfDocument title={`Price Quotation ${text(quote.quotation_no)}`}>
-    <PdfPage size={LONG_BOND_PORTRAIT} style={generatedPdfStyles.page}>
+    <PdfPage size={LEGAL_PORTRAIT} orientation="portrait" style={generatedPdfStyles.page}>
       <PdfView style={generatedPdfStyles.header}>
         <PdfView><PdfImage src={`${origin}/huswell-quotation-logo.png`} style={generatedPdfStyles.logo} /><PdfText>72 Adrian St. North Fairview Park Subd.</PdfText><PdfText>Brgy. North Fairview, Quezon City</PdfText><PdfText>09171697153</PdfText><PdfText>saleshuswell@gmail.com</PdfText></PdfView>
         <PdfView style={generatedPdfStyles.quotationHeader}><PdfText style={generatedPdfStyles.quotationTitle}>PRICE QUOTATION</PdfText><PdfView style={generatedPdfStyles.quotationDetails}><PdfText style={generatedPdfStyles.quotationDetail}>Quotation No.: {text(quote.quotation_no)}</PdfText><PdfText style={generatedPdfStyles.quotationDetail}>Quotation Date: {issueDate}</PdfText><PdfText style={generatedPdfStyles.quotationDetail}>Prepared For: {text(customer?.company_name ?? lead?.client_name ?? quote.client_name, "—")}</PdfText><PdfText style={generatedPdfStyles.quotationDetail}>Attention: {text(customer?.contact_name ?? lead?.contact_name ?? quote.client_contact_name, "—")}</PdfText></PdfView></PdfView>
@@ -2248,7 +2236,7 @@ function CostingBreakdownPdf({ quote, store, origin }: { quote: Row; store: Stor
   const approvedByName = text(quote.approved_by_name, "Marvin S. Tavarez");
   const approvedBySignature = text(quote.approved_by_signature_url, "") || (quote.approved_by_name ? undefined : `${origin}/marvin-tavarez-signature.png`);
   const approvedByRole = quote.approved_by_name ? "General Manager" : "Proprietor";
-  return <PdfDocument title={`Costing Breakdown ${text(quote.quotation_no)}`}><PdfPage size={LONG_BOND_PORTRAIT} style={generatedPdfStyles.page}>
+  return <PdfDocument title={`Costing Breakdown ${text(quote.quotation_no)}`}><PdfPage size={LEGAL_PORTRAIT} orientation="portrait" style={generatedPdfStyles.page}>
     <PdfView style={{ alignItems: "center" }}><PdfImage src={`${origin}/huswell-quotation-logo.png`} style={generatedPdfStyles.logo} /><PdfText style={generatedPdfStyles.title}>COSTING BREAKDOWN / PRICE QUOTE</PdfText></PdfView>
     <PdfText style={generatedPdfStyles.sectionTitle}>CLIENT INFORMATION</PdfText>
     {[["Company Name", text(customer?.company_name ?? lead?.client_name ?? quote.client_name)], ["Client Name", text(customer?.contact_name ?? lead?.contact_name ?? quote.client_contact_name)], ["Phone / Email", text(quote.client_phone)], ["Date", day(quote.issue_date)]].map(([label, value]) => <PdfView key={label} style={generatedPdfStyles.infoRow}><PdfText style={generatedPdfStyles.infoLabel}>{label}:</PdfText><PdfText style={generatedPdfStyles.infoValue}>{value}</PdfText></PdfView>)}
@@ -4772,7 +4760,7 @@ function MockupQuotationWorkspace({
   role: string;
   }) {
   type RequestItem = {
-    sourceItemId: string;
+    id: string;
     description: string;
     quantity: string;
   };
@@ -4792,6 +4780,7 @@ function MockupQuotationWorkspace({
   const [requestItems, setRequestItems] = useState<RequestItem[]>([]);
   const [saving, setSaving] = useState(false);
   const [reviewing, setReviewing] = useState<Row | null>(null);
+  const [revisionNoteQuote, setRevisionNoteQuote] = useState<Row | null>(null);
   const [pdfQuote, setPdfQuote] = useState<Row | null>(null);
   const [pdfWindow, setPdfWindow] = useState<Window | null>(null);
   const [proofQuote, setProofQuote] = useState<Row | null>(null);
@@ -4888,15 +4877,13 @@ function MockupQuotationWorkspace({
   };
   const selectSource = (sourceId: string) => {
     setSourceQuotationId(sourceId);
-    const sourceItems = itemRowsFor(sourceId);
-    setRequestItems(
-      sourceItems.map((item) => ({
-        sourceItemId: text(item.id),
-        description: text(item.description, ""),
-        quantity: text(item.quantity, "1"),
-      })),
-    );
+    setRequestItems(sourceId ? [newRequestItem()] : []);
   };
+  const newRequestItem = (): RequestItem => ({
+    id: `mockup-item-${crypto.randomUUID()}`,
+    description: "",
+    quantity: "",
+  });
   const openRequest = () => {
     if (!availableSourceQuotations.length) {
       return notice(
@@ -4911,16 +4898,17 @@ function MockupQuotationWorkspace({
   const openEdit = (quote: Row) => {
     const source = sourceFor(quote);
     if (!source?.id) return notice("The approved source Price Quotation could not be found.");
-    const sourceItems = itemRowsFor(text(source.id));
     const quoteItems = itemRowsFor(text(quote.id));
     setEditingQuote(quote);
     setSourceQuotationId(text(source.id));
     setRequestItems(
-      sourceItems.map((sourceItem, index) => ({
-        sourceItemId: text(sourceItem.id),
-        description: text(quoteItems[index]?.description, text(sourceItem.description, "")),
-        quantity: text(quoteItems[index]?.quantity, text(sourceItem.quantity, "1")),
-      })),
+      quoteItems.length
+        ? quoteItems.map((item) => ({
+            id: text(item.id, `mockup-item-${crypto.randomUUID()}`),
+            description: text(item.description, ""),
+            quantity: text(item.quantity, ""),
+          }))
+        : [newRequestItem()],
     );
     setRequestOpen(true);
   };
@@ -4934,7 +4922,7 @@ function MockupQuotationWorkspace({
     setPdfWindow(nextWindow);
     setPdfQuote(quote);
   };
-  const saveRequest = async () => {
+  const saveDraft = async () => {
     const source = store.quotations.find((quote) => quote.id === sourceQuotationId);
     if (!source) return notice("Select an approved Price Quotation first.");
     if (
@@ -4946,33 +4934,58 @@ function MockupQuotationWorkspace({
     setSaving(true);
     const client = createClient();
     try {
-      const { data, error } = await client.rpc("save_mockup_quotation_draft", {
+      const wasEditing = Boolean(editingQuote);
+      const { error } = await client.rpc("save_mockup_quotation_draft", {
         p_mockup_quotation_id: editingQuote?.id ?? null,
         p_source_price_quotation_id: source.id,
         p_items: requestItems.map((item) => ({
-          source_item_id: item.sourceItemId,
           description: item.description,
           quantity: n(item.quantity),
         })),
       });
       if (error) throw error;
-      const mockupQuotationId = text(data, "");
-      const { error: submitError } = await client.rpc("submit_mockup_quotation", {
-        p_mockup_quotation_id: mockupQuotationId,
-      });
-      if (submitError) {
-        resetRequest();
-        await reload();
-        return notice("Mockup Quotation saved as a draft, but could not be submitted: " + submitError.message);
-      }
       resetRequest();
-      notice("Mockup Quotation submitted to the assigned Sales & Pricing Officer.");
+      setStatusTab("draft");
+      notice(wasEditing ? "Mockup Quotation updated." : "Mockup Quotation draft created.");
       await reload();
     } catch (error) {
       notice(error instanceof Error ? error.message : "Mockup Quotation could not be saved.");
     } finally {
       setSaving(false);
     }
+  };
+  const submit = async (quote: Row) => {
+    setSaving(true);
+    const { error } = await createClient().rpc("submit_mockup_quotation", {
+      p_mockup_quotation_id: quote.id,
+    });
+    setSaving(false);
+    if (error) return notice(error.message);
+    notice("Mockup Quotation submitted to the assigned Sales & Pricing Officer.");
+    await reload();
+  };
+  const unsubmit = async (quote: Row) => {
+    setSaving(true);
+    const { error } = await createClient().rpc("unsubmit_mockup_quotation", {
+      p_mockup_quotation_id: quote.id,
+    });
+    setSaving(false);
+    if (error) return notice(error.message);
+    setStatusTab("draft");
+    notice("Mockup Quotation returned to draft.");
+    await reload();
+  };
+  const beginRevision = async (quote: Row) => {
+    setSaving(true);
+    const { error } = await createClient().rpc("begin_mockup_quotation_revision", {
+      p_mockup_quotation_id: quote.id,
+    });
+    setSaving(false);
+    if (error) return notice(error.message);
+    await reload();
+    setStatusTab("needs_revision");
+    openEdit({ ...quote, status: "needs_revision" });
+    notice("Update the Mockup Quotation, then submit it to the assigned Sales & Pricing Officer.");
   };
   const documentName = (quote: Row) =>
     text(quote.document_type) === "mockup_quotation" ? "Mockup Quotation" : "Price Quotation";
@@ -4983,7 +4996,7 @@ function MockupQuotationWorkspace({
         canReview
           ? "Review Mockup Quotation requests assigned to your project types, add independent costing, and submit them to the General Manager."
           : canPrepare
-            ? "Select an approved Price Quotation, confirm the mockup requirements, and request an independent Mockup Quotation."
+            ? "Select an approved Price Quotation, enter separate mockup requirements, and submit an independent Mockup Quotation request."
             : "Review Mockup Quotation statuses and approved documents."
       }
       variant="page"
@@ -5057,12 +5070,10 @@ function MockupQuotationWorkspace({
               const proofCount = store.quotation_signed_proofs.filter(
                 (proof) => proof.quotation_id === quote.id,
               ).length;
-              const paymentSummary = source
-                ? quotationPaymentSummary(
-                    source,
-                    store.quotation_payment_records.filter((record) => record.quotation_id === source.id),
-                  )
-                : null;
+              const paymentSummary = quotationPaymentSummary(
+                quote,
+                store.quotation_payment_records.filter((record) => record.quotation_id === quote.id),
+              );
               return (
                 <tr key={text(quote.id)}>
                   <td className="px-5 py-3">{stackedCell(quote.quotation_no, quote.project_name)}</td>
@@ -5078,15 +5089,24 @@ function MockupQuotationWorkspace({
                   <td className="px-5 py-3">{stackedCell(party.clientName, party.companyName)}</td>
                   <td className="px-5 py-3">{text(quote.project_types)}</td>
                   <td className="px-5 py-3">{paymentSummary ? <div><PaymentStatusBadge status={paymentSummary.status} /><small>{peso.format(paymentSummary.verified)} / {peso.format(paymentSummary.total)}</small></div> : "-"}</td>
-                  <td className="px-5 py-3"><Status value={status} /></td>
+                  <td className="px-5 py-3"><div className="flex items-center gap-1.5"><Status value={status} />{status === "needs_revision" && <ActionIcon label="View revision note" tone="amber" confirm={false} onClick={() => setRevisionNoteQuote(quote)}><MessageSquareText size={15} /></ActionIcon>}</div></td>
                   <td className="px-5 py-3">{day(status === "approved" ? quote.approved_at : quote.submitted_at ?? quote.created_at)}</td>
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-1">
-                      {canReview && status === "pending" && !owner && (
+                      {canReview && status === "pending" && (
                         <ActionIcon label="Review Mockup Quotation" confirm={false} onClick={() => setReviewing(quote)}><FileText size={15} /></ActionIcon>
                       )}
                       {canPrepare && owner && ["draft", "needs_revision"].includes(status) && (
                         <ActionIcon label="Edit Mockup Quotation" confirm={false} onClick={() => openEdit(quote)}><Pencil size={15} /></ActionIcon>
+                      )}
+                      {canPrepare && owner && ["draft", "needs_revision"].includes(status) && (
+                        <ActionIcon label="Submit to Sales & Pricing Officer" tone="green" loading={saving} disabled={saving} onClick={() => void submit(quote)}><Send size={15} /></ActionIcon>
+                      )}
+                      {canPrepare && owner && status === "pending" && (
+                        <ActionIcon label="Unsubmit and return to draft" tone="amber" loading={saving} disabled={saving} onClick={() => void unsubmit(quote)}><RotateCcw size={15} /></ActionIcon>
+                      )}
+                      {canPrepare && owner && status === "approved" && (
+                        <ActionIcon label="Edit and resubmit Mockup Quotation" tone="amber" loading={saving} disabled={saving} onClick={() => void beginRevision(quote)}><RotateCcw size={15} /></ActionIcon>
                       )}
                       {status === "approved" && (
                         <ActionIcon label={"View " + documentName(quote) + " PDF"} confirm={false} onClick={() => openPdf(quote)}><FileText size={15} /></ActionIcon>
@@ -5094,8 +5114,8 @@ function MockupQuotationWorkspace({
                       {status === "approved" && (
                         <ActionIcon label={"View signed client proof" + (proofCount ? " (" + proofCount + "/5)" : "")} confirm={false} onClick={() => setProofQuote(quote)}><Paperclip size={15} /></ActionIcon>
                       )}
-                      {status === "approved" && source?.id && (
-                        <ActionIcon label="View quotation payments" confirm={false} onClick={() => setPaymentQuote(source)}><ReceiptText size={15} /></ActionIcon>
+                      {status === "approved" && (
+                        <ActionIcon label="View Mockup Quotation payments" confirm={false} onClick={() => setPaymentQuote(quote)}><ReceiptText size={15} /></ActionIcon>
                       )}
                     </div>
                   </td>
@@ -5146,14 +5166,17 @@ function MockupQuotationWorkspace({
             )}
             {sourceQuotationId && requestItems.length > 0 && (
               <section className="mt-5">
-                <h3 className="text-[14px] font-semibold text-[#202938]">Mockup requirements</h3>
-                <p className="mt-1 text-[12px] text-[#687386]">Descriptions and quantities can be adjusted for this Mockup Quotation. The source Price Quotation remains unchanged.</p>
-                <Table labels={["#", "Description", "Quantity"]} minWidth={0} className="mt-3 table-fixed" columnWidths={["8%", "72%", "20%"]}>
+                <div className="flex items-center justify-between gap-3">
+                  <div><h3 className="text-[14px] font-semibold text-[#202938]">Mockup requirements</h3><p className="mt-1 text-[12px] text-[#687386]">Enter descriptions and quantities separately for this Mockup Quotation. The source Price Quotation remains unchanged.</p></div>
+                  <Button secondary onClick={() => setRequestItems((current) => [...current, newRequestItem()])}><Plus size={13} /> Add item</Button>
+                </div>
+                <Table labels={["#", "Description", "Quantity", "Actions"]} minWidth={0} className="mt-3 table-fixed" columnWidths={["8%", "62%", "20%", "10%"]}>
                   {requestItems.map((item, index) => (
-                    <tr key={item.sourceItemId}>
+                    <tr key={item.id}>
                       <td className="px-3 py-2 text-center">{index + 1}</td>
-                      <td className="px-3 py-2"><textarea rows={2} aria-label={"Mockup item " + (index + 1) + " description"} value={item.description} onChange={(event) => setRequestItems((current) => current.map((value) => value.sourceItemId === item.sourceItemId ? { ...value, description: titleCase(event.target.value) } : value))} className="input mt-0 min-h-[58px] resize-y" /></td>
-                      <td className="px-3 py-2"><input aria-label={"Mockup item " + (index + 1) + " quantity"} type="number" min="0.001" step="any" value={item.quantity} onChange={(event) => setRequestItems((current) => current.map((value) => value.sourceItemId === item.sourceItemId ? { ...value, quantity: event.target.value } : value))} className="input mt-0 text-center" /></td>
+                      <td className="px-3 py-2"><textarea rows={2} aria-label={"Mockup item " + (index + 1) + " description"} value={item.description} onChange={(event) => setRequestItems((current) => current.map((value) => value.id === item.id ? { ...value, description: titleCase(event.target.value) } : value))} className="input mt-0 min-h-[58px] resize-y" /></td>
+                      <td className="px-3 py-2"><input aria-label={"Mockup item " + (index + 1) + " quantity"} type="number" min="0.001" step="any" value={item.quantity} onChange={(event) => setRequestItems((current) => current.map((value) => value.id === item.id ? { ...value, quantity: event.target.value } : value))} className="input mt-0 text-center" /></td>
+                      <td className="px-3 py-2 text-center"><ActionIcon label={"Remove mockup item " + (index + 1)} confirm={false} disabled={requestItems.length === 1} onClick={() => setRequestItems((current) => current.length === 1 ? current : current.filter((value) => value.id !== item.id))}><Trash2 size={15} /></ActionIcon></td>
                     </tr>
                   ))}
                 </Table>
@@ -5161,10 +5184,19 @@ function MockupQuotationWorkspace({
             )}
             <div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4">
               <Button secondary disabled={saving} onClick={resetRequest}>Cancel</Button>
-              <Button loading={saving} disabled={saving || !sourceQuotationId || requestItems.length === 0} onClick={() => void saveRequest()}>
-                {editingQuote ? "Save and resubmit" : "Submit Mockup Quotation Request"}
+              <Button loading={saving} disabled={saving || !sourceQuotationId || requestItems.length === 0} onClick={() => void saveDraft()}>
+                {editingQuote ? "Save Mockup Quotation" : "Save Mockup Quotation Draft"}
               </Button>
             </div>
+          </section>
+        </div>
+      )}
+      {revisionNoteQuote && (
+        <div className="fixed inset-0 z-[70] grid place-items-center bg-[#151922]/40 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setRevisionNoteQuote(null); }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="mockup-quotation-revision-note-title" className="w-full max-w-lg rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
+            <div className="flex items-center justify-between gap-4"><div><h2 id="mockup-quotation-revision-note-title" className="text-[16px] font-semibold text-[#202938]">Revision note</h2><p className="mt-1 text-[12px] text-[#687386]">{text(revisionNoteQuote.quotation_no, "Mockup Quotation")}</p></div><button type="button" onClick={() => setRevisionNoteQuote(null)} aria-label="Close revision note" className="rounded-md p-1 text-[#687386] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938]"><X size={18} /></button></div>
+            <div className="mt-4 max-h-[50vh] overflow-y-auto whitespace-pre-wrap text-[13px] leading-5 text-[#303949]">{text(revisionNoteQuote.revision_note, "No revision note was provided.")}</div>
+            <div className="mt-5 flex justify-end"><Button secondary onClick={() => setRevisionNoteQuote(null)}>Close</Button></div>
           </section>
         </div>
       )}
@@ -5187,6 +5219,13 @@ function MockupQuotationWorkspace({
   );
 }
 
+type SignedProofUploadStatus = "queued" | "uploading" | "complete" | "failed";
+type SignedProofUpload = {
+  id: string;
+  fileName: string;
+  status: SignedProofUploadStatus;
+};
+
 function SignedProofDialog({
   quote,
   store,
@@ -5204,6 +5243,7 @@ function SignedProofDialog({
 }) {
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
   const [uploading, setUploading] = useState(false);
+  const [pendingUploads, setPendingUploads] = useState<SignedProofUpload[]>([]);
   const proofs = useMemo(
     () =>
       store.quotation_signed_proofs
@@ -5237,20 +5277,28 @@ function SignedProofDialog({
   }, [proofKey, proofs, quote.id]);
   const addFiles = async (fileList: FileList | null) => {
     if (!fileList) return;
-    const selected = Array.from(fileList);
+    const selected = Array.from(fileList).map((file) => ({
+      file,
+      id: crypto.randomUUID(),
+    }));
+    if (!selected.length) return;
     const remaining = 5 - proofs.length;
     if (selected.length > remaining) {
       return notice("You can upload up to five signed proof images. " + remaining + " slot" + (remaining === 1 ? "" : "s") + " remaining.");
     }
     const validTypes = ["image/jpeg", "image/png", "image/webp"];
-    const invalid = selected.find((file) => !validTypes.includes(file.type) || file.size > 10 * 1024 * 1024);
+    const invalid = selected.find(({ file }) => !validTypes.includes(file.type) || file.size > 10 * 1024 * 1024);
     if (invalid) return notice("Signed proof images must be JPEG, PNG, or WebP files no larger than 10 MB each.");
+    setPendingUploads(selected.map(({ file, id }) => ({ id, fileName: file.name, status: "queued" })));
     setUploading(true);
     const client = createClient();
+    let activeUploadId: string | null = null;
     try {
-      for (const file of selected) {
+      for (const { file, id } of selected) {
+        activeUploadId = id;
+        setPendingUploads((current) => current.map((upload) => upload.id === id ? { ...upload, status: "uploading" } : upload));
         const extension = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
-        const path = text(quote.organization_id) + "/" + text(quote.id) + "/" + crypto.randomUUID() + "." + extension;
+        const path = text(quote.organization_id) + "/" + text(quote.id) + "/" + id + "." + extension;
         const { error: uploadError } = await client.storage.from("quotation-signed-proofs").upload(path, file, { contentType: file.type, upsert: false });
         if (uploadError) throw uploadError;
         const { error: registerError } = await client.rpc("register_quotation_signed_proof", {
@@ -5264,10 +5312,16 @@ function SignedProofDialog({
           await client.storage.from("quotation-signed-proofs").remove([path]);
           throw registerError;
         }
+        setPendingUploads((current) => current.map((upload) => upload.id === id ? { ...upload, status: "complete" } : upload));
       }
+      activeUploadId = null;
       notice("Signed client proof uploaded privately.");
       await reload();
+      setPendingUploads([]);
     } catch (error) {
+      if (activeUploadId) {
+        setPendingUploads((current) => current.map((upload) => upload.status === "complete" ? upload : { ...upload, status: "failed" }));
+      }
       notice(error instanceof Error ? error.message : "The signed proof could not be uploaded.");
     } finally {
       setUploading(false);
@@ -5290,6 +5344,7 @@ function SignedProofDialog({
     }
   };
   const label = text(quote.document_type) === "mockup_quotation" ? "Mockup Quotation" : "Price Quotation";
+  const uploadInProgress = pendingUploads.some((upload) => upload.status === "queued" || upload.status === "uploading");
   return (
     <div className="fixed inset-0 z-[70] grid place-items-center bg-[#151922]/40 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
       <section role="dialog" aria-modal="true" aria-labelledby="signed-proof-title" className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
@@ -5297,8 +5352,48 @@ function SignedProofDialog({
           <div><h2 id="signed-proof-title" className="text-[16px] font-semibold text-[#202938]">Signed client proof</h2><p className="mt-1 text-[12px] text-[#687386]">{label} {text(quote.quotation_no)} · Private attachment, separate from quotation illustrations.</p></div>
           <button type="button" onClick={close} aria-label="Close signed client proof" className="rounded-md p-1 text-[#687386] hover:bg-[#f0f3f7]"><X size={18} /></button>
         </div>
-        {canUpload && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3"><div><p className="text-[12px] font-medium text-[#202938]">Upload proof images ({proofs.length}/5)</p><p className="mt-0.5 text-[11px] text-[#687386]">JPEG, PNG, or WebP · up to 10 MB each</p></div><label className={"inline-flex min-h-8 cursor-pointer items-center rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-semibold text-[#344054] hover:bg-[#f5f7fa] " + (proofs.length >= 5 || uploading ? "pointer-events-none opacity-50" : "")}><Paperclip size={13} className="mr-1" /> Add images<input type="file" accept="image/jpeg,image/png,image/webp" multiple className="sr-only" disabled={proofs.length >= 5 || uploading} onChange={(event) => { void addFiles(event.target.files); event.currentTarget.value = ""; }} /></label></div>}
-        {proofs.length ? <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">{proofs.map((proof, index) => <div key={text(proof.id)} className="group relative overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2"><a href={signedUrls[text(proof.id)]} target="_blank" rel="noreferrer" className="block aspect-square">{signedUrls[text(proof.id)] ? <img src={signedUrls[text(proof.id)]} alt={text(proof.file_name, "Signed proof " + (index + 1))} className="size-full rounded-md object-cover" /> : <span className="grid size-full place-items-center text-[11px] text-[#8b92a1]">Loading…</span>}</a><p className="mt-2 truncate text-[11px] text-[#344054]" title={text(proof.file_name)}>{text(proof.file_name)}</p>{canUpload && <button type="button" onClick={() => void removeProof(proof)} disabled={uploading} aria-label={"Remove " + text(proof.file_name, "signed proof " + (index + 1))} className="absolute right-2 top-2 grid size-7 place-items-center rounded-md bg-white/90 text-[#8b92a1] shadow-sm hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={14} /></button>}</div>)}</div> : <div className="mt-5 rounded-lg border border-dashed border-[#ccd5e0] px-4 py-8 text-center text-[12px] text-[#8b92a1]">{canUpload ? "No signed client proof uploaded yet." : "No signed client proof is available yet."}</div>}
+        {canUpload && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3"><div><p className="text-[12px] font-medium text-[#202938]">Upload proof images ({proofs.length}/5)</p><p className="mt-0.5 text-[11px] text-[#687386]">JPEG, PNG, or WebP · up to 10 MB each</p></div><label aria-busy={uploadInProgress} className={"inline-flex min-h-8 cursor-pointer items-center rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-semibold text-[#344054] hover:bg-[#f5f7fa] " + (proofs.length >= 5 || uploading ? "pointer-events-none opacity-50" : "")}>{uploadInProgress ? <LoaderCircle size={13} className="mr-1 animate-spin" aria-hidden="true" /> : <Paperclip size={13} className="mr-1" />} {uploadInProgress ? "Uploading..." : "Add images"}<input type="file" accept="image/jpeg,image/png,image/webp" multiple className="sr-only" disabled={proofs.length >= 5 || uploading} onChange={(event) => { void addFiles(event.target.files); event.currentTarget.value = ""; }} /></label></div>}
+        {proofs.length || pendingUploads.length ? <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5" aria-live="polite" aria-busy={uploadInProgress}>{proofs.map((proof, index) => <div key={text(proof.id)} className="group relative overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2"><a href={signedUrls[text(proof.id)]} target="_blank" rel="noreferrer" className="block aspect-square">{signedUrls[text(proof.id)] ? <img src={signedUrls[text(proof.id)]} alt={text(proof.file_name, "Signed proof " + (index + 1))} className="size-full rounded-md object-cover" /> : <span className="grid size-full place-items-center text-[11px] text-[#8b92a1]">Loading…</span>}</a><p className="mt-2 truncate text-[11px] text-[#344054]" title={text(proof.file_name)}>{text(proof.file_name)}</p>{canUpload && <button type="button" onClick={() => void removeProof(proof)} disabled={uploading} aria-label={"Remove " + text(proof.file_name, "signed proof " + (index + 1))} className="absolute right-2 top-2 grid size-7 place-items-center rounded-md bg-white/90 text-[#8b92a1] shadow-sm hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={14} /></button>}</div>)}{pendingUploads.map((upload) => <div key={upload.id} className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2"><div className="grid aspect-square place-items-center rounded-md bg-[#f3f4f6] px-2 text-center" role="status"><div className="flex flex-col items-center gap-2 text-[11px] text-[#687386]">{upload.status === "queued" || upload.status === "uploading" ? <LoaderCircle size={20} className="animate-spin" aria-hidden="true" /> : upload.status === "complete" ? <Check size={20} aria-hidden="true" /> : <XCircle size={20} aria-hidden="true" />}<span>{upload.status === "queued" ? "Waiting..." : upload.status === "uploading" ? "Uploading..." : upload.status === "complete" ? "Uploaded" : "Upload failed"}</span></div></div><p className="mt-2 truncate text-[11px] text-[#344054]" title={upload.fileName}>{upload.fileName}</p></div>)}</div> : <div className="mt-5 rounded-lg border border-dashed border-[#ccd5e0] px-4 py-8 text-center text-[12px] text-[#8b92a1]">{canUpload ? "No signed client proof uploaded yet." : "No signed client proof is available yet."}</div>}
+        <div className="mt-5 flex justify-end"><Button secondary onClick={close}>Close</Button></div>
+      </section>
+    </div>
+  );
+}
+
+function SignedProofViewer({
+  priceProofs,
+  mockupProofs,
+  close,
+}: {
+  priceProofs: Row[];
+  mockupProofs: Row[];
+  close: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[120] grid place-items-center bg-[#151922]/40 p-4"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) close();
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="signed-proof-viewer-title"
+        className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 id="signed-proof-viewer-title" className="text-[16px] font-semibold text-[#202938]">Signed proofs</h2>
+            <p className="mt-1 text-[12px] text-[#687386]">Price Quotation and Mockup Quotation proof images.</p>
+          </div>
+          <button type="button" onClick={close} aria-label="Close signed proofs" className="rounded-md p-1 text-[#687386] hover:bg-[#f0f3f7]"><X size={18} /></button>
+        </div>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <SignedProofThumbnails label="Price Quotation proof" proofs={priceProofs} />
+          <SignedProofThumbnails label="Mockup Quotation proof" proofs={mockupProofs} />
+        </div>
         <div className="mt-5 flex justify-end"><Button secondary onClick={close}>Close</Button></div>
       </section>
     </div>
@@ -5310,13 +5405,18 @@ function SignedProofThumbnails({
   proofs,
   action,
   compact = false,
+  priceProofs,
+  mockupProofs,
 }: {
   label: string;
   proofs: Row[];
   action?: ReactNode;
   compact?: boolean;
+  priceProofs?: Row[];
+  mockupProofs?: Row[];
 }) {
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({});
+  const [viewerOpen, setViewerOpen] = useState(false);
   const proofKey = proofs
     .map((proof) => `${text(proof.id)}:${text(proof.storage_path)}`)
     .join("|");
@@ -5334,6 +5434,11 @@ function SignedProofThumbnails({
 
   useEffect(() => {
     let active = true;
+    if (compact) {
+      return () => {
+        active = false;
+      };
+    }
     if (!proofEntries.length) {
       setSignedUrls({});
       return () => {
@@ -5363,7 +5468,29 @@ function SignedProofThumbnails({
     return () => {
       active = false;
     };
-  }, [proofEntries]);
+  }, [compact, proofEntries]);
+
+  if (compact) {
+    return (
+      <>
+        <ActionIcon
+          label={`View ${label}`}
+          confirm={false}
+          disabled={!proofEntries.length}
+          onClick={() => setViewerOpen(true)}
+        >
+          <Paperclip size={15} />
+        </ActionIcon>
+        {viewerOpen && (
+          <SignedProofViewer
+            priceProofs={priceProofs ?? []}
+            mockupProofs={mockupProofs ?? []}
+            close={() => setViewerOpen(false)}
+          />
+        )}
+      </>
+    );
+  }
 
   return (
     <section className={compact ? "min-w-24" : "rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3"}>
@@ -5448,10 +5575,6 @@ const quotationPaymentSuggestedAmount = (
 };
 const quotationPaymentAmountsMatch = (left: number, right: number) =>
   Math.abs(roundQuotationPayment(left) - roundQuotationPayment(right)) < 0.005;
-const quotationPaymentSource = (store: Store, quote: Row) =>
-  text(quote.document_type) === "mockup_quotation" && quote.source_price_quotation_id
-    ? store.quotations.find((source) => source.id === quote.source_price_quotation_id)
-    : quote;
 type QuotationPaymentSummary = {
   total: number;
   pending: number;
@@ -5537,6 +5660,7 @@ function QuotationPaymentDialog({
     [liveQuote.id, store.quotation_payment_records],
   );
   const summary = quotationPaymentSummary(liveQuote, records);
+  const quotationLabel = text(liveQuote.document_type) === "mockup_quotation" ? "Mockup Quotation" : "Price Quotation";
   const canSubmit = isProjectOfficerRole(role) && text(liveQuote.status) === "approved";
   const canReviewAsManager = memberRole(role);
   const paymentRequirement = text(liveQuote.payment_requirement, "downpayment");
@@ -5846,7 +5970,7 @@ function QuotationPaymentDialog({
           <header className="flex items-start justify-between gap-4 border-b border-[#e1e6ee] px-4 py-4 sm:px-5">
             <div className="min-w-0">
               <p className="text-[11px] font-medium uppercase tracking-wide text-[#7b8494]">Payment review</p>
-              <h2 id="quotation-payment-title" className="mt-1 truncate text-[16px] font-semibold text-[#202938]">Quotation payments</h2>
+              <h2 id="quotation-payment-title" className="mt-1 truncate text-[16px] font-semibold text-[#202938]">{quotationLabel} payments</h2>
               <p className="mt-1 truncate text-[12px] text-[#687386]">{text(liveQuote.quotation_no)} <span className="px-1 text-[#b7bfca]">·</span> {text(liveQuote.client_name, "Client")}</p>
             </div>
             <div className="flex shrink-0 items-start gap-3">
@@ -6048,7 +6172,7 @@ function PaymentMonitoring({
   const approvedQuotes = store.quotations
     .filter(
       (quote) =>
-        text(quote.document_type) === "price_quotation" &&
+        ["price_quotation", "mockup_quotation"].includes(text(quote.document_type)) &&
         !quote.costing_source_id &&
         text(quote.status) === "approved",
     )
@@ -6145,15 +6269,16 @@ function PaymentMonitoring({
           <button type="button" onClick={() => setScope("all")} aria-current={scope === "all" ? "page" : undefined} className="app-tab">All recorded ({approvedQuotes.filter(({ records }) => records.length > 0).length})</button>
         </nav>}
         {rows.length ? (
-          <Table labels={["Price Quotation", "Client", "Prepared by", "Payment status", "Pending", "Verified / Total", "Last receipt", "Review"]} minWidth={1120}>
+          <Table labels={["Quotation", "Client", "Prepared by", "Payment status", "Pending", "Verified / Total", "Last receipt", "Review"]} minWidth={1120}>
             {rows.map(({ quote, records, pendingForReview, summary }) => {
               const party = quotationParty(quote, store);
+              const quotationType = text(quote.document_type) === "mockup_quotation" ? "Mockup Quotation" : "Price Quotation";
               const preparedBy = text(store.profiles.find((profile) => profile.id === (quote.prepared_by_user_id ?? quote.created_by))?.full_name, text(quote.representative, "Sales Executive"));
               const pendingAmountForRow = assignedOnly
                 ? pendingForReview.reduce((sum, payment) => sum + n(payment.amount), 0)
                 : summary.pending;
               return <tr key={text(quote.id)}>
-                <td className="px-5 py-3">{stackedCell(quote.quotation_no, quote.project_name)}</td>
+                <td className="px-5 py-3">{stackedCell(quote.quotation_no, [quotationType, quote.project_name])}</td>
                 <td className="px-5 py-3">{stackedCell(party.clientName, party.companyName)}</td>
                 <td className="px-5 py-3">{preparedBy}</td>
                 <td className="px-5 py-3"><PaymentStatusBadge status={summary.status} /></td>
@@ -7033,16 +7158,18 @@ function ProjectCalendar({
           {filteredTableSchedules.map((schedule) => {
             const quotation = store.quotations.find((quote) => quote.id === schedule.quotation_id);
             const mockupQuotation = store.quotations.find((quote) => quote.id === schedule.mockup_quotation_id);
-            const scheduleProofs = store.quotation_signed_proofs.filter(
-              (proof) =>
-                text(proof.id, "") === text(schedule.price_signed_proof_id, "") ||
-                text(proof.id, "") === text(schedule.mockup_signed_proof_id, ""),
+            const schedulePriceProofs = store.quotation_signed_proofs.filter(
+              (proof) => text(proof.quotation_id, "") === text(schedule.quotation_id, ""),
             );
+            const scheduleMockupProofs = store.quotation_signed_proofs.filter(
+              (proof) => text(proof.quotation_id, "") === text(schedule.mockup_quotation_id, ""),
+            );
+            const scheduleProofs = [...schedulePriceProofs, ...scheduleMockupProofs];
             const lead = store.leads.find((item) => item.id === quotation?.lead_id);
             return <tr key={text(schedule.id)} className="hover:bg-[#fbfcff]">
               <td className="px-4 py-2">{text(quotation?.quotation_no ?? schedule.quotation_no, "—")}</td>
               <td className="px-4 py-2">{text(mockupQuotation?.quotation_no, "—")}</td>
-              <td className="px-4 py-2"><SignedProofThumbnails label="Signed proofs" proofs={scheduleProofs} compact /></td>
+              <td className="px-4 py-2"><SignedProofThumbnails label="Signed proofs" proofs={scheduleProofs} priceProofs={schedulePriceProofs} mockupProofs={scheduleMockupProofs} compact /></td>
               <td className="px-4 py-2">{text(lead?.contact_name ?? quotation?.client_contact_name ?? schedule.client_name, "—")}</td>
               <td className="px-4 py-2">{text(lead?.client_name ?? quotation?.client_name ?? schedule.client_name, "—")}</td>
               <td className="px-4 py-2">{day(schedule.start_date)}</td>
@@ -8223,7 +8350,7 @@ function QuotationDocument({
     let cancelled = false;
     const exportPdf = async () => {
       const quotationPrintStyles = `
-        @page { size: 8.5in 13in; margin: 0.48in 0.42in 0.6in; }
+        @page { size: 8.5in 14in; margin: 0.48in 0.42in 0.6in; }
         *, *::before, *::after { box-sizing: border-box; }
         html, body { margin: 0; padding: 0; background: #fff; color: #000; font-family: Arial, Helvetica, sans-serif; }
         .quotation-print-document { width: auto !important; padding: 0 !important; }
@@ -8818,11 +8945,11 @@ function QuotationDocument({
             style={{ width: "8.5in" }}
           >
             <section
-              className="quotation-print-page relative min-h-[13in] w-[8.5in] px-[12mm] pb-[15mm] pt-[11mm]"
+              className="quotation-print-page relative min-h-[14in] w-[8.5in] px-[12mm] pb-[15mm] pt-[11mm]"
               style={{
                 position: "relative",
                 width: "8.5in",
-                minHeight: "13in",
+                minHeight: "14in",
                 padding: "11mm 12mm 15mm",
               }}
             >
@@ -8945,11 +9072,11 @@ function QuotationDocument({
               </p>
             </section>
             <section
-              className="quotation-print-page relative min-h-[13in] w-[8.5in] px-[12mm] pb-[15mm] pt-[12.5mm] text-[12px] leading-[1.4]"
+              className="quotation-print-page relative min-h-[14in] w-[8.5in] px-[12mm] pb-[15mm] pt-[12.5mm] text-[12px] leading-[1.4]"
               style={{
                 position: "relative",
                 width: "8.5in",
-                minHeight: "13in",
+                minHeight: "14in",
                 padding: "12.5mm 12mm 15mm",
               }}
             >
@@ -9007,11 +9134,11 @@ function QuotationDocument({
               </p>
             </section>
             <section
-              className="quotation-print-page relative min-h-[13in] w-[8.5in] px-[12mm] pb-[15mm] pt-[12.5mm] text-[12px] leading-[1.4]"
+              className="quotation-print-page relative min-h-[14in] w-[8.5in] px-[12mm] pb-[15mm] pt-[12.5mm] text-[12px] leading-[1.4]"
               style={{
                 position: "relative",
                 width: "8.5in",
-                minHeight: "13in",
+                minHeight: "14in",
                 padding: "12.5mm 12mm 15mm",
               }}
             >
@@ -9152,7 +9279,7 @@ function CostingDocument({
         )
         .join("");
       const printStyles = `
-        @page { size: 8.5in 13in; margin: 0.48in 0.42in 0.6in; }
+        @page { size: 8.5in 14in; margin: 0.48in 0.42in 0.6in; }
         html, body { margin: 0; padding: 0; background: #fff; color: #000; font-family: Arial, Helvetica, sans-serif; }
         [data-pdf-document], [data-pdf-document] * { color: #000 !important; font-family: Arial, Helvetica, sans-serif !important; border-color: #000 !important; background-color: #fff !important; }
         [data-pdf-document] img { filter: none !important; }
@@ -11099,6 +11226,7 @@ function PriceQuotationSubmissions({
   const [search, setSearch] = useState("");
   const [month, setMonth] = useState("");
   const [submissionType, setSubmissionType] = useState<"all" | "new" | "revised">("all");
+  const [quotationKind, setQuotationKind] = useState<"price_quotation" | "mockup_quotation">("price_quotation");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
@@ -11121,8 +11249,14 @@ function PriceQuotationSubmissions({
       !quotation.costing_source_id &&
       assignedProjectTypes.has(pricingProjectTypeKey(quotation.project_types)),
   ).sort(newestActivityFirst);
+  const pendingMockupQuotations = store.quotations.filter(
+    (quotation) =>
+      text(quotation.status) === "pending" &&
+      text(quotation.document_type) === "mockup_quotation" &&
+      assignedProjectTypes.has(pricingProjectTypeKey(quotation.project_types)),
+  ).sort(newestActivityFirst);
   const normalizedSearch = search.trim().toLowerCase();
-  const filteredPriceQuotations = pendingPriceQuotations.filter((quotation) => {
+  const matchesSubmissionFilters = (quotation: Row) => {
     const submittedAt = text(quotation.submitted_at);
     const preparedBy = store.profiles.find((profile) => profile.id === (quotation.prepared_by_user_id ?? quotation.submitted_by ?? quotation.created_by))?.full_name;
     const party = quotationParty(quotation, store);
@@ -11132,11 +11266,16 @@ function PriceQuotationSubmissions({
     const revised = n(quotation.resubmission_count) > 0;
     const matchesSubmission = submissionType === "all" || (submissionType === "new" ? !revised : revised);
     return matchesSearch && matchesMonth && matchesSubmission;
-  }).sort((left, right) => {
+  };
+  const sortSubmissions = (left: Row, right: Row) => {
     const submittedDifference = new Date(text(right.submitted_at, "")).getTime() - new Date(text(left.submitted_at, "")).getTime();
     if (Number.isFinite(submittedDifference) && submittedDifference !== 0) return submittedDifference;
     return new Date(text(right.created_at, "")).getTime() - new Date(text(left.created_at, "")).getTime();
-  });
+  };
+  const filteredPriceQuotations = pendingPriceQuotations.filter(matchesSubmissionFilters).sort(sortSubmissions);
+  const filteredMockupQuotations = pendingMockupQuotations.filter(matchesSubmissionFilters).sort(sortSubmissions);
+  const activeSubmissions = quotationKind === "price_quotation" ? filteredPriceQuotations : filteredMockupQuotations;
+  const activePendingSubmissions = quotationKind === "price_quotation" ? pendingPriceQuotations : pendingMockupQuotations;
   const submissionLabel = (quotation: Row) => {
     const count = n(quotation.resubmission_count);
     return count === 0 ? "New" : count === 1 ? "Revised" : `Revised ${count}×`;
@@ -11151,20 +11290,24 @@ function PriceQuotationSubmissions({
     );
   return (
     <Panel
-      title="Price Quotation Submissions"
-      detail="Review submitted Price Quotations from the Sales Executives and approve or return them for revision."
+      title="Quotation Review Queue"
+      detail="Review submitted Price Quotations and Mockup Quotations assigned to your project types."
       variant="page"
       hideHeading
     >
+      <div className="app-tabs border-b border-[#edf0f5] px-4 pt-3 sm:px-5">
+        <button type="button" onClick={() => { setQuotationKind("price_quotation"); setSelectedPriceQuotation(null); }} aria-current={quotationKind === "price_quotation" ? "page" : undefined} className="app-tab">Price Quotations ({pendingPriceQuotations.length})</button>
+        <button type="button" onClick={() => { setQuotationKind("mockup_quotation"); setSelectedPriceQuotation(null); }} aria-current={quotationKind === "mockup_quotation" ? "page" : undefined} className="app-tab">Mockup Quotations ({pendingMockupQuotations.length})</button>
+      </div>
       <div className="flex flex-wrap items-end gap-2 border-b border-[#edf0f5] px-4 py-3 sm:px-5">
         <label className="min-w-[190px] flex-1 text-[11px] font-medium text-[#687386]">Search<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Quotation, client, or project" className="input mt-1" /></label>
         <label className="text-[11px] font-medium text-[#687386]">Month<input type="month" value={month} onClick={(event) => event.currentTarget.showPicker?.()} onChange={(event) => setMonth(event.target.value)} className="input mt-1 w-[155px]" /></label>
         <label className="text-[11px] font-medium text-[#687386]">Submission<select value={submissionType} onChange={(event) => setSubmissionType(event.target.value as "all" | "new" | "revised")} className="input mt-1 w-[130px]"><option value="all">All</option><option value="new">New</option><option value="revised">Revised</option></select></label>
         {(search || month || submissionType !== "all") && <Button secondary onClick={() => { setSearch(""); setMonth(""); setSubmissionType("all"); }}>Clear filters</Button>}
       </div>
-      {filteredPriceQuotations.length ? (
-        <Table labels={["Price Quotation", "Client's Name", "Company Name", "Prepared by", "Submitted", "Review"]} minWidth={860}>
-          {filteredPriceQuotations.map((quotation) => {
+      {activeSubmissions.length ? (
+        <Table labels={[quotationKind === "price_quotation" ? "Price Quotation" : "Mockup Quotation", "Client's Name", "Company Name", "Prepared by", "Submitted", "Review"]} minWidth={860}>
+          {activeSubmissions.map((quotation) => {
             const lead = store.leads.find((item) => item.id === quotation.lead_id);
             const party = quotationParty(quotation, store);
             return (
@@ -11175,19 +11318,20 @@ function PriceQuotationSubmissions({
                 <td className="px-5 py-3">{officerName(quotation)}</td>
                 <td className="px-5 py-3">{day(quotation.submitted_at)}</td>
                 <td className="px-5 py-3">
-                  <ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon>
+                  <ActionIcon label={quotationKind === "price_quotation" ? "Review Price Quotation" : "Review Mockup Quotation"} confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon>
                 </td>
               </tr>
             );
           })}
         </Table>
       ) : (
-        <Empty>{pendingPriceQuotations.length ? "No Price Quotations match the selected filters." : "No Price Quotations are awaiting review."}</Empty>
+        <Empty>{activePendingSubmissions.length ? `No ${quotationKind === "price_quotation" ? "Price Quotations" : "Mockup Quotations"} match the selected filters.` : `No ${quotationKind === "price_quotation" ? "Price Quotations" : "Mockup Quotations"} are awaiting review.`}</Empty>
       )}
       {selectedPriceQuotation && (
         <PriceQuotationReview
           quotation={selectedPriceQuotation}
           store={store}
+          quotationKind={quotationKind}
           saving={false}
           close={() => setSelectedPriceQuotation(null)}
           notice={notice}
@@ -12013,7 +12157,7 @@ function PriceQuotationReview({
   );
   const defaultVatRate = text(pricingDefaultSettings?.vat_rate, "12");
   const initialVatRate = () => {
-    if (!finalApproval && !isMockupQuotation && n(quotation.vat_rate) <= 0) {
+    if (!finalApproval && n(quotation.vat_rate) <= 0) {
       return defaultVatRate;
     }
     return text(quotation.vat_rate, "12");
@@ -12055,7 +12199,7 @@ function PriceQuotationReview({
       .then(({ data, error }) => {
         if (!active || error || data?.default_bank_details === undefined || hasSavedBankDetails) return;
         setBankDetails(quotationBankDetails(data.default_bank_details));
-        if (!finalApproval && !isMockupQuotation && n(quotation.vat_rate) <= 0) {
+        if (!finalApproval && n(quotation.vat_rate) <= 0) {
           setVatRate((current) => (current === defaultVatRate ? text(data.vat_rate, "12") : current));
         }
       });
@@ -12193,20 +12337,18 @@ function PriceQuotationReview({
         rate: n(markup.rate),
       })),
     }));
-    const { error } = finalApproval && decision === "needs_revision"
-      ? await createClient().rpc(isMockupQuotation ? "return_mockup_quotation_from_gm" : "return_price_quotation_from_gm", { p_quotation_id: quotation.id, p_note: revisionNote })
-      : finalApproval && decision === "approved"
-      ? await createClient().rpc(
-          isMockupQuotation ? "final_approve_mockup_quotation" : "final_approve_price_quotation_with_edits",
-          isMockupQuotation
-            ? { p_quotation_id: quotation.id }
-            : {
-              p_quotation_id: quotation.id,
-              p_vat_rate: n(vatRate),
-              p_terms_conditions: terms.filter((term) => term.trim()).join("\n"),
-              p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
-              p_costings: costingsPayload,
-            },
+      const { error } = finalApproval && decision === "needs_revision"
+        ? await createClient().rpc(isMockupQuotation ? "return_mockup_quotation_from_gm" : "return_price_quotation_from_gm", { p_quotation_id: quotation.id, p_note: revisionNote })
+        : finalApproval && decision === "approved"
+        ? await createClient().rpc(
+          "final_approve_price_quotation_with_edits",
+          {
+            p_quotation_id: quotation.id,
+            p_vat_rate: n(vatRate),
+            p_terms_conditions: terms.filter((term) => term.trim()).join("\n"),
+            p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
+            p_costings: costingsPayload,
+          },
         )
       : isMockupQuotation
       ? await createClient().rpc("pricing_review_mockup_quotation", {
@@ -13587,17 +13729,19 @@ function Submissions({
           {visiblePendingProjectSchedules.map((schedule) => {
             const quotation = store.quotations.find((item) => item.id === schedule.quotation_id);
             const mockupQuotation = store.quotations.find((item) => item.id === schedule.mockup_quotation_id);
-            const scheduleProofs = store.quotation_signed_proofs.filter(
-              (proof) =>
-                text(proof.id, "") === text(schedule.price_signed_proof_id, "") ||
-                text(proof.id, "") === text(schedule.mockup_signed_proof_id, ""),
+            const schedulePriceProofs = store.quotation_signed_proofs.filter(
+              (proof) => text(proof.quotation_id, "") === text(schedule.quotation_id, ""),
             );
+            const scheduleMockupProofs = store.quotation_signed_proofs.filter(
+              (proof) => text(proof.quotation_id, "") === text(schedule.mockup_quotation_id, ""),
+            );
+            const scheduleProofs = [...schedulePriceProofs, ...scheduleMockupProofs];
             return (
             <tr key={text(schedule.id)}>
               <td className="px-5 py-3">{scheduleOfficerName(schedule)}</td>
               <td className="px-5 py-3">{text(schedule.quotation_no)}</td>
               <td className="px-5 py-3">{text(mockupQuotation?.quotation_no, "—")}</td>
-              <td className="px-5 py-3"><SignedProofThumbnails label="Signed proofs" proofs={scheduleProofs} compact /></td>
+              <td className="px-5 py-3"><SignedProofThumbnails label="Signed proofs" proofs={scheduleProofs} priceProofs={schedulePriceProofs} mockupProofs={scheduleMockupProofs} compact /></td>
               <td className="px-5 py-3">{text(schedule.client_name)}</td>
               <td className="px-5 py-3">{n(schedule.quantity).toLocaleString()}</td>
               <td className="px-5 py-3">{text(schedule.product_name)}</td>
@@ -13840,11 +13984,13 @@ function Production({
               const used = store.production_material_usage.filter(
                 (u) => u.production_job_id === job.id,
               ).length;
-              const proofs = store.quotation_signed_proofs.filter(
-                (proof) =>
-                  text(proof.id, "") === text(job.price_signed_proof_id, "") ||
-                  text(proof.id, "") === text(job.mockup_signed_proof_id, ""),
+              const jobPriceProofs = store.quotation_signed_proofs.filter(
+                (proof) => text(proof.quotation_id, "") === text(job.quotation_id, ""),
               );
+              const jobMockupProofs = store.quotation_signed_proofs.filter(
+                (proof) => text(proof.quotation_id, "") === text(job.mockup_quotation_id, ""),
+              );
+              const proofs = [...jobPriceProofs, ...jobMockupProofs];
               const jobQuote = store.quotations.find((quote) => quote.id === job.quotation_id);
               const paymentSummary = jobQuote
                 ? quotationPaymentSummary(
@@ -13880,7 +14026,7 @@ function Production({
                   <td className="px-5 py-3">
                     {used} line{used === 1 ? "" : "s"}
                   </td>
-                  <td className="px-5 py-3"><SignedProofThumbnails label="Signed proofs" proofs={proofs} compact /></td>
+                  <td className="px-5 py-3"><SignedProofThumbnails label="Signed proofs" proofs={proofs} priceProofs={jobPriceProofs} mockupProofs={jobMockupProofs} compact /></td>
                   <td className="px-5 py-3">
                     {canUpdateJob ? (
                       <select
@@ -17076,10 +17222,7 @@ export function HuswellWorkspace({
         (quotation) =>
           text(quotation.status) === "pending" &&
           text(quotation.document_type) === "mockup_quotation" &&
-          assignedProjectTypes.has(pricingProjectTypeKey(quotation.project_types)) &&
-          ![quotation.created_by, quotation.prepared_by_user_id].some(
-            (userId) => text(userId, "") === currentUserId,
-          ),
+          assignedProjectTypes.has(pricingProjectTypeKey(quotation.project_types)),
       ).length
     : 0;
   const pendingPaymentReviewCount = isPricingOfficerRole(role)
@@ -17152,8 +17295,8 @@ export function HuswellWorkspace({
       items: [
         { view: "Leads", icon: ClipboardCheck },
         { view: "Price Quotations", icon: FileText },
-        { view: "Price Quotation Review", icon: ClipboardCheck, badge: pendingPricingReviewCount },
-        { view: "Mockups", icon: ImageIcon, badge: pendingMockupReviewCount },
+        { view: "Price Quotation Review", icon: ClipboardCheck, badge: pendingPricingReviewCount + pendingMockupReviewCount },
+        { view: "Mockups", icon: ImageIcon },
         { view: "Quotation Costing Overview", icon: ReceiptText },
       ],
     },
@@ -17652,7 +17795,7 @@ export function HuswellWorkspace({
                       className={`${active === view ? "text-[var(--color-on-accent)]" : "text-[var(--color-text-tertiary)] group-hover:text-[var(--color-text-tertiary)]"} shrink-0 transition-colors`}
                     />
                     <span className={`min-w-0 flex-1 truncate ${sidebarCollapsed ? "lg:hidden" : ""}`}>{navigationLabel}</span>
-                    {badge ? <span className={`min-w-5 rounded-full px-1.5 py-0.5 text-center text-[10px] font-semibold ${active === view ? "bg-white/20 text-white" : "bg-[var(--color-accent-subtle)] text-[var(--color-accent-text)]"}`}>{badge > 99 ? "99+" : badge}</span> : null}
+                    {badge ? <span className={`sidebar-badge min-w-5 rounded-full px-1.5 py-0.5 text-center text-[10px] font-semibold ${active === view ? "bg-white text-[var(--color-accent-text)]" : "bg-[var(--color-accent-subtle)] text-[var(--color-accent-text)]"}`}>{badge > 99 ? "99+" : badge}</span> : null}
                   </button>
                   );
                 })}
@@ -17785,7 +17928,7 @@ export function HuswellWorkspace({
         </header>
         <div className={`workspace-content ${(["Projects", "Price Quotations", "Price Quotation Review", "Approvals", "Payment Monitoring", "Payment Reviews"].includes(active) || active === "Policy") ? "p-0" : "p-2 sm:p-3 lg:p-4"}`}>
           {message && (
-            <div className="fixed inset-0 z-[60] grid place-items-center bg-[color-mix(in_srgb,var(--color-text-primary)_30%,transparent)] p-4">
+            <div className="fixed inset-0 z-[999] grid place-items-center bg-[color-mix(in_srgb,var(--color-text-primary)_30%,transparent)] p-4">
               <section
                 role="dialog"
                 aria-modal="true"

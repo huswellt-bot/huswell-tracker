@@ -1,0 +1,309 @@
+-- Give approved Mockup Quotations an independent receipt ledger while
+-- preserving the existing Price Quotation payment workflow.
+-- Run after 129_mockup_quotation_preparation_parity.sql.
+-- Safe to re-run.
+
+begin;
+
+create or replace function private.can_submit_quotation_payment(
+  p_quotation_id uuid
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, private
+as $$
+  select exists (
+    select 1
+    from public.quotations quote
+    where quote.id = p_quotation_id
+      and quote.document_type in ('price_quotation', 'mockup_quotation')
+      and quote.costing_source_id is null
+      and quote.status::text = 'approved'
+      and private.has_text_role(quote.organization_id, array['project_manager'])
+      and (
+        quote.created_by = (select auth.uid())
+        or quote.prepared_by_user_id = (select auth.uid())
+        or quote.submitted_by = (select auth.uid())
+        or private.is_pricing_officer_assigned(
+          quote.organization_id,
+          (select auth.uid()),
+          quote.project_types
+        )
+      )
+  );
+$$;
+
+create or replace function private.can_view_quotation_payment(
+  p_quotation_id uuid
+)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public, private
+as $$
+  select exists (
+    select 1
+    from public.quotations quote
+    where quote.id = p_quotation_id
+      and (
+        private.has_text_role(quote.organization_id, array['super_admin', 'owner', 'admin', 'accountant', 'production', 'warehouse'])
+        or private.can_submit_quotation_payment(quote.id)
+        or private.quotation_payment_reviewer(quote.id) = (select auth.uid())
+      )
+  );
+$$;
+
+create or replace function public.set_quotation_payment_terms(
+  p_quotation_id uuid,
+  p_payment_requirement text,
+  p_downpayment_rate numeric default 50
+)
+returns public.quotations
+language plpgsql
+security definer
+set search_path = public, private
+as $$
+declare
+  v_quote public.quotations%rowtype;
+  v_rate numeric := coalesce(p_downpayment_rate, 50);
+begin
+  select * into v_quote
+  from public.quotations
+  where id = p_quotation_id
+  for update;
+
+  if not found
+    or v_quote.document_type is null
+    or v_quote.document_type not in ('price_quotation', 'mockup_quotation')
+    or v_quote.costing_source_id is not null
+    or v_quote.status::text is distinct from 'approved' then
+    raise exception 'Payment terms can only be set on an approved Price or Mockup Quotation';
+  end if;
+
+  if not (
+    private.has_text_role(v_quote.organization_id, array['super_admin', 'owner', 'admin'])
+    or private.can_submit_quotation_payment(v_quote.id)
+  ) then
+    raise exception 'Only the quotation owner, assigned Sales & Pricing Officer, or General Manager can set payment terms';
+  end if;
+
+  if p_payment_requirement not in ('none', 'downpayment', 'full_payment') then
+    raise exception 'Unsupported payment requirement';
+  end if;
+  if p_payment_requirement = 'downpayment'
+    and (v_rate <= 0 or v_rate >= 100) then
+    raise exception 'Downpayment percentage must be greater than 0 and less than 100';
+  end if;
+
+  update public.quotations
+  set payment_requirement = p_payment_requirement,
+      downpayment_rate = case
+        when p_payment_requirement = 'none' then 0
+        when p_payment_requirement = 'full_payment' then 100
+        else v_rate
+      end
+  where id = v_quote.id
+  returning * into v_quote;
+
+  return v_quote;
+end;
+$$;
+
+create or replace function public.register_quotation_payment(
+  p_payment_id uuid,
+  p_quotation_id uuid,
+  p_payment_kind text,
+  p_amount numeric,
+  p_paid_at date,
+  p_method public.payment_method,
+  p_reference_no text,
+  p_notes text,
+  p_receipt_storage_path text,
+  p_receipt_file_name text,
+  p_receipt_content_type text,
+  p_receipt_file_size bigint
+)
+returns public.quotation_payment_records
+language plpgsql
+security definer
+set search_path = public, private
+as $$
+declare
+  v_quote public.quotations%rowtype;
+  v_payment public.quotation_payment_records%rowtype;
+  v_reviewer uuid;
+  v_amount numeric;
+  v_total numeric;
+  v_verified numeric;
+  v_pending numeric;
+  v_available numeric;
+  v_downpayment_remaining numeric;
+begin
+  select * into v_quote
+  from public.quotations
+  where id = p_quotation_id
+  for update;
+
+  if not found
+    or v_quote.document_type is null
+    or v_quote.document_type not in ('price_quotation', 'mockup_quotation')
+    or v_quote.costing_source_id is not null
+    or v_quote.status::text is distinct from 'approved' then
+    raise exception 'Payments can only be recorded against an approved Price or Mockup Quotation';
+  end if;
+  if not private.can_submit_quotation_payment(v_quote.id) then
+    raise exception 'Only the quotation owner, assigned Sales & Pricing Officer, or General Manager can record a payment';
+  end if;
+  if p_payment_id is null or p_amount is null or p_amount <= 0 then
+    raise exception 'Enter a payment amount greater than zero';
+  end if;
+  if p_payment_kind is null
+    or p_payment_kind not in ('downpayment', 'partial_payment', 'full_payment') then
+    raise exception 'Unsupported payment type';
+  end if;
+  if p_amount <> round(p_amount, 2) then
+    raise exception 'Payment amounts can use no more than two decimal places';
+  end if;
+  if exists (
+    select 1
+    from public.quotation_payment_records payment
+    where payment.id = p_payment_id
+  ) then
+    raise exception 'This payment receipt has already been registered';
+  end if;
+
+  v_amount := round(p_amount, 2);
+  v_total := round(greatest(coalesce(v_quote.total_amount, 0), 0), 2);
+  if v_total <= 0 then
+    raise exception 'The quotation must have a positive total before recording a payment';
+  end if;
+
+  select
+    round(coalesce(sum(payment.amount) filter (where payment.status = 'verified'), 0), 2),
+    round(coalesce(sum(payment.amount) filter (where payment.status = 'pending'), 0), 2)
+  into v_verified, v_pending
+  from public.quotation_payment_records payment
+  where payment.quotation_id = v_quote.id;
+
+  v_available := round(greatest(v_total - v_verified - v_pending, 0), 2);
+  v_downpayment_remaining := round(greatest(
+    case v_quote.payment_requirement
+      when 'none' then 0
+      when 'full_payment' then v_total
+      else v_total * (coalesce(v_quote.downpayment_rate, 50) / 100)
+    end - v_verified - v_pending,
+    0
+  ), 2);
+
+  if v_available <= 0 then
+    raise exception 'No unallocated quotation balance remains; review the pending receipts first';
+  end if;
+
+  if p_payment_kind = 'downpayment' then
+    if v_quote.payment_requirement is distinct from 'downpayment' then
+      raise exception 'Set a downpayment term before recording a downpayment receipt';
+    end if;
+    if v_downpayment_remaining <= 0 then
+      raise exception 'The downpayment target is already covered by verified or pending payments';
+    end if;
+    if v_amount <> v_downpayment_remaining then
+      raise exception 'Downpayment must equal the remaining downpayment target of %', v_downpayment_remaining;
+    end if;
+  elsif p_payment_kind = 'partial_payment' then
+    if v_amount >= v_available then
+      raise exception 'Use Full payment for the entire available balance of %', v_available;
+    end if;
+  elsif v_amount <> v_available then
+    raise exception 'Full payment must equal the available balance of % after pending receipts', v_available;
+  end if;
+
+  if p_receipt_file_name is null or nullif(btrim(p_receipt_file_name), '') is null then
+    raise exception 'Upload the payment receipt image';
+  end if;
+  if p_receipt_content_type not in ('image/jpeg', 'image/png', 'image/webp')
+    or p_receipt_file_size is null
+    or p_receipt_file_size <= 0
+    or p_receipt_file_size > 10485760 then
+    raise exception 'Payment receipts must be JPEG, PNG, or WebP files no larger than 10 MB';
+  end if;
+  if p_receipt_storage_path !~* (
+    '^' || v_quote.organization_id::text || '/' || v_quote.id::text || '/'
+      || p_payment_id::text || '\.(jpg|jpeg|png|webp)$'
+  ) then
+    raise exception 'Payment receipt storage path is invalid';
+  end if;
+  if not exists (
+    select 1
+    from storage.objects object
+    where object.bucket_id = 'quotation-payment-receipts'
+      and object.name = p_receipt_storage_path
+  ) then
+    raise exception 'Upload the payment receipt image before registering it';
+  end if;
+
+  v_reviewer := private.quotation_payment_reviewer(v_quote.id);
+
+  insert into public.quotation_payment_records (
+    id,
+    organization_id,
+    quotation_id,
+    payment_kind,
+    amount,
+    paid_at,
+    method,
+    reference_no,
+    notes,
+    receipt_storage_path,
+    receipt_file_name,
+    receipt_content_type,
+    receipt_file_size,
+    status,
+    submitted_by,
+    reviewer_user_id
+  )
+  values (
+    p_payment_id,
+    v_quote.organization_id,
+    v_quote.id,
+    p_payment_kind,
+    v_amount,
+    coalesce(p_paid_at, current_date),
+    coalesce(p_method, 'cash'::public.payment_method),
+    nullif(btrim(coalesce(p_reference_no, '')), ''),
+    nullif(btrim(coalesce(p_notes, '')), ''),
+    p_receipt_storage_path,
+    btrim(p_receipt_file_name),
+    p_receipt_content_type,
+    p_receipt_file_size,
+    'pending',
+    (select auth.uid()),
+    v_reviewer
+  )
+  returning * into v_payment;
+
+  return v_payment;
+end;
+$$;
+
+update public.quotation_payment_records payment
+set reviewer_user_id = private.quotation_payment_reviewer(payment.quotation_id)
+where payment.reviewer_user_id is null
+  and exists (
+    select 1
+    from public.quotations quote
+    where quote.id = payment.quotation_id
+      and quote.document_type = 'mockup_quotation'
+  );
+
+revoke all on function public.set_quotation_payment_terms(uuid, text, numeric) from public;
+revoke all on function public.register_quotation_payment(uuid, uuid, text, numeric, date, public.payment_method, text, text, text, text, text, bigint) from public;
+grant execute on function public.set_quotation_payment_terms(uuid, text, numeric) to authenticated;
+grant execute on function public.register_quotation_payment(uuid, uuid, text, numeric, date, public.payment_method, text, text, text, text, text, bigint) to authenticated;
+
+commit;
+
+-- Rollback: restore the payment eligibility checks from migrations 123-125
+-- after all Mockup payment records and UI paths have been removed.
