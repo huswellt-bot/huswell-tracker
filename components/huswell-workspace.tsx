@@ -41,6 +41,7 @@ import {
   Menu,
   MessageSquareText,
   Paperclip,
+  Percent,
   Pencil,
   Plus,
   Printer,
@@ -222,6 +223,66 @@ type PendingCostLine = {
   details?: string;
 };
 type MarkupCalculationType = "percentage" | "fixed_amount";
+const calculationBasisOptions = [
+  { value: "percentage", label: "Percentage (%)" },
+  { value: "fixed_amount", label: "Amount (₱)" },
+] as const satisfies ReadonlyArray<{
+  value: MarkupCalculationType;
+  label: string;
+}>;
+const calculationBasisShortLabels = {
+  percentage: <Percent size={14} strokeWidth={1.75} aria-hidden="true" />,
+  fixed_amount: <PhilippinePeso size={14} strokeWidth={1.75} aria-hidden="true" />,
+} as const;
+const costLineCalculationOptions = [
+  { value: "quantity_unit_cost", label: "Q×C" },
+  { value: "fixed_amount", label: "Fixed" },
+] as const;
+
+function SegmentedToggle({
+  ariaLabel,
+  value,
+  options,
+  onChange,
+  size = "default",
+  className = "",
+}: {
+  ariaLabel: string;
+  value: string;
+  options: ReadonlyArray<{ value: string; label: ReactNode; ariaLabel?: string }>;
+  onChange: (value: string) => void;
+  size?: "compact" | "default";
+  className?: string;
+}) {
+  const sizing = size === "compact"
+    ? "min-h-6 px-1 text-[10px] font-semibold"
+    : "min-h-8 px-3 text-[12px] font-medium";
+
+  return (
+    <div
+      aria-label={ariaLabel}
+      role="group"
+      className={`inline-flex min-w-0 items-center justify-center overflow-hidden whitespace-nowrap rounded-md border border-[var(--color-border)] bg-white ${className}`}
+    >
+      {options.map((option) => {
+        const selected = value === option.value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            aria-label={option.ariaLabel}
+            title={option.ariaLabel}
+            aria-pressed={selected}
+            onClick={() => onChange(option.value)}
+            className={`inline-flex min-w-0 flex-1 items-center justify-center ${sizing} transition-colors ${selected ? "bg-[var(--color-accent)] text-[var(--color-on-accent)]" : "bg-white text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)]"} focus-visible:relative focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]`}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 type PricingMarkupKey =
   | "target_profit_margin"
   | "overhead_allocation"
@@ -252,6 +313,9 @@ const pricingMarkupDefinitions: Array<{
   { key: "third_party_markup", label: "Third Party Mark Up", fallback: "15", legacyKeys: ["default_additional_markup"] },
   { key: "vat", label: "VAT", fallback: "12", legacyKeys: ["vat_rate"] },
 ];
+const internalPricingMarkupKeys = pricingMarkupDefinitions
+  .filter((definition) => definition.key !== "vat")
+  .map((definition) => definition.key);
 const pricingMarkupDefinition = (key: PricingMarkupKey) =>
   pricingMarkupDefinitions.find((definition) => definition.key === key);
 const objectValue = (value: unknown): Record<string, unknown> =>
@@ -498,6 +562,7 @@ type Field = {
     | "number"
     | "date"
     | "select"
+    | "toggle"
     | "checkbox_group"
     | "contact_toggle"
     | "size"
@@ -508,6 +573,7 @@ type Field = {
   hint?: string;
   placeholder?: string;
   readOnly?: boolean;
+  shortLabels?: Record<string, ReactNode>;
 };
 type Module = {
   table: TableName;
@@ -2908,6 +2974,7 @@ function Dialog({
   children,
   saveLabel = "Save record",
   className = "max-w-xl",
+  compact = false,
   onFieldChange,
 }: {
   title: string;
@@ -2920,6 +2987,7 @@ function Dialog({
   children?: ReactNode;
   saveLabel?: string;
   className?: string;
+  compact?: boolean;
   onFieldChange?: (
     key: string,
     value: string,
@@ -2937,19 +3005,19 @@ function Dialog({
           e.preventDefault();
           setConfirmOpen(true);
         }}
-        className={`max-h-[90vh] w-full overflow-y-auto rounded-[14px] border border-[#d9e0e9] bg-white p-3 sm:p-4 ${className}`}
+        className={`max-h-[90vh] w-full overflow-y-auto rounded-[14px] border border-[#d9e0e9] bg-white ${compact ? "p-3" : "p-3 sm:p-4"} ${className}`}
       >
-        <div className="mb-4 flex items-center justify-between">
+        <div className={`${compact ? "mb-3" : "mb-4"} flex items-center justify-between`}>
           <h2 className="text-[15px] font-semibold">{title}</h2>
           <button type="button" onClick={close} aria-label="Close" className="grid size-8 place-items-center rounded-md text-[#8a95a6] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938]">
             <X size={18} />
           </button>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className={`grid ${compact ? "gap-2" : "gap-3"} sm:grid-cols-2`}>
           {fields.map((f) => (
             <label
               key={f.key}
-              className={`block text-[12px] font-medium ${f.type === "textarea" || f.type === "terms" ? "sm:col-span-2" : ""}`}
+              className={`block ${compact ? "text-[11px]" : "text-[12px]"} font-medium ${f.type === "textarea" || f.type === "terms" ? "sm:col-span-2" : ""}`}
             >
               {titleCase(f.label)}
               {f.type === "contact_toggle" ? (
@@ -3038,6 +3106,30 @@ function Dialog({
                     </option>
                   ))}
                 </select>
+              ) : f.type === "toggle" ? (
+                <SegmentedToggle
+                  ariaLabel={f.label}
+                  value={(values[f.key] ?? "").split("|")[0]}
+                  options={(f.options ?? []).map((option) => {
+                    const separator = option.indexOf("|");
+                    const optionValue = separator >= 0 ? option.slice(0, separator) : option;
+                    const fullLabel = separator >= 0 ? option.slice(separator + 1) : option.replaceAll("_", " ");
+                    return {
+                      value: optionValue,
+                      label: compact ? f.shortLabels?.[optionValue] ?? fullLabel : fullLabel,
+                      ariaLabel: f.shortLabels?.[optionValue] ? fullLabel : undefined,
+                    };
+                  })}
+                  onChange={(value) =>
+                    setValues(
+                      onFieldChange
+                        ? onFieldChange(f.key, value, values)
+                        : { ...values, [f.key]: value },
+                    )
+                  }
+                  size={compact ? "compact" : "default"}
+                  className={`${compact ? "mt-1" : "mt-2"} w-full`}
+                />
               ) : f.type === "checkbox_group" ? (
                 <div className="mt-2 grid grid-cols-2 gap-2 rounded-lg border border-[#d9e0e9] bg-[#fafbfe] p-3">
                   {f.options?.map((option) => {
@@ -3163,7 +3255,7 @@ function Dialog({
                           : e.target.value,
                     })
                   }
-                  className={`input ${f.readOnly ? "bg-[#f6f8fb] text-[#687386]" : ""}`}
+                  className={`input ${compact ? "min-h-7 px-2 py-1 text-[12px]" : ""} ${f.readOnly ? "bg-[#f6f8fb] text-[#687386]" : ""}`}
                   placeholder={fieldPlaceholder(f)}
                 />
               )}
@@ -12287,21 +12379,28 @@ function ProductCostingsSection({
 function PricingMarkupEditor({
   costing,
   editable,
+  visibleMarkupKeys,
   update,
 }: {
   costing: ProductCostingDraft;
   editable: boolean;
+  visibleMarkupKeys: ReadonlyArray<PricingMarkupKey>;
   update: (next: ProductCostingDraft) => void;
 }) {
   const totals = productCostingTotals(costing, 1, "percentage", 0);
+  const visibleMarkups = costing.markups.filter((markup) => {
+    const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
+    return Boolean(key) && visibleMarkupKeys.includes(key as PricingMarkupKey);
+  });
+  const discountOnly = visibleMarkupKeys.length === 1 && visibleMarkupKeys[0] === "discounts";
   return (
     <div className="rounded-lg border border-[#d9e0e9] bg-white">
       <div className="border-b border-[#edf0f5] px-3 py-2">
-        <h4 className="text-[12px] font-semibold text-[#344054]">Internal pricing adjustments</h4>
-        <p className="mt-0.5 text-[11px] text-[#687386]">Percentage values use direct COGS. Target profit is a true margin; discounts are deducted from the customer list price.</p>
+        <h4 className="text-[12px] font-semibold text-[#344054]">{discountOnly ? "Discount" : "Internal pricing adjustments"}</h4>
+        <p className="mt-0.5 text-[11px] text-[#687386]">{discountOnly ? "Enter the customer discount using a percentage or fixed amount." : "Percentage values use direct COGS. Target profit is a true margin; discounts are deducted from the customer list price."}</p>
       </div>
       <Table labels={["Category", "Basis", "Value", "Calculated amount"]} minWidth={0} compact alignRightLabels={["Value", "Calculated amount"]}>
-        {costing.markups.map((markup) => {
+        {visibleMarkups.map((markup) => {
           const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
           const label = pricingMarkupDefinition(key as PricingMarkupKey)?.label ?? markup.label;
           const type = markupCalculationType(markup);
@@ -12310,7 +12409,7 @@ function PricingMarkupEditor({
             <tr key={markup.key} className="hover:bg-[#fbfcff]">
               <td className="px-3 py-2 font-medium text-[#344054]">{label}</td>
               <td className="px-2 py-2">
-                {editable ? <select aria-label={`${label} calculation basis`} value={type} onChange={(event) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, calculationType: event.target.value as MarkupCalculationType } : item) })} className="input mt-0 min-w-0 px-2 py-1.5 text-[11px]"><option value="percentage">Percentage (%)</option><option value="fixed_amount">Amount (₱)</option></select> : <span className="text-[11px] text-[#687386]">{type === "fixed_amount" ? "Amount (₱)" : "Percentage (%)"}</span>}
+                {editable ? <SegmentedToggle ariaLabel={`${label} calculation basis`} value={type} options={calculationBasisOptions} size="compact" className="w-full" onChange={(value) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, calculationType: value as MarkupCalculationType } : item) })} /> : <span className="text-[11px] text-[#687386]">{type === "fixed_amount" ? "Amount (₱)" : "Percentage (%)"}</span>}
               </td>
               <td className="px-2 py-2">
                 {editable ? <div className="flex items-center justify-end gap-1"><input aria-label={`${label} value`} type="number" min="0" step="any" value={markupValue(markup)} onChange={(event) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, value: event.target.value } : item) })} className="input mt-0 w-[92px] min-w-0 px-2 py-1.5 text-right tabular-nums" /><span className="w-4 text-[11px] text-[#687386]">{type === "fixed_amount" ? "₱" : "%"}</span></div> : <span className="block text-right tabular-nums text-[#687386]">{type === "fixed_amount" ? peso.format(n(markupValue(markup))) : `${n(markupValue(markup))}%`}</span>}
@@ -12426,6 +12525,7 @@ function ProductCostingsSectionWithPricing({
   setCostings,
   pricingDefaults,
   editableMarkups,
+  visibleMarkupKeys,
 }: {
   projectName: string;
   lines: Row[];
@@ -12437,6 +12537,7 @@ function ProductCostingsSectionWithPricing({
   setCostings: (next: ProductCostingDraft[] | ((current: ProductCostingDraft[]) => ProductCostingDraft[])) => void;
   pricingDefaults: Record<string, unknown>;
   editableMarkups: boolean;
+  visibleMarkupKeys: ReadonlyArray<PricingMarkupKey>;
 }) {
   const displayProjectName = projectName.trim() || "Project";
   const defaults = pricingMarkupDefaults(pricingDefaults.pricing_markup_defaults, pricingDefaults);
@@ -12507,10 +12608,20 @@ function ProductCostingsSectionWithPricing({
                       return (
                         <tr key={line.key}>
                           <td className="min-w-0 px-1 py-2">
-                            <div aria-label={`Cost ${lineIndex + 1} calculation type`} role="group" className="inline-flex w-full items-center justify-center overflow-hidden whitespace-nowrap rounded-md border border-[#d9e0e9] text-[10px] font-semibold">
-                              <button type="button" aria-pressed={!isFixedAmount} onClick={() => updateLine({ calculationType: "quantity_unit_cost", amount: line.amount || "0" })} className={`min-h-6 min-w-0 flex-1 px-1 transition-colors ${!isFixedAmount ? "bg-[#c43b43] text-white" : "bg-white text-[#687386] hover:bg-[#f5f7fa]"}`}>Q×C</button>
-                              <button type="button" aria-pressed={isFixedAmount} onClick={() => updateLine({ calculationType: "fixed_amount", amount: line.calculationType === "fixed_amount" ? line.amount : String(n(line.quantity) * n(line.unitCost)) })} className={`min-h-6 min-w-0 flex-1 px-1 transition-colors ${isFixedAmount ? "bg-[#c43b43] text-white" : "bg-white text-[#687386] hover:bg-[#f5f7fa]"}`}>Fixed</button>
-                            </div>
+                            <SegmentedToggle
+                              ariaLabel={`Cost ${lineIndex + 1} calculation type`}
+                              value={isFixedAmount ? "fixed_amount" : "quantity_unit_cost"}
+                              options={costLineCalculationOptions}
+                              size="compact"
+                              className="w-full"
+                              onChange={(value) => {
+                                if (value === "fixed_amount") {
+                                  updateLine({ calculationType: "fixed_amount", amount: line.calculationType === "fixed_amount" ? line.amount : String(n(line.quantity) * n(line.unitCost)) });
+                                } else {
+                                  updateLine({ calculationType: "quantity_unit_cost", amount: line.amount || "0" });
+                                }
+                              }}
+                            />
                           </td>
                           <td className="min-w-0 !whitespace-normal break-words px-2 py-2"><input aria-label={`Cost ${lineIndex + 1} description`} value={line.description} onChange={(event) => updateLine({ description: titleCaseEntry(event.target.value, "description") })} className="input mt-0 min-w-0 max-w-full px-2" placeholder="Material, labor, logistics" /></td>
                           <td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-end text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} quantity`} type="number" min="0.001" step="any" value={line.quantity} onChange={(event) => updateLine({ quantity: event.target.value })} className="input mt-0 min-w-0 max-w-full px-1 text-right" />}</td>
@@ -12525,11 +12636,11 @@ function ProductCostingsSectionWithPricing({
                 </div>
 
                 <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-                  {editableMarkups && <PricingMarkupEditor costing={costing} editable update={(next) => updateCosting(costing.key, () => next)} />}
+                  {editableMarkups && <PricingMarkupEditor costing={costing} editable visibleMarkupKeys={visibleMarkupKeys} update={(next) => updateCosting(costing.key, () => next)} />}
                   <dl className={`overflow-hidden rounded-lg border border-[#d9e0e9] text-[12px] ${editableMarkups ? "" : "lg:col-span-2"}`}>
                     <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Total Direct Cost</dt><dd className="font-medium">{peso.format(totals.cogs)}</dd></div>
                     <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Cost Base Before Profit</dt><dd>{peso.format(totals.costBase)}</dd></div>
-                    <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Target Profit</dt><dd>{peso.format(totals.profitAmount)}</dd></div>
+                    {visibleMarkupKeys.includes("target_profit_margin") && <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Target Profit</dt><dd>{peso.format(totals.profitAmount)}</dd></div>}
                     <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Discount</dt><dd>{peso.format(totals.discountAmount)}</dd></div>
                     <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>List Price VAT Ex</dt><dd>{peso.format(totals.listSellingExVat)}</dd></div>
                     <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2 font-medium"><dt>Net Selling Price VAT Ex</dt><dd>{peso.format(totals.sellingExVat)}</dd></div>
@@ -12547,7 +12658,7 @@ function ProductCostingsSectionWithPricing({
       <div className="mt-4 rounded-lg border border-[#d9e0e9] bg-white p-3">
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-48 flex-1"><h4 className="text-[12px] font-semibold text-[#344054]">Quotation VAT</h4><p className="mt-0.5 text-[11px] text-[#687386]">VAT is applied after the final VAT-exclusive selling price.</p></div>
-          <label className="text-[11px] font-medium text-[#344054]">Basis<select aria-label="VAT calculation basis" value={vatCalculationType} onChange={(event) => setVatCalculationType(event.target.value as MarkupCalculationType)} className="input mt-1 min-w-36 px-2 py-1.5"><option value="percentage">Percentage (%)</option><option value="fixed_amount">Amount (₱)</option></select></label>
+          <label className="text-[11px] font-medium text-[#344054]">Basis<SegmentedToggle ariaLabel="VAT calculation basis" value={vatCalculationType} options={calculationBasisOptions} size="compact" className="mt-1 min-w-36" onChange={(value) => setVatCalculationType(value as MarkupCalculationType)} /></label>
           <label className="text-[11px] font-medium text-[#344054]">Value<div className="mt-1 flex items-center gap-1"><input aria-label="VAT value" type="number" min="0" step="any" value={vatValue} onChange={(event) => setVatValue(event.target.value)} className="input mt-0 w-28 px-2 py-1.5 text-right" /><span className="text-[#687386]">{vatCalculationType === "fixed_amount" ? "₱" : "%"}</span></div></label>
           <output aria-label="VAT total" className="min-w-28 text-right text-[12px] font-semibold text-[#344054]">{peso.format(vatTotal)}</output>
         </div>
@@ -12575,7 +12686,7 @@ function PriceQuotationReviewContent({
         </dl>
         {illustrations.length > 0 && <div className="mt-4"><p className="text-[12px] font-medium text-[#687386]">Illustrations</p><div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">{illustrations.map((illustration) => <a key={illustration.id} href={illustration.imageUrl} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><img src={illustration.imageUrl} alt={illustration.description || "Quotation illustration"} className="aspect-square w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{illustration.description}</p></a>)}</div></div>}
       </section>
-      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatCalculationType={vatCalculationType} setVatCalculationType={setVatCalculationType} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups={finalApproval} />
+      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatCalculationType={vatCalculationType} setVatCalculationType={setVatCalculationType} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups visibleMarkupKeys={finalApproval ? internalPricingMarkupKeys : ["discounts"]} />
       <section>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <p className="text-[12px] text-[#687386]">Choose how the selling price is entered. The quotation always saves its VAT-exclusive price.</p>
@@ -17494,7 +17605,7 @@ function SettingsView({
           {pricingMarkupDefaults(setting?.pricing_markup_defaults, setting).map((definition) => <tr key={definition.key}><td className="px-4 py-3 font-medium">{definition.label}</td><td className="px-4 py-3 text-[#687386]">{definition.calculationType === "fixed_amount" ? "Amount (₱)" : "Percentage (%)"}</td><td className="px-4 py-3 text-right">{definition.calculationType === "fixed_amount" ? peso.format(n(definition.value)) : `${n(definition.value)}%`}</td></tr>)}
         </Table>
       </Panel>
-      {pricingDefaultsOpen && <Dialog title="Pricing defaults - Internal" fields={pricingMarkupDefinitions.flatMap((definition) => [{ key: `${definition.key}_value`, label: `${definition.label} value`, type: "number" as const, required: true }, { key: `${definition.key}_type`, label: `${definition.label} basis`, type: "select" as const, options: ["percentage|Percentage (%)", "fixed_amount|Amount (₱)"] }])} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => { if (!savingPricingDefaults) setPricingDefaultsOpen(false); }} saving={savingPricingDefaults} saveLabel="Save pricing defaults" className="max-w-3xl" />}
+      {pricingDefaultsOpen && <Dialog title="Pricing defaults - Internal" fields={pricingMarkupDefinitions.flatMap((definition) => [{ key: `${definition.key}_value`, label: `${definition.label} value`, type: "number" as const, required: true }, { key: `${definition.key}_type`, label: `${definition.label} basis`, type: "toggle" as const, options: calculationBasisOptions.map((option) => `${option.value}|${option.label}`), shortLabels: calculationBasisShortLabels }])} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => { if (!savingPricingDefaults) setPricingDefaultsOpen(false); }} saving={savingPricingDefaults} saveLabel="Save pricing defaults" className="max-w-lg" compact />}
       <Panel
         title="Default bank details"
         detail="Shown on new Price Quotations."

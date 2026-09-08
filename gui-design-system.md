@@ -317,6 +317,36 @@ Rules:
 
 ---
 
+## 7.3 Segmented Toggles (Binary Choices)
+
+Use a compact, inline button group for mutually exclusive binary choices such as `Percentage (%)` / `Amount (₱)` and `Q×C` / `Fixed`. These controls replace a native select when both choices should remain visible.
+
+| State        | Background               | Text                        | Border                              |
+| ------------ | ------------------------ | --------------------------- | ----------------------------------- |
+| Default      | `--color-surface`        | `--color-text-secondary`    | shared `1px solid var(--color-border)` |
+| Hover        | `--color-surface-subtle` | `--color-text-primary`      | shared `1px solid var(--color-border)` |
+| **Selected** | `--color-accent` (solid)  | `--color-on-accent` (white) | shared `1px solid var(--color-border)` |
+
+```jsx
+<div role="group" aria-label="Calculation basis">
+  <button type="button" aria-pressed={basis === "percentage"}>
+    Percentage (%)
+  </button>
+  <button type="button" aria-pressed={basis === "fixed_amount"}>
+    Amount (₱)
+  </button>
+</div>
+```
+
+Rules:
+
+- Keep both options visible, equal-width where space allows, and use `28px` for dense table controls or `32px` for standard form controls. Dense controls may use one Lucide icon per option, such as `Percent` / `PhilippinePeso`, while accessible labels retain the full meaning.
+- Use `aria-pressed` on every option and a descriptive `aria-label` on the containing `role="group"`.
+- The selected option uses the brand accent fill; inactive options remain neutral. No gradients, shadows, or additional accent colors.
+- Preserve the underlying stable value (`percentage`, `fixed_amount`, or the component’s existing mode key) when changing the visual control.
+
+---
+
 ## 8. Icons
 
 - **`lucide-react` exclusively.**
