@@ -12532,8 +12532,9 @@ function GeneralManagerCostingReview({
           </div>
           <button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938]"><X size={18} /></button>
         </div>
-        <div className="mt-5 grid gap-5 lg:grid-cols-[1.45fr_.75fr]">
-          <div>
+        {/* Keep the costing table and the editable GM markup table in one vertical review flow. */}
+        <div className="mt-5 grid grid-cols-1 gap-0">
+          <div className="contents">
             <h3 className="mb-2 text-[14px] font-semibold text-[#202938]">Materials and Production</h3>
             <Table labels={["Preview", "Material", "Quantity", "Unit cost", "Subtotal"]}>
               {lines.map((line) => (
@@ -12554,15 +12555,15 @@ function GeneralManagerCostingReview({
                 </td>
               </tr>
             </Table>
-            <section className="mt-5 rounded-xl border border-[#e1e6ee] p-4">
+            <section className="order-3 mt-5 rounded-xl border border-[#e1e6ee] p-4">
 <div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div>
               <div className="mt-3 space-y-2">{terms.map((term, index) => <div key={index} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label="Remove term" onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] transition-colors hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
             </section>
-            <section className="mt-4 rounded-xl border border-[#e1e6ee] p-4">
+            <section className="order-4 mt-4 rounded-xl border border-[#e1e6ee] p-4">
               <div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div>
               <div className="mt-3 space-y-2">{bankDetails.map((detail, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={detail.bank_name} onChange={(event) => setBankDetails((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, bank_name: event.target.value } : item))} placeholder="Bank name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={detail.account_name} onChange={(event) => setBankDetails((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, account_name: event.target.value } : item))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={detail.account_number} onChange={(event) => setBankDetails((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, account_number: event.target.value } : item))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label="Remove bank" onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] transition-colors hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
             </section>
-            <label className="mt-4 block text-[12px] font-medium text-[#202938]">
+            <label className="order-5 mt-4 block text-[12px] font-medium text-[#202938]">
               Revision notes for Sales Executive
               <textarea
                 rows={3}
@@ -12573,7 +12574,7 @@ function GeneralManagerCostingReview({
               />
             </label>
           </div>
-          <aside className="space-y-4">
+          <aside className="order-2 mt-5 space-y-4">
             <section className="overflow-hidden rounded-xl border border-[#e1e6ee]">
               <div className="border-b border-[#edf0f5] px-4 py-3">
                 <h3 className="text-[14px] font-semibold text-[#202938]">
