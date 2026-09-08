@@ -194,6 +194,7 @@ type ApprovalQueueItem = {
   requester: string;
   submittedAt: unknown;
   selectable: boolean;
+  bulkDecisions?: ApprovalDecision[];
   bulkAction?: (
     decision: ApprovalDecision,
   ) => Promise<{ error?: { message?: string } | null }>;
@@ -13993,7 +13994,16 @@ function Submissions({
       detail: text(quotation.project_name),
       requester: officerName(quotation),
       submittedAt: quotation.submitted_at,
-      selectable: false,
+      selectable: true,
+      bulkDecisions: ["approved"] as ApprovalDecision[],
+      bulkAction: async (decision: ApprovalDecision) => {
+        if (decision !== "approved") {
+          return { error: { message: "Direct Price Quotations can only be approved in bulk." } };
+        }
+        return createClient().rpc("final_approve_price_quotation_from_saved_state", {
+          p_quotation_id: text(quotation.id),
+        });
+      },
       action: <ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon>,
     })),
     ...visiblePendingMockupQuotations.map((quotation) => ({
@@ -14161,6 +14171,22 @@ function Submissions({
   const selectedCurrentApprovalItems = currentSelectableItems.filter((item) =>
     selectedApprovalKeys.has(item.key),
   );
+  const canBulkApproveCurrent = currentSelectableItems.some((item) =>
+    (item.bulkDecisions ?? ["approved", "rejected"]).includes("approved"),
+  );
+  const canBulkRejectCurrent = currentSelectableItems.some((item) =>
+    (item.bulkDecisions ?? ["approved", "rejected"]).includes("rejected"),
+  );
+  const selectedCanBulkApprove =
+    selectedCurrentApprovalItems.length > 0 &&
+    selectedCurrentApprovalItems.every((item) =>
+      (item.bulkDecisions ?? ["approved", "rejected"]).includes("approved"),
+    );
+  const selectedCanBulkReject =
+    selectedCurrentApprovalItems.length > 0 &&
+    selectedCurrentApprovalItems.every((item) =>
+      (item.bulkDecisions ?? ["approved", "rejected"]).includes("rejected"),
+    );
   const allCurrentItemsSelected =
     currentSelectableItems.length > 0 &&
     selectedCurrentApprovalItems.length === currentSelectableItems.length;
@@ -14189,6 +14215,12 @@ function Submissions({
     );
     if (!items.length) {
       notice("Select at least one approval with a one-click decision.");
+      return;
+    }
+    if (items.some((item) =>
+      !(item.bulkDecisions ?? ["approved", "rejected"]).includes(decision),
+    )) {
+      notice(`Some selected approvals cannot be ${decision} in bulk.`);
       return;
     }
 
@@ -14304,26 +14336,30 @@ function Submissions({
                 : "Select approvals with one-click decisions"}
             </span>
             <span className="hidden text-[11px] text-[#8b92a1] sm:inline">
-              Detailed quotation, costing, project, and lead reviews remain individual.
+              Bulk actions use each record&apos;s saved state; edits and revision requests remain individual.
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Button
-              tone="green"
-              loading={bulkSaving && bulkDecision === "approved"}
-              disabled={bulkSaving || selectedCurrentApprovalItems.length === 0}
-              onClick={() => setBulkDecision("approved")}
-            >
-              <Check size={14} /> Approve selected
-            </Button>
-            <Button
-              secondary
-              loading={bulkSaving && bulkDecision === "rejected"}
-              disabled={bulkSaving || selectedCurrentApprovalItems.length === 0}
-              onClick={() => setBulkDecision("rejected")}
-            >
-              <X size={14} /> Reject selected
-            </Button>
+            {canBulkApproveCurrent && (
+              <Button
+                tone="green"
+                loading={bulkSaving && bulkDecision === "approved"}
+                disabled={bulkSaving || !selectedCanBulkApprove}
+                onClick={() => setBulkDecision("approved")}
+              >
+                <Check size={14} /> Approve selected
+              </Button>
+            )}
+            {canBulkRejectCurrent && (
+              <Button
+                secondary
+                loading={bulkSaving && bulkDecision === "rejected"}
+                disabled={bulkSaving || !selectedCanBulkReject}
+                onClick={() => setBulkDecision("rejected")}
+              >
+                <X size={14} /> Reject selected
+              </Button>
+            )}
             {selectedCurrentApprovalItems.length > 0 && (
               <Button
                 secondary
@@ -14355,10 +14391,10 @@ function Submissions({
         </Table>
       ) : <Empty>No management approvals are awaiting review.</Empty>)}
       {tab === "quotations" && (visiblePendingPriceQuotations.length ? (
-        <Table labels={["Price Quotation", "Client's Name", "Company Name", "Prepared by", "Submitted", "Review"]} minWidth={860}>
+        <Table labels={["Select", "Price Quotation", "Client's Name", "Company Name", "Prepared by", "Submitted", "Review"]} minWidth={940}>
           {visiblePendingPriceQuotations.map((quotation) => {
             const party = quotationParty(quotation, store);
-            return <tr key={text(quotation.id)}><td className="px-5 py-3">{stackedCell(quotation.quotation_no, quotation.project_name)}</td><td className="px-5 py-3 font-medium">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3"><ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>;
+            return <tr key={text(quotation.id)}>{renderSelectionCell(`price-${text(quotation.id)}`)}<td className="px-5 py-3">{stackedCell(quotation.quotation_no, quotation.project_name)}</td><td className="px-5 py-3 font-medium">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3"><ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>;
           })}
         </Table>
       ) : <Empty>No Price Quotations are awaiting review.</Empty>)}
