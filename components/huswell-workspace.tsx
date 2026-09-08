@@ -12402,7 +12402,9 @@ function PricingMarkupEditor({
       <Table labels={["Category", "Basis", "Value", "Calculated amount"]} minWidth={0} compact alignRightLabels={["Value", "Calculated amount"]}>
         {visibleMarkups.map((markup) => {
           const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
-          const label = pricingMarkupDefinition(key as PricingMarkupKey)?.label ?? markup.label;
+          const label = discountOnly && key === "discounts"
+            ? "Discount"
+            : pricingMarkupDefinition(key as PricingMarkupKey)?.label ?? markup.label;
           const type = markupCalculationType(markup);
           const amount = totals.markupAmounts[markup.key] ?? 0;
           return (
