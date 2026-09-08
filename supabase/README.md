@@ -89,7 +89,7 @@
 87. Run `088_mockup_workflow.sql` to add the separate Mockups workspace with Sales Executive updates and real-time, read-only General Manager oversight.
 88. Run `089_mockup_approval_and_illustrations.sql` to require General Manager mockup approval/revisions, private officer-uploaded illustrations, and an approved mockup before Project scheduling.
 89. Run `090_add_lead_deletion_request_notes.sql` to store the required reason for a Sales Executive Lead-deletion request.
-90. Run `091_require_dropped_client_reason.sql` to require and retain the reason when a Lead becomes Dropped Client.
+90. Run `091_require_dropped_client_reason.sql` to require and retain the reason when a Lead becomes Lost client (the legacy status-3 value).
 91. Run `092_price_quotation_illustration_gallery.sql` to add quotation-level illustration galleries.
 92. Run `093_fix_price_quotation_gallery_save.sql` to correct the quotation-gallery draft-save workflow.
 93. Run `094_price_quotation_product_costings.sql` to add General Manager-only per-product internal costings for direct Price Quotations.
@@ -115,6 +115,7 @@
 113. Run `131_internal_pricing_defaults_and_mixed_markups.sql` after `130_mockup_quotation_payment_tracking.sql` before deploying the matching pricing update. It adds General Manager-managed internal pricing defaults, fixed-amount pricing adjustments, target-margin calculations, and VAT calculation modes.
 114. Run `132_general_manager_bulk_price_quotation_approval.sql` after `131_internal_pricing_defaults_and_mixed_markups.sql` and before deploying the matching Approval Center update. It adds a General Manager-only, approve-only RPC for bulk direct Price Quotation approval using each quotation's persisted pricing and costing state.
 115. Run `133_pricing_officer_discount_markup.sql` after `132_general_manager_bulk_price_quotation_approval.sql` and before deploying the matching quotation-review update. It lets the assigned Sales & Pricing Officer edit and submit only the Discount adjustment, keeps VAT editable at quotation level, and preserves all other internal pricing adjustments for General Manager review.
+116. Run `134_align_lost_client_status_reason.sql` after `133_pricing_officer_discount_markup.sql` and before deploying the matching Leads update. It keeps the status-3 officer approval error aligned with the Lost client label without changing existing lead records or permissions.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 

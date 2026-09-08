@@ -164,7 +164,8 @@ export async function POST(request: Request) {
       project_name: clientName || contactName,
       contact_method: "Messenger",
       date_sent: dateSent,
-      evaluation_number: 1,
+      // New chatbot contacts have shown interest but have not purchased yet.
+      evaluation_number: 4,
     })
     .select("id, lead_no")
     .single();

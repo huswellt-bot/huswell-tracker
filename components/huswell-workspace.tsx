@@ -1020,9 +1020,16 @@ const Status = ({ value }: { value: unknown }) => (
   </span>
 );
 const leadStatuses = [
-  "1|New Client",
-  "2|Repeat Client",
-  "3|Dropped Client",
+  // Keep the existing stored IDs stable: 1, 2, and 3 are already used by
+  // saved leads, while 7 is reserved for the separate Done Deal workflow.
+  "4|Potential client / Prospect",
+  "1|New client",
+  "2|Paying / Repeat client",
+  "5|Loyal / Long-term client",
+  "6|Inactive / Dormant client",
+  "8|Referral client",
+  "3|Lost client",
+  "9|VIP / High-value client",
 ] as const;
 // Done Deal remains an internal marker that keeps projects separate from leads.
 const evaluationStatuses = [...leadStatuses, "7|Done Deal"] as const;
@@ -1519,8 +1526,8 @@ const leads: Module = {
   add: "Add lead",
   fields: [
     { key: "date_sent", label: "Date sent", type: "date" },
-    { key: "contact_name", label: "Client name", required: true },
-    { key: "client_name", label: "Company Name (Optional)" },
+    { key: "contact_name", label: "Client's Name", required: true },
+    { key: "client_name", label: "Company Name" },
     { key: "email", label: "Email" },
     { key: "phone", label: "Viber" },
     { key: "date_contacted", label: "Date contacted", type: "date" },
@@ -3542,7 +3549,11 @@ function Records({
           text(values.evaluation_number, "").split("|")[0] !== "7"
         ? fields.filter((field) => field.key !== "done_deal_status")
         : fields;
-  const isOfficerSettingDroppedClient =
+  const dialogVisibleFields = visibleFields.filter(
+    (field) =>
+      !(module.table === "leads" && !editing && field.key === "date_sent"),
+  );
+  const isOfficerSettingLostClient =
     module.table === "leads" &&
     !isProjectsPage &&
     isProjectOfficerRole(role) &&
@@ -3552,7 +3563,7 @@ function Records({
   const dialogFields =
     module.table === "leads" && isGeneralManager && !isProjectsPage
       ? [
-          ...visibleFields,
+          ...dialogVisibleFields,
           {
             key: "assigned_to",
             label: "Sales Executive",
@@ -3564,15 +3575,15 @@ function Records({
           },
         ]
       : [
-          ...visibleFields,
-          ...(isOfficerSettingDroppedClient
+          ...dialogVisibleFields,
+          ...(isOfficerSettingLostClient
             ? [
                 {
                   key: "request_note",
-                  label: "Reason for dropping this client",
+                  label: "Reason for marking this client lost",
                   type: "textarea" as const,
                   required: true,
-                  placeholder: "Explain why this client was dropped",
+                  placeholder: "Explain why this client was lost",
                 },
               ]
             : []),
@@ -3581,7 +3592,13 @@ function Records({
     Object.fromEntries(
       module.fields.map((f) => [
         f.key,
-        row ? text(row[f.key], "") : f.type === "date" ? isoToday() : "",
+        row
+          ? text(row[f.key], "")
+          : f.key === "date_sent" && module.table === "leads"
+            ? ""
+            : f.type === "date"
+              ? isoToday()
+              : "",
       ]),
     );
   const save = async () => {
@@ -3659,9 +3676,9 @@ function Records({
       !isProjectsPage &&
       isProjectOfficerRole(role)
     ) {
-      if (isOfficerSettingDroppedClient && !requestNote) {
+      if (isOfficerSettingLostClient && !requestNote) {
         setSaving(false);
-        return notice("Enter a reason for dropping this client.");
+        return notice("Enter a reason for marking this client lost.");
       }
       const { error } = await client.rpc("request_lead_change", {
         p_lead_id: editing.id,
@@ -13460,7 +13477,7 @@ function ProjectEditRequestReview({
       : {};
   const labels: Record<string, string> = {
     project_name: "Project name",
-    contact_name: "Client name",
+    contact_name: "Client's Name",
     client_name: "Company name",
     email: "Email",
     phone: "Phone",
@@ -13525,7 +13542,7 @@ function LeadChangeRequestReview({
       : {};
   const labels: Record<string, string> = {
     project_name: "Project name",
-    contact_name: "Client's name",
+    contact_name: "Client's Name",
     client_name: "Company name",
     email: "Email",
     phone: "Phone number",
