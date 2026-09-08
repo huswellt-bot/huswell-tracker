@@ -12524,8 +12524,8 @@ function ProductCostingsSectionWithPricing({
                 </div>
 
                 <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-                  <div>{editableMarkups ? <PricingMarkupEditor costing={costing} editable update={(next) => updateCosting(costing.key, () => next)} /> : <p className="rounded-lg border border-dashed border-[#ccd5e0] bg-[#fafbfc] px-3 py-3 text-[12px] text-[#687386]">Internal pricing adjustments are managed by the General Manager and are not editable in this review.</p>}</div>
-                  <dl className="overflow-hidden rounded-lg border border-[#d9e0e9] text-[12px]">
+                  {editableMarkups && <PricingMarkupEditor costing={costing} editable update={(next) => updateCosting(costing.key, () => next)} />}
+                  <dl className={`overflow-hidden rounded-lg border border-[#d9e0e9] text-[12px] ${editableMarkups ? "" : "lg:col-span-2"}`}>
                     <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Total Direct Cost</dt><dd className="font-medium">{peso.format(totals.cogs)}</dd></div>
                     <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Cost Base Before Profit</dt><dd>{peso.format(totals.costBase)}</dd></div>
                     <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Target Profit</dt><dd>{peso.format(totals.profitAmount)}</dd></div>
