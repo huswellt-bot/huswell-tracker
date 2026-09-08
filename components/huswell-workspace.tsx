@@ -12553,6 +12553,8 @@ type PriceQuotationReviewContentProps = {
 function ProductCostingsSectionWithPricing({
   projectName,
   lines,
+  priceBasis,
+  setPriceBasis,
   vatCalculationType,
   setVatCalculationType,
   vatValue,
@@ -12565,6 +12567,8 @@ function ProductCostingsSectionWithPricing({
 }: {
   projectName: string;
   lines: Row[];
+  priceBasis: "ex" | "inc";
+  setPriceBasis: (basis: "ex" | "inc") => void;
   vatCalculationType: MarkupCalculationType;
   setVatCalculationType: (value: MarkupCalculationType) => void;
   vatValue: string;
@@ -12591,6 +12595,12 @@ function ProductCostingsSectionWithPricing({
 
   return (
     <section className="rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-[#edf0f5] pb-3">
+        <p className="text-[12px] text-[#687386]">Choose how the selling price is entered. The quotation always saves its VAT-exclusive price.</p>
+        <div className="inline-flex rounded-lg border border-[#d9e0e9] bg-[#f8fafc] p-0.5" aria-label="Selling price VAT basis">
+          {(["ex", "inc"] as const).map((basis) => <button key={basis} type="button" aria-pressed={priceBasis === basis} onClick={() => setPriceBasis(basis)} className={`min-h-8 rounded-md px-3 text-[12px] font-semibold transition-colors ${priceBasis === basis ? "bg-white text-[#202938] shadow-sm" : "text-[#687386] hover:text-[#344054]"}`}>VAT {basis.toUpperCase()}</button>)}
+        </div>
+      </div>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-[14px] font-semibold text-[#202938]">Internal product costings</h3>
@@ -12722,14 +12732,8 @@ function PriceQuotationReviewContent({
         </dl>
         {illustrations.length > 0 && <div className="mt-4"><p className="text-[12px] font-medium text-[#687386]">Illustrations</p><div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">{illustrations.map((illustration) => <a key={illustration.id} href={illustration.imageUrl} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><img src={illustration.imageUrl} alt={illustration.description || "Quotation illustration"} className="aspect-square w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{illustration.description}</p></a>)}</div></div>}
       </section>
-      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatCalculationType={vatCalculationType} setVatCalculationType={setVatCalculationType} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups visibleMarkupKeys={finalApproval ? internalPricingMarkupKeys : ["discounts"]} />
+      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} priceBasis={priceBasis} setPriceBasis={setPriceBasis} vatCalculationType={vatCalculationType} setVatCalculationType={setVatCalculationType} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups visibleMarkupKeys={finalApproval ? internalPricingMarkupKeys : ["discounts"]} />
       <section>
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <p className="text-[12px] text-[#687386]">Choose how the selling price is entered. The quotation always saves its VAT-exclusive price.</p>
-          <div className="inline-flex rounded-lg border border-[#d9e0e9] bg-[#f8fafc] p-0.5" aria-label="Selling price VAT basis">
-            {(["ex", "inc"] as const).map((basis) => <button key={basis} type="button" aria-pressed={priceBasis === basis} onClick={() => setPriceBasis(basis)} className={`min-h-8 rounded-md px-3 text-[12px] font-semibold transition-colors ${priceBasis === basis ? "bg-white text-[#202938] shadow-sm" : "text-[#687386] hover:text-[#344054]"}`}>VAT {basis.toUpperCase()}</button>)}
-          </div>
-        </div>
         <Table
           labels={["Item", "Description", "Quantity", priceLabel, "Amount"]}
           minWidth={0}
