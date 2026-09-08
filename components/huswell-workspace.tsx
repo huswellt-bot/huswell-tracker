@@ -220,9 +220,88 @@ type PendingCostLine = {
   image_url?: string;
   details?: string;
 };
+type MarkupCalculationType = "percentage" | "fixed_amount";
+type PricingMarkupKey =
+  | "target_profit_margin"
+  | "overhead_allocation"
+  | "contingency_allowance"
+  | "sales_commission"
+  | "incentives"
+  | "discounts"
+  | "third_party_markup"
+  | "vat";
+type PricingMarkupDefault = {
+  key: PricingMarkupKey;
+  label: string;
+  calculationType: MarkupCalculationType;
+  value: string;
+};
+const pricingMarkupDefinitions: Array<{
+  key: PricingMarkupKey;
+  label: string;
+  fallback: string;
+  legacyKeys: string[];
+}> = [
+  { key: "target_profit_margin", label: "Target Profit Margin", fallback: "75", legacyKeys: ["default_profit_margin"] },
+  { key: "overhead_allocation", label: "Overhead Allocation", fallback: "0", legacyKeys: ["default_overhead_rate"] },
+  { key: "contingency_allowance", label: "Contingency Allowance", fallback: "20", legacyKeys: ["default_buffer_margin"] },
+  { key: "sales_commission", label: "Sales Commission", fallback: "0", legacyKeys: ["production_commission"] },
+  { key: "incentives", label: "Incentives", fallback: "0", legacyKeys: [] },
+  { key: "discounts", label: "Discounts", fallback: "0", legacyKeys: [] },
+  { key: "third_party_markup", label: "Third Party Mark Up", fallback: "15", legacyKeys: ["default_additional_markup"] },
+  { key: "vat", label: "VAT", fallback: "12", legacyKeys: ["vat_rate"] },
+];
+const pricingMarkupDefinition = (key: PricingMarkupKey) =>
+  pricingMarkupDefinitions.find((definition) => definition.key === key);
+const objectValue = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+const pricingMarkupKeyForLabel = (label: unknown): PricingMarkupKey | "" => {
+  const normalized = String(label ?? "").trim().toLowerCase();
+  if (normalized === "profit margin" || normalized === "target profit margin") return "target_profit_margin";
+  if (normalized === "overhead expense" || normalized === "overhead allocation") return "overhead_allocation";
+  if (normalized === "buffer margin" || normalized === "contingency allowance") return "contingency_allowance";
+  if (normalized === "commission" || normalized === "production commission" || normalized === "sales commission") return "sales_commission";
+  if (normalized === "incentives" || normalized === "discounts" || normalized === "third party markup" || normalized === "third party mark up" || normalized === "additional markup") {
+    return normalized === "incentives" ? "incentives" : normalized === "discounts" ? "discounts" : "third_party_markup";
+  }
+  return "";
+};
+const pricingMarkupDefaults = (
+  stored: unknown,
+  legacySettings?: Record<string, unknown>,
+): PricingMarkupDefault[] => {
+  const storedDefaults = objectValue(stored);
+  return pricingMarkupDefinitions.map((definition) => {
+    const storedEntry = objectValue(storedDefaults[definition.key]);
+    const legacyValue = definition.legacyKeys
+      .map((key) => legacySettings?.[key])
+      .find((value) => value !== undefined && value !== null && value !== "");
+    const rawValue = storedEntry.value ?? storedEntry.rate ?? legacyValue ?? definition.fallback;
+    return {
+      key: definition.key,
+      label: definition.label,
+      calculationType: storedEntry.calculation_type === "fixed_amount" ? "fixed_amount" : "percentage",
+      value: text(rawValue, definition.fallback),
+    };
+  });
+};
+const pricingMarkupDefaultPayload = (defaults: PricingMarkupDefault[]) =>
+  Object.fromEntries(
+    defaults.map((definition) => [
+      definition.key,
+      {
+        label: definition.label,
+        calculation_type: definition.calculationType,
+        value: n(definition.value),
+      },
+    ]),
+  );
 type ProductCostingDraft = {
   key: string;
   quotationItemId: string;
+  pricingModel: "legacy_markup" | "target_margin";
   costLines: {
     key: string;
     description: string;
@@ -231,11 +310,26 @@ type ProductCostingDraft = {
     unitCost: string;
     amount: string;
   }[];
-  markups: { key: string; label: string; rate: string }[];
+  markups: {
+    key: string;
+    markupKey?: PricingMarkupKey | "";
+    label: string;
+    calculationType?: MarkupCalculationType;
+    value?: string;
+    rate?: string;
+  }[];
 };
-const newProductCostingDraft = (quotationItemId: string): ProductCostingDraft => ({
+const markupCalculationType = (markup: ProductCostingDraft["markups"][number]): MarkupCalculationType =>
+  markup.calculationType ?? "percentage";
+const markupValue = (markup: ProductCostingDraft["markups"][number]) =>
+  markup.value ?? markup.rate ?? "0";
+const newProductCostingDraft = (
+  quotationItemId: string,
+  defaults = pricingMarkupDefaults(null),
+): ProductCostingDraft => ({
   key: `product-costing-${crypto.randomUUID()}`,
   quotationItemId,
+  pricingModel: "target_margin",
   costLines: [
     {
       key: `cost-line-${crypto.randomUUID()}`,
@@ -246,21 +340,53 @@ const newProductCostingDraft = (quotationItemId: string): ProductCostingDraft =>
       amount: "0",
     },
   ],
-  markups: [
-    { key: `markup-${crypto.randomUUID()}`, label: "Profit Margin", rate: "0" },
-    { key: `markup-${crypto.randomUUID()}`, label: "Overhead Expense", rate: "0" },
-    { key: `markup-${crypto.randomUUID()}`, label: "Buffer Margin", rate: "0" },
-    { key: `markup-${crypto.randomUUID()}`, label: "Additional Markup", rate: "15" },
-  ],
+  markups: defaults
+    .filter((definition) => definition.key !== "vat")
+    .map((definition) => ({
+      key: `markup-${crypto.randomUUID()}`,
+      markupKey: definition.key,
+      label: definition.label,
+      calculationType: definition.calculationType,
+      value: definition.value,
+    })),
 });
 const productCostingDrafts = (
   costings: Row[],
   costLines: Row[],
   markups: Row[],
 ): ProductCostingDraft[] =>
-  costings.map((costing, costingIndex) => ({
+  costings.map((costing, costingIndex) => {
+    const pricingModel = text(costing.pricing_model, "legacy_markup") === "target_margin" ? "target_margin" : "legacy_markup";
+    const loadedMarkups = markups
+      .filter((markup) => markup.product_costing_id === costing.id)
+      .sort((left, right) => n(left.sort_order) - n(right.sort_order))
+      .map((markup, markupIndex) => {
+        const markupKey = pricingMarkupKeyForLabel(markup.markup_key ?? markup.label);
+        const calculationType: MarkupCalculationType = text(markup.calculation_type) === "fixed_amount" ? "fixed_amount" : "percentage";
+        return {
+          key: text(markup.id, `markup-${markupIndex}`),
+          markupKey,
+          label: text(markup.label, pricingMarkupDefinition(markupKey as PricingMarkupKey)?.label ?? "Markup"),
+          calculationType,
+          value: calculationType === "fixed_amount"
+            ? text(markup.amount, text(markup.rate, "0"))
+            : text(markup.rate, "0"),
+        };
+      });
+    const targetMarkups = pricingMarkupDefinitions
+      .filter((definition) => definition.key !== "vat")
+      .map((definition) => loadedMarkups.find((markup) => markup.markupKey === definition.key) ?? {
+        key: `markup-${crypto.randomUUID()}`,
+        markupKey: definition.key,
+        label: definition.label,
+        calculationType: "percentage" as const,
+        value: "0",
+      });
+    const knownKeys = new Set(targetMarkups.map((markup) => markup.key));
+    return {
     key: text(costing.id, `product-costing-${costingIndex}`),
     quotationItemId: text(costing.quotation_item_id),
+    pricingModel,
     costLines: costLines
       .filter((line) => line.product_costing_id === costing.id)
       .sort((left, right) => n(left.sort_order) - n(right.sort_order))
@@ -272,36 +398,93 @@ const productCostingDrafts = (
         unitCost: text(line.unit_cost, "0"),
         amount: text(line.unit_cost, "0"),
       })),
-    markups: markups
-      .filter((markup) => markup.product_costing_id === costing.id)
-      .sort((left, right) => n(left.sort_order) - n(right.sort_order))
-      .map((markup, markupIndex) => ({
-        key: text(markup.id, `markup-${markupIndex}`),
-        label: text(markup.label),
-        rate: text(markup.rate, "0"),
-      })),
-  }));
-const productCostingTotals = (costing: ProductCostingDraft, productQuantity: number, vatRate: number) => {
+    markups: pricingModel === "target_margin"
+      ? [...targetMarkups, ...loadedMarkups.filter((markup) => !knownKeys.has(markup.key))]
+      : loadedMarkups,
+  };
+  });
+const productCostingTotals = (
+  costing: ProductCostingDraft,
+  productQuantity: number,
+  vatCalculationType: MarkupCalculationType | number,
+  vatValue = 0,
+  vatBaseTotal = 0,
+) => {
   const rounded = (value: number) => Math.round(value * 100) / 100;
+  const resolvedVatType: MarkupCalculationType = typeof vatCalculationType === "number" ? "percentage" : vatCalculationType;
+  const resolvedVatValue = typeof vatCalculationType === "number" ? vatCalculationType : vatValue;
   const cogs = costing.costLines.reduce(
     (sum, line) => sum + rounded(line.calculationType === "fixed_amount" ? n(line.amount) : n(line.quantity) * n(line.unitCost)),
     0,
   );
-  const markupTotal = costing.markups.reduce(
-    (sum, markup) => sum + rounded(cogs * n(markup.rate) / 100),
-    0,
-  );
-  const sellingExVat = cogs + markupTotal;
-  const vat = sellingExVat * vatRate / 100;
-  const sellingIncVat = sellingExVat + vat;
+  const markupAmounts: Record<string, number> = {};
+  let markupTotal = 0;
+  let costBase = cogs;
+  let profitAmount = 0;
+  let discountAmount = 0;
+  let listSellingExVat = cogs;
+  let sellingExVat = cogs;
+  if (costing.pricingModel === "legacy_markup") {
+    markupTotal = costing.markups.reduce((sum, markup) => {
+      const amount = markupCalculationType(markup) === "fixed_amount"
+        ? rounded(n(markupValue(markup)))
+        : rounded(cogs * n(markupValue(markup)) / 100);
+      markupAmounts[markup.key] = amount;
+      return sum + amount;
+    }, 0);
+    sellingExVat = rounded(cogs + markupTotal);
+    listSellingExVat = sellingExVat;
+  } else {
+    const target = costing.markups.find((markup) => (markup.markupKey || pricingMarkupKeyForLabel(markup.label)) === "target_profit_margin");
+    const discount = costing.markups.find((markup) => (markup.markupKey || pricingMarkupKeyForLabel(markup.label)) === "discounts");
+    for (const markup of costing.markups) {
+      const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
+      if (!key || key === "target_profit_margin" || key === "discounts" || key === "vat") continue;
+      const amount = markupCalculationType(markup) === "fixed_amount"
+        ? rounded(n(markupValue(markup)))
+        : rounded(cogs * n(markupValue(markup)) / 100);
+      markupAmounts[markup.key] = amount;
+      costBase += amount;
+    }
+    costBase = rounded(costBase);
+    const targetValue = n(target ? markupValue(target) : 0);
+    profitAmount = target && markupCalculationType(target) === "fixed_amount"
+      ? rounded(targetValue)
+      : targetValue >= 100
+        ? 0
+        : rounded(costBase * targetValue / (100 - targetValue));
+    if (target) markupAmounts[target.key] = profitAmount;
+    const requiredNetPrice = rounded(costBase + profitAmount);
+    if (discount) {
+      const discountValue = n(markupValue(discount));
+      if (markupCalculationType(discount) === "fixed_amount") {
+        discountAmount = rounded(discountValue);
+      } else if (discountValue < 100) {
+        discountAmount = rounded(requiredNetPrice / (1 - discountValue / 100) - requiredNetPrice);
+      }
+      markupAmounts[discount.key] = discountAmount;
+    }
+    listSellingExVat = rounded(requiredNetPrice + discountAmount);
+    sellingExVat = rounded(listSellingExVat - discountAmount);
+    markupTotal = rounded(sellingExVat - cogs);
+  }
+  const vat = resolvedVatType === "fixed_amount"
+    ? rounded(vatBaseTotal > 0 ? resolvedVatValue * sellingExVat / vatBaseTotal : resolvedVatValue)
+    : rounded(sellingExVat * resolvedVatValue / 100);
+  const sellingIncVat = rounded(sellingExVat + vat);
   return {
     cogs,
+    costBase,
+    profitAmount,
+    discountAmount,
+    listSellingExVat,
     markupTotal,
+    markupAmounts,
     sellingExVat,
     vat,
     sellingIncVat,
-    unitExVat: productQuantity > 0 ? sellingExVat / productQuantity : 0,
-    unitIncVat: productQuantity > 0 ? sellingIncVat / productQuantity : 0,
+    unitExVat: productQuantity > 0 ? rounded(sellingExVat / productQuantity) : 0,
+    unitIncVat: productQuantity > 0 ? rounded(sellingIncVat / productQuantity) : 0,
   };
 };
 type Field = {
@@ -2139,6 +2322,20 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
   const productCostings = showInternalCosting
     ? store.price_quotation_product_costings.filter((costing) => costing.quotation_id === quote.id)
     : [];
+  const internalCostingDrafts = productCostings
+    .map((costing) => productCostingDrafts(
+      [costing],
+      store.price_quotation_costing_lines,
+      store.price_quotation_costing_markups,
+    )[0])
+    .filter((costing): costing is ProductCostingDraft => Boolean(costing));
+  const quotationVatCalculationType: MarkupCalculationType = text(quote.vat_calculation_type) === "fixed_amount" ? "fixed_amount" : "percentage";
+  const quotationVatValue = quotationVatCalculationType === "fixed_amount" ? n(quote.vat_fixed_amount) : n(quote.vat_rate);
+  const internalVatBaseTotal = internalCostingDrafts.reduce((sum, costing) => {
+    const product = lines.find((line) => line.id === costing.quotationItemId);
+    return sum + productCostingTotals(costing, n(product?.quantity), "percentage", 0).sellingExVat;
+  }, 0);
+  const taxLabel = quotationVatCalculationType === "fixed_amount" ? "TAX (FIXED AMOUNT)" : `TAX (${n(quote.vat_rate)}%)`;
   const pageStyle = priceQuotationPdfStyles.page;
   const clientField = (label: string, value: string) => <PdfView key={label} style={[priceQuotationPdfStyles.clientField, compact ? priceQuotationPdfCompactStyles.clientField : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientField : undefined]}><PdfText style={[priceQuotationPdfStyles.clientLabel, compact ? priceQuotationPdfCompactStyles.clientLabel : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientLabel : undefined]}>{label}</PdfText><PdfText style={[priceQuotationPdfStyles.clientColon, compact ? priceQuotationPdfCompactStyles.clientColon : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientColon : undefined]}>:</PdfText><PdfText style={[priceQuotationPdfStyles.clientValue, compact ? priceQuotationPdfCompactStyles.clientValue : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientValue : undefined]}>{value}</PdfText></PdfView>;
   const headerSection = (
@@ -2172,7 +2369,7 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
     <PdfView style={priceQuotationPdfStyles.table} wrap>
       <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="11%" header>ITEM</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="37%" header>DESCRIPTION</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="16%" header>QUANTITY</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="21%" header>SELLING PRICE / UNIT</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="15%" header>AMOUNT</PriceQuotationPdfCell></PdfView>
       {lines.map((line, index) => { const quantity = n(line.quantity); return <PdfView key={text(line.id, String(index))} style={priceQuotationPdfStyles.row} wrap={false}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="11%">{index + 1}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="37%" description>{text(line.description)}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="16%">{`${quantity} ${quantity === 1 ? "pc" : "pcs"}`}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="21%">{currency(n(line.unit_cost))}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="15%">{currency(n(line.line_total))}</PriceQuotationPdfCell></PdfView>; })}
-      {[["SUBTOTAL", currency(subtotal)], [`TAX (${n(quote.vat_rate)}%)`, currency(tax)], ...(shipping > 0 ? [["SHIPPING / HANDLING", currency(shipping)]] : [])].map(([label, value]) => <PdfView key={label} style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="85%" description style={priceQuotationPdfStyles.totalLabel}>{label}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="15%" style={priceQuotationPdfStyles.totalValue}>{value}</PriceQuotationPdfCell></PdfView>)}
+      {[["SUBTOTAL", currency(subtotal)], [taxLabel, currency(tax)], ...(shipping > 0 ? [["SHIPPING / HANDLING", currency(shipping)]] : [])].map(([label, value]) => <PdfView key={label} style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="85%" description style={priceQuotationPdfStyles.totalLabel}>{label}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="15%" style={priceQuotationPdfStyles.totalValue}>{value}</PriceQuotationPdfCell></PdfView>)}
       <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="85%" description style={[priceQuotationPdfStyles.totalRow, priceQuotationPdfStyles.totalLabelStrong]}>TOTAL</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="15%" style={[priceQuotationPdfStyles.totalRow, priceQuotationPdfStyles.totalValueStrong]}>{currency(n(quote.total_amount))}</PriceQuotationPdfCell></PdfView>
     </PdfView>
   );
@@ -2208,13 +2405,12 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
       {productCostings.map((costing, costingIndex) => {
         const product = lines.find((line) => line.id === costing.quotation_item_id);
         const costLines = store.price_quotation_costing_lines.filter((line) => line.product_costing_id === costing.id).sort((a, b) => n(a.sort_order) - n(b.sort_order));
-        const markups = store.price_quotation_costing_markups.filter((markup) => markup.product_costing_id === costing.id).sort((a, b) => n(a.sort_order) - n(b.sort_order));
         const rounded = (value: number) => Math.round(value * 100) / 100;
         const cogs = costLines.reduce((sum, line) => sum + rounded(text(line.calculation_type) === "fixed_amount" ? n(line.unit_cost) : n(line.quantity) * n(line.unit_cost)), 0);
-        const markupTotal = markups.reduce((sum, markup) => sum + rounded(cogs * n(markup.rate) / 100), 0);
-        const sellingExVat = cogs + markupTotal;
-        const vat = sellingExVat * n(quote.vat_rate) / 100;
         const quantity = n(product?.quantity);
+        const costingDraft = internalCostingDrafts.find((item) => item.key === text(costing.id));
+        if (!costingDraft) return null;
+        const totals = productCostingTotals(costingDraft, quantity, quotationVatCalculationType, quotationVatValue, internalVatBaseTotal);
         return <PdfView key={text(costing.id, String(costingIndex))} wrap>
           <PdfText style={priceQuotationPdfStyles.internalProductTitle}>{`${costingIndex + 1}. ${text(product?.description, "Quotation product")} — ${quantity} ${quantity === 1 ? "pc" : "pcs"}`}</PdfText>
           <PdfView style={priceQuotationPdfStyles.table}>
@@ -2223,11 +2419,13 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
           </PdfView>
           <PdfView style={priceQuotationPdfStyles.internalSummary}>
             <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>TOTAL DIRECT COST</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(cogs)}</PriceQuotationPdfCell></PdfView>
-            {markups.map((markup, index) => <PdfView key={text(markup.id, String(index))} style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>{`${text(markup.label)} (${n(markup.rate)}%)`}</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(rounded(cogs * n(markup.rate) / 100))}</PriceQuotationPdfCell></PdfView>)}
-            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>SELLING PRICE VAT EX (TOTAL)</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(sellingExVat)}</PriceQuotationPdfCell></PdfView>
-            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>{`VAT (${n(quote.vat_rate)}%)`}</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(vat)}</PriceQuotationPdfCell></PdfView>
-            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>SELLING PRICE VAT EX / PIECE</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(quantity > 0 ? sellingExVat / quantity : 0)}</PriceQuotationPdfCell></PdfView>
-            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={[priceQuotationPdfStyles.totalRow, priceQuotationPdfStyles.totalLabelStrong]}>SELLING PRICE VAT INC / PIECE</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={[priceQuotationPdfStyles.totalRow, priceQuotationPdfStyles.totalValueStrong]}>{currency(quantity > 0 ? (sellingExVat + vat) / quantity : 0)}</PriceQuotationPdfCell></PdfView>
+            {costingDraft.markups.map((markup, index) => { const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label); const type = markupCalculationType(markup); const value = n(markupValue(markup)); const label = pricingMarkupDefinition(key as PricingMarkupKey)?.label ?? markup.label; return <PdfView key={text(markup.key, String(index))} style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>{`${label} (${type === "fixed_amount" ? currency(value) : `${value}%`})`}</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.markupAmounts[markup.key] ?? 0)}</PriceQuotationPdfCell></PdfView>; })}
+            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>COST BASE BEFORE PROFIT</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.costBase)}</PriceQuotationPdfCell></PdfView>
+            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>LIST PRICE VAT EX (TOTAL)</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.listSellingExVat)}</PriceQuotationPdfCell></PdfView>
+            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>NET SELLING PRICE VAT EX (TOTAL)</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.sellingExVat)}</PriceQuotationPdfCell></PdfView>
+            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>{quotationVatCalculationType === "fixed_amount" ? "VAT (FIXED AMOUNT)" : `VAT (${n(quote.vat_rate)}%)`}</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.vat)}</PriceQuotationPdfCell></PdfView>
+            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>SELLING PRICE VAT EX / PIECE</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.unitExVat)}</PriceQuotationPdfCell></PdfView>
+            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={[priceQuotationPdfStyles.totalRow, priceQuotationPdfStyles.totalLabelStrong]}>SELLING PRICE VAT INC / PIECE</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={[priceQuotationPdfStyles.totalRow, priceQuotationPdfStyles.totalValueStrong]}>{currency(totals.unitIncVat)}</PriceQuotationPdfCell></PdfView>
           </PdfView>
         </PdfView>;
       })}
@@ -6214,7 +6412,7 @@ function PaymentMonitoring({
 }) {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [paymentQuote, setPaymentQuote] = useState<Row | null>(null);
-  const [scope, setScope] = useState<"pending" | "all">("pending");
+  const [scope, setScope] = useState<"pending" | "all">("all");
   const [paymentQuery, setPaymentQuery] = useState("");
   const [paymentMonth, setPaymentMonth] = useState("");
   const [paymentOfficerFilter, setPaymentOfficerFilter] = useState("all");
@@ -6240,7 +6438,7 @@ function PaymentMonitoring({
       const allRecords = store.quotation_payment_records
         .filter((record) => record.quotation_id === quote.id)
         .sort((left, right) => text(right.paid_at ?? right.submitted_at ?? right.created_at).localeCompare(text(left.paid_at ?? left.submitted_at ?? left.created_at)));
-      const records = allRecords.filter((record) => {
+      const matchingRecords = allRecords.filter((record) => {
         const receiptDate = text(record.paid_at ?? record.submitted_at ?? record.created_at, "");
         return !paymentMonth || receiptDate.slice(0, 7) === paymentMonth;
       });
@@ -6265,7 +6463,7 @@ function PaymentMonitoring({
         ]),
       ].some((value) => text(value, "").toLowerCase().includes(normalizedQuery));
       const matchesOfficer = paymentOfficerFilter === "all" || preparedById === paymentOfficerFilter;
-      const pendingForReview = records.filter(
+      const pendingForReview = (paymentMonth ? matchingRecords : allRecords).filter(
         (record) =>
           text(record.status) === "pending" &&
           assignedPaymentReviewerId(
@@ -6277,15 +6475,16 @@ function PaymentMonitoring({
       );
       return {
         quote,
-        records,
+        allRecords,
+        matchingRecords,
         pendingForReview,
-        summary: quotationPaymentSummary(quote, records),
+        summary: quotationPaymentSummary(quote, allRecords),
         matchesSearch,
         matchesOfficer,
       };
     })
-    .filter(({ matchesSearch, matchesOfficer, records }) => matchesSearch && matchesOfficer && records.length > 0);
-  const rows = approvedQuotes.filter(({ records, summary, pendingForReview }) => assignedOnly ? pendingForReview.length > 0 : scope === "all" ? records.length > 0 : summary.pending > 0);
+    .filter(({ matchesSearch, matchesOfficer, matchingRecords }) => matchesSearch && matchesOfficer && (!paymentMonth || matchingRecords.length > 0));
+  const rows = approvedQuotes.filter(({ summary, pendingForReview }) => assignedOnly ? pendingForReview.length > 0 : scope === "all" || summary.pending > 0);
   const pendingCount = assignedOnly
     ? approvedQuotes.reduce((count, { pendingForReview }) => count + pendingForReview.length, 0)
     : approvedQuotes.filter(({ summary }) => summary.pending > 0).length;
@@ -6304,7 +6503,7 @@ function PaymentMonitoring({
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3"><p className="text-[11px] uppercase tracking-wide text-[#7b8494]">{assignedOnly ? "Receipts assigned to me" : "Pending receipts"}</p><p className="mt-1 text-[16px] font-semibold text-[#a76605]">{pendingCount}</p><p className="mt-1 text-[11px] text-[#687386]">{peso.format(pendingAmount)} awaiting review</p></div>
           <div className="rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3"><p className="text-[11px] uppercase tracking-wide text-[#7b8494]">Verified paid</p><p className="mt-1 text-[16px] font-semibold text-[#218b55]">{peso.format(verifiedAmount)}</p><p className="mt-1 text-[11px] text-[#687386]">Approved receipt total</p></div>
-          <div className="rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3"><p className="text-[11px] uppercase tracking-wide text-[#7b8494]">Recorded quotations</p><p className="mt-1 text-[16px] font-semibold text-[#202938]">{approvedQuotes.filter(({ records }) => records.length > 0).length}</p><p className="mt-1 text-[11px] text-[#687386]">Approved quotations with receipts</p></div>
+          <div className="rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3"><p className="text-[11px] uppercase tracking-wide text-[#7b8494]">Approved quotations</p><p className="mt-1 text-[16px] font-semibold text-[#202938]">{approvedQuotes.length}</p><p className="mt-1 text-[11px] text-[#687386]">Price and Mockup Quotations in the current filters</p></div>
         </div>
         <WorkspaceListFilters
           query={paymentQuery}
@@ -6326,11 +6525,12 @@ function PaymentMonitoring({
         />
         {!assignedOnly && <nav aria-label="Payment monitoring scope" className="app-tabs mt-4">
           <button type="button" onClick={() => setScope("pending")} aria-current={scope === "pending" ? "page" : undefined} className="app-tab">Pending review ({pendingCount})</button>
-          <button type="button" onClick={() => setScope("all")} aria-current={scope === "all" ? "page" : undefined} className="app-tab">All recorded ({approvedQuotes.filter(({ records }) => records.length > 0).length})</button>
+          <button type="button" onClick={() => setScope("all")} aria-current={scope === "all" ? "page" : undefined} className="app-tab">All approved ({approvedQuotes.length})</button>
         </nav>}
+        {paymentMonth && <p className="mt-2 text-[11px] text-[var(--muted)]">The month filter selects quotations with receipts in that month. Payment status and totals include the complete quotation history.</p>}
         {rows.length ? (
           <Table labels={["Quotation", "Client", "Prepared by", "Payment status", "Pending", "Verified / Total", "Last receipt", "Review"]} minWidth={1120}>
-            {rows.map(({ quote, records, pendingForReview, summary }) => {
+            {rows.map(({ quote, allRecords, pendingForReview, summary }) => {
               const party = quotationParty(quote, store);
               const quotationType = text(quote.document_type) === "mockup_quotation" ? "Mockup Quotation" : "Price Quotation";
               const preparedBy = text(store.profiles.find((profile) => profile.id === (quote.prepared_by_user_id ?? quote.created_by))?.full_name, text(quote.representative, "Sales Executive"));
@@ -6344,13 +6544,13 @@ function PaymentMonitoring({
                 <td className="px-5 py-3"><PaymentStatusBadge status={summary.status} /></td>
                 <td className="px-5 py-3 font-medium text-[#a76605]">{peso.format(pendingAmountForRow)}</td>
                 <td className="px-5 py-3">{peso.format(summary.verified)} / {peso.format(summary.total)}</td>
-                <td className="px-5 py-3">{records[0] ? day(records[0].paid_at ?? records[0].submitted_at ?? records[0].created_at) : "-"}</td>
+                <td className="px-5 py-3">{allRecords[0] ? day(allRecords[0].paid_at ?? allRecords[0].submitted_at ?? allRecords[0].created_at) : "-"}</td>
                 <td className="px-5 py-3"><ActionIcon label="Review quotation payments" confirm={false} onClick={() => setPaymentQuote(quote)}><ReceiptText size={15} /></ActionIcon></td>
               </tr>;
             })}
           </Table>
         ) : (
-          <Empty>{assignedOnly ? "No payment receipts are currently assigned to you." : scope === "pending" ? "No quotation payment receipts are awaiting review." : "No quotation payment receipts have been recorded yet."}</Empty>
+          <Empty>{assignedOnly ? "No payment receipts are currently assigned to you." : scope === "pending" ? "No quotation payment receipts are awaiting review." : "No approved Price or Mockup Quotations match the current filters."}</Empty>
         )}
       </div>
       {paymentQuote && <QuotationPaymentDialog quote={paymentQuote} store={store} orgId={orgId} role={role} close={() => setPaymentQuote(null)} reload={reload} />}
@@ -12025,6 +12225,7 @@ function PriceQuotationReviewContentLegacy({ lines, prices, setPrices, subtotal,
   return <div className="mt-5 space-y-5"><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]} minWidth={0}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><Table labels={["Quotation Total", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section><section className="rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label><div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary loading={saving || working} disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></div>;
 }
 
+/*
 function ProductCostingsSection({
   projectName,
   lines,
@@ -12081,6 +12282,104 @@ function ProductCostingsSection({
   );
 }
 
+*/
+function PricingMarkupEditor({
+  costing,
+  editable,
+  update,
+}: {
+  costing: ProductCostingDraft;
+  editable: boolean;
+  update: (next: ProductCostingDraft) => void;
+}) {
+  const totals = productCostingTotals(costing, 1, "percentage", 0);
+  return (
+    <div className="rounded-lg border border-[#d9e0e9] bg-white">
+      <div className="border-b border-[#edf0f5] px-3 py-2">
+        <h4 className="text-[12px] font-semibold text-[#344054]">Internal pricing adjustments</h4>
+        <p className="mt-0.5 text-[11px] text-[#687386]">Percentage values use direct COGS. Target profit is a true margin; discounts are deducted from the customer list price.</p>
+      </div>
+      <Table labels={["Category", "Basis", "Value", "Calculated amount"]} minWidth={0} compact alignRightLabels={["Value", "Calculated amount"]}>
+        {costing.markups.map((markup) => {
+          const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
+          const label = pricingMarkupDefinition(key as PricingMarkupKey)?.label ?? markup.label;
+          const type = markupCalculationType(markup);
+          const amount = totals.markupAmounts[markup.key] ?? 0;
+          return (
+            <tr key={markup.key} className="hover:bg-[#fbfcff]">
+              <td className="px-3 py-2 font-medium text-[#344054]">{label}</td>
+              <td className="px-2 py-2">
+                {editable ? <select aria-label={`${label} calculation basis`} value={type} onChange={(event) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, calculationType: event.target.value as MarkupCalculationType } : item) })} className="input mt-0 min-w-0 px-2 py-1.5 text-[11px]"><option value="percentage">Percentage (%)</option><option value="fixed_amount">Amount (₱)</option></select> : <span className="text-[11px] text-[#687386]">{type === "fixed_amount" ? "Amount (₱)" : "Percentage (%)"}</span>}
+              </td>
+              <td className="px-2 py-2">
+                {editable ? <div className="flex items-center justify-end gap-1"><input aria-label={`${label} value`} type="number" min="0" step="any" value={markupValue(markup)} onChange={(event) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, value: event.target.value } : item) })} className="input mt-0 w-[92px] min-w-0 px-2 py-1.5 text-right tabular-nums" /><span className="w-4 text-[11px] text-[#687386]">{type === "fixed_amount" ? "₱" : "%"}</span></div> : <span className="block text-right tabular-nums text-[#687386]">{type === "fixed_amount" ? peso.format(n(markupValue(markup))) : `${n(markupValue(markup))}%`}</span>}
+              </td>
+              <td className="px-3 py-2 text-right font-medium tabular-nums">{peso.format(amount)}</td>
+            </tr>
+          );
+        })}
+      </Table>
+    </div>
+  );
+}
+
+/*
+function ProductCostingsSectionWithPricing({
+  projectName,
+  lines,
+  vatCalculationType,
+  setVatCalculationType,
+  vatValue,
+  setVatValue,
+  costings,
+  setCostings,
+  pricingDefaults,
+  editableMarkups,
+}: {
+  projectName: string;
+  lines: Row[];
+  vatCalculationType: MarkupCalculationType;
+  setVatCalculationType: (value: MarkupCalculationType) => void;
+  vatValue: string;
+  setVatValue: (value: string) => void;
+  costings: ProductCostingDraft[];
+  setCostings: (next: ProductCostingDraft[] | ((current: ProductCostingDraft[]) => ProductCostingDraft[])) => void;
+  pricingDefaults: Record<string, unknown>;
+  editableMarkups: boolean;
+}) {
+  const displayProjectName = projectName.trim() || "Project";
+  const defaults = pricingMarkupDefaults(pricingDefaults.pricing_markup_defaults, pricingDefaults);
+  const updateCosting = (key: string, update: (costing: ProductCostingDraft) => ProductCostingDraft) => setCostings((current) => current.map((costing) => costing.key === key ? update(costing) : costing));
+  const canAddCosting = costings.length < lines.length;
+  const vatBaseTotal = costings.reduce((sum, costing) => {
+    const product = lines.find((line) => line.id === costing.quotationItemId);
+    return sum + productCostingTotals(costing, n(product?.quantity), "percentage", 0).sellingExVat;
+  }, 0);
+  const vatTotal = costings.reduce((sum, costing) => {
+    const product = lines.find((line) => line.id === costing.quotationItemId);
+    return sum + productCostingTotals(costing, n(product?.quantity), vatCalculationType, n(vatValue), vatBaseTotal).vat;
+  }, 0);
+  return (
+    <section className="rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div><h3 className="text-[14px] font-semibold text-[#202938]">Internal product costings</h3><p className="mt-1 text-[12px] text-[#687386]">General Manager / Sales &amp; Pricing Officer only. Add one costing table for each finished product; internal pricing adjustments calculate the quotation price automatically.</p></div>
+        <Button secondary disabled={!canAddCosting} onClick={() => { const nextLine = lines.find((line) => !costings.some((costing) => costing.quotationItemId === line.id)); if (nextLine?.id) setCostings((current) => [...current, newProductCostingDraft(text(nextLine.id), defaults)]); }}><Plus size={14} /> Add costing table</Button>
+      </div>
+      {costings.length === 0 ? <p className="mt-4 rounded-lg border border-dashed border-[#ccd5e0] bg-white px-3 py-3 text-[12px] text-[#687386]">No internal costing table has been added. Add one costing table for each finished product before submitting for review.</p> : <div className="mt-4 space-y-4">{costings.map((costing, costingIndex) => {
+        const product = lines.find((line) => line.id === costing.quotationItemId);
+        const totals = productCostingTotals(costing, n(product?.quantity), vatCalculationType, n(vatValue), vatBaseTotal);
+        return <article key={costing.key} className="rounded-lg border border-[#d9e0e9] bg-white p-3">
+          <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[#edf0f5] pb-3"><label className="min-w-64 flex-1 text-[12px] font-medium text-[#202938]">Finished product<select value={costing.quotationItemId} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, quotationItemId: event.target.value }))} className="input mt-1"><option value="">Select quotation product</option>{lines.map((line, index) => <option key={text(line.id)} value={text(line.id)} disabled={costings.some((other) => other.key !== costing.key && other.quotationItemId === line.id)}>{displayProjectName} - Product {index + 1} - Qty: {n(line.quantity)} pcs</option>)}</select></label><Button secondary onClick={() => setCostings((current) => current.filter((item) => item.key !== costing.key))}><Trash2 size={14} /> Remove table</Button></div>
+          <div className="mt-3"><div className="mb-3 flex items-center justify-between gap-3"><h4 className="text-[12px] font-semibold text-[#344054]">Internal costs</h4><span className="text-[11px] text-[#687386]">Product {costingIndex + 1}</span></div><Table labels={["Mode", "Description", "Quantity", "Unit Cost", "Amount", ""]} minWidth={0} className="table-fixed" scrollable={false} compact columnWidths={["12%", "42%", "12%", "12%", "12%", "10%"]} alignRightLabels={["Quantity", "Unit Cost", "Amount"]}>{costing.costLines.map((line, lineIndex) => { const isFixedAmount = line.calculationType === "fixed_amount"; const lineAmount = isFixedAmount ? n(line.amount) : n(line.quantity) * n(line.unitCost); const setCalculationType = (value: "quantity_unit_cost" | "fixed_amount") => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, calculationType: value, amount: value === "fixed_amount" && item.calculationType !== "fixed_amount" ? String(n(item.quantity) * n(item.unitCost)) : item.amount } : item) })); return <tr key={line.key}><td className="min-w-0 px-1 py-2"><div aria-label={`Cost ${lineIndex + 1} calculation type`} role="group" className="inline-flex w-full items-center justify-center whitespace-nowrap overflow-hidden rounded-md border border-[#d9e0e9] text-[10px] font-semibold"><button type="button" aria-pressed={!isFixedAmount} onClick={() => setCalculationType("quantity_unit_cost")} className={`min-w-0 flex-1 min-h-6 px-1 transition-colors ${!isFixedAmount ? "bg-[#c43b43] text-white" : "bg-white text-[#687386] hover:bg-[#f5f7fa]"}`}>Q×C</button><button type="button" aria-pressed={isFixedAmount} onClick={() => setCalculationType("fixed_amount")} className={`min-w-0 flex-1 min-h-6 px-1 transition-colors ${isFixedAmount ? "bg-[#c43b43] text-white" : "bg-white text-[#687386] hover:bg-[#f5f7fa]"}`}>Fixed</button></div></td><td className="min-w-0 !whitespace-normal break-words px-2 py-2"><input aria-label={`Cost ${lineIndex + 1} description`} value={line.description} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, description: titleCaseEntry(event.target.value, "description") } : item) }))} className="input mt-0 min-w-0 max-w-full px-2" placeholder="Material, labor, logistics" /></td><td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-end text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} quantity`} type="number" min="0.001" step="any" value={line.quantity} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, quantity: event.target.value } : item) }))} className="input mt-0 min-w-0 max-w-full px-1 text-right" />}</td><td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-end text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} unit cost`} type="number" min="0" step="any" value={line.unitCost} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, unitCost: event.target.value } } : item) }))} className="input mt-0 min-w-0 max-w-full px-1 text-right" />}</td><td className="min-w-0 px-2 py-2">{isFixedAmount ? <input aria-label={`Cost ${lineIndex + 1} fixed amount`} type="number" min="0" step="any" value={line.amount} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.map((item) => item.key === line.key ? { ...item, amount: event.target.value } : item) }))} className="input mt-0 min-w-0 max-w-full px-1 text-right" /> : <span className="flex min-h-9 items-center justify-end whitespace-nowrap font-medium">{peso.format(lineAmount)}</span>}</td><td className="px-1 py-2 text-center"><ActionIcon label={`Remove cost ${lineIndex + 1}`} tone="red" disabled={costing.costLines.length === 1} onClick={() => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.filter((item) => item.key !== line.key) }))}><Trash2 size={14} /></ActionIcon></td></tr>; })}</Table><div className="mt-2 flex justify-end"><Button onClick={() => updateCosting(costing.key, (current) => ({ ...current, costLines: [...current.costLines, { key: `cost-line-${crypto.randomUUID()}`, description: "", calculationType: "quantity_unit_cost", quantity: "1", unitCost: "0", amount: "0" }] }))}><Plus size={13} /> Add cost</Button></div></div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]"><div>{editableMarkups ? <PricingMarkupEditor costing={costing} editable update={(next) => updateCosting(costing.key, () => next)} /> : <p className="rounded-lg border border-dashed border-[#ccd5e0] bg-[#fafbfc] px-3 py-3 text-[12px] text-[#687386]">Internal pricing adjustments are managed by the General Manager and are not editable in this review.</p>}</div><dl className="overflow-hidden rounded-lg border border-[#d9e0e9] text-[12px]"><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Total Direct Cost</dt><dd className="font-medium">{peso.format(totals.cogs)}</dd></div><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Cost Base Before Profit</dt><dd>{peso.format(totals.costBase)}</dd></div><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Target Profit</dt><dd>{peso.format(totals.profitAmount)}</dd></div><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Discount</dt><dd>{peso.format(totals.discountAmount)}</dd></div><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>List Price VAT Ex</dt><dd>{peso.format(totals.listSellingExVat)}</dd></div><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2 font-medium"><dt>Net Selling Price VAT Ex</dt><dd>{peso.format(totals.sellingExVat)}</dd></div><div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>VAT</dt><dd>{peso.format(totals.vat)}</dd></div><div className="flex justify-between bg-[#f8fbff] px-3 py-2"><dt>Selling Price VAT Ex / Piece</dt><dd>{peso.format(totals.unitExVat)}</dd></div><div className="flex justify-between bg-[#eff7f1] px-3 py-2 font-semibold text-[#176b40]"><dt>Selling Price VAT Inc / Piece</dt><dd>{peso.format(totals.unitIncVat)}</dd></div></dl></div>
+        </article>;
+      })}</div>}
+      <div className="mt-4 rounded-lg border border-[#d9e0e9] bg-white p-3"><div className="flex flex-wrap items-end gap-3"><div className="min-w-48 flex-1"><h4 className="text-[12px] font-semibold text-[#344054]">Quotation VAT</h4><p className="mt-0.5 text-[11px] text-[#687386]">VAT is applied after the final VAT-exclusive selling price.</p></div><label className="text-[11px] font-medium text-[#344054]">Basis<select aria-label="VAT calculation basis" value={vatCalculationType} onChange={(event) => setVatCalculationType(event.target.value as MarkupCalculationType)} className="input mt-1 min-w-36 px-2 py-1.5"><option value="percentage">Percentage (%)</option><option value="fixed_amount">Amount (₱)</option></select></label><label className="text-[11px] font-medium text-[#344054]">Value<div className="mt-1 flex items-center gap-1"><input aria-label="VAT value" type="number" min="0" step="any" value={vatValue} onChange={(event) => setVatValue(event.target.value)} className="input mt-0 w-28 px-2 py-1.5 text-right" /><span className="text-[#687386]">{vatCalculationType === "fixed_amount" ? "₱" : "%"}</span></div></label><output aria-label="VAT total" className="min-w-28 text-right text-[12px] font-semibold text-[#344054]">{peso.format(vatTotal)}</output></div></div>
+    </section>
+  );
+}
+
+*/
 type PriceQuotationReviewContentProps = {
   lines: Row[];
   projectName: string;
@@ -12096,6 +12395,8 @@ type PriceQuotationReviewContentProps = {
   subtotal: number;
   vatRate: string;
   setVatRate: (value: string) => void;
+  vatCalculationType: MarkupCalculationType;
+  setVatCalculationType: (value: MarkupCalculationType) => void;
   tax: number;
   total: number;
   terms: string[];
@@ -12113,13 +12414,154 @@ type PriceQuotationReviewContentProps = {
   sourceQuotationNo?: string;
 };
 
+function ProductCostingsSectionWithPricing({
+  projectName,
+  lines,
+  vatCalculationType,
+  setVatCalculationType,
+  vatValue,
+  setVatValue,
+  costings,
+  setCostings,
+  pricingDefaults,
+  editableMarkups,
+}: {
+  projectName: string;
+  lines: Row[];
+  vatCalculationType: MarkupCalculationType;
+  setVatCalculationType: (value: MarkupCalculationType) => void;
+  vatValue: string;
+  setVatValue: (value: string) => void;
+  costings: ProductCostingDraft[];
+  setCostings: (next: ProductCostingDraft[] | ((current: ProductCostingDraft[]) => ProductCostingDraft[])) => void;
+  pricingDefaults: Record<string, unknown>;
+  editableMarkups: boolean;
+}) {
+  const displayProjectName = projectName.trim() || "Project";
+  const defaults = pricingMarkupDefaults(pricingDefaults.pricing_markup_defaults, pricingDefaults);
+  const updateCosting = (key: string, update: (costing: ProductCostingDraft) => ProductCostingDraft) =>
+    setCostings((current) => current.map((costing) => costing.key === key ? update(costing) : costing));
+  const canAddCosting = costings.length < lines.length;
+  const vatBaseTotal = costings.reduce((sum, costing) => {
+    const product = lines.find((line) => line.id === costing.quotationItemId);
+    return sum + productCostingTotals(costing, n(product?.quantity), "percentage", 0).sellingExVat;
+  }, 0);
+  const vatTotal = costings.reduce((sum, costing) => {
+    const product = lines.find((line) => line.id === costing.quotationItemId);
+    return sum + productCostingTotals(costing, n(product?.quantity), vatCalculationType, n(vatValue), vatBaseTotal).vat;
+  }, 0);
+
+  return (
+    <section className="rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-[14px] font-semibold text-[#202938]">Internal product costings</h3>
+          <p className="mt-1 text-[12px] text-[#687386]">General Manager / Sales &amp; Pricing Officer only. Add one costing table for each finished product; internal pricing adjustments calculate the quotation price automatically.</p>
+        </div>
+        <Button
+          secondary
+          disabled={!canAddCosting}
+          onClick={() => {
+            const nextLine = lines.find((line) => !costings.some((costing) => costing.quotationItemId === line.id));
+            if (nextLine?.id) setCostings((current) => [...current, newProductCostingDraft(text(nextLine.id), defaults)]);
+          }}
+        >
+          <Plus size={14} /> Add costing table
+        </Button>
+      </div>
+
+      {costings.length === 0 ? (
+        <p className="mt-4 rounded-lg border border-dashed border-[#ccd5e0] bg-white px-3 py-3 text-[12px] text-[#687386]">No internal costing table has been added. Add one costing table for each finished product before submitting for review.</p>
+      ) : (
+        <div className="mt-4 space-y-4">
+          {costings.map((costing, costingIndex) => {
+            const product = lines.find((line) => line.id === costing.quotationItemId);
+            const totals = productCostingTotals(costing, n(product?.quantity), vatCalculationType, n(vatValue), vatBaseTotal);
+            return (
+              <article key={costing.key} className="rounded-lg border border-[#d9e0e9] bg-white p-3">
+                <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[#edf0f5] pb-3">
+                  <label className="min-w-64 flex-1 text-[12px] font-medium text-[#202938]">
+                    Finished product
+                    <select value={costing.quotationItemId} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, quotationItemId: event.target.value }))} className="input mt-1">
+                      <option value="">Select quotation product</option>
+                      {lines.map((line, index) => <option key={text(line.id)} value={text(line.id)} disabled={costings.some((other) => other.key !== costing.key && other.quotationItemId === line.id)}>{displayProjectName} - Product {index + 1} - Qty: {n(line.quantity)} pcs</option>)}
+                    </select>
+                  </label>
+                  <Button secondary onClick={() => setCostings((current) => current.filter((item) => item.key !== costing.key))}><Trash2 size={14} /> Remove table</Button>
+                </div>
+
+                <div className="mt-3">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <h4 className="text-[12px] font-semibold text-[#344054]">Internal costs</h4>
+                    <span className="text-[11px] text-[#687386]">Product {costingIndex + 1}</span>
+                  </div>
+                  <Table labels={["Mode", "Description", "Quantity", "Unit Cost", "Amount", ""]} minWidth={0} className="table-fixed" scrollable={false} compact columnWidths={["12%", "42%", "12%", "12%", "12%", "10%"]} alignRightLabels={["Quantity", "Unit Cost", "Amount"]}>
+                    {costing.costLines.map((line, lineIndex) => {
+                      const isFixedAmount = line.calculationType === "fixed_amount";
+                      const lineAmount = isFixedAmount ? n(line.amount) : n(line.quantity) * n(line.unitCost);
+                      const updateLine = (next: Partial<typeof line>) => updateCosting(costing.key, (current) => ({
+                        ...current,
+                        costLines: current.costLines.map((item) => item.key === line.key ? { ...item, ...next } : item),
+                      }));
+                      return (
+                        <tr key={line.key}>
+                          <td className="min-w-0 px-1 py-2">
+                            <div aria-label={`Cost ${lineIndex + 1} calculation type`} role="group" className="inline-flex w-full items-center justify-center overflow-hidden whitespace-nowrap rounded-md border border-[#d9e0e9] text-[10px] font-semibold">
+                              <button type="button" aria-pressed={!isFixedAmount} onClick={() => updateLine({ calculationType: "quantity_unit_cost", amount: line.amount || "0" })} className={`min-h-6 min-w-0 flex-1 px-1 transition-colors ${!isFixedAmount ? "bg-[#c43b43] text-white" : "bg-white text-[#687386] hover:bg-[#f5f7fa]"}`}>Q×C</button>
+                              <button type="button" aria-pressed={isFixedAmount} onClick={() => updateLine({ calculationType: "fixed_amount", amount: line.calculationType === "fixed_amount" ? line.amount : String(n(line.quantity) * n(line.unitCost)) })} className={`min-h-6 min-w-0 flex-1 px-1 transition-colors ${isFixedAmount ? "bg-[#c43b43] text-white" : "bg-white text-[#687386] hover:bg-[#f5f7fa]"}`}>Fixed</button>
+                            </div>
+                          </td>
+                          <td className="min-w-0 !whitespace-normal break-words px-2 py-2"><input aria-label={`Cost ${lineIndex + 1} description`} value={line.description} onChange={(event) => updateLine({ description: titleCaseEntry(event.target.value, "description") })} className="input mt-0 min-w-0 max-w-full px-2" placeholder="Material, labor, logistics" /></td>
+                          <td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-end text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} quantity`} type="number" min="0.001" step="any" value={line.quantity} onChange={(event) => updateLine({ quantity: event.target.value })} className="input mt-0 min-w-0 max-w-full px-1 text-right" />}</td>
+                          <td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-end text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} unit cost`} type="number" min="0" step="any" value={line.unitCost} onChange={(event) => updateLine({ unitCost: event.target.value })} className="input mt-0 min-w-0 max-w-full px-1 text-right" />}</td>
+                          <td className="min-w-0 px-2 py-2">{isFixedAmount ? <input aria-label={`Cost ${lineIndex + 1} fixed amount`} type="number" min="0" step="any" value={line.amount} onChange={(event) => updateLine({ amount: event.target.value })} className="input mt-0 min-w-0 max-w-full px-1 text-right" /> : <span className="flex min-h-9 items-center justify-end whitespace-nowrap font-medium">{peso.format(lineAmount)}</span>}</td>
+                          <td className="px-1 py-2 text-center"><ActionIcon label={`Remove cost ${lineIndex + 1}`} tone="red" disabled={costing.costLines.length === 1} onClick={() => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.filter((item) => item.key !== line.key) }))}><Trash2 size={14} /></ActionIcon></td>
+                        </tr>
+                      );
+                    })}
+                  </Table>
+                  <div className="mt-2 flex justify-end"><Button onClick={() => updateCosting(costing.key, (current) => ({ ...current, costLines: [...current.costLines, { key: `cost-line-${crypto.randomUUID()}`, description: "", calculationType: "quantity_unit_cost", quantity: "1", unitCost: "0", amount: "0" }] }))}><Plus size={13} /> Add cost</Button></div>
+                </div>
+
+                <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+                  <div>{editableMarkups ? <PricingMarkupEditor costing={costing} editable update={(next) => updateCosting(costing.key, () => next)} /> : <p className="rounded-lg border border-dashed border-[#ccd5e0] bg-[#fafbfc] px-3 py-3 text-[12px] text-[#687386]">Internal pricing adjustments are managed by the General Manager and are not editable in this review.</p>}</div>
+                  <dl className="overflow-hidden rounded-lg border border-[#d9e0e9] text-[12px]">
+                    <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Total Direct Cost</dt><dd className="font-medium">{peso.format(totals.cogs)}</dd></div>
+                    <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Cost Base Before Profit</dt><dd>{peso.format(totals.costBase)}</dd></div>
+                    <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Target Profit</dt><dd>{peso.format(totals.profitAmount)}</dd></div>
+                    <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Discount</dt><dd>{peso.format(totals.discountAmount)}</dd></div>
+                    <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>List Price VAT Ex</dt><dd>{peso.format(totals.listSellingExVat)}</dd></div>
+                    <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2 font-medium"><dt>Net Selling Price VAT Ex</dt><dd>{peso.format(totals.sellingExVat)}</dd></div>
+                    <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>VAT</dt><dd>{peso.format(totals.vat)}</dd></div>
+                    <div className="flex justify-between bg-[#f8fbff] px-3 py-2"><dt>Selling Price VAT Ex / Piece</dt><dd>{peso.format(totals.unitExVat)}</dd></div>
+                    <div className="flex justify-between bg-[#eff7f1] px-3 py-2 font-semibold text-[#176b40]"><dt>Selling Price VAT Inc / Piece</dt><dd>{peso.format(totals.unitIncVat)}</dd></div>
+                  </dl>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="mt-4 rounded-lg border border-[#d9e0e9] bg-white p-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="min-w-48 flex-1"><h4 className="text-[12px] font-semibold text-[#344054]">Quotation VAT</h4><p className="mt-0.5 text-[11px] text-[#687386]">VAT is applied after the final VAT-exclusive selling price.</p></div>
+          <label className="text-[11px] font-medium text-[#344054]">Basis<select aria-label="VAT calculation basis" value={vatCalculationType} onChange={(event) => setVatCalculationType(event.target.value as MarkupCalculationType)} className="input mt-1 min-w-36 px-2 py-1.5"><option value="percentage">Percentage (%)</option><option value="fixed_amount">Amount (₱)</option></select></label>
+          <label className="text-[11px] font-medium text-[#344054]">Value<div className="mt-1 flex items-center gap-1"><input aria-label="VAT value" type="number" min="0" step="any" value={vatValue} onChange={(event) => setVatValue(event.target.value)} className="input mt-0 w-28 px-2 py-1.5 text-right" /><span className="text-[#687386]">{vatCalculationType === "fixed_amount" ? "₱" : "%"}</span></div></label>
+          <output aria-label="VAT total" className="min-w-28 text-right text-[12px] font-semibold text-[#344054]">{peso.format(vatTotal)}</output>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function PriceQuotationReviewContent({
   lines, projectName, projectType, illustrations, productCostings, pricingDefaults, setProductCostings, prices, setPrices, subtotal, vatRate, setVatRate, tax,
   total, terms, setTerms, bankDetails, setBankDetails, priceBasis, setPriceBasis,
   revisionNote, setRevisionNote, close, saving, working, review, finalApproval,
-  documentLabel = "Price Quotation", sourceQuotationNo,
+  vatCalculationType, setVatCalculationType, documentLabel = "Price Quotation", sourceQuotationNo,
 }: PriceQuotationReviewContentProps) {
-  const vatMultiplier = 1 + n(vatRate) / 100;
+  const vatMultiplier = subtotal > 0 ? 1 + tax / subtotal : 1;
   const priceLabel = "Selling Price / Unit";
   return (
     <div className="mt-5 space-y-5">
@@ -12132,7 +12574,7 @@ function PriceQuotationReviewContent({
         </dl>
         {illustrations.length > 0 && <div className="mt-4"><p className="text-[12px] font-medium text-[#687386]">Illustrations</p><div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">{illustrations.map((illustration) => <a key={illustration.id} href={illustration.imageUrl} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><img src={illustration.imageUrl} alt={illustration.description || "Quotation illustration"} className="aspect-square w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{illustration.description}</p></a>)}</div></div>}
       </section>
-      <ProductCostingsSection projectName={projectName} lines={lines} vatRate={vatRate} setVatRate={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} />
+      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatCalculationType={vatCalculationType} setVatCalculationType={setVatCalculationType} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups={finalApproval} />
       <section>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <p className="text-[12px] text-[#687386]">Choose how the selling price is entered. The quotation always saves its VAT-exclusive price.</p>
@@ -12149,7 +12591,6 @@ function PriceQuotationReviewContent({
           {lines.map((line, index) => {
             const storedPrice = prices[text(line.id)] ?? "";
             const price = n(storedPrice);
-            const enteredPrice = priceBasis === "inc" && storedPrice ? (price * vatMultiplier).toFixed(2) : storedPrice;
             const displayedPrice = priceBasis === "inc" ? price * vatMultiplier : price;
             const productCosting = productCostings.find((costing) => costing.quotationItemId === line.id);
             return <tr key={text(line.id)}>
@@ -12164,7 +12605,7 @@ function PriceQuotationReviewContent({
         <div className="mt-3">
         <Table labels={["Quotation Total", "Amount"]} minWidth={0}>
           <tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr>
-          <tr><td className="px-4 py-2">VAT ({n(vatRate)}%)</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr>
+          <tr><td className="px-4 py-2">{vatCalculationType === "fixed_amount" ? "VAT (fixed amount)" : `VAT (${n(vatRate)}%)`}</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr>
           <tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr>
         </Table>
         </div>
@@ -12215,12 +12656,20 @@ function PriceQuotationReview({
   const pricingDefaultSettings = store.business_settings.find(
     (setting) => text(setting.organization_id) === text(quotation.organization_id),
   );
-  const defaultVatRate = text(pricingDefaultSettings?.vat_rate, "12");
+  const defaultPricingDefaults = pricingMarkupDefaults(pricingDefaultSettings?.pricing_markup_defaults, pricingDefaultSettings);
+  const defaultVat = defaultPricingDefaults.find((definition) => definition.key === "vat") ?? { calculationType: "percentage" as const, value: "12" };
+  const quotationVatCalculationType: MarkupCalculationType = text(quotation.vat_calculation_type) === "fixed_amount" ? "fixed_amount" : "percentage";
+  // New-format quotations start with zero totals and have no pricing review
+  // snapshot yet. Apply the current organization VAT default only in that
+  // state; a reviewed quotation keeps its saved VAT even when defaults change.
+  const useCurrentVatDefault = !finalApproval
+    && !quotation.pricing_reviewed_at
+    && n(quotation.vat_rate) <= 0
+    && n(quotation.vat_fixed_amount) <= 0;
+  const initialVatCalculationType = () => useCurrentVatDefault ? defaultVat.calculationType : quotationVatCalculationType;
   const initialVatRate = () => {
-    if (!finalApproval && n(quotation.vat_rate) <= 0) {
-      return defaultVatRate;
-    }
-    return text(quotation.vat_rate, "12");
+    if (useCurrentVatDefault) return defaultVat.value;
+    return quotationVatCalculationType === "fixed_amount" ? text(quotation.vat_fixed_amount, "0") : text(quotation.vat_rate, "12");
   };
   const [prices, setPrices] = useState<Record<string, string>>(() =>
     Object.fromEntries(
@@ -12230,6 +12679,7 @@ function PriceQuotationReview({
     ),
   );
   const [priceBasis, setPriceBasis] = useState<"ex" | "inc">("ex");
+  const [vatCalculationType, setVatCalculationType] = useState<MarkupCalculationType>(initialVatCalculationType);
   const [vatRate, setVatRate] = useState(initialVatRate);
   const [terms, setTerms] = useState(
     text(quotation.terms_conditions, DEFAULT_QUOTATION_TERMS)
@@ -12253,20 +12703,25 @@ function PriceQuotationReview({
     if (!organizationId) return;
     void createClient()
       .from("business_settings")
-      .select("default_bank_details, vat_rate")
+      .select("default_bank_details, vat_rate, pricing_markup_defaults")
       .eq("organization_id", organizationId)
       .maybeSingle()
       .then(({ data, error }) => {
-        if (!active || error || data?.default_bank_details === undefined || hasSavedBankDetails) return;
-        setBankDetails(quotationBankDetails(data.default_bank_details));
-        if (!finalApproval && n(quotation.vat_rate) <= 0) {
-          setVatRate((current) => (current === defaultVatRate ? text(data.vat_rate, "12") : current));
+        if (!active || error) return;
+        if (!hasSavedBankDetails && data?.default_bank_details !== undefined) setBankDetails(quotationBankDetails(data.default_bank_details));
+        if (useCurrentVatDefault) {
+          const loadedDefaults = pricingMarkupDefaults(data?.pricing_markup_defaults, data as Row);
+          const loadedVat = loadedDefaults.find((definition) => definition.key === "vat");
+          if (loadedVat) {
+            setVatCalculationType((current) => current === defaultVat.calculationType ? loadedVat.calculationType : current);
+            setVatRate((current) => current === defaultVat.value ? loadedVat.value : current);
+          }
         }
       });
     return () => {
       active = false;
     };
-  }, [defaultVatRate, finalApproval, hasSavedBankDetails, isMockupQuotation, quotation.organization_id, quotation.vat_rate]);
+  }, [defaultVat.calculationType, defaultVat.value, finalApproval, hasSavedBankDetails, quotation.organization_id, quotation.pricing_reviewed_at, quotation.vat_fixed_amount, quotation.vat_rate, useCurrentVatDefault]);
   const [revisionNote, setRevisionNote] = useState("");
   const [working, setWorking] = useState(false);
   const [productCostings, setProductCostings] = useState<ProductCostingDraft[]>(() =>
@@ -12349,6 +12804,7 @@ function PriceQuotationReview({
         const unitExVat = productCostingTotals(
           costing,
           n(product.quantity),
+          vatCalculationType,
           n(vatRate),
         ).unitExVat.toFixed(2);
         if (next[text(product.id)] !== unitExVat) {
@@ -12358,7 +12814,7 @@ function PriceQuotationReview({
       });
       return changed ? next : current;
     });
-  }, [lines, productCostings, vatRate]);
+  }, [lines, productCostings, vatCalculationType, vatRate]);
   const illustrations = [
     ...galleryIllustrations
       .sort((left, right) => n(left.sort_order) - n(right.sort_order))
@@ -12373,8 +12829,10 @@ function PriceQuotationReview({
     }),
   ];
   const subtotal = lines.reduce((sum, line) => sum + n(line.quantity) * n(prices[text(line.id)]), 0);
-  const tax = Math.round(subtotal * n(vatRate)) / 100;
-  const total = subtotal + tax;
+  const tax = vatCalculationType === "fixed_amount"
+    ? Math.round(n(vatRate) * 100) / 100
+    : Math.round(subtotal * n(vatRate)) / 100;
+  const total = Math.round((subtotal + tax) * 100) / 100;
   const review = async (decision: "approved" | "needs_revision") => {
     if (!finalApproval && isMockupQuotation && productCostings.length !== lines.length) {
       return notice("Add one costing table for every Mockup Quotation product before reviewing.");
@@ -12393,9 +12851,13 @@ function PriceQuotationReview({
         amount: line.calculationType === "fixed_amount" ? n(line.amount) : undefined,
       })),
       markups: costing.markups.map((markup) => ({
+        markup_key: markup.markupKey || pricingMarkupKeyForLabel(markup.label) || undefined,
         label: markup.label,
-        rate: n(markup.rate),
+        calculation_type: markupCalculationType(markup),
+        rate: markupCalculationType(markup) === "percentage" ? n(markupValue(markup)) : 0,
+        amount: markupCalculationType(markup) === "fixed_amount" ? n(markupValue(markup)) : 0,
       })),
+      pricing_model: costing.pricingModel,
     }));
       const { error } = finalApproval && decision === "needs_revision"
         ? await createClient().rpc(isMockupQuotation ? "return_mockup_quotation_from_gm" : "return_price_quotation_from_gm", { p_quotation_id: quotation.id, p_note: revisionNote })
@@ -12405,6 +12867,8 @@ function PriceQuotationReview({
           {
             p_quotation_id: quotation.id,
             p_vat_rate: n(vatRate),
+            p_vat_calculation_type: vatCalculationType,
+            p_vat_fixed_amount: vatCalculationType === "fixed_amount" ? n(vatRate) : 0,
             p_terms_conditions: terms.filter((term) => term.trim()).join("\n"),
             p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
             p_costings: costingsPayload,
@@ -12415,6 +12879,8 @@ function PriceQuotationReview({
           p_quotation_id: quotation.id,
           p_decision: decision,
           p_vat_rate: n(vatRate),
+          p_vat_calculation_type: vatCalculationType,
+          p_vat_fixed_amount: vatCalculationType === "fixed_amount" ? n(vatRate) : 0,
           p_terms_conditions: terms.filter((term) => term.trim()).join("\n"),
           p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
           p_costings: costingsPayload,
@@ -12425,6 +12891,8 @@ function PriceQuotationReview({
           p_quotation_id: quotation.id,
           p_decision: decision,
           p_vat_rate: n(vatRate),
+          p_vat_calculation_type: vatCalculationType,
+          p_vat_fixed_amount: vatCalculationType === "fixed_amount" ? n(vatRate) : 0,
           p_terms_conditions: terms.filter((term) => term.trim()).join("\n"),
           p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
           p_costings: costingsPayload,
@@ -12450,7 +12918,7 @@ function PriceQuotationReview({
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} shipping={shipping} setShipping={setShipping} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} · {text(quotation.client_name)} · Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><div className="mt-5 grid gap-5 lg:grid-cols-[1.45fr_.75fr]"><div><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><section className="mt-5 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="mt-4 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="mt-4 block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label></div><aside><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><div className="border-b border-[#edf0f5] px-4 py-3"><h3 className="text-[14px] font-semibold">Quotation Total</h3></div><Table labels={["Category", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section></aside></div><div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary loading={saving || working} disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></section></div>;
   */
-  return <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review {documentLabel}</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - {finalApproval ? "Finalize approval." : `Complete pricing and submit ${documentLabel} to the General Manager.`}</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectName={text(quotation.project_name, "")} projectType={text(quotation.project_types, "")} sourceQuotationNo={text(sourceQuotation?.quotation_no, "") || undefined} documentLabel={documentLabel} illustrations={illustrations} productCostings={productCostings} pricingDefaults={pricingDefaultSettings ?? {}} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} priceBasis={priceBasis} setPriceBasis={setPriceBasis} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} finalApproval={finalApproval} /></section></div>;
+  return <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review {documentLabel}</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - {finalApproval ? "Finalize approval." : `Complete pricing and submit ${documentLabel} to the General Manager.`}</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectName={text(quotation.project_name, "")} projectType={text(quotation.project_types, "")} sourceQuotationNo={text(sourceQuotation?.quotation_no, "") || undefined} documentLabel={documentLabel} illustrations={illustrations} productCostings={productCostings} pricingDefaults={pricingDefaultSettings ?? {}} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} priceBasis={priceBasis} setPriceBasis={setPriceBasis} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} vatCalculationType={vatCalculationType} setVatCalculationType={setVatCalculationType} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} finalApproval={finalApproval} /></section></div>;
 }
 
 function GeneralManagerCostingReview({
@@ -16857,6 +17325,7 @@ function SettingsView({
   const [savingBankDetails, setSavingBankDetails] = useState(false);
   const [pricingDefaultsOpen, setPricingDefaultsOpen] = useState(false);
   const [pricingDefaults, setPricingDefaults] = useState<Record<string, string>>({});
+  const [savingPricingDefaults, setSavingPricingDefaults] = useState(false);
   const setting = store.business_settings[0];
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileValues, setProfileValues] = useState<Record<string, string>>(
@@ -16962,15 +17431,20 @@ function SettingsView({
     await reload();
   };
   const savePricingDefaults = async () => {
-    const { error } = await createClient().from("business_settings").upsert({
-      organization_id: orgId,
-      default_profit_margin: n(pricingDefaults.default_profit_margin),
-      default_overhead_rate: n(pricingDefaults.default_overhead_rate),
-      default_buffer_margin: n(pricingDefaults.default_buffer_margin),
-      production_commission: n(pricingDefaults.production_commission),
-      default_additional_markup: n(pricingDefaults.default_additional_markup),
-      vat_rate: n(pricingDefaults.vat_rate),
+    const defaults = pricingMarkupDefinitions.map((definition) => ({
+      key: definition.key,
+      label: definition.label,
+      calculationType: pricingDefaults[`${definition.key}_type`] === "fixed_amount" ? "fixed_amount" as const : "percentage" as const,
+      value: pricingDefaults[`${definition.key}_value`] ?? definition.fallback,
+    }));
+    const invalid = defaults.find((definition) => String(definition.value ?? "").trim() === "" || !Number.isFinite(Number(definition.value)) || n(definition.value) < 0 || (definition.calculationType === "percentage" && n(definition.value) > 100) || (definition.key === "target_profit_margin" && definition.calculationType === "percentage" && n(definition.value) >= 100) || (definition.key === "discounts" && definition.calculationType === "percentage" && n(definition.value) >= 100));
+    if (invalid) return notice(`${invalid.label} must use a valid non-negative value${invalid.calculationType === "percentage" ? " below 100% for target profit and discounts" : ""}.`);
+    setSavingPricingDefaults(true);
+    const { error } = await createClient().rpc("save_pricing_defaults", {
+      p_organization_id: orgId,
+      p_defaults: pricingMarkupDefaultPayload(defaults),
     });
+    setSavingPricingDefaults(false);
     if (error) return notice(error.message);
     setPricingDefaultsOpen(false);
     notice("Pricing defaults saved.");
@@ -16979,10 +17453,12 @@ function SettingsView({
   return (
     <div className="space-y-5">
       <AccountProfileDialog open embedded fullWidth role={role} />
-      <Panel title="Pricing defaults" detail="Applied automatically to new product costings. Sales &amp; Pricing Officers can view and adjust VAT only." action={<Button secondary onClick={() => { setPricingDefaults({ default_profit_margin: text(setting?.default_profit_margin, "75"), default_overhead_rate: text(setting?.default_overhead_rate, "0"), default_buffer_margin: text(setting?.default_buffer_margin, "20"), production_commission: text(setting?.production_commission, "0"), default_additional_markup: text(setting?.default_additional_markup, "15"), vat_rate: text(setting?.vat_rate, "12") }); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button>}>
-        <Table labels={["Profit margin", "Overhead expense", "Buffer margin", "Commission", "Additional markup", "VAT"]}><tr><td className="px-4 py-3">{text(setting?.default_profit_margin, "75")}%</td><td className="px-4 py-3">{text(setting?.default_overhead_rate, "0")}%</td><td className="px-4 py-3">{text(setting?.default_buffer_margin, "20")}%</td><td className="px-4 py-3">{text(setting?.production_commission, "0")}%</td><td className="px-4 py-3">{text(setting?.default_additional_markup, "15")}%</td><td className="px-4 py-3">{text(setting?.vat_rate, "12")}%</td></tr></Table>
+      <Panel title="Pricing defaults - Internal" detail="Applied to new internal product costings. Existing quotations keep their saved pricing. Sales &amp; Pricing Officers can adjust VAT per quotation." action={memberRole(role) ? <Button secondary onClick={() => { const defaults = pricingMarkupDefaults(setting?.pricing_markup_defaults, setting); setPricingDefaults(Object.fromEntries(defaults.flatMap((definition) => [[`${definition.key}_value`, definition.value], [`${definition.key}_type`, definition.calculationType]]))); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button> : undefined}>
+        <Table labels={["Pricing default", "Basis", "Default"]}>
+          {pricingMarkupDefaults(setting?.pricing_markup_defaults, setting).map((definition) => <tr key={definition.key}><td className="px-4 py-3 font-medium">{definition.label}</td><td className="px-4 py-3 text-[#687386]">{definition.calculationType === "fixed_amount" ? "Amount (₱)" : "Percentage (%)"}</td><td className="px-4 py-3 text-right">{definition.calculationType === "fixed_amount" ? peso.format(n(definition.value)) : `${n(definition.value)}%`}</td></tr>)}
+        </Table>
       </Panel>
-      {pricingDefaultsOpen && <Dialog title="Pricing defaults" fields={[{ key: "default_profit_margin", label: "Profit Margin %", type: "number" }, { key: "default_overhead_rate", label: "Overhead Expense %", type: "number" }, { key: "default_buffer_margin", label: "Buffer Margin %", type: "number" }, { key: "production_commission", label: "Commission %", type: "number" }, { key: "default_additional_markup", label: "Additional Markup %", type: "number" }, { key: "vat_rate", label: "Default VAT %", type: "number" }]} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => setPricingDefaultsOpen(false)} saving={false} saveLabel="Save pricing defaults" />}
+      {pricingDefaultsOpen && <Dialog title="Pricing defaults - Internal" fields={pricingMarkupDefinitions.flatMap((definition) => [{ key: `${definition.key}_value`, label: `${definition.label} value`, type: "number" as const, required: true }, { key: `${definition.key}_type`, label: `${definition.label} basis`, type: "select" as const, options: ["percentage|Percentage (%)", "fixed_amount|Amount (₱)"] }])} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => { if (!savingPricingDefaults) setPricingDefaultsOpen(false); }} saving={savingPricingDefaults} saveLabel="Save pricing defaults" className="max-w-3xl" />}
       <Panel
         title="Default bank details"
         detail="Shown on new Price Quotations."
