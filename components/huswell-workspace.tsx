@@ -18542,7 +18542,7 @@ export function HuswellWorkspace({
                       : view === "Policy"
                         ? "Announcements & Policy"
                       : isManagementRole && view === "Leads"
-                          ? "Lead Management"
+                          ? "Generated Leads"
                       : view === "Projects"
                             ? "Production"
                             : view === "Mockups"
