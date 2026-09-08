@@ -116,6 +116,7 @@
 114. Run `132_general_manager_bulk_price_quotation_approval.sql` after `131_internal_pricing_defaults_and_mixed_markups.sql` and before deploying the matching Approval Center update. It adds a General Manager-only, approve-only RPC for bulk direct Price Quotation approval using each quotation's persisted pricing and costing state.
 115. Run `133_pricing_officer_discount_markup.sql` after `132_general_manager_bulk_price_quotation_approval.sql` and before deploying the matching quotation-review update. It lets the assigned Sales & Pricing Officer edit and submit only the Discount adjustment, keeps VAT editable at quotation level, and preserves all other internal pricing adjustments for General Manager review.
 116. Run `134_align_lost_client_status_reason.sql` after `133_pricing_officer_discount_markup.sql` and before deploying the matching Leads update. It keeps the status-3 officer approval error aligned with the Lost client label without changing existing lead records or permissions.
+117. Run `135_vat_percentage_only.sql` after `134_align_lost_client_status_reason.sql` and before deploying the matching pricing update. It makes VAT percentage-only for new and edited data, normalizes legacy VAT defaults, and preserves historical fixed-basis quotations without rewriting them.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 

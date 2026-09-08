@@ -357,14 +357,17 @@ const pricingMarkupDefaults = (
   const storedDefaults = objectValue(stored);
   return pricingMarkupDefinitions.map((definition) => {
     const storedEntry = objectValue(storedDefaults[definition.key]);
+    const storedCalculationType = storedEntry.calculation_type === "fixed_amount" ? "fixed_amount" : "percentage";
     const legacyValue = definition.legacyKeys
       .map((key) => legacySettings?.[key])
       .find((value) => value !== undefined && value !== null && value !== "");
-    const rawValue = storedEntry.value ?? storedEntry.rate ?? legacyValue ?? definition.fallback;
+    const rawValue = definition.key === "vat" && storedCalculationType === "fixed_amount"
+      ? legacySettings?.vat_rate ?? definition.fallback
+      : storedEntry.value ?? storedEntry.rate ?? legacyValue ?? definition.fallback;
     return {
       key: definition.key,
       label: definition.label,
-      calculationType: storedEntry.calculation_type === "fixed_amount" ? "fixed_amount" : "percentage",
+      calculationType: definition.key === "vat" ? "percentage" : storedCalculationType,
       value: text(rawValue, definition.fallback),
     };
   });
@@ -375,7 +378,7 @@ const pricingMarkupDefaultPayload = (defaults: PricingMarkupDefault[]) =>
       definition.key,
       {
         label: definition.label,
-        calculation_type: definition.calculationType,
+        calculation_type: definition.key === "vat" ? "percentage" : definition.calculationType,
         value: n(definition.value),
       },
     ]),
@@ -485,16 +488,20 @@ const productCostingDrafts = (
       : loadedMarkups,
   };
   });
+const quotationVatRate = (quote: Row) => {
+  const storedRate = n(quote.vat_rate);
+  if (text(quote.vat_calculation_type) !== "fixed_amount") return storedRate;
+  const subtotal = n(quote.subtotal);
+  return subtotal > 0
+    ? Math.round((n(quote.vat_amount) / subtotal) * 10000) / 100
+    : storedRate;
+};
 const productCostingTotals = (
   costing: ProductCostingDraft,
   productQuantity: number,
-  vatCalculationType: MarkupCalculationType | number,
   vatValue = 0,
-  vatBaseTotal = 0,
 ) => {
   const rounded = (value: number) => Math.round(value * 100) / 100;
-  const resolvedVatType: MarkupCalculationType = typeof vatCalculationType === "number" ? "percentage" : vatCalculationType;
-  const resolvedVatValue = typeof vatCalculationType === "number" ? vatCalculationType : vatValue;
   const cogs = costing.costLines.reduce(
     (sum, line) => sum + rounded(line.calculationType === "fixed_amount" ? n(line.amount) : n(line.quantity) * n(line.unitCost)),
     0,
@@ -550,9 +557,7 @@ const productCostingTotals = (
     sellingExVat = rounded(listSellingExVat - discountAmount);
     markupTotal = rounded(sellingExVat - cogs);
   }
-  const vat = resolvedVatType === "fixed_amount"
-    ? rounded(vatBaseTotal > 0 ? resolvedVatValue * sellingExVat / vatBaseTotal : resolvedVatValue)
-    : rounded(sellingExVat * resolvedVatValue / 100);
+  const vat = rounded(sellingExVat * vatValue / 100);
   const sellingIncVat = rounded(sellingExVat + vat);
   return {
     cogs,
@@ -2420,13 +2425,8 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
       store.price_quotation_costing_markups,
     )[0])
     .filter((costing): costing is ProductCostingDraft => Boolean(costing));
-  const quotationVatCalculationType: MarkupCalculationType = text(quote.vat_calculation_type) === "fixed_amount" ? "fixed_amount" : "percentage";
-  const quotationVatValue = quotationVatCalculationType === "fixed_amount" ? n(quote.vat_fixed_amount) : n(quote.vat_rate);
-  const internalVatBaseTotal = internalCostingDrafts.reduce((sum, costing) => {
-    const product = lines.find((line) => line.id === costing.quotationItemId);
-    return sum + productCostingTotals(costing, n(product?.quantity), "percentage", 0).sellingExVat;
-  }, 0);
-  const taxLabel = quotationVatCalculationType === "fixed_amount" ? "TAX (FIXED AMOUNT)" : `TAX (${n(quote.vat_rate)}%)`;
+  const quotationVatRateValue = quotationVatRate(quote);
+  const taxLabel = `TAX (${quotationVatRateValue}%)`;
   const pageStyle = priceQuotationPdfStyles.page;
   const clientField = (label: string, value: string) => <PdfView key={label} style={[priceQuotationPdfStyles.clientField, compact ? priceQuotationPdfCompactStyles.clientField : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientField : undefined]}><PdfText style={[priceQuotationPdfStyles.clientLabel, compact ? priceQuotationPdfCompactStyles.clientLabel : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientLabel : undefined]}>{label}</PdfText><PdfText style={[priceQuotationPdfStyles.clientColon, compact ? priceQuotationPdfCompactStyles.clientColon : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientColon : undefined]}>:</PdfText><PdfText style={[priceQuotationPdfStyles.clientValue, compact ? priceQuotationPdfCompactStyles.clientValue : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientValue : undefined]}>{value}</PdfText></PdfView>;
   const headerSection = (
@@ -2501,7 +2501,7 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
         const quantity = n(product?.quantity);
         const costingDraft = internalCostingDrafts.find((item) => item.key === text(costing.id));
         if (!costingDraft) return null;
-        const totals = productCostingTotals(costingDraft, quantity, quotationVatCalculationType, quotationVatValue, internalVatBaseTotal);
+        const totals = productCostingTotals(costingDraft, quantity, quotationVatRateValue);
         return <PdfView key={text(costing.id, String(costingIndex))} wrap>
           <PdfText style={priceQuotationPdfStyles.internalProductTitle}>{`${costingIndex + 1}. ${text(product?.description, "Quotation product")} — ${quantity} ${quantity === 1 ? "pc" : "pcs"}`}</PdfText>
           <PdfView style={priceQuotationPdfStyles.table}>
@@ -2514,7 +2514,7 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
             <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>COST BASE BEFORE PROFIT</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.costBase)}</PriceQuotationPdfCell></PdfView>
             <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>LIST PRICE VAT EX (TOTAL)</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.listSellingExVat)}</PriceQuotationPdfCell></PdfView>
             <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>NET SELLING PRICE VAT EX (TOTAL)</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.sellingExVat)}</PriceQuotationPdfCell></PdfView>
-            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>{quotationVatCalculationType === "fixed_amount" ? "VAT (FIXED AMOUNT)" : `VAT (${n(quote.vat_rate)}%)`}</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.vat)}</PriceQuotationPdfCell></PdfView>
+            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>{`VAT (${quotationVatRateValue}%)`}</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.vat)}</PriceQuotationPdfCell></PdfView>
             <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>SELLING PRICE VAT EX / PIECE</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.unitExVat)}</PriceQuotationPdfCell></PdfView>
             <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={[priceQuotationPdfStyles.totalRow, priceQuotationPdfStyles.totalLabelStrong]}>SELLING PRICE VAT INC / PIECE</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={[priceQuotationPdfStyles.totalRow, priceQuotationPdfStyles.totalValueStrong]}>{currency(totals.unitIncVat)}</PriceQuotationPdfCell></PdfView>
           </PdfView>
@@ -2542,6 +2542,7 @@ function PriceQuotationPdfLegacy({ quote, store, origin }: { quote: Row; store: 
   const clientEmail = text(customer?.email ?? lead?.email, "—");
   const subtotal = n(quote.subtotal);
   const tax = n(quote.vat_amount);
+  const vatRate = quotationVatRate(quote);
   const shipping = n(quote.shipping_handling);
   return <PdfDocument title={`Price Quotation ${text(quote.quotation_no)}`}>
     <PdfPage size={LEGAL_PORTRAIT} orientation="portrait" style={generatedPdfStyles.page}>
@@ -2561,7 +2562,7 @@ function PriceQuotationPdfLegacy({ quote, store, origin }: { quote: Row; store: 
         <PdfView style={generatedPdfStyles.row}><PdfCell width="11%" header>ITEM</PdfCell><PdfCell width="37%" header>DESCRIPTION</PdfCell><PdfCell width="16%" header>QUANTITY</PdfCell><PdfCell width="21%" header>SELLING PRICE / UNIT</PdfCell><PdfCell width="15%" header>AMOUNT</PdfCell></PdfView>
         {lines.map((line, index) => { const quantity = n(line.quantity); return <PdfView key={text(line.id, String(index))} style={generatedPdfStyles.row} wrap={false}><PdfCell width="11%">{index + 1}</PdfCell><PdfCell width="37%" description>{text(line.description)}</PdfCell><PdfCell width="16%">{`${quantity} ${quantity === 1 ? "pc" : "pcs"}`}</PdfCell><PdfCell width="21%">{currency(n(line.unit_cost))}</PdfCell><PdfCell width="15%">{currency(n(line.line_total))}</PdfCell></PdfView>; })}
         <PdfView style={generatedPdfStyles.row}><PdfCell width="85%" total>SUBTOTAL</PdfCell><PdfCell width="15%" total>{currency(subtotal)}</PdfCell></PdfView>
-        <PdfView style={generatedPdfStyles.row}><PdfCell width="85%" total>{`TAX (${n(quote.vat_rate)}%)`}</PdfCell><PdfCell width="15%" total>{currency(tax)}</PdfCell></PdfView>
+        <PdfView style={generatedPdfStyles.row}><PdfCell width="85%" total>{`TAX (${vatRate}%)`}</PdfCell><PdfCell width="15%" total>{currency(tax)}</PdfCell></PdfView>
         {shipping > 0 && <PdfView style={generatedPdfStyles.row}><PdfCell width="85%" total>SHIPPING / HANDLING</PdfCell><PdfCell width="15%" total>{currency(shipping)}</PdfCell></PdfView>}
         <PdfView style={generatedPdfStyles.row}><PdfCell width="85%" total>TOTAL</PdfCell><PdfCell width="15%" total>{currency(n(quote.total_amount))}</PdfCell></PdfView>
       </PdfView>
@@ -9721,6 +9722,7 @@ function CostingDocument({
   const buffer = (cogs * n(quote.buffer_margin_rate)) / 100;
   const commission = (cogs * n(quote.commission_rate)) / 100;
   const sellingExVat = n(quote.subtotal);
+  const vatRate = quotationVatRate(quote);
   const projectTypeOptions = [
     "Premium Rigid Box",
     "Regular Rigid Box",
@@ -9739,7 +9741,7 @@ function CostingDocument({
           <section className="mt-5 grid grid-cols-[minmax(0,1fr)_auto] gap-10"><div className="min-w-0"><h2 className="font-medium text-[#a22d35]">CLIENT INFORMATION</h2><dl className="mt-2 grid grid-cols-[150px_minmax(180px,1fr)] gap-y-1"><dt>Company Name:</dt><dd className="min-w-0 border border-[#d5dbe5] px-2 py-1">{companyName}</dd><dt>Client Name:</dt><dd className="min-w-0 border border-[#d5dbe5] px-2 py-1">{clientName}</dd><dt>Phone / Email:</dt><dd className="min-w-0 border border-[#d5dbe5] px-2 py-1">{text(quote.client_phone)}</dd></dl></div><div className="pt-7"><span>Date: </span><span className="inline-block min-w-36 border border-[#d5dbe5] px-2 py-1 text-center">{day(quote.issue_date)}</span></div></section>
           <section className="mt-5 grid grid-cols-2 gap-7 border-y border-[#111] py-3"><div><b>DETAILS</b><dl className="mt-2 grid grid-cols-[145px_1fr] gap-y-1"><dt>Size: L x W x H (in./cm.):</dt><dd className="border-b border-[#777] px-1">{text(quote.size_details)}</dd><dt>Quantity:</dt><dd className="border-b border-[#777] px-1">{text(quote.project_quantity)}</dd><dt>Delivery Date:</dt><dd className="border-b border-[#777] px-1">{day(quote.delivery_date)}</dd></dl></div><div><b>PROJECT TYPE</b><div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1.5">{projectTypeOptions.map((type) => <div key={type} className="flex items-center gap-2"><span className="inline-grid size-4 place-items-center border border-[#111] text-[11px]">{text(quote.project_types, "") === type ? "✓" : ""}</span><span>{type}</span></div>)}</div></div></section>
           <table className="pdf-fixed-table mt-6 w-full border-collapse text-sm"><thead className="font-bold"><tr className="bg-[#c43b43] text-white"><th className="w-[52%] border border-[#c43b43] p-2 text-left">Materials and Production</th><th className="w-[14%] border border-[#c43b43] p-2">Quantity</th><th className="w-[17%] border border-[#c43b43] p-2">Unit Cost</th><th className="w-[17%] border border-[#c43b43] p-2">Subtotal</th></tr></thead><tbody>{lines.map((line) => <tr key={text(line.id)}><td className="border border-[#d5dbe5] p-2">{text(line.description)}</td><td className="border border-[#d5dbe5] p-2 text-center">{n(line.quantity)}</td><td className="border border-[#d5dbe5] p-2 text-right">{peso.format(n(line.unit_cost))}</td><td className="border border-[#d5dbe5] p-2 text-right">{peso.format(n(line.line_total))}</td></tr>)}<tr className="font-medium"><td colSpan={3} className="border border-[#d5dbe5] bg-[#fff7f7] p-2">TOTAL ESTIMATED COGS</td><td className="border border-[#d5dbe5] bg-[#fff7f7] p-2 text-right">{peso.format(cogs)}</td></tr></tbody></table>
-          <section className="mt-7 max-w-sm border border-[#d5dbe5]"><h2 className="border-b border-[#d5dbe5] bg-[#fff7f7] px-3 py-2 font-medium text-[#a22d35]">MARKUP, VAT, EXPENSES</h2><Cost label={`Declared Markup (${n(quote.profit_margin_rate)}%)`} value={profit} /><Cost label={`Overhead Allocation (${n(quote.overhead_rate)}%)`} value={overhead} /><Cost label={`Buffer Margin (${n(quote.buffer_margin_rate)}%)`} value={buffer} /><Cost label={`Production Commission (${n(quote.commission_rate)}%)`} value={commission} /><Cost label={`VAT (${n(quote.vat_rate)}%)`} value={n(quote.vat_amount)} /><Cost label="SELLING PRICE VAT INC." value={n(quote.total_amount)} strong /><Cost label="SELLING PRICE VAT EX." value={sellingExVat} strong /></section>
+          <section className="mt-7 max-w-sm border border-[#d5dbe5]"><h2 className="border-b border-[#d5dbe5] bg-[#fff7f7] px-3 py-2 font-medium text-[#a22d35]">MARKUP, VAT, EXPENSES</h2><Cost label={`Declared Markup (${n(quote.profit_margin_rate)}%)`} value={profit} /><Cost label={`Overhead Allocation (${n(quote.overhead_rate)}%)`} value={overhead} /><Cost label={`Buffer Margin (${n(quote.buffer_margin_rate)}%)`} value={buffer} /><Cost label={`Production Commission (${n(quote.commission_rate)}%)`} value={commission} /><Cost label={`VAT (${vatRate}%)`} value={n(quote.vat_amount)} /><Cost label="SELLING PRICE VAT INC." value={n(quote.total_amount)} strong /><Cost label="SELLING PRICE VAT EX." value={sellingExVat} strong /></section>
           <section className="mt-12 flex items-end justify-between"><div className="w-56 text-center"><div className="h-14" /><div className="mx-auto w-52 border-b border-[#111] pb-1 font-semibold">{text(quote.representative)}</div><div>Sales Executive</div></div><div className="w-56 text-center"><div className="h-14">{approved && <img src="/marvin-tavarez-signature.png" alt="Signature of Mr. Marvin S. Tavarez" className="mx-auto h-14 max-w-full object-contain" />}</div><div className="mx-auto w-52 border-b border-[#111] pb-1 font-semibold">{approved ? "Mr. Marvin S. Tavarez" : "Pending approval"}</div><div>{approved ? `Approved and Signed By · ${day(quote.approved_at)}` : "Approved and Signed By"}</div></div></section>
         </article>
     </div>
@@ -12421,7 +12423,7 @@ function PricingMarkupEditor({
   visibleMarkupKeys: ReadonlyArray<PricingMarkupKey>;
   update: (next: ProductCostingDraft) => void;
 }) {
-  const totals = productCostingTotals(costing, 1, "percentage", 0);
+  const totals = productCostingTotals(costing, 1, 0);
   const visibleMarkups = costing.markups.filter((markup) => {
     const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
     return Boolean(key) && visibleMarkupKeys.includes(key as PricingMarkupKey);
@@ -12531,8 +12533,6 @@ type PriceQuotationReviewContentProps = {
   subtotal: number;
   vatRate: string;
   setVatRate: (value: string) => void;
-  vatCalculationType: MarkupCalculationType;
-  setVatCalculationType: (value: MarkupCalculationType) => void;
   tax: number;
   total: number;
   terms: string[];
@@ -12550,13 +12550,49 @@ type PriceQuotationReviewContentProps = {
   sourceQuotationNo?: string;
 };
 
+function QuotationReviewSummary({
+  lines,
+  prices,
+  priceBasis,
+  subtotal,
+  vatRate,
+  tax,
+  total,
+  productCostings,
+}: Pick<PriceQuotationReviewContentProps, "lines" | "prices" | "priceBasis" | "subtotal" | "vatRate" | "tax" | "total" | "productCostings">) {
+  const vatMultiplier = subtotal > 0 ? 1 + tax / subtotal : 1;
+  const priceLabel = "Selling Price / Unit";
+  return <section>
+    <Table labels={["Item", "Description", "Quantity", priceLabel, "Amount"]} minWidth={0} className="price-quotation-review-items table-fixed" columnWidths={["7%", "43%", "11%", "22%", "17%"]}>
+      {lines.map((line, index) => {
+        const storedPrice = prices[text(line.id)] ?? "";
+        const price = n(storedPrice);
+        const displayedPrice = priceBasis === "inc" ? price * vatMultiplier : price;
+        const productCosting = productCostings.find((costing) => costing.quotationItemId === line.id);
+        return <tr key={text(line.id)}>
+          <td className="px-4 py-3 text-center">{index + 1}</td>
+          <td className="whitespace-pre-wrap break-words px-4 py-3 font-medium">{text(line.description)}</td>
+          <td className="px-4 py-3 text-center">{n(line.quantity)}</td>
+          <td className="px-4 py-2">{productCosting ? <span aria-label={`${priceLabel} for ${text(line.description)}`} className="flex min-h-9 items-center justify-center font-medium text-[#202938]">{peso.format(displayedPrice)}</span> : <span aria-label={`${priceLabel} for ${text(line.description)}`} className="flex min-h-9 items-center justify-center text-[#8b92a1]">—</span>}</td>
+          <td className="px-4 py-3 text-right font-semibold">{productCosting ? wholePeso.format(n(line.quantity) * displayedPrice) : <span className="text-[#8b92a1]">—</span>}</td>
+        </tr>;
+      })}
+    </Table>
+    <div className="mt-3">
+      <Table labels={["Quotation Total", "Amount"]} minWidth={0}>
+        <tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr>
+        <tr><td className="px-4 py-2">{`VAT (${n(vatRate)}%)`}</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr>
+        <tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr>
+      </Table>
+    </div>
+  </section>;
+}
+
 function ProductCostingsSectionWithPricing({
   projectName,
   lines,
   priceBasis,
   setPriceBasis,
-  vatCalculationType,
-  setVatCalculationType,
   vatValue,
   setVatValue,
   costings,
@@ -12569,8 +12605,6 @@ function ProductCostingsSectionWithPricing({
   lines: Row[];
   priceBasis: "ex" | "inc";
   setPriceBasis: (basis: "ex" | "inc") => void;
-  vatCalculationType: MarkupCalculationType;
-  setVatCalculationType: (value: MarkupCalculationType) => void;
   vatValue: string;
   setVatValue: (value: string) => void;
   costings: ProductCostingDraft[];
@@ -12584,13 +12618,9 @@ function ProductCostingsSectionWithPricing({
   const updateCosting = (key: string, update: (costing: ProductCostingDraft) => ProductCostingDraft) =>
     setCostings((current) => current.map((costing) => costing.key === key ? update(costing) : costing));
   const canAddCosting = costings.length < lines.length;
-  const vatBaseTotal = costings.reduce((sum, costing) => {
-    const product = lines.find((line) => line.id === costing.quotationItemId);
-    return sum + productCostingTotals(costing, n(product?.quantity), "percentage", 0).sellingExVat;
-  }, 0);
   const vatTotal = costings.reduce((sum, costing) => {
     const product = lines.find((line) => line.id === costing.quotationItemId);
-    return sum + productCostingTotals(costing, n(product?.quantity), vatCalculationType, n(vatValue), vatBaseTotal).vat;
+    return sum + productCostingTotals(costing, n(product?.quantity), n(vatValue)).vat;
   }, 0);
 
   return (
@@ -12607,14 +12637,13 @@ function ProductCostingsSectionWithPricing({
           <p className="mt-1 text-[12px] text-[#687386]">General Manager / Sales &amp; Pricing Officer only. Add one costing table for each finished product; internal pricing adjustments calculate the quotation price automatically.</p>
         </div>
         <Button
-          secondary
           disabled={!canAddCosting}
           onClick={() => {
             const nextLine = lines.find((line) => !costings.some((costing) => costing.quotationItemId === line.id));
             if (nextLine?.id) setCostings((current) => [...current, newProductCostingDraft(text(nextLine.id), defaults)]);
           }}
         >
-          <Plus size={14} /> Add costing table
+          <Plus size={14} /> Add Costing Breakdown
         </Button>
       </div>
 
@@ -12624,7 +12653,7 @@ function ProductCostingsSectionWithPricing({
         <div className="mt-4 space-y-4">
           {costings.map((costing, costingIndex) => {
             const product = lines.find((line) => line.id === costing.quotationItemId);
-            const totals = productCostingTotals(costing, n(product?.quantity), vatCalculationType, n(vatValue), vatBaseTotal);
+            const totals = productCostingTotals(costing, n(product?.quantity), n(vatValue));
             return (
               <article key={costing.key} className="rounded-lg border border-[#d9e0e9] bg-white p-3">
                 <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[#edf0f5] pb-3">
@@ -12704,8 +12733,7 @@ function ProductCostingsSectionWithPricing({
       <div className="mt-4 rounded-lg border border-[#d9e0e9] bg-white p-3">
         <div className="flex flex-wrap items-end gap-3">
           <div className="min-w-48 flex-1"><h4 className="text-[12px] font-semibold text-[#344054]">Quotation VAT</h4><p className="mt-0.5 text-[11px] text-[#687386]">VAT is applied after the final VAT-exclusive selling price.</p></div>
-          <label className="text-[11px] font-medium text-[#344054]">Basis<SegmentedToggle ariaLabel="VAT calculation basis" value={vatCalculationType} options={calculationBasisIconOptions} size="compact" className="mt-1 min-w-36" onChange={(value) => setVatCalculationType(value as MarkupCalculationType)} /></label>
-          <label className="text-[11px] font-medium text-[#344054]">Value<div className="mt-1 flex items-center gap-1"><input aria-label="VAT value" type="number" min="0" step="any" value={vatValue} onChange={(event) => setVatValue(event.target.value)} className="input mt-0 w-28 px-2 py-1.5 text-right" /><span className="text-[#687386]">{vatCalculationType === "fixed_amount" ? "₱" : "%"}</span></div></label>
+          <label className="text-[11px] font-medium text-[#344054]">VAT<div className="mt-1 flex items-center gap-1"><input aria-label="VAT percentage" type="number" min="0" max="100" step="any" value={vatValue} onChange={(event) => setVatValue(event.target.value)} className="input mt-0 w-20 px-2 py-1.5 text-right" /><span className="text-[#687386]">%</span></div></label>
           <output aria-label="VAT total" className="min-w-28 text-right text-[12px] font-semibold text-[#344054]">{peso.format(vatTotal)}</output>
         </div>
       </div>
@@ -12717,12 +12745,11 @@ function PriceQuotationReviewContent({
   lines, projectName, projectType, illustrations, productCostings, pricingDefaults, setProductCostings, prices, setPrices, subtotal, vatRate, setVatRate, tax,
   total, terms, setTerms, bankDetails, setBankDetails, priceBasis, setPriceBasis,
   revisionNote, setRevisionNote, close, saving, working, review, finalApproval,
-  vatCalculationType, setVatCalculationType, documentLabel = "Price Quotation", sourceQuotationNo,
+  documentLabel = "Price Quotation", sourceQuotationNo,
 }: PriceQuotationReviewContentProps) {
-  const vatMultiplier = subtotal > 0 ? 1 + tax / subtotal : 1;
-  const priceLabel = "Selling Price / Unit";
   return (
     <div className="mt-5 space-y-5">
+      <QuotationReviewSummary lines={lines} prices={prices} priceBasis={priceBasis} subtotal={subtotal} vatRate={vatRate} tax={tax} total={total} productCostings={productCostings} />
       <section className="rounded-xl border border-[#e1e6ee] p-4">
         <h3 className="text-[14px] font-semibold">{documentLabel} details</h3>
         <dl className="mt-3 grid gap-1 text-[13px] sm:grid-cols-[120px_1fr]">
@@ -12732,36 +12759,7 @@ function PriceQuotationReviewContent({
         </dl>
         {illustrations.length > 0 && <div className="mt-4"><p className="text-[12px] font-medium text-[#687386]">Illustrations</p><div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">{illustrations.map((illustration) => <a key={illustration.id} href={illustration.imageUrl} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><img src={illustration.imageUrl} alt={illustration.description || "Quotation illustration"} className="aspect-square w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{illustration.description}</p></a>)}</div></div>}
       </section>
-      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} priceBasis={priceBasis} setPriceBasis={setPriceBasis} vatCalculationType={vatCalculationType} setVatCalculationType={setVatCalculationType} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups visibleMarkupKeys={finalApproval ? internalPricingMarkupKeys : ["discounts"]} />
-      <section>
-        <Table
-          labels={["Item", "Description", "Quantity", priceLabel, "Amount"]}
-          minWidth={0}
-          className="price-quotation-review-items table-fixed"
-          columnWidths={["7%", "43%", "11%", "22%", "17%"]}
-        >
-          {lines.map((line, index) => {
-            const storedPrice = prices[text(line.id)] ?? "";
-            const price = n(storedPrice);
-            const displayedPrice = priceBasis === "inc" ? price * vatMultiplier : price;
-            const productCosting = productCostings.find((costing) => costing.quotationItemId === line.id);
-            return <tr key={text(line.id)}>
-              <td className="px-4 py-3 text-center">{index + 1}</td>
-              <td className="whitespace-pre-wrap break-words px-4 py-3 font-medium">{text(line.description)}</td>
-              <td className="px-4 py-3 text-center">{n(line.quantity)}</td>
-              <td className="px-4 py-2">{productCosting ? <span aria-label={`${priceLabel} for ${text(line.description)}`} className="flex min-h-9 items-center justify-center font-medium text-[#202938]">{peso.format(displayedPrice)}</span> : <span aria-label={`${priceLabel} for ${text(line.description)}`} className="flex min-h-9 items-center justify-center text-[#8b92a1]">—</span>}</td>
-              <td className="px-4 py-3 text-right font-semibold">{productCosting ? wholePeso.format(n(line.quantity) * displayedPrice) : <span className="text-[#8b92a1]">—</span>}</td>
-            </tr>;
-          })}
-        </Table>
-        <div className="mt-3">
-        <Table labels={["Quotation Total", "Amount"]} minWidth={0}>
-          <tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr>
-          <tr><td className="px-4 py-2">{vatCalculationType === "fixed_amount" ? "VAT (fixed amount)" : `VAT (${n(vatRate)}%)`}</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr>
-          <tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr>
-        </Table>
-        </div>
-      </section>
+      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} priceBasis={priceBasis} setPriceBasis={setPriceBasis} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups visibleMarkupKeys={finalApproval ? internalPricingMarkupKeys : ["discounts"]} />
       <section className="rounded-xl border border-[#e1e6ee] p-4">
         <h3 className="text-[14px] font-semibold">Terms and Conditions</h3>
         <div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
@@ -12810,7 +12808,6 @@ function PriceQuotationReview({
   );
   const defaultPricingDefaults = pricingMarkupDefaults(pricingDefaultSettings?.pricing_markup_defaults, pricingDefaultSettings);
   const defaultVat = defaultPricingDefaults.find((definition) => definition.key === "vat") ?? { calculationType: "percentage" as const, value: "12" };
-  const quotationVatCalculationType: MarkupCalculationType = text(quotation.vat_calculation_type) === "fixed_amount" ? "fixed_amount" : "percentage";
   // New-format quotations start with zero totals and have no pricing review
   // snapshot yet. Apply the current organization VAT default only in that
   // state; a reviewed quotation keeps its saved VAT even when defaults change.
@@ -12818,11 +12815,7 @@ function PriceQuotationReview({
     && !quotation.pricing_reviewed_at
     && n(quotation.vat_rate) <= 0
     && n(quotation.vat_fixed_amount) <= 0;
-  const initialVatCalculationType = () => useCurrentVatDefault ? defaultVat.calculationType : quotationVatCalculationType;
-  const initialVatRate = () => {
-    if (useCurrentVatDefault) return defaultVat.value;
-    return quotationVatCalculationType === "fixed_amount" ? text(quotation.vat_fixed_amount, "0") : text(quotation.vat_rate, "12");
-  };
+  const initialVatRate = () => useCurrentVatDefault ? defaultVat.value : text(quotationVatRate(quotation), "12");
   const [prices, setPrices] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       store.quotation_items
@@ -12831,7 +12824,6 @@ function PriceQuotationReview({
     ),
   );
   const [priceBasis, setPriceBasis] = useState<"ex" | "inc">("ex");
-  const [vatCalculationType, setVatCalculationType] = useState<MarkupCalculationType>(initialVatCalculationType);
   const [vatRate, setVatRate] = useState(initialVatRate);
   const [terms, setTerms] = useState(
     text(quotation.terms_conditions, DEFAULT_QUOTATION_TERMS)
@@ -12865,7 +12857,6 @@ function PriceQuotationReview({
           const loadedDefaults = pricingMarkupDefaults(data?.pricing_markup_defaults, data as Row);
           const loadedVat = loadedDefaults.find((definition) => definition.key === "vat");
           if (loadedVat) {
-            setVatCalculationType((current) => current === defaultVat.calculationType ? loadedVat.calculationType : current);
             setVatRate((current) => current === defaultVat.value ? loadedVat.value : current);
           }
         }
@@ -12873,7 +12864,7 @@ function PriceQuotationReview({
     return () => {
       active = false;
     };
-  }, [defaultVat.calculationType, defaultVat.value, finalApproval, hasSavedBankDetails, quotation.organization_id, quotation.pricing_reviewed_at, quotation.vat_fixed_amount, quotation.vat_rate, useCurrentVatDefault]);
+  }, [defaultVat.value, finalApproval, hasSavedBankDetails, quotation.organization_id, quotation.pricing_reviewed_at, quotation.vat_fixed_amount, quotation.vat_rate, useCurrentVatDefault]);
   const [revisionNote, setRevisionNote] = useState("");
   const [working, setWorking] = useState(false);
   const [productCostings, setProductCostings] = useState<ProductCostingDraft[]>(() =>
@@ -12956,7 +12947,6 @@ function PriceQuotationReview({
         const unitExVat = productCostingTotals(
           costing,
           n(product.quantity),
-          vatCalculationType,
           n(vatRate),
         ).unitExVat.toFixed(2);
         if (next[text(product.id)] !== unitExVat) {
@@ -12966,7 +12956,7 @@ function PriceQuotationReview({
       });
       return changed ? next : current;
     });
-  }, [lines, productCostings, vatCalculationType, vatRate]);
+  }, [lines, productCostings, vatRate]);
   const illustrations = [
     ...galleryIllustrations
       .sort((left, right) => n(left.sort_order) - n(right.sort_order))
@@ -12981,9 +12971,7 @@ function PriceQuotationReview({
     }),
   ];
   const subtotal = lines.reduce((sum, line) => sum + n(line.quantity) * n(prices[text(line.id)]), 0);
-  const tax = vatCalculationType === "fixed_amount"
-    ? Math.round(n(vatRate) * 100) / 100
-    : Math.round(subtotal * n(vatRate)) / 100;
+  const tax = Math.round(subtotal * n(vatRate)) / 100;
   const total = Math.round((subtotal + tax) * 100) / 100;
   const review = async (decision: "approved" | "needs_revision") => {
     if (!finalApproval && isMockupQuotation && productCostings.length !== lines.length) {
@@ -13019,8 +13007,8 @@ function PriceQuotationReview({
           {
             p_quotation_id: quotation.id,
             p_vat_rate: n(vatRate),
-            p_vat_calculation_type: vatCalculationType,
-            p_vat_fixed_amount: vatCalculationType === "fixed_amount" ? n(vatRate) : 0,
+            p_vat_calculation_type: "percentage",
+            p_vat_fixed_amount: 0,
             p_terms_conditions: terms.filter((term) => term.trim()).join("\n"),
             p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
             p_costings: costingsPayload,
@@ -13031,8 +13019,8 @@ function PriceQuotationReview({
           p_quotation_id: quotation.id,
           p_decision: decision,
           p_vat_rate: n(vatRate),
-          p_vat_calculation_type: vatCalculationType,
-          p_vat_fixed_amount: vatCalculationType === "fixed_amount" ? n(vatRate) : 0,
+          p_vat_calculation_type: "percentage",
+          p_vat_fixed_amount: 0,
           p_terms_conditions: terms.filter((term) => term.trim()).join("\n"),
           p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
           p_costings: costingsPayload,
@@ -13043,8 +13031,8 @@ function PriceQuotationReview({
           p_quotation_id: quotation.id,
           p_decision: decision,
           p_vat_rate: n(vatRate),
-          p_vat_calculation_type: vatCalculationType,
-          p_vat_fixed_amount: vatCalculationType === "fixed_amount" ? n(vatRate) : 0,
+          p_vat_calculation_type: "percentage",
+          p_vat_fixed_amount: 0,
           p_terms_conditions: terms.filter((term) => term.trim()).join("\n"),
           p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
           p_costings: costingsPayload,
@@ -13070,7 +13058,7 @@ function PriceQuotationReview({
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} shipping={shipping} setShipping={setShipping} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} · {text(quotation.client_name)} · Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><div className="mt-5 grid gap-5 lg:grid-cols-[1.45fr_.75fr]"><div><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><section className="mt-5 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="mt-4 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="mt-4 block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label></div><aside><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><div className="border-b border-[#edf0f5] px-4 py-3"><h3 className="text-[14px] font-semibold">Quotation Total</h3></div><Table labels={["Category", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section></aside></div><div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary loading={saving || working} disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></section></div>;
   */
-  return <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review {documentLabel}</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - {finalApproval ? "Finalize approval." : `Complete pricing and submit ${documentLabel} to the General Manager.`}</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectName={text(quotation.project_name, "")} projectType={text(quotation.project_types, "")} sourceQuotationNo={text(sourceQuotation?.quotation_no, "") || undefined} documentLabel={documentLabel} illustrations={illustrations} productCostings={productCostings} pricingDefaults={pricingDefaultSettings ?? {}} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} priceBasis={priceBasis} setPriceBasis={setPriceBasis} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} vatCalculationType={vatCalculationType} setVatCalculationType={setVatCalculationType} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} finalApproval={finalApproval} /></section></div>;
+  return <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review {documentLabel}</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - {finalApproval ? "Finalize approval." : `Complete pricing and submit ${documentLabel} to the General Manager.`}</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectName={text(quotation.project_name, "")} projectType={text(quotation.project_types, "")} sourceQuotationNo={text(sourceQuotation?.quotation_no, "") || undefined} documentLabel={documentLabel} illustrations={illustrations} productCostings={productCostings} pricingDefaults={pricingDefaultSettings ?? {}} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} priceBasis={priceBasis} setPriceBasis={setPriceBasis} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} finalApproval={finalApproval} /></section></div>;
 }
 
 function GeneralManagerCostingReview({
@@ -13097,7 +13085,7 @@ function GeneralManagerCostingReview({
     overhead_rate: text(quotation.overhead_rate, "0"),
     buffer_margin_rate: text(quotation.buffer_margin_rate, "20"),
     commission_rate: text(quotation.commission_rate, "5"),
-    vat_rate: text(quotation.vat_rate, "12"),
+    vat_rate: text(quotationVatRate(quotation), "12"),
   });
   const [terms, setTerms] = useState(
     text(quotation.terms_conditions, DEFAULT_QUOTATION_TERMS)
@@ -13422,7 +13410,7 @@ function SubmissionReview({
             }
           />
           <Cost
-            label={`VAT (${n(quotation.vat_rate)}%)`}
+            label={`VAT (${quotationVatRate(quotation)}%)`}
             value={n(quotation.vat_amount)}
           />
           <Cost
@@ -13746,7 +13734,7 @@ function Submissions({
       p_commission_rate: n(
         reviewChanges.commission_rate ?? quotation.commission_rate,
       ),
-      p_vat_rate: n(reviewChanges.vat_rate ?? quotation.vat_rate),
+      p_vat_rate: n(reviewChanges.vat_rate ?? quotationVatRate(quotation)),
       p_terms_conditions:
         typeof reviewChanges.terms_conditions === "string"
           ? reviewChanges.terms_conditions
@@ -17621,7 +17609,7 @@ function SettingsView({
     const defaults = pricingMarkupDefinitions.map((definition) => ({
       key: definition.key,
       label: definition.label,
-      calculationType: pricingDefaults[`${definition.key}_type`] === "fixed_amount" ? "fixed_amount" as const : "percentage" as const,
+      calculationType: definition.key === "vat" || pricingDefaults[`${definition.key}_type`] !== "fixed_amount" ? "percentage" as const : "fixed_amount" as const,
       value: pricingDefaults[`${definition.key}_value`] ?? definition.fallback,
     }));
     const invalid = defaults.find((definition) => String(definition.value ?? "").trim() === "" || !Number.isFinite(Number(definition.value)) || n(definition.value) < 0 || (definition.calculationType === "percentage" && n(definition.value) > 100) || (definition.key === "target_profit_margin" && definition.calculationType === "percentage" && n(definition.value) >= 100) || (definition.key === "discounts" && definition.calculationType === "percentage" && n(definition.value) >= 100));
@@ -17640,12 +17628,12 @@ function SettingsView({
   return (
     <div className="space-y-5">
       <AccountProfileDialog open embedded fullWidth role={role} />
-      <Panel title="Pricing defaults - Internal" detail="Applied to new internal product costings. Existing quotations keep their saved pricing. Sales &amp; Pricing Officers can adjust VAT per quotation." action={memberRole(role) ? <Button secondary onClick={() => { const defaults = pricingMarkupDefaults(setting?.pricing_markup_defaults, setting); setPricingDefaults(Object.fromEntries(defaults.flatMap((definition) => [[`${definition.key}_value`, definition.value], [`${definition.key}_type`, definition.calculationType]]))); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button> : undefined}>
+      <Panel title="Pricing defaults - Internal" detail="Applied to new internal product costings. Existing quotations keep their saved pricing. Sales &amp; Pricing Officers can adjust the VAT percentage per quotation." action={memberRole(role) ? <Button secondary onClick={() => { const defaults = pricingMarkupDefaults(setting?.pricing_markup_defaults, setting); setPricingDefaults(Object.fromEntries(defaults.flatMap((definition) => [[`${definition.key}_value`, definition.value], ...(definition.key === "vat" ? [] : [[`${definition.key}_type`, definition.calculationType]])]))); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button> : undefined}>
         <Table labels={["Pricing default", "Basis", "Default"]}>
           {pricingMarkupDefaults(setting?.pricing_markup_defaults, setting).map((definition) => <tr key={definition.key}><td className="px-4 py-3 font-medium">{definition.label}</td><td className="px-4 py-3 text-center text-[#687386]"><CalculationBasisIcon value={definition.calculationType} /></td><td className="px-4 py-3 text-right">{definition.calculationType === "fixed_amount" ? peso.format(n(definition.value)) : `${n(definition.value)}%`}</td></tr>)}
         </Table>
       </Panel>
-      {pricingDefaultsOpen && <Dialog title="Pricing defaults - Internal" fields={pricingMarkupDefinitions.flatMap((definition) => [{ key: `${definition.key}_value`, label: `${definition.label} value`, type: "number" as const, required: true }, { key: `${definition.key}_type`, label: `${definition.label} basis`, type: "toggle" as const, options: calculationBasisOptions.map((option) => `${option.value}|${option.label}`), shortLabels: calculationBasisShortLabels }])} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => { if (!savingPricingDefaults) setPricingDefaultsOpen(false); }} saving={savingPricingDefaults} saveLabel="Save pricing defaults" className="max-w-lg" compact />}
+      {pricingDefaultsOpen && <Dialog title="Pricing defaults - Internal" fields={pricingMarkupDefinitions.flatMap((definition) => [{ key: `${definition.key}_value`, label: `${definition.label} ${definition.key === "vat" ? "percentage" : "value"}`, type: "number" as const, required: true }, ...(definition.key === "vat" ? [] : [{ key: `${definition.key}_type`, label: `${definition.label} basis`, type: "toggle" as const, options: calculationBasisOptions.map((option) => `${option.value}|${option.label}`), shortLabels: calculationBasisShortLabels }])])} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => { if (!savingPricingDefaults) setPricingDefaultsOpen(false); }} saving={savingPricingDefaults} saveLabel="Save pricing defaults" className="max-w-lg" compact />}
       <Panel
         title="Default bank details"
         detail="Shown on new Price Quotations."
