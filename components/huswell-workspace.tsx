@@ -13036,10 +13036,15 @@ function PriceQuotationReview({
     (setting) => text(setting.organization_id) === text(quotation.organization_id),
   );
   const savedBankDetails = quotationBankDetailsSnapshot(quotation.bank_details);
-  const hasSavedBankDetails = savedBankDetails !== null;
+  // The Pricing Officer may still use the live GM default until submitting to GM.
+  const useLatestBankDefault = !finalApproval && (
+    text(quotation.status, "") === "pending" || pricingRevision
+  );
   const bankDetailsTouched = useRef(false);
   const [bankDetails, setBankDetails] = useState<BankDetail[]>(() =>
-    savedBankDetails ?? quotationBankDetails(businessSettings?.default_bank_details),
+    useLatestBankDefault
+      ? quotationBankDetails(businessSettings?.default_bank_details)
+      : savedBankDetails ?? quotationBankDetails(businessSettings?.default_bank_details),
   );
   const updateBankDetails = (
     next: BankDetail[] | ((current: BankDetail[]) => BankDetail[]),
@@ -13059,14 +13064,14 @@ function PriceQuotationReview({
       .then(({ data, error }) => {
         if (!active || error) return;
         setFetchedPricingDefaultSettings((data ?? {}) as Row);
-        if (!hasSavedBankDetails && !bankDetailsTouched.current && data?.default_bank_details !== undefined) {
+        if (useLatestBankDefault && !bankDetailsTouched.current && data?.default_bank_details !== undefined) {
           setBankDetails(quotationBankDetails(data.default_bank_details));
         }
       });
     return () => {
       active = false;
     };
-  }, [hasSavedBankDetails, quotation.organization_id]);
+  }, [quotation.organization_id, useLatestBankDefault]);
   const [revisionNote, setRevisionNote] = useState("");
   const [working, setWorking] = useState(false);
   const [productCostings, setProductCostings] = useState<ProductCostingDraft[]>(() => {
