@@ -83,6 +83,11 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { AccountProfileDialog } from "@/components/account-profile-dialog";
 import { FixedIconTooltip } from "@/components/fixed-icon-tooltip";
+import {
+  quotationProjectTypeColors,
+  quotationProjectTypes,
+} from "@/lib/quotation-project-types";
+import { workspaceAccountLabel } from "@/lib/role-labels";
 
 PdfFont.register({
   family: "SF Pro Display",
@@ -1014,24 +1019,6 @@ const DEFAULT_QUOTATION_TERMS = [
   "Artwork Revisions: Any revisions or changes requested after the artwork has been approved may result in an adjustment of the production lead time. The revised delivery schedule will be based on the scope and timing of the requested changes.",
   "Two revisions only.",
 ].join("\n");
-
-const PRICE_QUOTATION_PROJECT_TYPES = [
-  "Premium Rigid Box",
-  "Regular Rigid Box",
-  "Corrugated",
-  "Offset",
-  "Digital",
-  "Mock Up",
-] as const;
-
-const projectTypeCalendarColors: Record<string, string> = {
-  "Premium Rigid Box": "#4CAF50",
-  "Regular Rigid Box": "#FFD54F",
-  Corrugated: "#F48FB1",
-  Offset: "#FB8C00",
-  Digital: "#03A9F4",
-  "Mock Up": "#7E57C2",
-};
 
 type BankDetail = {
   bank_name: string;
@@ -7179,7 +7166,7 @@ function ProjectCalendar({
       text(schedule.product_name, "Unspecified"),
     );
   const calendarColorForProjectType = (projectType: string) =>
-    projectTypeCalendarColors[projectType] ?? "#64748b";
+    quotationProjectTypeColors[projectType] ?? "#64748b";
   const isDueDateReserved = (
     dueDate: string,
     projectType: string,
@@ -7595,7 +7582,7 @@ function ProjectCalendar({
           </p>
         </div>
         <div className="mt-3 flex flex-wrap gap-x-4 gap-y-2 text-[11px] text-[#687386]">
-          {PRICE_QUOTATION_PROJECT_TYPES.map((projectType) => <span key={projectType} className="inline-flex items-center gap-1.5"><span className="size-[13px] rounded-full" style={{ backgroundColor: calendarColorForProjectType(projectType) }} aria-hidden="true" />{projectType}</span>)}
+          {quotationProjectTypes.map((projectType) => <span key={projectType} className="inline-flex items-center gap-1.5"><span className="size-[13px] rounded-full" style={{ backgroundColor: calendarColorForProjectType(projectType) }} aria-hidden="true" />{projectType}</span>)}
         </div>
         <div className="mt-4 grid gap-3 xl:grid-cols-3">
           {calendarMonths.map((calendarMonth) => {
@@ -9904,14 +9891,7 @@ function CostingDocument({
   const commission = (cogs * n(quote.commission_rate)) / 100;
   const sellingExVat = n(quote.subtotal);
   const vatRate = quotationVatRate(quote);
-  const projectTypeOptions = [
-    "Premium Rigid Box",
-    "Regular Rigid Box",
-    "Corrugated",
-    "Offset",
-    "Digital",
-    "Mock Up",
-  ];
+  const projectTypeOptions = quotationProjectTypes;
   return (
     <div className="hidden">
         <article ref={documentRef} data-pdf-document className="mx-auto max-w-[8.5in] border border-[#d5dbe5] bg-white p-8 text-[12px] text-[#202938] print:border-0 print:p-0" style={{ fontFamily: "Arial, Helvetica, sans-serif" }}>
@@ -10204,14 +10184,7 @@ function Quotations({
       key: "project_types",
       label: "Project type",
       type: "select",
-      options: [
-        "Premium Rigid Box",
-        "Offset",
-        "Regular Rigid Box",
-        "Digital",
-        "Corrugated",
-        "Mock Up",
-      ],
+      options: [...quotationProjectTypes],
     },
     {
       key: "representative",
@@ -12488,7 +12461,7 @@ function PriceQuotationWorkspace({
           <section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
             <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">{editing ? "Edit Price Quotation" : "Request Price Quotation"}</h2><p className="mt-1 text-[12px] text-[#687386]">Add the requested materials and quantities. Selling prices are entered by the assigned Sales & Pricing Officer.</p></div><button type="button" onClick={resetEditor} aria-label="Close" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div>
             <label className="mt-5 block text-[12px] font-medium text-[#202938]">Client&apos;s Name - Company Name<select value={leadId} onChange={(event) => setLeadId(event.target.value)} className="input mt-1" required><option value="">Select a lead</option>{availableLeads.map((lead) => <option key={text(lead.id)} value={text(lead.id)}>{leadClientLabel(lead)}</option>)}</select></label>
-            <label className="mt-4 block text-[12px] font-medium text-[#202938]">Project Type<select value={projectType} onChange={(event) => setProjectType(event.target.value)} className={`input mt-1 ${projectType ? "text-[#151922]" : "text-[#8b92a1]"}`} required><option value="">Select project type</option>{PRICE_QUOTATION_PROJECT_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+            <label className="mt-4 block text-[12px] font-medium text-[#202938]">Project Type<select value={projectType} onChange={(event) => setProjectType(event.target.value)} className={`input mt-1 ${projectType ? "text-[#151922]" : "text-[#8b92a1]"}`} required><option value="">Select project type</option>{quotationProjectTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
             <section className="mt-5 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div><h3 className="text-[14px] font-semibold text-[#202938]">Illustrations</h3><p className="mt-1 text-[12px] text-[#687386]">Upload up to five JPEG, PNG, or WebP reference images (5 MB each). They are view-only and are not included in the PDF.</p></div>
@@ -19102,6 +19075,9 @@ export function HuswellWorkspace({
                 day: "numeric",
                 year: "numeric",
               }).format(navigationDate)}
+            </span>
+            <span className="max-w-[150px] truncate text-[11px] font-medium sm:max-w-[220px]">
+              {workspaceAccountLabel(role)}
             </span>
             {canEditOwnProfile && isManagementRole ? (
               <button

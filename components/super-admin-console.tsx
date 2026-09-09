@@ -22,6 +22,8 @@ import { useRouter } from "next/navigation";
 import { AccountProfileDialog } from "@/components/account-profile-dialog";
 import { FixedIconTooltip } from "@/components/fixed-icon-tooltip";
 import { createClient } from "@/lib/supabase/client";
+import { quotationProjectTypes } from "@/lib/quotation-project-types";
+import { workspaceAccountLabel, workspaceRoleLabel } from "@/lib/role-labels";
 
 type ManagedUser = {
   id: string;
@@ -41,20 +43,7 @@ type UserFormValues = {
   project_types: string[];
 };
 
-const displayRole = (role: string) =>
-  role === "admin"
-    ? "General Manager"
-    : role === "sales_pricing_officer"
-      ? "Sales & Pricing Officer"
-      : "Sales Executive";
-const pricingProjectTypes = [
-  "Premium Rigid Box",
-  "Regular Rigid Box",
-  "Corrugated",
-  "Offset",
-  "Digital",
-  "Mock Up",
-] as const;
+const displayRole = workspaceRoleLabel;
 const isPricingRole = (role: string) =>
   role === "sales_pricing_officer";
 const titleCase = (value: string) =>
@@ -313,7 +302,7 @@ export function SuperAdminConsole({
             />
             <span className="hidden h-8 w-px bg-[#dfe5ed] sm:block" />
             <div>
-              <h1 className="text-[15px] font-semibold">Super Admin</h1>
+              <h1 className="text-[15px] font-semibold">{workspaceAccountLabel("super_admin")}</h1>
               <p className="text-[12px] text-[#7d8797]">
                 {organizationName} · User Management
               </p>
@@ -507,6 +496,7 @@ export function SuperAdminConsole({
         open={profileOpen}
         onClose={() => setProfileOpen(false)}
         onSaved={(fullName) => setMessage(`Profile updated for ${fullName}.`)}
+        role="super_admin"
       />
       {editingUser && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-[#151922]/40 p-4">
@@ -573,9 +563,9 @@ export function SuperAdminConsole({
               {isPricingRole(editValues.role) && (
                 <fieldset className="rounded-lg border border-[#dfe5ed] bg-[#f8faff] p-3">
                   <legend className="px-1 text-[13px] font-semibold">Assigned project types</legend>
-                  <p className="mt-1 text-[12px] font-normal text-[#7d8797]">Only quotations with these project types will be routed to this Sales &amp; Pricing Officer. Assign Mock Up to both officers when both should receive it.</p>
+                  <p className="mt-1 text-[12px] font-normal text-[#7d8797]">Only quotations with these project types will be routed to this Sales &amp; Pricing Officer. Assign every project type this officer should review.</p>
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    {pricingProjectTypes.map((projectType) => (
+                    {quotationProjectTypes.map((projectType) => (
                       <label key={projectType} className="flex items-center gap-2 text-[12px] font-medium text-[#344054]">
                         <input
                           type="checkbox"
@@ -753,9 +743,9 @@ export function SuperAdminConsole({
               {isPricingRole(values.role) && (
                 <fieldset className="rounded-lg border border-[#dfe5ed] bg-[#f8faff] p-3">
                   <legend className="px-1 text-[13px] font-semibold">Assigned project types</legend>
-                  <p className="mt-1 text-[12px] font-normal text-[#7d8797]">Only quotations with these project types will be routed to this Sales &amp; Pricing Officer. Assign Mock Up to both officers when both should receive it.</p>
+                  <p className="mt-1 text-[12px] font-normal text-[#7d8797]">Only quotations with these project types will be routed to this Sales &amp; Pricing Officer. Assign every project type this officer should review.</p>
                   <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    {pricingProjectTypes.map((projectType) => (
+                    {quotationProjectTypes.map((projectType) => (
                       <label key={projectType} className="flex items-center gap-2 text-[12px] font-medium text-[#344054]">
                         <input
                           type="checkbox"

@@ -4,6 +4,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Eye, EyeOff, LoaderCircle, Pencil, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { workspaceRoleLabel } from "@/lib/role-labels";
 
 type ProfileValues = { fullName: string; email: string; password: string };
 
@@ -42,16 +43,7 @@ export function AccountProfileDialog({
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(!embedded);
   const [showPassword, setShowPassword] = useState(false);
-  const accountType =
-    role === "owner"
-      ? "Owner / General Manager"
-      : role === "admin"
-        ? "General Manager"
-        : role === "project_manager"
-          ? "Sales Executive"
-          : role === "sales_pricing_officer"
-            ? "Sales & Pricing Officer"
-            : role.replaceAll("_", " ");
+  const accountType = workspaceRoleLabel(role);
 
   useEffect(() => {
     if (!open) return;
