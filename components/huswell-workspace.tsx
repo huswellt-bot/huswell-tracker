@@ -1031,23 +1031,25 @@ const DEFAULT_QUOTATION_BANK_DETAILS: BankDetail[] = [
   { bank_name: "Unionbank", account_name: "Huswell Trading", account_number: "002300008069" },
 ];
 
-const quotationBankDetails = (value: unknown): BankDetail[] => {
+const quotationBankDetailsSnapshot = (value: unknown): BankDetail[] | null => {
   let parsed = value;
   if (typeof value === "string") {
+    if (!value.trim()) return null;
     try {
       parsed = JSON.parse(value);
     } catch {
-      parsed = undefined;
+      return null;
     }
   }
-  if (parsed === null || parsed === undefined) return DEFAULT_QUOTATION_BANK_DETAILS;
-  if (!Array.isArray(parsed)) return DEFAULT_QUOTATION_BANK_DETAILS;
+  if (!Array.isArray(parsed)) return null;
   return parsed.map((detail) => ({
     bank_name: text((detail as Record<string, unknown>)?.bank_name, ""),
     account_name: text((detail as Record<string, unknown>)?.account_name, ""),
     account_number: text((detail as Record<string, unknown>)?.account_number, ""),
   })).filter((detail) => detail.bank_name || detail.account_name || detail.account_number);
 };
+const quotationBankDetails = (value: unknown): BankDetail[] =>
+  quotationBankDetailsSnapshot(value) ?? DEFAULT_QUOTATION_BANK_DETAILS;
 const statusStyle = (value: unknown) => {
   const v = text(value, "draft").toLowerCase();
   return v.includes("rejected") || v.includes("cancelled") || v.includes("void") || v.includes("overpaid")
@@ -1566,6 +1568,7 @@ const directory: Module = {
     },
   ],
 };
+const leadRecordedDateLabel = "Date recorded";
 const leads: Module = {
   table: "leads",
   title: "Leads",
@@ -1573,11 +1576,11 @@ const leads: Module = {
     "Register outbound client contacts using the same fields as the outbound tracker.",
   add: "Add lead",
   fields: [
-    { key: "date_sent", label: "Date sent", type: "date" },
+    { key: "date_sent", label: leadRecordedDateLabel, type: "date" },
     { key: "contact_name", label: "Client's Name", required: true },
     { key: "client_name", label: "Company Name" },
     { key: "email", label: "Email" },
-    { key: "phone", label: "Viber" },
+    { key: "phone", label: "Viber / WhatsApp / Instagram / Messenger" },
     { key: "date_contacted", label: "Date contacted", type: "date" },
     {
       key: "contact_method",
@@ -1622,7 +1625,7 @@ const leads: Module = {
     },
     { label: "Date contacted", value: (r) => day(r.date_contacted) },
     { label: "Outbound method", value: (r) => text(r.contact_method, "—") },
-    { label: "Date sent", value: (r) => day(r.date_sent) },
+    { label: leadRecordedDateLabel, value: (r) => day(r.date_sent) },
     {
       label: "Lead status",
       value: (r) => evaluationLabel(r.evaluation_number),
@@ -3655,14 +3658,14 @@ function Records({
         "Unassigned",
       ),
   };
-  const dateSentLeadColumns = leadColumns.filter(
-    (column) => column.label === "Date sent",
+  const leadRecordedDateColumns = leadColumns.filter(
+    (column) => column.label === leadRecordedDateLabel,
   );
   const remainingLeadColumns = leadColumns.filter(
-    (column) => column.label !== "Date sent",
+    (column) => column.label !== leadRecordedDateLabel,
   );
   const leadColumnsDateFirst = [
-    ...dateSentLeadColumns,
+    ...leadRecordedDateColumns,
     ...remainingLeadColumns,
   ];
   const columns =
@@ -3677,7 +3680,7 @@ function Records({
         )
       : module.table === "leads" && isGeneralManager
         ? [
-            ...dateSentLeadColumns,
+            ...leadRecordedDateColumns,
             assignmentColumn,
             ...remainingLeadColumns,
           ]
@@ -3691,7 +3694,7 @@ function Records({
         : fields;
   const dialogVisibleFields = visibleFields.filter(
     (field) =>
-      !(module.table === "leads" && !editing && field.key === "date_sent"),
+      !(module.table === "leads" && isProjectsPage && !editing && field.key === "date_sent"),
   );
   const isOfficerSettingLostClient =
     module.table === "leads" &&
@@ -10218,6 +10221,9 @@ function Quotations({
       setSaving(false);
       return notice("Add at least one material or production line before saving.");
     }
+    const quotationBusinessSettings = store.business_settings.find(
+      (setting) => text(setting.organization_id) === text(orgId),
+    );
     const clean: Record<string, unknown> = {
       ...Object.fromEntries(
         officerCostingFields.map((field) => [field.key, values[field.key] ?? ""]),
@@ -10230,7 +10236,7 @@ function Quotations({
       client_phone: values.client_phone?.trim() || lead?.phone || lead?.email || null,
       project_name: lead?.project_name ?? lead?.client_name ?? lead?.contact_name ?? "",
       notes: values.notes ?? "",
-      bank_details: quotationBankDetails(store.business_settings[0]?.default_bank_details),
+      bank_details: quotationBankDetails(quotationBusinessSettings?.default_bank_details),
       prepared_by_user_id: user.user.id,
       prepared_by_signature_url: text(profile?.signature_url, "") || null,
       organization_id: orgId,
@@ -13029,14 +13035,18 @@ function PriceQuotationReview({
   const businessSettings = store.business_settings.find(
     (setting) => text(setting.organization_id) === text(quotation.organization_id),
   );
-  const hasSavedBankDetails = quotation.bank_details !== null
-    && quotation.bank_details !== undefined
-    && quotation.bank_details !== "";
+  const savedBankDetails = quotationBankDetailsSnapshot(quotation.bank_details);
+  const hasSavedBankDetails = savedBankDetails !== null;
+  const bankDetailsTouched = useRef(false);
   const [bankDetails, setBankDetails] = useState<BankDetail[]>(() =>
-    quotationBankDetails(
-      hasSavedBankDetails ? quotation.bank_details : businessSettings?.default_bank_details,
-    ),
+    savedBankDetails ?? quotationBankDetails(businessSettings?.default_bank_details),
   );
+  const updateBankDetails = (
+    next: BankDetail[] | ((current: BankDetail[]) => BankDetail[]),
+  ) => {
+    bankDetailsTouched.current = true;
+    setBankDetails(next);
+  };
   useEffect(() => {
     let active = true;
     const organizationId = text(quotation.organization_id);
@@ -13049,7 +13059,9 @@ function PriceQuotationReview({
       .then(({ data, error }) => {
         if (!active || error) return;
         setFetchedPricingDefaultSettings((data ?? {}) as Row);
-        if (!hasSavedBankDetails && data?.default_bank_details !== undefined) setBankDetails(quotationBankDetails(data.default_bank_details));
+        if (!hasSavedBankDetails && !bankDetailsTouched.current && data?.default_bank_details !== undefined) {
+          setBankDetails(quotationBankDetails(data.default_bank_details));
+        }
       });
     return () => {
       active = false;
@@ -13272,7 +13284,7 @@ function PriceQuotationReview({
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} shipping={shipping} setShipping={setShipping} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} · {text(quotation.client_name)} · Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><div className="mt-5 grid gap-5 lg:grid-cols-[1.45fr_.75fr]"><div><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><section className="mt-5 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="mt-4 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="mt-4 block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label></div><aside><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><div className="border-b border-[#edf0f5] px-4 py-3"><h3 className="text-[14px] font-semibold">Quotation Total</h3></div><Table labels={["Category", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section></aside></div><div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary loading={saving || working} disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></section></div>;
   */
-  return <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review {documentLabel}</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - {pricingRevision ? "Address the General Manager's instructions and resubmit." : finalApproval ? "Finalize approval." : `Complete pricing and submit ${documentLabel} to the General Manager.`}</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectName={text(quotation.project_name, "")} projectType={text(quotation.project_types, "")} sourceQuotationNo={text(sourceQuotation?.quotation_no, "") || undefined} documentLabel={documentLabel} illustrations={illustrations} productCostings={productCostings} pricingDefaults={activePricingDefaultSettings ?? {}} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} finalApproval={finalApproval} showInternalMarkups={showInternalMarkups} pricingRevision={pricingRevision} /></section></div>;
+  return <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review {documentLabel}</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - {pricingRevision ? "Address the General Manager's instructions and resubmit." : finalApproval ? "Finalize approval." : `Complete pricing and submit ${documentLabel} to the General Manager.`}</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectName={text(quotation.project_name, "")} projectType={text(quotation.project_types, "")} sourceQuotationNo={text(sourceQuotation?.quotation_no, "") || undefined} documentLabel={documentLabel} illustrations={illustrations} productCostings={productCostings} pricingDefaults={activePricingDefaultSettings ?? {}} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={updateBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} finalApproval={finalApproval} showInternalMarkups={showInternalMarkups} pricingRevision={pricingRevision} /></section></div>;
 }
 
 function GeneralManagerCostingReview({
@@ -13306,9 +13318,39 @@ function GeneralManagerCostingReview({
       .split(/\r?\n+/)
       .filter(Boolean),
   );
-  const [bankDetails, setBankDetails] = useState<BankDetail[]>(() =>
-    quotationBankDetails(quotation.bank_details),
+  const businessSettings = store.business_settings.find(
+    (setting) => text(setting.organization_id) === text(quotation.organization_id),
   );
+  const savedBankDetails = quotationBankDetailsSnapshot(quotation.bank_details);
+  const hasSavedBankDetails = savedBankDetails !== null;
+  const bankDetailsTouched = useRef(false);
+  const [bankDetails, setBankDetailsState] = useState<BankDetail[]>(() =>
+    savedBankDetails ?? quotationBankDetails(businessSettings?.default_bank_details),
+  );
+  const updateBankDetails = (
+    next: BankDetail[] | ((current: BankDetail[]) => BankDetail[]),
+  ) => {
+    bankDetailsTouched.current = true;
+    setBankDetailsState(next);
+  };
+  const setBankDetails = updateBankDetails;
+  useEffect(() => {
+    let active = true;
+    const organizationId = text(quotation.organization_id);
+    if (!organizationId || hasSavedBankDetails) return;
+    void createClient()
+      .from("business_settings")
+      .select("default_bank_details")
+      .eq("organization_id", organizationId)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!active || error || bankDetailsTouched.current || data?.default_bank_details === undefined) return;
+        setBankDetailsState(quotationBankDetails(data.default_bank_details));
+      });
+    return () => {
+      active = false;
+    };
+  }, [hasSavedBankDetails, quotation.organization_id]);
   const [revisionNote, setRevisionNote] = useState("");
   const lines = store.quotation_items.filter(
     (line) => line.quotation_id === quotation.id,
@@ -13704,7 +13746,7 @@ function ProjectEditRequestReview({
     client_name: "Company name",
     email: "Email",
     phone: "Phone",
-    date_sent: "Date sent",
+    date_sent: leadRecordedDateLabel,
     date_contacted: "Date contacted",
     contact_method: "Contact method",
     outbound_caller: "Outbound caller",
@@ -13769,7 +13811,7 @@ function LeadChangeRequestReview({
     client_name: "Company name",
     email: "Email",
     phone: "Phone number",
-    date_sent: "Date sent",
+    date_sent: leadRecordedDateLabel,
     date_contacted: "Date contacted",
     contact_method: "Outbound method",
     evaluation_number: "Lead status",
@@ -16854,9 +16896,7 @@ function ProjectOfficerSalesFunnel({
     { label: "2. Leads Contacted", description: "Leads that were successfully contacted", total: store.leads.filter((lead) => Boolean(text(lead.date_contacted, ""))).length, color: "#08aabd", Icon: MessageSquareText },
     { label: "3. Price Quotation", description: "Quotation provided to interested leads", total: countUniqueLeads(priceQuotations), color: "#ee9500", Icon: FileText },
     { label: "4. Paid Clients", description: "Leads who made a payment / became clients", total: completedAt(6), color: "#e74408", Icon: PhilippinePeso },
-    { label: "5. Mock-Up / Sample Approval", description: "Samples approved by the client", total: completedAt(5), color: "#d32971", Icon: ClipboardCheck },
-    { label: "6. Purchase Order received", description: "Official PO received from the client", total: completedAt(4), color: "#6330bd", Icon: FileText },
-    { label: "7. Completed Projects", description: "General Manager-approved finished projects", total: completedProjects, color: "#075fc3", Icon: Check },
+    { label: "5. Completed Projects", description: "General Manager-approved finished projects", total: completedProjects, color: "#075fc3", Icon: Check },
   ];
   const percentage = (current: number, previous: number) => previous ? `${((current / previous) * 100).toFixed(2)}%` : "—";
   const overallPercentage = percentage(stages.at(-1)?.total ?? 0, stages[0].total);
@@ -17786,7 +17826,7 @@ function SettingsView({
   const openProfile = async () => {
     const { data, error } = await createClient()
       .from("organizations")
-      .select("name,legal_name,address,phone,email,tin,logo_url")
+      .select("name,legal_name,address,phone,email")
       .eq("id", orgId)
       .single();
     if (error) return notice(error.message);
@@ -17796,8 +17836,6 @@ function SettingsView({
       address: text(data?.address, ""),
       phone: text(data?.phone, ""),
       email: text(data?.email, ""),
-      tin: text(data?.tin, ""),
-      logo_url: text(data?.logo_url, ""),
     });
     setProfileOpen(true);
   };
@@ -17902,8 +17940,7 @@ function SettingsView({
         }
       >
         <div className="p-5 text-[12px] text-[#626b7a]">
-          Business identity, address, contact details, TIN, and logo are managed
-          here.
+          Business identity, address, and contact details are managed here.
         </div>
       </Panel>
       {isSuperAdmin && (
@@ -18072,8 +18109,6 @@ function SettingsView({
             { key: "address", label: "Business address", type: "textarea" },
             { key: "phone", label: "Contact phone" },
             { key: "email", label: "Email" },
-            { key: "tin", label: "TIN" },
-            { key: "logo_url", label: "Logo URL" },
           ]}
           values={profileValues}
           setValues={setProfileValues}
