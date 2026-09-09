@@ -893,7 +893,7 @@ const titleCase = (value: string) =>
     (_, prefix: string, letter: string) => `${prefix}${letter.toUpperCase()}`,
   );
 const titleCaseEntry = (value: string, key = "") =>
-  /(?:email|url|phone|tin|sku|(?:^|_)no$|number|password|id)/i.test(key)
+  key === "term" || /(?:email|url|phone|tin|sku|(?:^|_)no$|number|password|id)/i.test(key)
     ? value
     : titleCase(value);
 const leadClientLabel = (lead: Row) => {
