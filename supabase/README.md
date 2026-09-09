@@ -123,6 +123,7 @@
 121. If the Pricing Officer still receives the General Manager-only totals error after migration 138, run `139_fix_pricing_officer_revision_guard.sql` after migration 138. It reapplies the two attached direct Price Quotation preparation guards without changing quotation data or removing the triggers.
 122. Run `140_add_large_format_printing_project_type.sql` after migration 139 and before deploying the matching app update. It adds `Large Format Printing` to the routeable Sales & Pricing Officer project types without rewriting existing quotations.
 123. Run `141_fix_business_settings_pricing_default.sql` after migration 140. It aligns the `business_settings.pricing_markup_defaults` insert default with the current validator and removes the obsolete organization-level Discount key so partial settings updates, including quotation bank details, can be saved.
+124. Run `142_general_manager_production_deletion.sql` after migration 141 and before deploying the matching Project Calendar update. It lets General Managers delete approved production schedules from the Active and Completed views while preserving linked quotations, signed proofs, and production jobs.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 

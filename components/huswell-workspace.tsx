@@ -129,6 +129,16 @@ type View =
   | "Settings"
   | "Commissions"
   | "Profile";
+
+const TEMPORARILY_HIDDEN_VIEWS: ReadonlyArray<View> = [
+  "Payment Monitoring",
+  "Payment Reviews",
+  "Commissions",
+];
+
+const isTemporarilyHiddenView = (view: View) =>
+  TEMPORARILY_HIDDEN_VIEWS.includes(view);
+
 type TableName =
   | "profiles"
   | "business_settings"
@@ -7162,6 +7172,12 @@ function ProjectCalendar({
   );
   const canCreateSchedule = isProjectOfficerRole(role);
   const isGeneralManager = memberRole(role);
+  const scheduleLifecycleStatus = (schedule: Row) =>
+    schedule.completed_at ? "completed" : "active";
+  const canDeleteSchedule = (schedule: Row) =>
+    isGeneralManager &&
+    text(schedule.status, "") === "approved" &&
+    ["active", "completed"].includes(scheduleLifecycleStatus(schedule));
   const scheduleProjectType = (schedule: Row) =>
     text(
       store.quotations.find((quote) => quote.id === schedule.quotation_id)
@@ -7467,7 +7483,8 @@ function ProjectCalendar({
     );
   const showScheduleRevisionActions = isProjectOfficerRole(role);
   const showProjectActions =
-    showScheduleRevisionActions && projectStatusTab === "active";
+    (showScheduleRevisionActions && projectStatusTab === "active") ||
+    isGeneralManager;
   const canRequestScheduleCompletion = (schedule: Row) =>
     !schedule.completed_at &&
     !hasPendingScheduleRevision(schedule) &&
@@ -7533,6 +7550,23 @@ function ProjectCalendar({
       remark: remarkDraft,
     });
     if (saved) setRemarkSchedule(null);
+  };
+  const deleteSchedule = async (schedule: Row) => {
+    const scheduleId = text(schedule.id, "");
+    if (!scheduleId || !canDeleteSchedule(schedule)) return;
+    setSaving(true);
+    const { data, error } = await createClient()
+      .from("project_schedules")
+      .delete()
+      .eq("id", scheduleId)
+      .eq("organization_id", orgId)
+      .eq("status", "approved")
+      .select("id");
+    setSaving(false);
+    if (error) return notice(error.message);
+    if (!data?.length) return notice("This production could not be deleted. Refresh and try again.");
+    notice("Production deleted.");
+    await reload();
   };
   return (
     <Panel
@@ -7770,6 +7804,18 @@ function ProjectCalendar({
                       }}
                     >
                       <RotateCcw size={15} />
+                    </ActionIcon>
+                  )}
+                  {canDeleteSchedule(schedule) && (
+                    <ActionIcon
+                      label="Delete production"
+                      tone="red"
+                      loading={saving}
+                      disabled={saving}
+                      confirmationDescription="This permanently deletes the production schedule and its related scheduling requests. Linked quotations, signed proofs, and the production job are kept. This cannot be undone."
+                      onClick={() => void deleteSchedule(schedule)}
+                    >
+                      <Trash2 size={15} />
                     </ActionIcon>
                   )}
                 </div> : <span className="text-[#8b92a1]">—</span>}
@@ -18141,12 +18187,17 @@ export function HuswellWorkspace({
   role: string;
   initialView?: View;
 }) {
-  const [active, setActive] = useState<View>(
+  const defaultWorkspaceView: View = role === "accountant" ? "Finance" : "Dashboard";
+  const requestedInitialView: View =
     initialView === "Costing Breakdown"
       ? "Price Quotations"
       : initialView === "Submissions"
         ? "Approvals"
-      : initialView ?? (role === "accountant" ? "Finance" : "Dashboard"),
+        : initialView ?? defaultWorkspaceView;
+  const [active, setActive] = useState<View>(
+    isTemporarilyHiddenView(requestedInitialView)
+      ? defaultWorkspaceView
+      : requestedInitialView,
   );
   const [leadMode, setLeadMode] = useState<LeadWorkspaceMode>("leads");
   const [mobile, setMobile] = useState(false);
@@ -18173,6 +18224,10 @@ export function HuswellWorkspace({
     setActive(mode === "quotation" ? "Price Quotations" : "Leads");
   }, []);
   const navigate = useCallback((view: View) => {
+    if (isTemporarilyHiddenView(view)) {
+      setActive(defaultWorkspaceView);
+      return;
+    }
     if (view === "Costing Breakdown") return selectLeadWorkspaceMode("quotation");
     if (view === "Submissions") {
       setActive("Approvals");
@@ -18190,7 +18245,7 @@ export function HuswellWorkspace({
     }
     if (view === "Leads") setLeadMode("leads");
     setActive(view);
-  }, [selectLeadWorkspaceMode]);
+  }, [defaultWorkspaceView, selectLeadWorkspaceMode]);
   const fetchTable = useCallback(
     async (table: TableName) => {
       const childTables: TableName[] = [
@@ -18327,11 +18382,9 @@ export function HuswellWorkspace({
       "Mockups",
       "Price Quotations",
       "Approvals",
-      "Payment Monitoring",
       "Finance",
       "Policy",
       "Settings",
-      "Commissions",
     ],
     owner: [
       "Dashboard",
@@ -18340,11 +18393,9 @@ export function HuswellWorkspace({
       "Mockups",
       "Price Quotations",
       "Approvals",
-      "Payment Monitoring",
       "Finance",
       "Policy",
       "Settings",
-      "Commissions",
     ],
     admin: [
       "Dashboard",
@@ -18353,11 +18404,9 @@ export function HuswellWorkspace({
       "Mockups",
       "Price Quotations",
       "Approvals",
-      "Payment Monitoring",
       "Finance",
       "Policy",
       "Settings",
-      "Commissions",
     ],
     project_manager: [
       "Dashboard",
@@ -18366,7 +18415,6 @@ export function HuswellWorkspace({
       "Mockups",
       "Price Quotations",
       "Policy",
-      "Commissions",
     ],
     sales_pricing_officer: [
       "Dashboard",
@@ -18376,9 +18424,7 @@ export function HuswellWorkspace({
       "Price Quotations",
       "Price Quotation Review",
       "Quotation Costing Overview",
-      "Payment Reviews",
       "Policy",
-      "Commissions",
     ],
     sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Policy"],
     warehouse: ["Dashboard", "Catalog", "Inventory", "Production", "Policy"],
@@ -18439,24 +18485,6 @@ export function HuswellWorkspace({
           assignedProjectTypes.has(pricingProjectTypeKey(quotation.project_types)),
       ).length
     : 0;
-  const pendingPaymentReviewCount = isPricingOfficerRole(role)
-    ? store.quotations.reduce(
-        (count, quote) =>
-          count +
-          store.quotation_payment_records.filter(
-            (payment) =>
-              payment.quotation_id === quote.id &&
-              text(payment.status) === "pending" &&
-              assignedPaymentReviewerId(
-                quote,
-                payment,
-                store.pricing_officer_project_types,
-              ) === currentUserId &&
-              text(payment.submitted_by, "") !== currentUserId,
-          ).length,
-        0,
-      )
-    : 0;
   useEffect(() => {
     let active = true;
     void client.auth.getUser().then(({ data }) => {
@@ -18490,9 +18518,7 @@ export function HuswellWorkspace({
     {
       label: "Business",
       items: [
-        { view: "Payment Monitoring", icon: ReceiptText },
         { view: "Finance", icon: Wallet },
-        { view: "Commissions", icon: PhilippinePeso },
         { view: "Policy", icon: ScrollText },
         { view: "Settings", icon: Settings },
       ],
@@ -18523,8 +18549,6 @@ export function HuswellWorkspace({
     {
       label: "Business",
       items: [
-        { view: "Payment Reviews", icon: ReceiptText, badge: pendingPaymentReviewCount },
-        { view: "Commissions", icon: PhilippinePeso },
         { view: "Policy", icon: ScrollText },
       ],
     },
@@ -18540,7 +18564,6 @@ export function HuswellWorkspace({
         { view: "Quotation Costing Overview", icon: ReceiptText },
         { view: "Projects", icon: ClipboardCheck },
         { view: "Suppliers & Materials", icon: UsersRound },
-        { view: "Commissions", icon: PhilippinePeso },
       ],
     },
     {
