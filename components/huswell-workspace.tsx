@@ -41,8 +41,8 @@ import {
   Menu,
   MessageSquareText,
   Paperclip,
-  Percent,
   Pencil,
+  Percent,
   Plus,
   Printer,
   ReceiptText,
@@ -223,37 +223,13 @@ type PendingCostLine = {
   details?: string;
 };
 type MarkupCalculationType = "percentage" | "fixed_amount";
-const calculationBasisOptions = [
-  { value: "percentage", label: "Percentage (%)" },
-  { value: "fixed_amount", label: "Amount (₱)" },
-] as const satisfies ReadonlyArray<{
-  value: MarkupCalculationType;
-  label: string;
-}>;
-const calculationBasisShortLabels = {
-  percentage: <Percent size={14} strokeWidth={1.75} aria-hidden="true" />,
-  fixed_amount: <PhilippinePeso size={14} strokeWidth={1.75} aria-hidden="true" />,
-} as const;
-const calculationBasisLabel = (value: MarkupCalculationType) =>
-  calculationBasisOptions.find((option) => option.value === value)?.label ?? "Calculation basis";
-const CalculationBasisIcon = ({ value }: { value: MarkupCalculationType }) => (
-  <span
-    role="img"
-    aria-label={calculationBasisLabel(value)}
-    title={calculationBasisLabel(value)}
-    className="inline-flex items-center justify-center"
-  >
-    {calculationBasisShortLabels[value]}
-  </span>
-);
-const calculationBasisIconOptions = calculationBasisOptions.map((option) => ({
-  value: option.value,
-  label: <CalculationBasisIcon value={option.value} />,
-  ariaLabel: option.label,
-}));
 const costLineCalculationOptions = [
   { value: "quantity_unit_cost", label: "Q×C" },
   { value: "fixed_amount", label: "Fixed" },
+] as const;
+const markupBasisOptions = [
+  { value: "percentage", label: <Percent size={13} />, ariaLabel: "Percent" },
+  { value: "fixed_amount", label: <PhilippinePeso size={13} />, ariaLabel: "Amount" },
 ] as const;
 
 function SegmentedToggle({
@@ -330,7 +306,12 @@ const pricingMarkupDefinitions: Array<{
   { key: "third_party_markup", label: "Third Party Mark Up", fallback: "15", legacyKeys: ["default_additional_markup"] },
   { key: "vat", label: "VAT", fallback: "12", legacyKeys: ["vat_rate"] },
 ];
-const internalPricingMarkupKeys = pricingMarkupDefinitions
+// Discount is set per quotation by the Sales & Pricing Officer. It is not an
+// organization-wide internal pricing default.
+const pricingMarkupDefaultDefinitions = pricingMarkupDefinitions.filter(
+  (definition) => definition.key !== "discounts",
+);
+const internalPricingMarkupKeys = pricingMarkupDefaultDefinitions
   .filter((definition) => definition.key !== "vat")
   .map((definition) => definition.key);
 const pricingMarkupDefinition = (key: PricingMarkupKey) =>
@@ -341,6 +322,13 @@ const objectValue = (value: unknown): Record<string, unknown> =>
     : {};
 const pricingMarkupKeyForLabel = (label: unknown): PricingMarkupKey | "" => {
   const normalized = String(label ?? "").trim().toLowerCase();
+  // Saved costing rows use canonical database keys (for example
+  // `target_profit_margin`), whereas legacy rows use display labels.
+  // Recognize both before attempting label aliases.
+  if (pricingMarkupDefinitions.some((definition) => definition.key === normalized)) {
+    return normalized as PricingMarkupKey;
+  }
+  if (normalized === "discount") return "discounts";
   if (normalized === "profit margin" || normalized === "target profit margin") return "target_profit_margin";
   if (normalized === "overhead expense" || normalized === "overhead allocation") return "overhead_allocation";
   if (normalized === "buffer margin" || normalized === "contingency allowance") return "contingency_allowance";
@@ -355,19 +343,16 @@ const pricingMarkupDefaults = (
   legacySettings?: Record<string, unknown>,
 ): PricingMarkupDefault[] => {
   const storedDefaults = objectValue(stored);
-  return pricingMarkupDefinitions.map((definition) => {
+  return pricingMarkupDefaultDefinitions.map((definition) => {
     const storedEntry = objectValue(storedDefaults[definition.key]);
-    const storedCalculationType = storedEntry.calculation_type === "fixed_amount" ? "fixed_amount" : "percentage";
     const legacyValue = definition.legacyKeys
       .map((key) => legacySettings?.[key])
       .find((value) => value !== undefined && value !== null && value !== "");
-    const rawValue = definition.key === "vat" && storedCalculationType === "fixed_amount"
-      ? legacySettings?.vat_rate ?? definition.fallback
-      : storedEntry.value ?? storedEntry.rate ?? legacyValue ?? definition.fallback;
+    const rawValue = storedEntry.value ?? storedEntry.rate ?? legacyValue ?? definition.fallback;
     return {
       key: definition.key,
       label: definition.label,
-      calculationType: definition.key === "vat" ? "percentage" : storedCalculationType,
+      calculationType: "percentage",
       value: text(rawValue, definition.fallback),
     };
   });
@@ -387,6 +372,7 @@ type ProductCostingDraft = {
   key: string;
   quotationItemId: string;
   pricingModel: "legacy_markup" | "target_margin";
+  internalVatRate: string;
   costLines: {
     key: string;
     description: string;
@@ -415,6 +401,7 @@ const newProductCostingDraft = (
   key: `product-costing-${crypto.randomUUID()}`,
   quotationItemId,
   pricingModel: "target_margin",
+  internalVatRate: "12",
   costLines: [
     {
       key: `cost-line-${crypto.randomUUID()}`,
@@ -435,10 +422,27 @@ const newProductCostingDraft = (
       value: definition.value,
     })),
 });
+const withQuotationDiscount = (costing: ProductCostingDraft): ProductCostingDraft =>
+  costing.markups.some((markup) => (markup.markupKey || pricingMarkupKeyForLabel(markup.label)) === "discounts")
+    ? costing
+    : {
+        ...costing,
+        markups: [
+          ...costing.markups,
+          {
+            key: `markup-${crypto.randomUUID()}`,
+            markupKey: "discounts",
+            label: "Discounts",
+            calculationType: "percentage",
+            value: "0",
+          },
+        ],
+      };
 const productCostingDrafts = (
   costings: Row[],
   costLines: Row[],
   markups: Row[],
+  missingMarkupDefaults?: PricingMarkupDefault[],
 ): ProductCostingDraft[] =>
   costings.map((costing, costingIndex) => {
     const pricingModel = text(costing.pricing_model, "legacy_markup") === "target_margin" ? "target_margin" : "legacy_markup";
@@ -458,20 +462,33 @@ const productCostingDrafts = (
             : text(markup.rate, "0"),
         };
       });
-    const targetMarkups = pricingMarkupDefinitions
+    const targetMarkups = pricingMarkupDefaultDefinitions
       .filter((definition) => definition.key !== "vat")
-      .map((definition) => loadedMarkups.find((markup) => markup.markupKey === definition.key) ?? {
-        key: `markup-${crypto.randomUUID()}`,
-        markupKey: definition.key,
-        label: definition.label,
+      .map((definition) => {
+        const savedMarkup = loadedMarkups.find((markup) => markup.markupKey === definition.key);
+        if (savedMarkup) return savedMarkup;
+        const defaultMarkup = missingMarkupDefaults?.find((markup) => markup.key === definition.key);
+        return {
+          key: `markup-${crypto.randomUUID()}`,
+          markupKey: definition.key,
+          label: defaultMarkup?.label ?? definition.label,
         calculationType: "percentage" as const,
-        value: "0",
+          value: defaultMarkup?.value ?? "0",
+        };
       });
-    const knownKeys = new Set(targetMarkups.map((markup) => markup.key));
+    // `targetMarkups` contains the saved standard categories (or a missing
+    // placeholder for one). Compare categories here, not database row IDs;
+    // otherwise every saved standard markup is appended a second time.
+    const knownMarkupKeys = new Set(
+      targetMarkups
+        .map((markup) => markup.markupKey)
+        .filter((markupKey): markupKey is PricingMarkupKey => Boolean(markupKey)),
+    );
     return {
     key: text(costing.id, `product-costing-${costingIndex}`),
     quotationItemId: text(costing.quotation_item_id),
     pricingModel,
+    internalVatRate: text(costing.internal_vat_rate, "12"),
     costLines: costLines
       .filter((line) => line.product_costing_id === costing.id)
       .sort((left, right) => n(left.sort_order) - n(right.sort_order))
@@ -484,9 +501,32 @@ const productCostingDrafts = (
         amount: text(line.unit_cost, "0"),
       })),
     markups: pricingModel === "target_margin"
-      ? [...targetMarkups, ...loadedMarkups.filter((markup) => !knownKeys.has(markup.key))]
+      ? [...targetMarkups, ...loadedMarkups.filter((markup) => !knownMarkupKeys.has(markup.markupKey as PricingMarkupKey))]
       : loadedMarkups,
   };
+  });
+const productCostingsWithMissingDefaultMarkups = (
+  costings: ProductCostingDraft[],
+  defaults: PricingMarkupDefault[],
+): ProductCostingDraft[] =>
+  costings.map((costing) => {
+    const savedMarkupKeys = new Set(
+      costing.markups
+        .map((markup) => markup.markupKey || pricingMarkupKeyForLabel(markup.label))
+        .filter((key): key is PricingMarkupKey => Boolean(key)),
+    );
+    const missingMarkups = defaults
+      .filter((definition) => definition.key !== "vat" && !savedMarkupKeys.has(definition.key))
+      .map((definition) => ({
+        key: `markup-${crypto.randomUUID()}`,
+        markupKey: definition.key,
+        label: definition.label,
+        calculationType: "percentage" as const,
+        value: definition.value,
+      }));
+    return missingMarkups.length
+      ? { ...costing, markups: [...costing.markups, ...missingMarkups] }
+      : costing;
   });
 const quotationVatRate = (quote: Row) => {
   const storedRate = n(quote.vat_rate);
@@ -508,6 +548,7 @@ const productCostingTotals = (
   );
   const markupAmounts: Record<string, number> = {};
   let markupTotal = 0;
+  const internalVatAmount = rounded(cogs * n(costing.internalVatRate) / 100);
   let costBase = cogs;
   let profitAmount = 0;
   let discountAmount = 0;
@@ -521,41 +562,35 @@ const productCostingTotals = (
       markupAmounts[markup.key] = amount;
       return sum + amount;
     }, 0);
+    // The Internal VAT is the seventh internal markup for every costing
+    // model, including quotations created before target-margin pricing.
+    markupTotal = rounded(markupTotal + internalVatAmount);
     sellingExVat = rounded(cogs + markupTotal);
     listSellingExVat = sellingExVat;
   } else {
-    const target = costing.markups.find((markup) => (markup.markupKey || pricingMarkupKeyForLabel(markup.label)) === "target_profit_margin");
     const discount = costing.markups.find((markup) => (markup.markupKey || pricingMarkupKeyForLabel(markup.label)) === "discounts");
     for (const markup of costing.markups) {
       const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
-      if (!key || key === "target_profit_margin" || key === "discounts" || key === "vat") continue;
+      if (!key || key === "discounts" || key === "vat") continue;
       const amount = markupCalculationType(markup) === "fixed_amount"
         ? rounded(n(markupValue(markup)))
         : rounded(cogs * n(markupValue(markup)) / 100);
       markupAmounts[markup.key] = amount;
-      costBase += amount;
+      markupTotal += amount;
+      if (key === "target_profit_margin") profitAmount = amount;
     }
-    costBase = rounded(costBase);
-    const targetValue = n(target ? markupValue(target) : 0);
-    profitAmount = target && markupCalculationType(target) === "fixed_amount"
-      ? rounded(targetValue)
-      : targetValue >= 100
-        ? 0
-        : rounded(costBase * targetValue / (100 - targetValue));
-    if (target) markupAmounts[target.key] = profitAmount;
-    const requiredNetPrice = rounded(costBase + profitAmount);
+    markupTotal = rounded(markupTotal + internalVatAmount);
+    costBase = rounded(cogs + markupTotal);
+    listSellingExVat = costBase;
     if (discount) {
       const discountValue = n(markupValue(discount));
-      if (markupCalculationType(discount) === "fixed_amount") {
-        discountAmount = rounded(discountValue);
-      } else if (discountValue < 100) {
-        discountAmount = rounded(requiredNetPrice / (1 - discountValue / 100) - requiredNetPrice);
-      }
+      discountAmount = markupCalculationType(discount) === "fixed_amount"
+        ? rounded(discountValue)
+        : rounded(listSellingExVat * discountValue / 100);
+      discountAmount = Math.min(discountAmount, listSellingExVat);
       markupAmounts[discount.key] = discountAmount;
     }
-    listSellingExVat = rounded(requiredNetPrice + discountAmount);
     sellingExVat = rounded(listSellingExVat - discountAmount);
-    markupTotal = rounded(sellingExVat - cogs);
   }
   const vat = rounded(sellingExVat * vatValue / 100);
   const sellingIncVat = rounded(sellingExVat + vat);
@@ -567,6 +602,7 @@ const productCostingTotals = (
     listSellingExVat,
     markupTotal,
     markupAmounts,
+    internalVatAmount,
     sellingExVat,
     vat,
     sellingIncVat,
@@ -684,6 +720,9 @@ const text = (value: unknown, fallback = "-") =>
       ? fallback
       : String(value),
   );
+const isPricingOfficerRevision = (quote: Row) =>
+  text(quote.status, "") === "needs_revision" &&
+  text(quote.revision_requested_to, "") === "pricing_officer";
 const comparableDisplayText = (value: unknown) =>
   text(value, "")
     .replace(/\s+/g, " ")
@@ -2193,6 +2232,83 @@ function ActionIcon({
   );
 }
 
+function NoteAction({
+  label = "View note",
+  onClick,
+  tone = "primary",
+}: {
+  label?: string;
+  onClick: () => void;
+  tone?: "primary" | "green" | "amber" | "red";
+}) {
+  return (
+    <ActionIcon label={label} tone={tone} confirm={false} onClick={onClick}>
+      <MessageSquareText size={15} />
+    </ActionIcon>
+  );
+}
+
+function NoteDialog({
+  open,
+  title,
+  context,
+  note,
+  emptyText = "No note was provided.",
+  titleId,
+  onClose,
+}: {
+  open: boolean;
+  title: string;
+  context?: string;
+  note: string;
+  emptyText?: string;
+  titleId: string;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div
+      className="fixed inset-0 z-[70] grid place-items-center bg-[color-mix(in_srgb,var(--color-text-primary)_30%,transparent)] p-4"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="w-full max-w-lg min-w-0 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-none"
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-[var(--color-border)] pb-3">
+          <div className="min-w-0">
+            <h2 id={titleId} className="text-[16px] font-semibold text-[var(--color-text-primary)]">
+              {title}
+            </h2>
+            {context && <p className="mt-1 text-[12px] text-[var(--color-text-secondary)]">{context}</p>}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={`Close ${title.toLowerCase()}`}
+            className="grid size-8 shrink-0 place-items-center rounded-[var(--radius-control)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)]"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="mt-4 max-h-[50vh] overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[13px] leading-5 text-[var(--color-text-primary)]">
+          {note.trim() || emptyText}
+        </div>
+        <div className="mt-5 flex justify-end">
+          <Button secondary onClick={onClose}>
+            Close
+          </Button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function SelectionCheckbox({
   checked,
   indeterminate = false,
@@ -2426,7 +2542,8 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
     )[0])
     .filter((costing): costing is ProductCostingDraft => Boolean(costing));
   const quotationVatRateValue = quotationVatRate(quote);
-  const taxLabel = `TAX (${quotationVatRateValue}%)`;
+  const hasReviewVat = quotationVatRateValue > 0 && tax > 0;
+  const taxLabel = `VAT (${quotationVatRateValue}%)`;
   const pageStyle = priceQuotationPdfStyles.page;
   const clientField = (label: string, value: string) => <PdfView key={label} style={[priceQuotationPdfStyles.clientField, compact ? priceQuotationPdfCompactStyles.clientField : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientField : undefined]}><PdfText style={[priceQuotationPdfStyles.clientLabel, compact ? priceQuotationPdfCompactStyles.clientLabel : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientLabel : undefined]}>{label}</PdfText><PdfText style={[priceQuotationPdfStyles.clientColon, compact ? priceQuotationPdfCompactStyles.clientColon : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientColon : undefined]}>:</PdfText><PdfText style={[priceQuotationPdfStyles.clientValue, compact ? priceQuotationPdfCompactStyles.clientValue : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientValue : undefined]}>{value}</PdfText></PdfView>;
   const headerSection = (
@@ -2458,10 +2575,10 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
   const salutationSection = <PdfText style={[priceQuotationPdfStyles.salutation, compact ? priceQuotationPdfCompactStyles.salutation : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.salutation : undefined]}>Dear Sir/Madam, Thank you for the opportunity to serve your requirements.</PdfText>;
   const tableSection = (
     <PdfView style={priceQuotationPdfStyles.table} wrap>
-      <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="11%" header>ITEM</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="37%" header>DESCRIPTION</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="16%" header>QUANTITY</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="21%" header>SELLING PRICE / UNIT</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="15%" header>AMOUNT</PriceQuotationPdfCell></PdfView>
+      <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="11%" header>ITEM</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="37%" header>DESCRIPTION</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="16%" header>QUANTITY</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="21%" header>{hasReviewVat ? "SELLING PRICE / UNIT (VAT INC.)" : "SELLING PRICE / UNIT"}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="15%" header>{hasReviewVat ? "AMOUNT (VAT INC.)" : "AMOUNT"}</PriceQuotationPdfCell></PdfView>
       {lines.map((line, index) => { const quantity = n(line.quantity); return <PdfView key={text(line.id, String(index))} style={priceQuotationPdfStyles.row} wrap={false}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="11%">{index + 1}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="37%" description>{text(line.description)}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="16%">{`${quantity} ${quantity === 1 ? "pc" : "pcs"}`}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="21%">{currency(n(line.unit_cost))}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="15%">{currency(n(line.line_total))}</PriceQuotationPdfCell></PdfView>; })}
-      {[["SUBTOTAL", currency(subtotal)], [taxLabel, currency(tax)], ...(shipping > 0 ? [["SHIPPING / HANDLING", currency(shipping)]] : [])].map(([label, value]) => <PdfView key={label} style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="85%" description style={priceQuotationPdfStyles.totalLabel}>{label}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="15%" style={priceQuotationPdfStyles.totalValue}>{value}</PriceQuotationPdfCell></PdfView>)}
-      <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="85%" description style={[priceQuotationPdfStyles.totalRow, priceQuotationPdfStyles.totalLabelStrong]}>TOTAL</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="15%" style={[priceQuotationPdfStyles.totalRow, priceQuotationPdfStyles.totalValueStrong]}>{currency(n(quote.total_amount))}</PriceQuotationPdfCell></PdfView>
+      {[["SUBTOTAL", currency(subtotal)], ...(hasReviewVat ? [[taxLabel, currency(tax)]] : []), ...(shipping > 0 ? [["SHIPPING / HANDLING", currency(shipping)]] : [])].map(([label, value]) => <PdfView key={label} style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="85%" description style={priceQuotationPdfStyles.totalLabel}>{label}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="15%" style={priceQuotationPdfStyles.totalValue}>{value}</PriceQuotationPdfCell></PdfView>)}
+      <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="85%" description style={[priceQuotationPdfStyles.totalRow, priceQuotationPdfStyles.totalLabelStrong]}>{hasReviewVat ? "GRAND TOTAL (VAT INCLUDED)" : "GRAND TOTAL"}</PriceQuotationPdfCell><PriceQuotationPdfCell superCompact={superCompact} compact={compact} width="15%" style={[priceQuotationPdfStyles.totalRow, priceQuotationPdfStyles.totalValueStrong]}>{currency(n(quote.total_amount))}</PriceQuotationPdfCell></PdfView>
     </PdfView>
   );
   const termsSection = (
@@ -2511,7 +2628,8 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
           <PdfView style={priceQuotationPdfStyles.internalSummary}>
             <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>TOTAL DIRECT COST</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(cogs)}</PriceQuotationPdfCell></PdfView>
             {costingDraft.markups.map((markup, index) => { const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label); const type = markupCalculationType(markup); const value = n(markupValue(markup)); const label = pricingMarkupDefinition(key as PricingMarkupKey)?.label ?? markup.label; return <PdfView key={text(markup.key, String(index))} style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>{`${label} (${type === "fixed_amount" ? currency(value) : `${value}%`})`}</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.markupAmounts[markup.key] ?? 0)}</PriceQuotationPdfCell></PdfView>; })}
-            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>COST BASE BEFORE PROFIT</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.costBase)}</PriceQuotationPdfCell></PdfView>
+            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>{`INTERNAL VAT (${n(costingDraft.internalVatRate)}%)`}</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.internalVatAmount)}</PriceQuotationPdfCell></PdfView>
+            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>TOTAL BEFORE DISCOUNT</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.listSellingExVat)}</PriceQuotationPdfCell></PdfView>
             <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>LIST PRICE VAT EX (TOTAL)</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.listSellingExVat)}</PriceQuotationPdfCell></PdfView>
             <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>NET SELLING PRICE VAT EX (TOTAL)</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.sellingExVat)}</PriceQuotationPdfCell></PdfView>
             <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>{`VAT (${quotationVatRateValue}%)`}</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.vat)}</PriceQuotationPdfCell></PdfView>
@@ -2966,7 +3084,7 @@ function Table({
           style={{ minWidth }}
         >
           <thead
-            className={`border-y border-[#102f61] bg-[#102f61] text-[12px] font-bold text-white ${scrollable ? "sticky top-0 z-10" : ""}`}
+            className={`border-y border-[#1F4E79] bg-[#1F4E79] text-[12px] font-bold text-white ${scrollable ? "sticky top-0 z-10" : ""}`}
           >
             <tr>
               {labels.map((l, index) => (
@@ -3357,6 +3475,11 @@ function Records({
   const [projectOfficerFilter, setProjectOfficerFilter] = useState("all");
   const [leadDistributionOpen, setLeadDistributionOpen] = useState(false);
   const [deletionRequestLead, setDeletionRequestLead] = useState<Row | null>(null);
+  const [recordNote, setRecordNote] = useState<{
+    title: string;
+    context: string;
+    note: string;
+  } | null>(null);
   const [deletionRequestValues, setDeletionRequestValues] = useState<Record<string, string>>({
     request_note: "",
   });
@@ -3384,6 +3507,18 @@ function Records({
           (request) => text(request.submitted_by, "") === currentUserId,
         )
       : [];
+  const renderRecordNote = (title: string, context: string, value: unknown) => {
+    const note = text(value, "").trim();
+    return note ? (
+      <NoteAction
+        label={`View ${title.toLowerCase()}`}
+        tone="amber"
+        onClick={() => setRecordNote({ title, context, note })}
+      />
+    ) : (
+      <span className="text-[11px] text-[#8b92a1]">—</span>
+    );
+  };
   useEffect(() => {
     let active = true;
     void createClient()
@@ -3919,10 +4054,10 @@ function Records({
           {ownLeadChangeRequests.length ? (
             <div className="lead-change-request-shell">
               <Table
-                labels={["Lead", "Requested changes", "Review", "Actions"]}
-                minWidth={760}
+                labels={["Lead", "Requested changes", "Review", "Note", "Actions"]}
+                minWidth={820}
                 scrollable
-                columnWidths={["28%", "31%", "29%", "12%"]}
+                columnWidths={["25%", "28%", "20%", "15%", "12%"]}
                 className="lead-change-request-table modern-page-table"
               >
                 {ownLeadChangeRequests.map((request) => {
@@ -3940,7 +4075,8 @@ function Records({
                     <tr key={text(request.id)} className="hover:bg-[#fbfcff]">
                       <td className="px-5 py-3">{stackedCell(lead?.project_name, [lead?.client_name, lead?.contact_name])}</td>
                       <td className="px-5 py-3"><span>{changeSummary || "-"}</span><small>Submitted {day(request.submitted_at)}</small></td>
-                      <td className="px-5 py-3"><Status value={request.status} />{text(request.decision_note, "") && <small>{text(request.decision_note)}</small>}</td>
+                      <td className="px-5 py-3"><Status value={request.status} /></td>
+                      <td className="px-5 py-3">{renderRecordNote("General Manager note", text(lead?.project_name, "Lead change"), request.decision_note)}</td>
                       <td className="px-5 py-3">
                         {text(request.status) === "pending" && (
                           <ActionIcon
@@ -3963,6 +4099,14 @@ function Records({
           ) : (
             <Empty>No lead change requests yet.</Empty>
           )}
+          <NoteDialog
+            open={Boolean(recordNote)}
+            title={recordNote?.title ?? "Note"}
+            context={recordNote?.context}
+            note={recordNote?.note ?? ""}
+            titleId="lead-change-request-note-title"
+            onClose={() => setRecordNote(null)}
+          />
         </Panel>
       </div>
     );
@@ -3977,35 +4121,38 @@ function Records({
     >
       {isProjectsPage && isProjectOfficerRole(role) && ownProjectEditRequests.length > 0 && (
         <Panel title="My Project Edit Requests" detail="Edit the project, submit it for review, and use Edit again if the General Manager returns it for revision.">
-          <Table labels={["Project", "Submitted", "Status", "General Manager note", "Actions"]} minWidth={720}>
-            {ownProjectEditRequests.map((request) => (
-              <tr key={text(request.id)}>
-                <td className="px-4 py-3">{text(store.leads.find((lead) => lead.id === request.project_id)?.project_name)}</td>
-                <td className="px-4 py-3">{day(request.submitted_at)}</td>
-                <td className="px-4 py-3"><Status value={request.status} /></td>
-                <td className="px-4 py-3">{text(request.decision_note)}</td>
-                <td className="px-4 py-3">
-                  {text(request.status) === "pending" && (
-                    <ActionIcon
-                      label="Unsubmit project edit"
-                      tone="amber"
-                      loading={saving}
-                      disabled={saving}
-                      confirm
-                      onClick={() => void unsubmitRequest(request, "unsubmit_project_edit", "Project edit")}
-                    >
-                      <RotateCcw size={15} />
-                    </ActionIcon>
-                  )}
-                </td>
-              </tr>
-            ))}
+          <Table labels={["Project", "Submitted", "Status", "Note", "Actions"]} minWidth={720}>
+            {ownProjectEditRequests.map((request) => {
+              const project = store.leads.find((lead) => lead.id === request.project_id);
+              return (
+                <tr key={text(request.id)}>
+                  <td className="px-4 py-3">{text(project?.project_name)}</td>
+                  <td className="px-4 py-3">{day(request.submitted_at)}</td>
+                  <td className="px-4 py-3"><Status value={request.status} /></td>
+                  <td className="px-4 py-3">{renderRecordNote("General Manager note", text(project?.project_name, "Project edit"), request.decision_note)}</td>
+                  <td className="px-4 py-3">
+                    {text(request.status) === "pending" && (
+                      <ActionIcon
+                        label="Unsubmit project edit"
+                        tone="amber"
+                        loading={saving}
+                        disabled={saving}
+                        confirm
+                        onClick={() => void unsubmitRequest(request, "unsubmit_project_edit", "Project edit")}
+                      >
+                        <RotateCcw size={15} />
+                      </ActionIcon>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </Table>
         </Panel>
       )}
       {!isProjectsPage && isProjectOfficerRole(role) && ownLeadChangeRequests.length > 0 && (
         <Panel title="My Lead Change Requests" detail="Edit the lead, submit it for review, and use Edit again if the General Manager returns it for revision.">
-          <Table labels={["Lead", "Requested", "Change", "Status", "General Manager note"]} minWidth={720}>
+          <Table labels={["Lead", "Requested", "Change", "Status", "Note"]} minWidth={720}>
             {ownLeadChangeRequests.map((request) => {
               const lead = store.leads.find((item) => item.id === request.lead_id);
               const changes = request.proposed_changes && typeof request.proposed_changes === "object" ? Object.keys(request.proposed_changes as Record<string, unknown>) : [];
@@ -4015,7 +4162,7 @@ function Records({
                   <td className="px-4 py-3">{day(request.submitted_at)}</td>
                   <td className="px-4 py-3">{text(request.change_type, "") === "delete" ? "Deletion request" : changes.map((change) => change.replaceAll("_", " ")).join(", ")}</td>
                   <td className="px-4 py-3"><Status value={request.status} /></td>
-                  <td className="px-4 py-3">{text(request.decision_note)}</td>
+                  <td className="px-4 py-3">{renderRecordNote("General Manager note", text(lead?.project_name, "Lead change"), request.decision_note)}</td>
                 </tr>
               );
             })}
@@ -4390,6 +4537,14 @@ function Records({
           </p>
         </Dialog>
       )}
+      <NoteDialog
+        open={Boolean(recordNote)}
+        title={recordNote?.title ?? "Note"}
+        context={recordNote?.context}
+        note={recordNote?.note ?? ""}
+        titleId="records-note-title"
+        onClose={() => setRecordNote(null)}
+      />
     </div>
   );
 }
@@ -5443,6 +5598,7 @@ function MockupQuotationWorkspace({
           )}
         </div>
         {filteredQuotations.length ? (
+          <div className="modern-table-shell">
           <Table
             labels={["Mockup Quotation", "Source Price Quotation", "Client", "Project Type", "Payment", "Status", "Date", "Actions"]}
             minWidth={1220}
@@ -5453,6 +5609,7 @@ function MockupQuotationWorkspace({
               const party = quotationParty(quote, store);
               const owner = isOwner(quote);
               const status = text(quote.status);
+              const pricingOfficerRevision = isPricingOfficerRevision(quote);
               const proofCount = store.quotation_signed_proofs.filter(
                 (proof) => proof.quotation_id === quote.id,
               ).length;
@@ -5475,17 +5632,17 @@ function MockupQuotationWorkspace({
                   <td className="px-5 py-3">{stackedCell(party.clientName, party.companyName)}</td>
                   <td className="px-5 py-3">{text(quote.project_types)}</td>
                   <td className="px-5 py-3">{paymentSummary ? <div><PaymentStatusBadge status={paymentSummary.status} /><small>{peso.format(paymentSummary.verified)} / {peso.format(paymentSummary.total)}</small></div> : "-"}</td>
-                  <td className="px-5 py-3"><div className="flex items-center gap-1.5"><Status value={status} />{status === "needs_revision" && <ActionIcon label="View revision note" tone="amber" confirm={false} onClick={() => setRevisionNoteQuote(quote)}><MessageSquareText size={15} /></ActionIcon>}</div></td>
+                  <td className="px-5 py-3"><div className="flex items-center gap-1.5"><Status value={status} />{status === "needs_revision" && <NoteAction label="View revision note" tone="amber" onClick={() => setRevisionNoteQuote(quote)} />}</div></td>
                   <td className="px-5 py-3">{day(status === "approved" ? quote.approved_at : quote.submitted_at ?? quote.created_at)}</td>
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-1">
                       {canReview && status === "pending" && (
                         <ActionIcon label="Review Mockup Quotation" confirm={false} onClick={() => setReviewing(quote)}><FileText size={15} /></ActionIcon>
                       )}
-                      {canPrepare && owner && ["draft", "needs_revision"].includes(status) && (
+                      {canPrepare && owner && !pricingOfficerRevision && ["draft", "needs_revision"].includes(status) && (
                         <ActionIcon label="Edit Mockup Quotation" confirm={false} onClick={() => openEdit(quote)}><Pencil size={15} /></ActionIcon>
                       )}
-                      {canPrepare && owner && ["draft", "needs_revision"].includes(status) && (
+                      {canPrepare && owner && !pricingOfficerRevision && ["draft", "needs_revision"].includes(status) && (
                         <ActionIcon label="Submit to Sales & Pricing Officer" tone="green" loading={saving} disabled={saving} onClick={() => void submit(quote)}><Send size={15} /></ActionIcon>
                       )}
                       {canPrepare && owner && status === "pending" && (
@@ -5509,6 +5666,7 @@ function MockupQuotationWorkspace({
               );
             })}
           </Table>
+          </div>
         ) : (
           <Empty>
             {mockupQuotations.length
@@ -5577,15 +5735,14 @@ function MockupQuotationWorkspace({
           </section>
         </div>
       )}
-      {revisionNoteQuote && (
-        <div className="fixed inset-0 z-[70] grid place-items-center bg-[#151922]/40 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setRevisionNoteQuote(null); }}>
-          <section role="dialog" aria-modal="true" aria-labelledby="mockup-quotation-revision-note-title" className="w-full max-w-lg rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
-            <div className="flex items-center justify-between gap-4"><div><h2 id="mockup-quotation-revision-note-title" className="text-[16px] font-semibold text-[#202938]">Revision note</h2><p className="mt-1 text-[12px] text-[#687386]">{text(revisionNoteQuote.quotation_no, "Mockup Quotation")}</p></div><button type="button" onClick={() => setRevisionNoteQuote(null)} aria-label="Close revision note" className="rounded-md p-1 text-[#687386] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938]"><X size={18} /></button></div>
-            <div className="mt-4 max-h-[50vh] overflow-y-auto whitespace-pre-wrap text-[13px] leading-5 text-[#303949]">{text(revisionNoteQuote.revision_note, "No revision note was provided.")}</div>
-            <div className="mt-5 flex justify-end"><Button secondary onClick={() => setRevisionNoteQuote(null)}>Close</Button></div>
-          </section>
-        </div>
-      )}
+      <NoteDialog
+        open={Boolean(revisionNoteQuote)}
+        title="Revision note"
+        context={revisionNoteQuote ? text(revisionNoteQuote.quotation_no, "Mockup Quotation") : undefined}
+        note={text(revisionNoteQuote?.revision_note, "")}
+        titleId="mockup-quotation-revision-note-title"
+        onClose={() => setRevisionNoteQuote(null)}
+      />
       {reviewing && (
         <PriceQuotationReview
           quotation={reviewing}
@@ -6433,9 +6590,7 @@ function QuotationPaymentDialog({
                       <td className="px-3 py-2.5"><Status value={status} /></td>
                       <td className="px-3 py-2.5">
                         {paymentNotes(payment).length ? (
-                          <ActionIcon label="View payment notes" confirm={false} onClick={() => setNotePayment(payment)}>
-                            <MessageSquareText size={15} />
-                          </ActionIcon>
+                          <NoteAction label="View payment notes" onClick={() => setNotePayment(payment)} />
                         ) : (
                           <span className="text-[11px] text-[#8b92a1]">-</span>
                         )}
@@ -6657,6 +6812,7 @@ function PaymentMonitoring({
         </nav>}
         {paymentMonth && <p className="mt-2 text-[11px] text-[var(--muted)]">The month filter selects quotations with receipts in that month. Payment status and totals include the complete quotation history.</p>}
         {rows.length ? (
+          <div className="modern-table-shell">
           <Table labels={["Quotation", "Client", "Prepared by", "Payment status", "Pending", "Verified / Total", "Last receipt", "Review"]} minWidth={1120}>
             {rows.map(({ quote, allRecords, pendingForReview, summary }) => {
               const party = quotationParty(quote, store);
@@ -6677,6 +6833,7 @@ function PaymentMonitoring({
               </tr>;
             })}
           </Table>
+          </div>
         ) : (
           <Empty>{assignedOnly ? "No payment receipts are currently assigned to you." : scope === "pending" ? "No quotation payment receipts are awaiting review." : "No approved Price or Mockup Quotations match the current filters."}</Empty>
         )}
@@ -6853,6 +7010,7 @@ function QuotationCostingOverview({
           )}
         </div>
         {filteredCostedQuotations.length ? (
+          <div className="modern-table-shell">
           <Table labels={tab === "mockup_quotation" ? ["Mockup Quotation", "Source Price Quotation", "Client", "Project Type", "Status", "Costed", "PDF"] : ["Price Quotation", "Client", "Project Type", "Status", "Costed", "PDF"]} minWidth={tab === "mockup_quotation" ? 1000 : 850} className="!w-full">
             {filteredCostedQuotations.map((quote) => {
               const source = sourceFor(quote);
@@ -6870,6 +7028,7 @@ function QuotationCostingOverview({
               );
             })}
           </Table>
+          </div>
         ) : (
           <Empty>{costedQuotations.length ? "No Quotations match the selected filters." : tab === "mockup_quotation" ? "No Mockup Quotations costed by this account yet." : "No Price Quotations costed by this account yet."}</Empty>
         )}
@@ -6910,10 +7069,25 @@ function ProjectCalendar({
   const [savingProgressId, setSavingProgressId] = useState<string | null>(null);
   const [remarkSchedule, setRemarkSchedule] = useState<Row | null>(null);
   const [remarkDraft, setRemarkDraft] = useState("");
+  const [calendarDecisionNote, setCalendarDecisionNote] = useState<{
+    title: string;
+    context: string;
+    note: string;
+  } | null>(null);
   const [proofQuote, setProofQuote] = useState<Row | null>(null);
   const schedules = store.project_schedules.slice().sort((a, b) =>
     text(a.start_date, "").localeCompare(text(b.start_date, "")),
   );
+  const renderCalendarDecisionNote = (context: string, value: unknown) => {
+    const note = text(value, "").trim();
+    return note ? (
+      <NoteAction
+        label="View General Manager note"
+        tone="amber"
+        onClick={() => setCalendarDecisionNote({ title: "General Manager note", context, note })}
+      />
+    ) : null;
+  };
   const approvedSchedules = schedules.filter(
     (schedule) => text(schedule.status, "approved") === "approved",
   );
@@ -7523,6 +7697,7 @@ function ProjectCalendar({
             {!isProjectOfficerRole(role) && <><label className="sr-only" htmlFor="project-officer-filter">Sales Officer</label><select id="project-officer-filter" value={projectOfficerFilter} onChange={(event) => setProjectOfficerFilter(event.target.value)} className={`min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${projectOfficerFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}><option value="all">All Sales Officers</option>{projectOfficerOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></>}
           </div>
         </div>
+        <div className="modern-table-shell">
         <Table
           labels={[
             "Quotation No.",
@@ -7566,7 +7741,7 @@ function ProjectCalendar({
               <td className="px-4 py-2"><Status value={schedule.completed_at ? "completed" : hasPendingScheduleCompletion(schedule) ? "completion pending" : "active"} /></td>
               <td className="px-4 py-2"><span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full" style={{ backgroundColor: calendarColorForProjectType(scheduleProjectType(schedule)) }} aria-hidden="true" />{scheduleProjectType(schedule)}</span></td>
               <td className="px-4 py-2">{isProjectOfficerRole(role) && !schedule.completed_at ? <input aria-label={`Progress percentage for ${text(schedule.project_name, text(schedule.quotation_no))}`} type="number" min="0" max="100" step="0.01" value={projectProgress(schedule).percentage} onChange={(event) => setProgressDrafts((current) => ({ ...current, [text(schedule.id)]: { ...projectProgress(schedule), percentage: event.target.value } }))} className="input mt-0 w-20 text-center" /> : `${n(schedule.progress_percentage)}%`}</td>
-              <td className="px-4 py-2 text-center"><ActionIcon label={isProjectOfficerRole(role) && !schedule.completed_at ? "Edit project remark" : "View project remark"} confirm={false} onClick={() => openRemark(schedule)}><MessageSquareText size={15} /></ActionIcon></td>
+              <td className="px-4 py-2 text-center"><NoteAction label={isProjectOfficerRole(role) && !schedule.completed_at ? "Edit project remark" : "View project remark"} onClick={() => openRemark(schedule)} /></td>
               {!isProjectOfficerRole(role) && <td className="px-4 py-2">{officerName(schedule)}</td>}
               <td className="px-4 py-2">
                 {showProjectActions ? <div className="flex items-center gap-1">
@@ -7612,6 +7787,7 @@ function ProjectCalendar({
             </tr>;
           })}
         </Table>
+        </div>
         {!filteredTableSchedules.length && (
           <Empty>
             {projectStatusTab === "active"
@@ -7662,6 +7838,14 @@ function ProjectCalendar({
             </section>
           </div>
         )}
+        <NoteDialog
+          open={Boolean(calendarDecisionNote)}
+          title={calendarDecisionNote?.title ?? "General Manager note"}
+          context={calendarDecisionNote?.context}
+          note={calendarDecisionNote?.note ?? ""}
+          titleId="project-calendar-decision-note-title"
+          onClose={() => setCalendarDecisionNote(null)}
+        />
         {isProjectOfficerRole(role) && myScheduleRequests.length > 0 && (
           <div className="mt-5 rounded-xl border border-[#e4e8ef] bg-[#fafbfe] p-4">
             <h2 className="text-[13px] font-semibold text-[#202938]">My project submissions</h2>
@@ -7670,8 +7854,7 @@ function ProjectCalendar({
                 <div key={text(schedule.id)} className="rounded-lg border border-[#e4e8ef] bg-white px-3 py-2 text-[12px]">
                   <p className="font-medium text-[#202938]">{text(schedule.project_name, text(schedule.quotation_no))}</p>
                   <p className="mt-0.5 text-[#687386]">{day(schedule.start_date)} – {day(schedule.due_date)}</p>
-                  <div className="mt-1"><Status value={text(schedule.status, "pending")} /></div>
-                  {text(schedule.decision_note) && <p className="mt-1 text-[#687386]">{text(schedule.decision_note)}</p>}
+                  <div className="mt-1 flex items-center gap-1.5"><Status value={text(schedule.status, "pending")} />{renderCalendarDecisionNote(text(schedule.project_name, text(schedule.quotation_no, "Project schedule")), schedule.decision_note)}</div>
                 </div>
               ))}
             </div>
@@ -7687,8 +7870,7 @@ function ProjectCalendar({
                   <div key={text(request.id)} className="rounded-lg border border-[#e4e8ef] bg-white px-3 py-2 text-[12px]">
                     <p className="font-medium text-[#202938]">{text(schedule?.project_name, text(schedule?.quotation_no))}</p>
                     <p className="mt-0.5 text-[#687386]">{day(request.proposed_start_date)} – {day(request.proposed_due_date)}</p>
-                    <div className="mt-1"><Status value={text(request.status, "pending")} /></div>
-                    {text(request.decision_note) && <p className="mt-1 text-[#687386]">{text(request.decision_note)}</p>}
+                    <div className="mt-1 flex items-center gap-1.5"><Status value={text(request.status, "pending")} />{renderCalendarDecisionNote(text(schedule?.project_name, text(schedule?.quotation_no, "Project schedule revision")), request.decision_note)}</div>
                     {text(request.status) === "pending" && (
                       <div className="mt-2">
                         <Button
@@ -7720,8 +7902,7 @@ function ProjectCalendar({
                   <div key={text(request.id)} className="rounded-lg border border-[#e4e8ef] bg-white px-3 py-2 text-[12px]">
                     <p className="font-medium text-[#202938]">{text(schedule?.project_name, text(schedule?.quotation_no))}</p>
                     <p className="mt-0.5 text-[#687386]">Requested {day(request.submitted_at)}</p>
-                    <div className="mt-1"><Status value={text(request.status, "pending")} /></div>
-                    {text(request.decision_note) && <p className="mt-1 text-[#687386]">{text(request.decision_note)}</p>}
+                    <div className="mt-1 flex items-center gap-1.5"><Status value={text(request.status, "pending")} />{renderCalendarDecisionNote(text(schedule?.project_name, text(schedule?.quotation_no, "Project completion")), request.decision_note)}</div>
                     {text(request.status) === "pending" && (
                       <div className="mt-2">
                         <Button
@@ -10605,14 +10786,11 @@ function Quotations({
                         <span className="text-[11px] text-[#a76605]">Revision requested</span>
                       )}
                       {isCosting && text(q.status) === "needs_revision" && text(q.revision_note, "") && (
-                        <ActionIcon
-                          label="View revision note"
-                          tone="amber"
-                          confirm={false}
-                          onClick={() => setRevisionNoteQuote(q)}
-                        >
-                          <MessageSquareText size={15} />
-                        </ActionIcon>
+                          <NoteAction
+                            label="View revision note"
+                            tone="amber"
+                            onClick={() => setRevisionNoteQuote(q)}
+                          />
                       )}
                     </div>
                   </td>
@@ -11552,52 +11730,14 @@ function Quotations({
           printAfterOpen={printAfterOpen}
         />
       )}
-      {revisionNoteQuote && (
-        <div
-          className="fixed inset-0 z-[70] grid place-items-center bg-[#151922]/40 p-4"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setRevisionNoteQuote(null);
-          }}
-        >
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="revision-note-title"
-            className="w-full max-w-lg rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"
-          >
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <h2
-                  id="revision-note-title"
-                  className="text-[16px] font-semibold text-[#202938]"
-                >
-                  General Manager revision note
-                </h2>
-                <p className="mt-1 text-[12px] text-[#687386]">
-                  {text(revisionNoteQuote.quotation_no, "Costing breakdown")}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setRevisionNoteQuote(null)}
-                aria-label="Close revision note"
-                className="rounded-md p-1 text-[#687386] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c43b43]"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="mt-4 max-h-[50vh] overflow-y-auto whitespace-pre-wrap text-[13px] leading-5 text-[#303949]">
-              {text(revisionNoteQuote.revision_note, "No revision note was provided.")}
-            </div>
-            <div className="mt-5 flex justify-end">
-              <Button secondary onClick={() => setRevisionNoteQuote(null)}>
-                Close
-              </Button>
-            </div>
-          </section>
-        </div>
-      )}
+      <NoteDialog
+        open={Boolean(revisionNoteQuote)}
+        title="General Manager revision note"
+        context={revisionNoteQuote ? text(revisionNoteQuote.quotation_no, "Costing breakdown") : undefined}
+        note={text(revisionNoteQuote?.revision_note, "")}
+        titleId="costing-revision-note-title"
+        onClose={() => setRevisionNoteQuote(null)}
+      />
     </div>
   );
 }
@@ -11612,10 +11752,12 @@ function PriceQuotationSubmissions({
   notice: (message: string) => void;
 }) {
   const [selectedPriceQuotation, setSelectedPriceQuotation] = useState<Row | null>(null);
+  const [noteQuotation, setNoteQuotation] = useState<Row | null>(null);
   const [search, setSearch] = useState("");
   const [month, setMonth] = useState("");
   const [submissionType, setSubmissionType] = useState<"all" | "new" | "revised">("all");
   const [quotationKind, setQuotationKind] = useState<"price_quotation" | "mockup_quotation">("price_quotation");
+  const [queueStage, setQueueStage] = useState<"pending" | "gm_revision">("pending");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
@@ -11644,27 +11786,51 @@ function PriceQuotationSubmissions({
       text(quotation.document_type) === "mockup_quotation" &&
       assignedProjectTypes.has(pricingProjectTypeKey(quotation.project_types)),
   ).sort(newestActivityFirst);
+  const gmRevisionPriceQuotations = store.quotations.filter(
+    (quotation) =>
+      isPricingOfficerRevision(quotation) &&
+      text(quotation.document_type) === "price_quotation" &&
+      !quotation.costing_source_id &&
+      assignedProjectTypes.has(pricingProjectTypeKey(quotation.project_types)),
+  ).sort(newestActivityFirst);
+  const gmRevisionMockupQuotations = store.quotations.filter(
+    (quotation) =>
+      isPricingOfficerRevision(quotation) &&
+      text(quotation.document_type) === "mockup_quotation" &&
+      assignedProjectTypes.has(pricingProjectTypeKey(quotation.project_types)),
+  ).sort(newestActivityFirst);
   const normalizedSearch = search.trim().toLowerCase();
   const matchesSubmissionFilters = (quotation: Row) => {
-    const submittedAt = text(quotation.submitted_at);
+    const activityAt = queueStage === "gm_revision"
+      ? text(quotation.revision_requested_at ?? quotation.updated_at ?? quotation.created_at, "")
+      : text(quotation.submitted_at, "");
     const preparedBy = store.profiles.find((profile) => profile.id === (quotation.prepared_by_user_id ?? quotation.submitted_by ?? quotation.created_by))?.full_name;
     const party = quotationParty(quotation, store);
     const matchesSearch = !normalizedSearch || [quotation.quotation_no, party.clientName, party.companyName, quotation.project_name, preparedBy]
       .some((value) => text(value).toLowerCase().includes(normalizedSearch));
-    const matchesMonth = !month || submittedAt.startsWith(month);
+    const matchesMonth = !month || activityAt.startsWith(month);
     const revised = n(quotation.resubmission_count) > 0;
     const matchesSubmission = submissionType === "all" || (submissionType === "new" ? !revised : revised);
     return matchesSearch && matchesMonth && matchesSubmission;
   };
   const sortSubmissions = (left: Row, right: Row) => {
-    const submittedDifference = new Date(text(right.submitted_at, "")).getTime() - new Date(text(left.submitted_at, "")).getTime();
-    if (Number.isFinite(submittedDifference) && submittedDifference !== 0) return submittedDifference;
+    const activityAt = (quotation: Row) => queueStage === "gm_revision"
+      ? text(quotation.revision_requested_at ?? quotation.updated_at ?? quotation.created_at, "")
+      : text(quotation.submitted_at, "");
+    const activityDifference = new Date(activityAt(right)).getTime() - new Date(activityAt(left)).getTime();
+    if (Number.isFinite(activityDifference) && activityDifference !== 0) return activityDifference;
     return new Date(text(right.created_at, "")).getTime() - new Date(text(left.created_at, "")).getTime();
   };
   const filteredPriceQuotations = pendingPriceQuotations.filter(matchesSubmissionFilters).sort(sortSubmissions);
   const filteredMockupQuotations = pendingMockupQuotations.filter(matchesSubmissionFilters).sort(sortSubmissions);
-  const activeSubmissions = quotationKind === "price_quotation" ? filteredPriceQuotations : filteredMockupQuotations;
-  const activePendingSubmissions = quotationKind === "price_quotation" ? pendingPriceQuotations : pendingMockupQuotations;
+  const filteredGmRevisionPriceQuotations = gmRevisionPriceQuotations.filter(matchesSubmissionFilters).sort(sortSubmissions);
+  const filteredGmRevisionMockupQuotations = gmRevisionMockupQuotations.filter(matchesSubmissionFilters).sort(sortSubmissions);
+  const activeSubmissions = queueStage === "gm_revision"
+    ? quotationKind === "price_quotation" ? filteredGmRevisionPriceQuotations : filteredGmRevisionMockupQuotations
+    : quotationKind === "price_quotation" ? filteredPriceQuotations : filteredMockupQuotations;
+  const activePendingSubmissions = queueStage === "gm_revision"
+    ? quotationKind === "price_quotation" ? gmRevisionPriceQuotations : gmRevisionMockupQuotations
+    : quotationKind === "price_quotation" ? pendingPriceQuotations : pendingMockupQuotations;
   const submissionLabel = (quotation: Row) => {
     const count = n(quotation.resubmission_count);
     return count === 0 ? "New" : count === 1 ? "Revised" : `Revised ${count}×`;
@@ -11680,13 +11846,17 @@ function PriceQuotationSubmissions({
   return (
     <Panel
       title="Quotation Review Queue"
-      detail="Review submitted Price Quotations and Mockup Quotations assigned to your project types."
+      detail="Review assigned quotations and address General Manager revisions before resubmitting."
       variant="page"
       hideHeading
     >
       <div className="app-tabs border-b border-[#edf0f5] px-4 pt-3 sm:px-5">
-        <button type="button" onClick={() => { setQuotationKind("price_quotation"); setSelectedPriceQuotation(null); }} aria-current={quotationKind === "price_quotation" ? "page" : undefined} className="app-tab">Price Quotations ({pendingPriceQuotations.length})</button>
-        <button type="button" onClick={() => { setQuotationKind("mockup_quotation"); setSelectedPriceQuotation(null); }} aria-current={quotationKind === "mockup_quotation" ? "page" : undefined} className="app-tab">Mockup Quotations ({pendingMockupQuotations.length})</button>
+        <button type="button" onClick={() => { setQuotationKind("price_quotation"); setSelectedPriceQuotation(null); }} aria-current={quotationKind === "price_quotation" ? "page" : undefined} className="app-tab">Price Quotations ({queueStage === "gm_revision" ? gmRevisionPriceQuotations.length : pendingPriceQuotations.length})</button>
+        <button type="button" onClick={() => { setQuotationKind("mockup_quotation"); setSelectedPriceQuotation(null); }} aria-current={quotationKind === "mockup_quotation" ? "page" : undefined} className="app-tab">Mockup Quotations ({queueStage === "gm_revision" ? gmRevisionMockupQuotations.length : pendingMockupQuotations.length})</button>
+      </div>
+      <div className="app-tabs border-b border-[#edf0f5] px-4 pt-2 sm:px-5">
+        <button type="button" onClick={() => { setQueueStage("pending"); setSelectedPriceQuotation(null); }} aria-current={queueStage === "pending" ? "page" : undefined} className="app-tab">Awaiting Review ({quotationKind === "price_quotation" ? pendingPriceQuotations.length : pendingMockupQuotations.length})</button>
+        <button type="button" onClick={() => { setQueueStage("gm_revision"); setSelectedPriceQuotation(null); }} aria-current={queueStage === "gm_revision" ? "page" : undefined} className="app-tab">GM Revisions ({quotationKind === "price_quotation" ? gmRevisionPriceQuotations.length : gmRevisionMockupQuotations.length})</button>
       </div>
       <div className="flex flex-wrap items-end gap-2 border-b border-[#edf0f5] px-4 py-3 sm:px-5">
         <label className="min-w-[190px] flex-1 text-[11px] font-medium text-[#687386]">Search<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Quotation, client, or project" className="input mt-1" /></label>
@@ -11695,17 +11865,29 @@ function PriceQuotationSubmissions({
         {(search || month || submissionType !== "all") && <Button secondary onClick={() => { setSearch(""); setMonth(""); setSubmissionType("all"); }}>Clear filters</Button>}
       </div>
       {activeSubmissions.length ? (
-        <Table labels={[quotationKind === "price_quotation" ? "Price Quotation" : "Mockup Quotation", "Client's Name", "Company Name", "Prepared by", "Submitted", "Review"]} minWidth={860}>
+        <div className="modern-table-shell">
+        <Table labels={[quotationKind === "price_quotation" ? "Price Quotation" : "Mockup Quotation", "Client's Name", "Company Name", "Prepared by", queueStage === "gm_revision" ? "Returned" : "Submitted", "Note", "Review"]} minWidth={940}>
           {activeSubmissions.map((quotation) => {
             const lead = store.leads.find((item) => item.id === quotation.lead_id);
             const party = quotationParty(quotation, store);
             return (
               <tr key={text(quotation.id)}>
-                <td className="px-5 py-3"><div className="flex items-center gap-2"><b>{text(quotation.quotation_no)}</b><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${n(quotation.resubmission_count) > 0 ? "bg-[#fff4dd] text-[#9a6700]" : "bg-[#edf5ff] text-[#175cd3]"}`}>{submissionLabel(quotation)}</span></div>{comparableDisplayText(text(quotation.project_name, text(lead?.project_name))) !== comparableDisplayText(quotation.quotation_no) && <small>{text(quotation.project_name, text(lead?.project_name))}</small>}</td>
+                <td className="px-5 py-3"><div className="flex items-center gap-2"><b>{text(quotation.quotation_no)}</b><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${queueStage === "gm_revision" ? "bg-[#fff4dd] text-[#9a6700]" : n(quotation.resubmission_count) > 0 ? "bg-[#fff4dd] text-[#9a6700]" : "bg-[#edf5ff] text-[#175cd3]"}`}>{queueStage === "gm_revision" ? "GM Revision" : submissionLabel(quotation)}</span></div>{comparableDisplayText(text(quotation.project_name, text(lead?.project_name))) !== comparableDisplayText(quotation.quotation_no) && <small>{text(quotation.project_name, text(lead?.project_name))}</small>}</td>
                 <td className="px-5 py-3 font-medium">{party.clientName}</td>
                 <td className="px-5 py-3">{party.companyName}</td>
                 <td className="px-5 py-3">{officerName(quotation)}</td>
-                <td className="px-5 py-3">{day(quotation.submitted_at)}</td>
+                <td className="px-5 py-3">{day(queueStage === "gm_revision" ? quotation.revision_requested_at ?? quotation.updated_at ?? quotation.created_at : quotation.submitted_at)}</td>
+                <td className="px-5 py-3">
+                  {text(quotation.revision_note, "").trim() ? (
+                    <NoteAction
+                      label="View General Manager instructions"
+                      tone="amber"
+                      onClick={() => setNoteQuotation(quotation)}
+                    />
+                  ) : (
+                    <span className="text-[11px] text-[#8b92a1]">—</span>
+                  )}
+                </td>
                 <td className="px-5 py-3">
                   <ActionIcon label={quotationKind === "price_quotation" ? "Review Price Quotation" : "Review Mockup Quotation"} confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon>
                 </td>
@@ -11713,9 +11895,19 @@ function PriceQuotationSubmissions({
             );
           })}
         </Table>
+        </div>
       ) : (
-        <Empty>{activePendingSubmissions.length ? `No ${quotationKind === "price_quotation" ? "Price Quotations" : "Mockup Quotations"} match the selected filters.` : `No ${quotationKind === "price_quotation" ? "Price Quotations" : "Mockup Quotations"} are awaiting review.`}</Empty>
+        <Empty>{activePendingSubmissions.length ? `No ${quotationKind === "price_quotation" ? "Price Quotations" : "Mockup Quotations"} match the selected filters.` : queueStage === "gm_revision" ? `No ${quotationKind === "price_quotation" ? "Price Quotations" : "Mockup Quotations"} have been returned by the General Manager.` : `No ${quotationKind === "price_quotation" ? "Price Quotations" : "Mockup Quotations"} are awaiting review.`}</Empty>
       )}
+      <NoteDialog
+        open={Boolean(noteQuotation)}
+        title="General Manager instructions"
+        context={noteQuotation ? text(noteQuotation.quotation_no, quotationKind === "price_quotation" ? "Price Quotation" : "Mockup Quotation") : undefined}
+        note={text(noteQuotation?.revision_note, "")}
+        emptyText="No instructions were provided."
+        titleId="quotation-queue-note-title"
+        onClose={() => setNoteQuotation(null)}
+      />
       {selectedPriceQuotation && (
         <PriceQuotationReview
           quotation={selectedPriceQuotation}
@@ -12071,6 +12263,7 @@ function PriceQuotationWorkspace({
   const canDeletePriceQuotation = (quote: Row) =>
     isGeneralManager ||
     (isProjectOfficerRole(role) &&
+      !isPricingOfficerRevision(quote) &&
       !quote.costing_source_id &&
       quote.created_by === currentUserId &&
       ["draft", "needs_revision"].includes(text(quote.status)));
@@ -12171,6 +12364,7 @@ function PriceQuotationWorkspace({
         </div>
       </div>
       {filteredQuotations.length ? (
+        <div className="modern-table-shell">
         <Table
           labels={isProjectOfficerRole(role) ? ["Quotation", "Client's Name", "Company Name", "Status", "Payment status", "Paid / total", "Date", "Actions"] : ["Quotation", "Client's Name", "Company Name", "Prepared by", "Status", "Payment status", "Paid / total", "Date", "Actions"]}
           minWidth={isProjectOfficerRole(role) ? 1120 : 1260}
@@ -12181,7 +12375,8 @@ function PriceQuotationWorkspace({
             const party = quotationParty(quote, store);
             const preparedBy = preparedByName(quote);
             const isLegacy = Boolean(quote.costing_source_id);
-            const editable = !isLegacy && ["draft", "needs_revision"].includes(text(quote.status));
+            const pricingOfficerRevision = isPricingOfficerRevision(quote);
+            const editable = !isLegacy && !pricingOfficerRevision && ["draft", "needs_revision"].includes(text(quote.status));
             const priceRevisionRequest = store.price_quotation_revision_requests.find(
               (request) =>
                 request.quotation_id === quote.id &&
@@ -12208,7 +12403,7 @@ function PriceQuotationWorkspace({
                 <td className="px-5 py-3">{stackedCell(party.clientName, text(quote.project_name, text(lead?.project_name)))}</td>
                 <td className="px-5 py-3">{party.companyName}</td>
                 {!isProjectOfficerRole(role) && <td className="px-5 py-3">{preparedBy}</td>}
-                <td className="px-5 py-3"><div className="flex items-center gap-1.5"><Status value={quote.status} />{priceRevisionRequest && <span className="text-[11px] text-[#a76605]">Revision requested</span>}{text(quote.status) === "needs_revision" && <ActionIcon label="View revision note" tone="amber" confirm={false} onClick={() => setRevisionNoteQuote(quote)}><MessageSquareText size={15} /></ActionIcon>}</div></td>
+                <td className="px-5 py-3"><div className="flex items-center gap-1.5"><Status value={quote.status} />{priceRevisionRequest && <span className="text-[11px] text-[#a76605]">Revision requested</span>}{text(quote.status) === "needs_revision" && <NoteAction label="View revision note" tone="amber" onClick={() => setRevisionNoteQuote(quote)} />}</div></td>
                 <td className="px-5 py-3"><PaymentStatusBadge status={paymentSummary.status} /></td>
                 <td className="px-5 py-3 text-right">{peso.format(paymentSummary.verified)} / {peso.format(paymentSummary.total)}</td>
                 <td className="px-5 py-3">{text(quote.status) === "approved" ? day(quote.approved_at) : day(quote.submitted_at)}</td>
@@ -12264,11 +12459,13 @@ function PriceQuotationWorkspace({
             );
           })}
         </Table>
+        </div>
       ) : <Empty>{quotations.length ? "No Price Quotations match the selected filters." : "No Price Quotations yet. Create one from a lead to begin."}</Empty>}
       </div>
       {isProjectOfficerRole(role) && recipientEndorsements.length > 0 && (
         <section className="border-t border-[#edf0f5] px-4 py-4 sm:px-5 lg:px-6">
           <div className="mb-3"><h3 className="text-[14px] font-semibold text-[#202938]">Endorsed to Me</h3><p className="mt-0.5 text-[12px] text-[#687386]">Read-only PDF copies shared by another Sales Executive.</p></div>
+          <div className="modern-table-shell">
           <Table labels={["Price Quotation", "Client's Name", "Company Name", "Endorsed", "PDF"]} minWidth={800}>
             {recipientEndorsements.map((endorsement) => {
               const quotation = store.quotations.find((item) => item.id === endorsement.quotation_id);
@@ -12276,9 +12473,10 @@ function PriceQuotationWorkspace({
                 ? quotationParty(quotation, store)
                 : { clientName: "-", companyName: text(endorsement.client_name) };
               return <tr key={text(endorsement.id)}><td className="px-5 py-3 font-medium">{text(endorsement.quotation_no)}</td><td className="px-5 py-3">{stackedCell(party.clientName, endorsement.project_name)}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{day(endorsement.activated_at ?? endorsement.created_at)}</td><td className="px-5 py-3"><ActionIcon label="View endorsed Price Quotation PDF" confirm={false} loading={openingEndorsementId === text(endorsement.id)} onClick={() => void openEndorsedSnapshot(endorsement)}><FileText size={15} /></ActionIcon></td></tr>;
-            })}
-          </Table>
-        </section>
+           })}
+         </Table>
+           </div>
+       </section>
       )}
       {endorseQuote && (
         <Dialog title="Endorse Price Quotation" fields={[{ key: "recipient_user_id", label: "Sales Executive", type: "select", required: true, options: availableEndorsementRecipients.map((officer) => `${officer.id}|${officer.name}`) }, { key: "note", label: "Note (optional)", type: "textarea", placeholder: "Add a note for the receiving officer." }]} values={endorsementValues} setValues={setEndorsementValues} save={() => void endorse()} close={() => setEndorseQuote(null)} saving={endorsing} saveLabel="Create PDF Copy & Endorse" className="max-w-xl">
@@ -12314,15 +12512,14 @@ function PriceQuotationWorkspace({
           </section>
         </div>
       )}
-      {revisionNoteQuote && (
-        <div className="fixed inset-0 z-[70] grid place-items-center bg-[#151922]/40 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setRevisionNoteQuote(null); }}>
-          <section role="dialog" aria-modal="true" aria-labelledby="price-quotation-revision-note-title" className="w-full max-w-lg rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
-            <div className="flex items-center justify-between gap-4"><div><h2 id="price-quotation-revision-note-title" className="text-[16px] font-semibold text-[#202938]">General Manager revision note</h2><p className="mt-1 text-[12px] text-[#687386]">{text(revisionNoteQuote.quotation_no, "Price Quotation")}</p></div><button type="button" onClick={() => setRevisionNoteQuote(null)} aria-label="Close revision note" className="rounded-md p-1 text-[#687386] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938]"><X size={18} /></button></div>
-            <div className="mt-4 max-h-[50vh] overflow-y-auto whitespace-pre-wrap text-[13px] leading-5 text-[#303949]">{text(revisionNoteQuote.revision_note, "No revision note was provided.")}</div>
-            <div className="mt-5 flex justify-end"><Button secondary onClick={() => setRevisionNoteQuote(null)}>Close</Button></div>
-          </section>
-        </div>
-      )}
+      <NoteDialog
+        open={Boolean(revisionNoteQuote)}
+        title="General Manager revision note"
+        context={revisionNoteQuote ? text(revisionNoteQuote.quotation_no, "Price Quotation") : undefined}
+        note={text(revisionNoteQuote?.revision_note, "")}
+        titleId="price-quotation-revision-note-title"
+        onClose={() => setRevisionNoteQuote(null)}
+      />
       {illustrationQuote && (
         <div className="fixed inset-0 z-[70] grid place-items-center bg-[#151922]/40 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setIllustrationQuote(null); }}>
           <section role="dialog" aria-modal="true" aria-labelledby="price-quotation-illustrations-title" className="w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
@@ -12341,7 +12538,7 @@ function PriceQuotationWorkspace({
         </div>
       )}
       {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); notice(message); }} autoExportPdf pdfWindow={pdfWindow} hidden showInternalCosting={isGeneralManager} />}
-      {reviewing && <PriceQuotationReview quotation={reviewing} store={store} saving={saving} close={() => setReviewing(null)} notice={notice} reload={reload} />}
+      {reviewing && <PriceQuotationReview quotation={reviewing} store={store} saving={saving} showInternalMarkups={isGeneralManager} close={() => setReviewing(null)} notice={notice} reload={reload} />}
       {proofQuote && <SignedProofDialog quote={proofQuote} store={store} canUpload={isProjectOfficerRole(role) && preparedByKey(proofQuote) === currentUserId} close={() => setProofQuote(null)} notice={notice} reload={reload} />}
       {paymentQuote && <QuotationPaymentDialog quote={paymentQuote} store={store} orgId={orgId} role={role} close={() => setPaymentQuote(null)} reload={reload} />}
     </Panel>
@@ -12417,11 +12614,15 @@ function PricingMarkupEditor({
   editable,
   visibleMarkupKeys,
   update,
+  heading,
+  showInternalVat = false,
 }: {
   costing: ProductCostingDraft;
   editable: boolean;
   visibleMarkupKeys: ReadonlyArray<PricingMarkupKey>;
   update: (next: ProductCostingDraft) => void;
+  heading?: string;
+  showInternalVat?: boolean;
 }) {
   const totals = productCostingTotals(costing, 1, 0);
   const visibleMarkups = costing.markups.filter((markup) => {
@@ -12429,33 +12630,41 @@ function PricingMarkupEditor({
     return Boolean(key) && visibleMarkupKeys.includes(key as PricingMarkupKey);
   });
   const discountOnly = visibleMarkupKeys.length === 1 && visibleMarkupKeys[0] === "discounts";
+  const includesDiscount = visibleMarkupKeys.includes("discounts");
   return (
     <div className="rounded-lg border border-[#d9e0e9] bg-white">
       <div className="border-b border-[#edf0f5] px-3 py-2">
-        <h4 className="text-[12px] font-semibold text-[#344054]">{discountOnly ? "Discount" : "Internal pricing adjustments"}</h4>
-        <p className="mt-0.5 text-[11px] text-[#687386]">{discountOnly ? "Enter the customer discount using a percentage or fixed amount." : "Percentage values use direct COGS. Target profit is a true margin; discounts are deducted from the customer list price."}</p>
+        <h4 className="text-[12px] font-semibold text-[#344054]">{heading ?? (discountOnly ? "Discount" : "Internal pricing adjustments")}</h4>
       </div>
-      <Table labels={["Category", "Basis", "Value", "Calculated amount"]} minWidth={0} compact alignRightLabels={["Value", "Calculated amount"]}>
+      <Table labels={includesDiscount ? ["Category", "Basis", "Value", "Calculated amount"] : ["Category", "Percentage", "Calculated amount"]} minWidth={0} compact alignRightLabels={includesDiscount ? ["Value", "Calculated amount"] : ["Percentage", "Calculated amount"]}>
         {visibleMarkups.map((markup) => {
           const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
+          const isDiscount = key === "discounts";
           const label = discountOnly && key === "discounts"
             ? "Discount"
             : pricingMarkupDefinition(key as PricingMarkupKey)?.label ?? markup.label;
-          const type = markupCalculationType(markup);
+          const calculationType = markupCalculationType(markup);
+          const rowCalculationType = isDiscount ? calculationType : "percentage";
           const amount = totals.markupAmounts[markup.key] ?? 0;
           return (
             <tr key={markup.key} className="hover:bg-[#fbfcff]">
               <td className="px-3 py-2 font-medium text-[#344054]">{label}</td>
+              {includesDiscount && <td className="px-2 py-2">
+                {isDiscount && editable ? <SegmentedToggle ariaLabel={`${label} calculation basis`} value={rowCalculationType} options={markupBasisOptions} onChange={(value) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, calculationType: value as MarkupCalculationType } : item) })} size="compact" className="w-16" /> : <span className="block text-right text-[#687386]">{rowCalculationType === "fixed_amount" ? "Amount" : "Percent"}</span>}
+              </td>}
               <td className="px-2 py-2">
-                {editable ? <SegmentedToggle ariaLabel={`${label} calculation basis`} value={type} options={calculationBasisIconOptions} size="compact" className="w-full" onChange={(value) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, calculationType: value as MarkupCalculationType } : item) })} /> : <CalculationBasisIcon value={type} />}
-              </td>
-              <td className="px-2 py-2">
-                {editable ? <div className="flex items-center justify-end gap-1"><input aria-label={`${label} value`} type="number" min="0" step="any" value={markupValue(markup)} onChange={(event) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, value: event.target.value } : item) })} className="input mt-0 w-[92px] min-w-0 px-2 py-1.5 text-right tabular-nums" /><span className="w-4 text-[11px] text-[#687386]">{type === "fixed_amount" ? "₱" : "%"}</span></div> : <span className="block text-right tabular-nums text-[#687386]">{type === "fixed_amount" ? peso.format(n(markupValue(markup))) : `${n(markupValue(markup))}%`}</span>}
+                {editable ? <div className="flex items-center justify-end gap-1"><input aria-label={`${label} ${rowCalculationType === "fixed_amount" ? "amount" : "percentage"}`} type="number" min="0" max={rowCalculationType === "percentage" ? "100" : undefined} step="any" value={markupValue(markup)} onChange={(event) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, calculationType: isDiscount ? rowCalculationType : "percentage", value: event.target.value } : item) })} className="input mt-0 px-2 py-1.5 tabular-nums" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /><span className="w-4 text-[11px] text-[#687386]">{rowCalculationType === "fixed_amount" ? "₱" : "%"}</span></div> : <span className="block text-right tabular-nums text-[#687386]">{rowCalculationType === "fixed_amount" ? peso.format(n(markupValue(markup))) : `${n(markupValue(markup))}%`}</span>}
               </td>
               <td className="px-3 py-2 text-right font-medium tabular-nums">{peso.format(amount)}</td>
             </tr>
           );
         })}
+        {showInternalVat && <tr className="bg-[#fafbfc]">
+          <td className="px-3 py-2 font-medium text-[#344054]">Internal VAT</td>
+          {includesDiscount && <td className="px-2 py-2"><span className="block text-right text-[#687386]">Percent</span></td>}
+          <td className="px-2 py-2">{editable ? <div className="flex items-center justify-end gap-1"><input aria-label="Internal VAT percentage" type="number" min="0" max="100" step="any" value={costing.internalVatRate} onChange={(event) => update({ ...costing, internalVatRate: event.target.value })} className="input mt-0 px-2 py-1.5 tabular-nums" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /><span className="w-4 text-[11px] text-[#687386]">%</span></div> : <span className="block text-right tabular-nums text-[#687386]">{`${n(costing.internalVatRate)}%`}</span>}</td>
+          <td className="px-3 py-2 text-right font-medium tabular-nums">{peso.format(totals.internalVatAmount)}</td>
+        </tr>}
       </Table>
     </div>
   );
@@ -12528,8 +12737,6 @@ type PriceQuotationReviewContentProps = {
   setProductCostings: (next: ProductCostingDraft[] | ((current: ProductCostingDraft[]) => ProductCostingDraft[])) => void;
   prices: Record<string, string>;
   setPrices: (next: Record<string, string> | ((current: Record<string, string>) => Record<string, string>)) => void;
-  priceBasis: "ex" | "inc";
-  setPriceBasis: (basis: "ex" | "inc") => void;
   subtotal: number;
   vatRate: string;
   setVatRate: (value: string) => void;
@@ -12546,6 +12753,8 @@ type PriceQuotationReviewContentProps = {
   working: boolean;
   review: (decision: "approved" | "needs_revision") => Promise<void>;
   finalApproval: boolean;
+  showInternalMarkups: boolean;
+  pricingRevision?: boolean;
   documentLabel?: string;
   sourceQuotationNo?: string;
 };
@@ -12553,21 +12762,20 @@ type PriceQuotationReviewContentProps = {
 function QuotationReviewSummary({
   lines,
   prices,
-  priceBasis,
   subtotal,
   vatRate,
   tax,
   total,
   productCostings,
-}: Pick<PriceQuotationReviewContentProps, "lines" | "prices" | "priceBasis" | "subtotal" | "vatRate" | "tax" | "total" | "productCostings">) {
-  const vatMultiplier = subtotal > 0 ? 1 + tax / subtotal : 1;
-  const priceLabel = "Selling Price / Unit";
+}: Pick<PriceQuotationReviewContentProps, "lines" | "prices" | "subtotal" | "vatRate" | "tax" | "total" | "productCostings">) {
+  const hasVat = n(vatRate) > 0 && tax > 0;
+  const priceLabel = hasVat ? "Selling Price / Unit (VAT inc.)" : "Selling Price / Unit";
   return <section>
     <Table labels={["Item", "Description", "Quantity", priceLabel, "Amount"]} minWidth={0} className="price-quotation-review-items table-fixed" columnWidths={["7%", "43%", "11%", "22%", "17%"]}>
       {lines.map((line, index) => {
         const storedPrice = prices[text(line.id)] ?? "";
         const price = n(storedPrice);
-        const displayedPrice = priceBasis === "inc" ? price * vatMultiplier : price;
+        const displayedPrice = price;
         const productCosting = productCostings.find((costing) => costing.quotationItemId === line.id);
         return <tr key={text(line.id)}>
           <td className="px-4 py-3 text-center">{index + 1}</td>
@@ -12578,21 +12786,12 @@ function QuotationReviewSummary({
         </tr>;
       })}
     </Table>
-    <div className="mt-3">
-      <Table labels={["Quotation Total", "Amount"]} minWidth={0}>
-        <tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr>
-        <tr><td className="px-4 py-2">{`VAT (${n(vatRate)}%)`}</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr>
-        <tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr>
-      </Table>
-    </div>
   </section>;
 }
 
 function ProductCostingsSectionWithPricing({
   projectName,
   lines,
-  priceBasis,
-  setPriceBasis,
   vatValue,
   setVatValue,
   costings,
@@ -12600,11 +12799,11 @@ function ProductCostingsSectionWithPricing({
   pricingDefaults,
   editableMarkups,
   visibleMarkupKeys,
+  canEditVat,
+  showPricingOfficerDiscount,
 }: {
   projectName: string;
   lines: Row[];
-  priceBasis: "ex" | "inc";
-  setPriceBasis: (basis: "ex" | "inc") => void;
   vatValue: string;
   setVatValue: (value: string) => void;
   costings: ProductCostingDraft[];
@@ -12612,6 +12811,8 @@ function ProductCostingsSectionWithPricing({
   pricingDefaults: Record<string, unknown>;
   editableMarkups: boolean;
   visibleMarkupKeys: ReadonlyArray<PricingMarkupKey>;
+  canEditVat: boolean;
+  showPricingOfficerDiscount: boolean;
 }) {
   const displayProjectName = projectName.trim() || "Project";
   const defaults = pricingMarkupDefaults(pricingDefaults.pricing_markup_defaults, pricingDefaults);
@@ -12625,12 +12826,9 @@ function ProductCostingsSectionWithPricing({
 
   return (
     <section className="rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-[#edf0f5] pb-3">
-        <p className="text-[12px] text-[#687386]">Choose how the selling price is entered. The quotation always saves its VAT-exclusive price.</p>
-        <div className="inline-flex rounded-lg border border-[#d9e0e9] bg-[#f8fafc] p-0.5" aria-label="Selling price VAT basis">
-          {(["ex", "inc"] as const).map((basis) => <button key={basis} type="button" aria-pressed={priceBasis === basis} onClick={() => setPriceBasis(basis)} className={`min-h-8 rounded-md px-3 text-[12px] font-semibold transition-colors ${priceBasis === basis ? "bg-white text-[#202938] shadow-sm" : "text-[#687386] hover:text-[#344054]"}`}>VAT {basis.toUpperCase()}</button>)}
-        </div>
-      </div>
+      {canEditVat && <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-[#edf0f5] pb-3">
+        <p className="text-[12px] text-[#687386]">The customer selling price per piece is the final grand total divided by quantity.</p>
+      </div>}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-[14px] font-semibold text-[#202938]">Internal product costings</h3>
@@ -12640,7 +12838,15 @@ function ProductCostingsSectionWithPricing({
           disabled={!canAddCosting}
           onClick={() => {
             const nextLine = lines.find((line) => !costings.some((costing) => costing.quotationItemId === line.id));
-            if (nextLine?.id) setCostings((current) => [...current, newProductCostingDraft(text(nextLine.id), defaults)]);
+            if (nextLine?.id) {
+              const nextCosting = newProductCostingDraft(text(nextLine.id), defaults);
+              setCostings((current) => [
+                ...current,
+                visibleMarkupKeys.includes("discounts")
+                  ? withQuotationDiscount(nextCosting)
+                  : nextCosting,
+              ]);
+            }
           }}
         >
           <Plus size={14} /> Add Costing Breakdown
@@ -12672,7 +12878,7 @@ function ProductCostingsSectionWithPricing({
                     <h4 className="text-[12px] font-semibold text-[#344054]">Internal costs</h4>
                     <span className="text-[11px] text-[#687386]">Product {costingIndex + 1}</span>
                   </div>
-                  <Table labels={["Mode", "Description", "Quantity", "Unit Cost", "Amount", ""]} minWidth={0} className="table-fixed" scrollable={false} compact columnWidths={["12%", "42%", "12%", "12%", "12%", "10%"]} alignRightLabels={["Quantity", "Unit Cost", "Amount"]}>
+                  <Table labels={["Mode", "Description", "Quantity", "Unit Cost", "Amount", ""]} minWidth={940} className="table-fixed" compact columnWidths={["10%", "48%", "12%", "12%", "12%", "6%"]} alignRightLabels={["Quantity", "Unit Cost", "Amount"]}>
                     {costing.costLines.map((line, lineIndex) => {
                       const isFixedAmount = line.calculationType === "fixed_amount";
                       const lineAmount = isFixedAmount ? n(line.amount) : n(line.quantity) * n(line.unitCost);
@@ -12699,10 +12905,10 @@ function ProductCostingsSectionWithPricing({
                             />
                           </td>
                           <td className="min-w-0 !whitespace-normal break-words px-2 py-2"><input aria-label={`Cost ${lineIndex + 1} description`} value={line.description} onChange={(event) => updateLine({ description: titleCaseEntry(event.target.value, "description") })} className="input mt-0 min-w-0 max-w-full px-2" placeholder="Material, labor, logistics" /></td>
-                          <td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-end text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} quantity`} type="number" min="0.001" step="any" value={line.quantity} onChange={(event) => updateLine({ quantity: event.target.value })} className="input mt-0 min-w-0 max-w-full px-1 text-right" />}</td>
-                          <td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-end text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} unit cost`} type="number" min="0" step="any" value={line.unitCost} onChange={(event) => updateLine({ unitCost: event.target.value })} className="input mt-0 min-w-0 max-w-full px-1 text-right" />}</td>
-                          <td className="min-w-0 px-2 py-2">{isFixedAmount ? <input aria-label={`Cost ${lineIndex + 1} fixed amount`} type="number" min="0" step="any" value={line.amount} onChange={(event) => updateLine({ amount: event.target.value })} className="input mt-0 min-w-0 max-w-full px-1 text-right" /> : <span className="flex min-h-9 items-center justify-end whitespace-nowrap font-medium">{peso.format(lineAmount)}</span>}</td>
-                          <td className="px-1 py-2 text-center"><ActionIcon label={`Remove cost ${lineIndex + 1}`} tone="red" disabled={costing.costLines.length === 1} onClick={() => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.filter((item) => item.key !== line.key) }))}><Trash2 size={14} /></ActionIcon></td>
+                          <td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-end text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} quantity`} type="number" min="0.001" step="any" value={line.quantity} onChange={(event) => updateLine({ quantity: event.target.value })} className="input mt-0 px-1" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} />}</td>
+                          <td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-end text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} unit cost`} type="number" min="0" step="any" value={line.unitCost} onChange={(event) => updateLine({ unitCost: event.target.value })} className="input mt-0 px-1" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} />}</td>
+                          <td className="min-w-0 px-2 py-2">{isFixedAmount ? <input aria-label={`Cost ${lineIndex + 1} fixed amount`} type="number" min="0" step="any" value={line.amount} onChange={(event) => updateLine({ amount: event.target.value })} className="input mt-0 px-1" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /> : <span className="flex min-h-9 items-center justify-end whitespace-nowrap font-medium">{peso.format(lineAmount)}</span>}</td>
+                          <td className="px-1 py-2 text-left"><ActionIcon label={`Remove cost ${lineIndex + 1}`} tone="red" disabled={costing.costLines.length === 1} onClick={() => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.filter((item) => item.key !== line.key) }))}><Trash2 size={14} /></ActionIcon></td>
                         </tr>
                       );
                     })}
@@ -12711,17 +12917,32 @@ function ProductCostingsSectionWithPricing({
                 </div>
 
                 <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-                  {editableMarkups && <PricingMarkupEditor costing={costing} editable visibleMarkupKeys={visibleMarkupKeys} update={(next) => updateCosting(costing.key, () => next)} />}
+                  {editableMarkups && <div className="space-y-4">
+                    <PricingMarkupEditor costing={costing} editable visibleMarkupKeys={visibleMarkupKeys} update={(next) => updateCosting(costing.key, () => next)} showInternalVat={canEditVat} />
+                    {showPricingOfficerDiscount && <PricingMarkupEditor
+                      costing={costing}
+                      editable
+                      visibleMarkupKeys={["discounts"]}
+                      update={(next) => updateCosting(costing.key, () => next)}
+                      heading="Pricing Officer Discount"
+                    />}
+                  </div>}
                   <dl className={`overflow-hidden rounded-lg border border-[#d9e0e9] text-[12px] ${editableMarkups ? "" : "lg:col-span-2"}`}>
-                    <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Total Direct Cost</dt><dd className="font-medium">{peso.format(totals.cogs)}</dd></div>
-                    <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Cost Base Before Profit</dt><dd>{peso.format(totals.costBase)}</dd></div>
-                    {visibleMarkupKeys.includes("target_profit_margin") && <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Target Profit</dt><dd>{peso.format(totals.profitAmount)}</dd></div>}
-                    <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Discount</dt><dd>{peso.format(totals.discountAmount)}</dd></div>
-                    <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>List Price VAT Ex</dt><dd>{peso.format(totals.listSellingExVat)}</dd></div>
-                    <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2 font-medium"><dt>Net Selling Price VAT Ex</dt><dd>{peso.format(totals.sellingExVat)}</dd></div>
-                    <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>VAT</dt><dd>{peso.format(totals.vat)}</dd></div>
-                    <div className="flex justify-between bg-[#f8fbff] px-3 py-2"><dt>Selling Price VAT Ex / Piece</dt><dd>{peso.format(totals.unitExVat)}</dd></div>
-                    <div className="flex justify-between bg-[#eff7f1] px-3 py-2 font-semibold text-[#176b40]"><dt>Selling Price VAT Inc / Piece</dt><dd>{peso.format(totals.unitIncVat)}</dd></div>
+                    {!canEditVat ? <>
+                      <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Total Direct Cost</dt><dd className="font-medium">{peso.format(totals.cogs)}</dd></div>
+                      {totals.vat > 0 && <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>VAT</dt><dd>{peso.format(totals.vat)}</dd></div>}
+                      <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2 font-semibold"><dt>Grand Total</dt><dd>{peso.format(totals.sellingIncVat)}</dd></div>
+                      <div className="flex justify-between bg-[#f8fbff] px-3 py-2 font-semibold"><dt>Selling Price Per Piece</dt><dd>{peso.format(totals.unitIncVat)}</dd></div>
+                    </> : <>
+                      <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Total Direct Cost</dt><dd className="font-medium">{peso.format(totals.cogs)}</dd></div>
+                      {visibleMarkupKeys.length > 1 && <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>All Markups</dt><dd>{peso.format(totals.markupTotal)}</dd></div>}
+                      {visibleMarkupKeys.length > 1 && <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Total Before Discount</dt><dd>{peso.format(totals.listSellingExVat)}</dd></div>}
+                      <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Discount</dt><dd>{peso.format(totals.discountAmount)}</dd></div>
+                      <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2 font-medium"><dt>Net Total</dt><dd>{peso.format(totals.sellingExVat)}</dd></div>
+                      <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>VAT</dt><dd>{peso.format(totals.vat)}</dd></div>
+                      <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2 font-semibold"><dt>Grand Total</dt><dd>{peso.format(totals.sellingIncVat)}</dd></div>
+                      <div className="flex justify-between bg-[#eff7f1] px-3 py-2 font-semibold text-[#176b40]"><dt>Selling Price Per Piece</dt><dd>{peso.format(totals.unitIncVat)}</dd></div>
+                    </>}
                   </dl>
                 </div>
               </article>
@@ -12730,26 +12951,28 @@ function ProductCostingsSectionWithPricing({
         </div>
       )}
 
-      <div className="mt-4 rounded-lg border border-[#d9e0e9] bg-white p-3">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="min-w-48 flex-1"><h4 className="text-[12px] font-semibold text-[#344054]">Quotation VAT</h4><p className="mt-0.5 text-[11px] text-[#687386]">VAT is applied after the final VAT-exclusive selling price.</p></div>
-          <label className="text-[11px] font-medium text-[#344054]">VAT<div className="mt-1 flex items-center gap-1"><input aria-label="VAT percentage" type="number" min="0" max="100" step="any" value={vatValue} onChange={(event) => setVatValue(event.target.value)} className="input mt-0 w-20 px-2 py-1.5 text-right" /><span className="text-[#687386]">%</span></div></label>
-          <output aria-label="VAT total" className="min-w-28 text-right text-[12px] font-semibold text-[#344054]">{peso.format(vatTotal)}</output>
+      {canEditVat && <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="rounded-lg border border-[#d9e0e9] bg-white p-3">
+          <div className="grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-3 border-b border-[#edf0f5] pb-2 text-[10px] font-medium text-[#687386]"><span>Category</span><span>Percentage</span><span className="text-right">Calculated Amount</span></div>
+          <div className="mt-2 grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-3">
+            <span className="text-[11px] font-medium text-[#344054]">VAT</span>
+            <div className="flex items-center gap-1"><input aria-label="VAT percentage" type="number" min="0" max="100" step="any" value={vatValue} onChange={(event) => setVatValue(event.target.value)} className="input mt-0 px-2 py-1.5" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /><span className="text-[11px] text-[#687386]">%</span></div>
+            <output aria-label="VAT total" className="min-w-20 text-right text-[12px] font-semibold text-[#344054]">{peso.format(vatTotal)}</output>
+          </div>
         </div>
-      </div>
+      </div>}
     </section>
   );
 }
 
 function PriceQuotationReviewContent({
   lines, projectName, projectType, illustrations, productCostings, pricingDefaults, setProductCostings, prices, setPrices, subtotal, vatRate, setVatRate, tax,
-  total, terms, setTerms, bankDetails, setBankDetails, priceBasis, setPriceBasis,
-  revisionNote, setRevisionNote, close, saving, working, review, finalApproval,
+  total, terms, setTerms, bankDetails, setBankDetails,
+  revisionNote, setRevisionNote, close, saving, working, review, finalApproval, showInternalMarkups, pricingRevision,
   documentLabel = "Price Quotation", sourceQuotationNo,
 }: PriceQuotationReviewContentProps) {
   return (
     <div className="mt-5 space-y-5">
-      <QuotationReviewSummary lines={lines} prices={prices} priceBasis={priceBasis} subtotal={subtotal} vatRate={vatRate} tax={tax} total={total} productCostings={productCostings} />
       <section className="rounded-xl border border-[#e1e6ee] p-4">
         <h3 className="text-[14px] font-semibold">{documentLabel} details</h3>
         <dl className="mt-3 grid gap-1 text-[13px] sm:grid-cols-[120px_1fr]">
@@ -12759,7 +12982,8 @@ function PriceQuotationReviewContent({
         </dl>
         {illustrations.length > 0 && <div className="mt-4"><p className="text-[12px] font-medium text-[#687386]">Illustrations</p><div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">{illustrations.map((illustration) => <a key={illustration.id} href={illustration.imageUrl} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><img src={illustration.imageUrl} alt={illustration.description || "Quotation illustration"} className="aspect-square w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{illustration.description}</p></a>)}</div></div>}
       </section>
-      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} priceBasis={priceBasis} setPriceBasis={setPriceBasis} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups visibleMarkupKeys={finalApproval ? internalPricingMarkupKeys : ["discounts"]} />
+      <QuotationReviewSummary lines={lines} prices={prices} subtotal={subtotal} vatRate={vatRate} tax={tax} total={total} productCostings={productCostings} />
+      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups visibleMarkupKeys={showInternalMarkups ? internalPricingMarkupKeys : ["discounts"]} canEditVat={finalApproval} showPricingOfficerDiscount={finalApproval} />
       <section className="rounded-xl border border-[#e1e6ee] p-4">
         <h3 className="text-[14px] font-semibold">Terms and Conditions</h3>
         <div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
@@ -12770,8 +12994,8 @@ function PriceQuotationReviewContent({
         <div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
         <div className="mt-3 flex justify-end"><Button onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div>
       </section>
-      <label className="block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label>
-      <div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary loading={saving || working} disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> {finalApproval ? `Approve ${documentLabel}` : `Submit ${documentLabel} to General Manager`}</Button></div>
+      {!pricingRevision && <label className="block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label>}
+      <div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button>{!pricingRevision && <Button secondary loading={saving || working} disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button>}<Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> {pricingRevision ? `Resubmit ${documentLabel} to General Manager` : finalApproval ? `Approve ${documentLabel}` : `Submit ${documentLabel} to General Manager`}</Button></div>
     </div>
   );
 }
@@ -12784,6 +13008,7 @@ function PriceQuotationReview({
   notice,
   reload,
   finalApproval = false,
+  showInternalMarkups = finalApproval,
   quotationKind = "price_quotation",
 }: {
   quotation: Row;
@@ -12793,9 +13018,11 @@ function PriceQuotationReview({
   notice: (message: string) => void;
   reload: () => Promise<void>;
   finalApproval?: boolean;
+  showInternalMarkups?: boolean;
   quotationKind?: "price_quotation" | "mockup_quotation";
 }) {
   const isMockupQuotation = quotationKind === "mockup_quotation";
+  const pricingRevision = !finalApproval && isPricingOfficerRevision(quotation);
   const documentLabel = isMockupQuotation ? "Mockup Quotation" : "Price Quotation";
   const sourceQuotation = isMockupQuotation
     ? store.quotations.find((quote) => quote.id === quotation.source_price_quotation_id)
@@ -12806,16 +13033,13 @@ function PriceQuotationReview({
   const pricingDefaultSettings = store.business_settings.find(
     (setting) => text(setting.organization_id) === text(quotation.organization_id),
   );
-  const defaultPricingDefaults = pricingMarkupDefaults(pricingDefaultSettings?.pricing_markup_defaults, pricingDefaultSettings);
-  const defaultVat = defaultPricingDefaults.find((definition) => definition.key === "vat") ?? { calculationType: "percentage" as const, value: "12" };
-  // New-format quotations start with zero totals and have no pricing review
-  // snapshot yet. Apply the current organization VAT default only in that
-  // state; a reviewed quotation keeps its saved VAT even when defaults change.
-  const useCurrentVatDefault = !finalApproval
-    && !quotation.pricing_reviewed_at
-    && n(quotation.vat_rate) <= 0
-    && n(quotation.vat_fixed_amount) <= 0;
-  const initialVatRate = () => useCurrentVatDefault ? defaultVat.value : text(quotationVatRate(quotation), "12");
+  const [fetchedPricingDefaultSettings, setFetchedPricingDefaultSettings] = useState<Row | undefined>();
+  const activePricingDefaultSettings = fetchedPricingDefaultSettings ?? pricingDefaultSettings;
+  const defaultPricingDefaults = useMemo(
+    () => pricingMarkupDefaults(activePricingDefaultSettings?.pricing_markup_defaults, activePricingDefaultSettings),
+    [activePricingDefaultSettings],
+  );
+  const initialVatRate = () => finalApproval ? "12" : "0";
   const [prices, setPrices] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       store.quotation_items
@@ -12823,7 +13047,6 @@ function PriceQuotationReview({
         .map((item) => [text(item.id), text(item.unit_cost, "")]),
     ),
   );
-  const [priceBasis, setPriceBasis] = useState<"ex" | "inc">("ex");
   const [vatRate, setVatRate] = useState(initialVatRate);
   const [terms, setTerms] = useState(
     text(quotation.terms_conditions, DEFAULT_QUOTATION_TERMS)
@@ -12852,30 +13075,28 @@ function PriceQuotationReview({
       .maybeSingle()
       .then(({ data, error }) => {
         if (!active || error) return;
+        setFetchedPricingDefaultSettings((data ?? {}) as Row);
         if (!hasSavedBankDetails && data?.default_bank_details !== undefined) setBankDetails(quotationBankDetails(data.default_bank_details));
-        if (useCurrentVatDefault) {
-          const loadedDefaults = pricingMarkupDefaults(data?.pricing_markup_defaults, data as Row);
-          const loadedVat = loadedDefaults.find((definition) => definition.key === "vat");
-          if (loadedVat) {
-            setVatRate((current) => current === defaultVat.value ? loadedVat.value : current);
-          }
-        }
       });
     return () => {
       active = false;
     };
-  }, [defaultVat.value, finalApproval, hasSavedBankDetails, quotation.organization_id, quotation.pricing_reviewed_at, quotation.vat_fixed_amount, quotation.vat_rate, useCurrentVatDefault]);
+  }, [hasSavedBankDetails, quotation.organization_id]);
   const [revisionNote, setRevisionNote] = useState("");
   const [working, setWorking] = useState(false);
-  const [productCostings, setProductCostings] = useState<ProductCostingDraft[]>(() =>
-    productCostingDrafts(
+  const [productCostings, setProductCostings] = useState<ProductCostingDraft[]>(() => {
+    const savedCostings = productCostingDrafts(
       store.price_quotation_product_costings.filter(
         (costing) => costing.quotation_id === quotation.id,
       ),
       store.price_quotation_costing_lines,
       store.price_quotation_costing_markups,
-    ),
-  );
+      finalApproval ? defaultPricingDefaults : undefined,
+    );
+    return finalApproval
+      ? productCostingsWithMissingDefaultMarkups(savedCostings, defaultPricingDefaults)
+      : savedCostings;
+  });
   useEffect(() => {
     let active = true;
     const loadProductCostings = async () => {
@@ -12903,19 +13124,21 @@ function PriceQuotationReview({
           .in("product_costing_id", costingIds),
       ]);
       if (!active || costLineResult.error || markupResult.error) return;
-      setProductCostings(
-        productCostingDrafts(
-          costings,
-          (costLineResult.data ?? []) as Row[],
-          (markupResult.data ?? []) as Row[],
-        ),
+      const loadedCostings = productCostingDrafts(
+        costings,
+        (costLineResult.data ?? []) as Row[],
+        (markupResult.data ?? []) as Row[],
+        finalApproval ? defaultPricingDefaults : undefined,
       );
+      setProductCostings(finalApproval
+        ? productCostingsWithMissingDefaultMarkups(loadedCostings, defaultPricingDefaults)
+        : loadedCostings);
     };
     void loadProductCostings();
     return () => {
       active = false;
     };
-  }, [quotation.id]);
+  }, [defaultPricingDefaults, finalApproval, quotation.id]);
   const [galleryIllustrations, setGalleryIllustrations] = useState<Row[]>(() =>
     store.price_quotation_illustrations.filter(
       (illustration) => illustration.quotation_id === illustrationQuotationId,
@@ -12944,19 +13167,20 @@ function PriceQuotationReview({
       productCostings.forEach((costing) => {
         const product = lines.find((line) => line.id === costing.quotationItemId);
         if (!product) return;
-        const unitExVat = productCostingTotals(
+        const totals = productCostingTotals(
           costing,
           n(product.quantity),
-          n(vatRate),
-        ).unitExVat.toFixed(2);
-        if (next[text(product.id)] !== unitExVat) {
-          next[text(product.id)] = unitExVat;
+          finalApproval ? n(vatRate) : 0,
+        );
+        const unitPrice = (finalApproval ? totals.unitIncVat : totals.unitExVat).toFixed(2);
+        if (next[text(product.id)] !== unitPrice) {
+          next[text(product.id)] = unitPrice;
           changed = true;
         }
       });
       return changed ? next : current;
     });
-  }, [lines, productCostings, vatRate]);
+  }, [finalApproval, lines, productCostings, vatRate]);
   const illustrations = [
     ...galleryIllustrations
       .sort((left, right) => n(left.sort_order) - n(right.sort_order))
@@ -12970,10 +13194,22 @@ function PriceQuotationReview({
       return imageUrl ? [{ id: text(line.id), description: text(line.description, "Quotation illustration"), imageUrl }] : [];
     }),
   ];
-  const subtotal = lines.reduce((sum, line) => sum + n(line.quantity) * n(prices[text(line.id)]), 0);
-  const tax = Math.round(subtotal * n(vatRate)) / 100;
-  const total = Math.round((subtotal + tax) * 100) / 100;
+  const subtotal = productCostings.reduce((sum, costing) => {
+    const product = lines.find((line) => line.id === costing.quotationItemId);
+    const totals = productCostingTotals(costing, n(product?.quantity), 0);
+    return sum + Math.round(totals.unitExVat * n(product?.quantity) * 100) / 100;
+  }, 0);
+  const total = productCostings.reduce((sum, costing) => {
+    const product = lines.find((line) => line.id === costing.quotationItemId);
+    const totals = productCostingTotals(costing, n(product?.quantity), finalApproval ? n(vatRate) : 0);
+    const unitPrice = finalApproval ? totals.unitIncVat : totals.unitExVat;
+    return sum + Math.round(unitPrice * n(product?.quantity) * 100) / 100;
+  }, 0);
+  const tax = Math.round((total - subtotal) * 100) / 100;
   const review = async (decision: "approved" | "needs_revision") => {
+    if (pricingRevision && decision !== "approved") {
+      return notice("GM revisions must be resubmitted to the General Manager.");
+    }
     if (!finalApproval && isMockupQuotation && productCostings.length !== lines.length) {
       return notice("Add one costing table for every Mockup Quotation product before reviewing.");
     }
@@ -12981,8 +13217,13 @@ function PriceQuotationReview({
       return notice("Add one costing table for every quotation product before reviewing.");
     }
     setWorking(true);
+    const savedTerms = terms
+      .filter((term) => term.trim())
+      .filter((term) => !finalApproval || n(vatRate) > 0 || !/vat\s+inclusive/i.test(term))
+      .join("\n");
     const costingsPayload = productCostings.map((costing) => ({
       quotation_item_id: costing.quotationItemId,
+      internal_vat_rate: n(costing.internalVatRate),
       cost_lines: costing.costLines.map((line) => ({
         description: line.description,
         calculation_type: line.calculationType,
@@ -12994,7 +13235,7 @@ function PriceQuotationReview({
         markup_key: markup.markupKey || pricingMarkupKeyForLabel(markup.label) || undefined,
         label: markup.label,
         calculation_type: markupCalculationType(markup),
-        rate: markupCalculationType(markup) === "percentage" ? n(markupValue(markup)) : 0,
+        rate: markupCalculationType(markup) === "fixed_amount" ? 0 : n(markupValue(markup)),
         amount: markupCalculationType(markup) === "fixed_amount" ? n(markupValue(markup)) : 0,
       })),
       pricing_model: costing.pricingModel,
@@ -13009,7 +13250,7 @@ function PriceQuotationReview({
             p_vat_rate: n(vatRate),
             p_vat_calculation_type: "percentage",
             p_vat_fixed_amount: 0,
-            p_terms_conditions: terms.filter((term) => term.trim()).join("\n"),
+            p_terms_conditions: savedTerms,
             p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
             p_costings: costingsPayload,
           },
@@ -13018,10 +13259,10 @@ function PriceQuotationReview({
       ? await createClient().rpc("pricing_review_mockup_quotation", {
           p_quotation_id: quotation.id,
           p_decision: decision,
-          p_vat_rate: n(vatRate),
+          p_vat_rate: 0,
           p_vat_calculation_type: "percentage",
           p_vat_fixed_amount: 0,
-          p_terms_conditions: terms.filter((term) => term.trim()).join("\n"),
+          p_terms_conditions: savedTerms,
           p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
           p_costings: costingsPayload,
           p_revision_note: revisionNote,
@@ -13030,10 +13271,10 @@ function PriceQuotationReview({
       ? await createClient().rpc("pricing_review_price_quotation", {
           p_quotation_id: quotation.id,
           p_decision: decision,
-          p_vat_rate: n(vatRate),
+          p_vat_rate: 0,
           p_vat_calculation_type: "percentage",
           p_vat_fixed_amount: 0,
-          p_terms_conditions: terms.filter((term) => term.trim()).join("\n"),
+          p_terms_conditions: savedTerms,
           p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
           p_costings: costingsPayload,
           p_revision_note: revisionNote,
@@ -13043,7 +13284,7 @@ function PriceQuotationReview({
           p_decision: decision,
           p_vat_rate: n(vatRate),
           p_shipping_handling: 0,
-          p_terms_conditions: terms.filter((term) => term.trim()).join("\n"),
+          p_terms_conditions: savedTerms,
           p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
           p_line_prices: lines.map((line) => ({ id: line.id, unit_cost: n(prices[text(line.id)]) })),
           p_revision_note: revisionNote,
@@ -13051,14 +13292,14 @@ function PriceQuotationReview({
     setWorking(false);
     if (error) return notice(error.message);
     close();
-    notice(decision === "approved" ? (finalApproval ? `${documentLabel} approved.` : `${documentLabel} submitted to the General Manager.`) : `${documentLabel} returned for revision.`);
+    notice(decision === "approved" ? (finalApproval ? `${documentLabel} approved.` : pricingRevision ? `${documentLabel} resubmitted to the General Manager.` : `${documentLabel} submitted to the General Manager.`) : `${documentLabel} returned for revision.`);
     await reload();
   };
   /*
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} shipping={shipping} setShipping={setShipping} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} · {text(quotation.client_name)} · Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><div className="mt-5 grid gap-5 lg:grid-cols-[1.45fr_.75fr]"><div><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><section className="mt-5 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="mt-4 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="mt-4 block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label></div><aside><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><div className="border-b border-[#edf0f5] px-4 py-3"><h3 className="text-[14px] font-semibold">Quotation Total</h3></div><Table labels={["Category", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section></aside></div><div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary loading={saving || working} disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></section></div>;
   */
-  return <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review {documentLabel}</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - {finalApproval ? "Finalize approval." : `Complete pricing and submit ${documentLabel} to the General Manager.`}</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectName={text(quotation.project_name, "")} projectType={text(quotation.project_types, "")} sourceQuotationNo={text(sourceQuotation?.quotation_no, "") || undefined} documentLabel={documentLabel} illustrations={illustrations} productCostings={productCostings} pricingDefaults={pricingDefaultSettings ?? {}} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} priceBasis={priceBasis} setPriceBasis={setPriceBasis} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} finalApproval={finalApproval} /></section></div>;
+  return <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review {documentLabel}</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - {pricingRevision ? "Address the General Manager's instructions and resubmit." : finalApproval ? "Finalize approval." : `Complete pricing and submit ${documentLabel} to the General Manager.`}</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectName={text(quotation.project_name, "")} projectType={text(quotation.project_types, "")} sourceQuotationNo={text(sourceQuotation?.quotation_no, "") || undefined} documentLabel={documentLabel} illustrations={illustrations} productCostings={productCostings} pricingDefaults={activePricingDefaultSettings ?? {}} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} finalApproval={finalApproval} showInternalMarkups={showInternalMarkups} pricingRevision={pricingRevision} /></section></div>;
 }
 
 function GeneralManagerCostingReview({
@@ -13265,8 +13506,8 @@ function GeneralManagerCostingReview({
                     {peso.format(sellingExVat + vat)}
                   </td>
                 </tr>
-              </Table>
-            </section>
+        </Table>
+      </section>
           </aside>
         </div>
         <div className="mt-6 flex flex-wrap justify-end gap-2 border-t border-[#edf0f5] pt-4">
@@ -14515,6 +14756,7 @@ function Submissions({
           These requests require individual review before approval or revision.
         </div>
       ) : null}
+      <div className="modern-table-shell">
       {tab === "all" && (pendingQueueItems.length ? (
         <Table labels={["Select", "Category", "Request", "Requester", "Submitted", "Review"]} minWidth={940}>
           {pendingQueueItems.sort((left, right) => text(right.submittedAt).localeCompare(text(left.submittedAt))).map((item) => (
@@ -14743,6 +14985,7 @@ function Submissions({
           {visiblePendingApprovalRequests.map((request) => <tr key={text(request.id)}>{renderSelectionCell(`approval-${text(request.id)}`)}<td className="px-5 py-3"><b className="capitalize">{text(request.resource_type, "Approval request").replaceAll("_", " ")}</b><small>{text(request.resource_id)}</small></td><td className="px-5 py-3">{text(store.profiles.find((profile) => profile.id === request.submitted_by)?.full_name, "Team member")}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve request" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideApprovalRequest(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject request" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideApprovalRequest(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>)}
         </Table>
       ) : <Empty>No other approval requests are awaiting review.</Empty>)}
+      </div>
       {bulkDecision && (
         <ConfirmationDialog
           open
@@ -14817,6 +15060,7 @@ function Production({
   const [usage, setUsage] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [activityNote, setActivityNote] = useState<Row | null>(null);
   const canRecordUsage = canAccess(role, "production_material_usage", "create");
   const canUpdateJob = canAccess(role, "production_jobs", "update");
   const addUsage = async () => {
@@ -14998,7 +15242,16 @@ function Production({
                 <td className="px-5 py-3">
                   {text(activity.action).replaceAll("_", " ")}
                 </td>
-                <td className="px-5 py-3">{text(activity.note)}</td>
+                <td className="px-5 py-3">
+                  {text(activity.note, "").trim() ? (
+                    <NoteAction
+                      label="View production activity note"
+                      onClick={() => setActivityNote(activity)}
+                    />
+                  ) : (
+                    <span className="text-[11px] text-[#8b92a1]">—</span>
+                  )}
+                </td>
               </tr>
             ))}
           </Table>
@@ -15006,6 +15259,14 @@ function Production({
           <Empty>No production activity recorded yet.</Empty>
         )}
       </Panel>
+      <NoteDialog
+        open={Boolean(activityNote)}
+        title="Production activity note"
+        context={activityNote ? text(store.production_jobs.find((job) => job.id === activityNote.production_job_id)?.job_no, "Production job") : undefined}
+        note={text(activityNote?.note, "")}
+        titleId="production-activity-note-title"
+        onClose={() => setActivityNote(null)}
+      />
       {usage && (
         <Dialog
           title="Record production material usage"
@@ -17201,6 +17462,7 @@ function Approvals({
   role: string;
 }) {
   const admin = memberRole(role);
+  const [approvalNote, setApprovalNote] = useState<Row | null>(null);
   const decide = async (r: Row, status: "approved" | "rejected") => {
     if (r.resource_type === "quotation") {
       return notice(
@@ -17260,7 +17522,14 @@ function Approvals({
                     </ActionIcon>
                   </>
                 ) : (
-                  text(r.decision_note)
+                  text(r.decision_note, "").trim() ? (
+                    <NoteAction
+                      label="View approval decision note"
+                      onClick={() => setApprovalNote(r)}
+                    />
+                  ) : (
+                    <span className="text-[11px] text-[#8b92a1]">—</span>
+                  )
                 )}
               </td>
             </tr>
@@ -17278,6 +17547,14 @@ function Approvals({
           </p>
         ))}
       </div>
+      <NoteDialog
+        open={Boolean(approvalNote)}
+        title="Approval decision note"
+        context={approvalNote ? text(approvalNote.resource_type, "Approval request").replaceAll("_", " ") : undefined}
+        note={text(approvalNote?.decision_note, "")}
+        titleId="approval-decision-note-title"
+        onClose={() => setApprovalNote(null)}
+      />
     </Panel>
   );
 }
@@ -17606,14 +17883,14 @@ function SettingsView({
     await reload();
   };
   const savePricingDefaults = async () => {
-    const defaults = pricingMarkupDefinitions.map((definition) => ({
+    const defaults = pricingMarkupDefaultDefinitions.map((definition) => ({
       key: definition.key,
       label: definition.label,
-      calculationType: definition.key === "vat" || pricingDefaults[`${definition.key}_type`] !== "fixed_amount" ? "percentage" as const : "fixed_amount" as const,
+      calculationType: "percentage" as const,
       value: pricingDefaults[`${definition.key}_value`] ?? definition.fallback,
     }));
-    const invalid = defaults.find((definition) => String(definition.value ?? "").trim() === "" || !Number.isFinite(Number(definition.value)) || n(definition.value) < 0 || (definition.calculationType === "percentage" && n(definition.value) > 100) || (definition.key === "target_profit_margin" && definition.calculationType === "percentage" && n(definition.value) >= 100) || (definition.key === "discounts" && definition.calculationType === "percentage" && n(definition.value) >= 100));
-    if (invalid) return notice(`${invalid.label} must use a valid non-negative value${invalid.calculationType === "percentage" ? " below 100% for target profit and discounts" : ""}.`);
+    const invalid = defaults.find((definition) => String(definition.value ?? "").trim() === "" || !Number.isFinite(Number(definition.value)) || n(definition.value) < 0 || n(definition.value) > 100 || (definition.key === "target_profit_margin" && n(definition.value) >= 100));
+    if (invalid) return notice(`${invalid.label} must use a valid percentage; Target Profit Margin must be below 100%.`);
     setSavingPricingDefaults(true);
     const { error } = await createClient().rpc("save_pricing_defaults", {
       p_organization_id: orgId,
@@ -17628,12 +17905,12 @@ function SettingsView({
   return (
     <div className="space-y-5">
       <AccountProfileDialog open embedded fullWidth role={role} />
-      <Panel title="Pricing defaults - Internal" detail="Applied to new internal product costings. Existing quotations keep their saved pricing. Sales &amp; Pricing Officers can adjust the VAT percentage per quotation." action={memberRole(role) ? <Button secondary onClick={() => { const defaults = pricingMarkupDefaults(setting?.pricing_markup_defaults, setting); setPricingDefaults(Object.fromEntries(defaults.flatMap((definition) => [[`${definition.key}_value`, definition.value], ...(definition.key === "vat" ? [] : [[`${definition.key}_type`, definition.calculationType]])]))); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button> : undefined}>
-        <Table labels={["Pricing default", "Basis", "Default"]}>
-          {pricingMarkupDefaults(setting?.pricing_markup_defaults, setting).map((definition) => <tr key={definition.key}><td className="px-4 py-3 font-medium">{definition.label}</td><td className="px-4 py-3 text-center text-[#687386]"><CalculationBasisIcon value={definition.calculationType} /></td><td className="px-4 py-3 text-right">{definition.calculationType === "fixed_amount" ? peso.format(n(definition.value)) : `${n(definition.value)}%`}</td></tr>)}
+      <Panel title="Pricing defaults - Internal" detail="Applied to new internal product costings as percentages. Existing quotations keep their saved pricing. Sales &amp; Pricing Officers can adjust the VAT percentage per quotation." action={memberRole(role) ? <Button secondary onClick={() => { const defaults = pricingMarkupDefaults(setting?.pricing_markup_defaults, setting); setPricingDefaults(Object.fromEntries(defaults.map((definition) => [`${definition.key}_value`, definition.value]))); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button> : undefined}>
+        <Table labels={["Pricing default", "Default percentage"]}>
+          {pricingMarkupDefaults(setting?.pricing_markup_defaults, setting).map((definition) => <tr key={definition.key}><td className="px-4 py-3 font-medium">{definition.label}</td><td className="px-4 py-3 text-right">{`${n(definition.value)}%`}</td></tr>)}
         </Table>
       </Panel>
-      {pricingDefaultsOpen && <Dialog title="Pricing defaults - Internal" fields={pricingMarkupDefinitions.flatMap((definition) => [{ key: `${definition.key}_value`, label: `${definition.label} ${definition.key === "vat" ? "percentage" : "value"}`, type: "number" as const, required: true }, ...(definition.key === "vat" ? [] : [{ key: `${definition.key}_type`, label: `${definition.label} basis`, type: "toggle" as const, options: calculationBasisOptions.map((option) => `${option.value}|${option.label}`), shortLabels: calculationBasisShortLabels }])])} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => { if (!savingPricingDefaults) setPricingDefaultsOpen(false); }} saving={savingPricingDefaults} saveLabel="Save pricing defaults" className="max-w-lg" compact />}
+      {pricingDefaultsOpen && <Dialog title="Pricing defaults - Internal" fields={pricingMarkupDefaultDefinitions.map((definition) => ({ key: `${definition.key}_value`, label: definition.label, type: "number" as const, required: true }))} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => { if (!savingPricingDefaults) setPricingDefaultsOpen(false); }} saving={savingPricingDefaults} saveLabel="Save pricing defaults" className="max-w-lg" compact />}
       <Panel
         title="Default bank details"
         detail="Shown on new Price Quotations."

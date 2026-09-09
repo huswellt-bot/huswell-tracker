@@ -307,7 +307,7 @@ textarea {
 .app-table thead th {
   font-size: 12px !important;
   font-weight: 600 !important;
-  color: var(--color-text-secondary) !important;
+  color: #ffffff !important;
   letter-spacing: 0 !important;
 }
 .app-table thead,
@@ -320,8 +320,8 @@ textarea {
 .app-table thead,
 .costing-detail-table thead {
   border-color: var(--color-border) !important;
-  background: var(--color-surface) !important;
-  color: var(--color-text-secondary) !important;
+  background: #1F4E79 !important;
+  color: #ffffff !important;
 }
 .costing-detail-table :is(th, td) {
   padding-top: var(--space-table-detail-y) !important;
@@ -645,13 +645,13 @@ select:not([multiple]) {
 }
 .huswell-workspace .modern-page-table thead {
   border: 0;
-  background: var(--color-surface);
+  background: #1F4E79;
 }
 .huswell-workspace .modern-page-table thead th {
   height: 32px;
   border-bottom: 1px solid var(--color-border);
-  background: var(--color-surface);
-  color: var(--color-text-secondary);
+  background: #1F4E79;
+  color: #ffffff;
   font-size: 12px;
   line-height: var(--line-height-body);
   font-weight: 600;
@@ -1027,18 +1027,18 @@ select option[value=""] {
 .compact-ui .app-table thead,
 .compact-ui .modern-page-table thead,
 .super-admin-console thead {
-  border-color: var(--color-border) !important;
-  background: var(--color-surface) !important;
-  color: var(--color-text-primary) !important;
+  border-color: #1F4E79 !important;
+  background: #1F4E79 !important;
+  color: #ffffff !important;
 }
 
 .compact-ui .app-table thead th,
 .compact-ui .modern-page-table thead th,
 .super-admin-console thead th {
   height: 32px !important;
-  border-color: var(--color-border) !important;
-  background: var(--color-surface) !important;
-  color: var(--color-text-secondary) !important;
+  border-color: #1F4E79 !important;
+  background: #1F4E79 !important;
+  color: #ffffff !important;
   font-size: 12px !important;
   font-weight: 600 !important;
   letter-spacing: 0 !important;
