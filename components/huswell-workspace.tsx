@@ -12468,8 +12468,8 @@ function PriceQuotationWorkspace({
                       disabled={saving}
                       confirm
                       confirmationDescription={quote.costing_source_id
-                        ? "This permanently deletes the historical Price Quotation, its Costing Breakdown, any quotations derived from it, and all linked invoices, payments, production jobs, stock-ins, schedules, and related requests. This cannot be undone."
-                        : "This permanently deletes the Price Quotation and its linked invoices, payments, production jobs, stock-ins, schedules, and related requests. This cannot be undone."}
+                        ? "This permanently deletes the historical Price Quotation, its Costing Breakdown, any derived Price Quotations, linked Mockup Quotations, and all linked invoices, payments, production jobs, stock-ins, schedules, and related requests. This cannot be undone."
+                        : "This permanently deletes the Price Quotation, any linked Mockup Quotations, and their linked invoices, payments, production jobs, stock-ins, schedules, and related requests. This cannot be undone."}
                       onClick={() => void deletePriceQuotation(quote)}
                     >
                       <Trash2 size={15} />
