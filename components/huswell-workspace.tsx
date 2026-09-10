@@ -299,12 +299,15 @@ type PricingMarkupKey =
   | "incentives"
   | "discounts"
   | "third_party_markup"
-  | "vat";
+  | "vat"
+  | (string & {});
 type PricingMarkupDefault = {
   key: PricingMarkupKey;
   label: string;
   calculationType: MarkupCalculationType;
   value: string;
+  visible: boolean;
+  custom?: boolean;
 };
 const pricingMarkupDefinitions: Array<{
   key: PricingMarkupKey;
@@ -343,6 +346,7 @@ const pricingMarkupKeyForLabel = (label: unknown): PricingMarkupKey | "" => {
   if (pricingMarkupDefinitions.some((definition) => definition.key === normalized)) {
     return normalized as PricingMarkupKey;
   }
+  if (/^custom_[0-9a-f-]{36}$/.test(normalized)) return normalized as PricingMarkupKey;
   if (normalized === "discount") return "discounts";
   if (normalized === "profit margin" || normalized === "target profit margin") return "target_profit_margin";
   if (normalized === "overhead expense" || normalized === "overhead allocation") return "overhead_allocation";
@@ -358,7 +362,7 @@ const pricingMarkupDefaults = (
   legacySettings?: Record<string, unknown>,
 ): PricingMarkupDefault[] => {
   const storedDefaults = objectValue(stored);
-  return pricingMarkupDefaultDefinitions.map((definition) => {
+  const standardDefaults = pricingMarkupDefaultDefinitions.map((definition) => {
     const storedEntry = objectValue(storedDefaults[definition.key]);
     const legacyValue = definition.legacyKeys
       .map((key) => legacySettings?.[key])
@@ -367,10 +371,25 @@ const pricingMarkupDefaults = (
     return {
       key: definition.key,
       label: definition.label,
-      calculationType: "percentage",
+      calculationType: "percentage" as const,
       value: text(rawValue, definition.fallback),
+      visible: storedEntry.visible !== false,
     };
   });
+  const customDefaults = Object.entries(storedDefaults)
+    .filter(([key, value]) => key.startsWith("custom_") && objectValue(value).label)
+    .map(([key, value]) => {
+      const entry = objectValue(value);
+      return {
+        key: key as PricingMarkupKey,
+        label: text(entry.label, "Custom Markup"),
+        calculationType: "percentage" as const,
+        value: text(entry.value ?? entry.rate, "0"),
+        visible: entry.visible !== false,
+        custom: true,
+      };
+    });
+  return [...standardDefaults, ...customDefaults];
 };
 const pricingMarkupDefaultPayload = (defaults: PricingMarkupDefault[]) =>
   Object.fromEntries(
@@ -380,6 +399,7 @@ const pricingMarkupDefaultPayload = (defaults: PricingMarkupDefault[]) =>
         label: definition.label,
         calculation_type: definition.key === "vat" ? "percentage" : definition.calculationType,
         value: n(definition.value),
+        visible: definition.visible !== false,
       },
     ]),
   );
@@ -1034,11 +1054,12 @@ type BankDetail = {
   bank_name: string;
   account_name: string;
   account_number: string;
+  visible?: boolean;
 };
 
 const DEFAULT_QUOTATION_BANK_DETAILS: BankDetail[] = [
-  { bank_name: "Chinabank", account_name: "Huswell Trading", account_number: "133300003109" },
-  { bank_name: "Unionbank", account_name: "Huswell Trading", account_number: "002300008069" },
+  { bank_name: "Chinabank", account_name: "Huswell Trading", account_number: "133300003109", visible: true },
+  { bank_name: "Unionbank", account_name: "Huswell Trading", account_number: "002300008069", visible: true },
 ];
 
 const quotationBankDetailsSnapshot = (value: unknown): BankDetail[] | null => {
@@ -1056,10 +1077,34 @@ const quotationBankDetailsSnapshot = (value: unknown): BankDetail[] | null => {
     bank_name: text((detail as Record<string, unknown>)?.bank_name, ""),
     account_name: text((detail as Record<string, unknown>)?.account_name, ""),
     account_number: text((detail as Record<string, unknown>)?.account_number, ""),
+    visible: (detail as Record<string, unknown>)?.visible !== false,
   })).filter((detail) => detail.bank_name || detail.account_name || detail.account_number);
 };
 const quotationBankDetails = (value: unknown): BankDetail[] =>
   quotationBankDetailsSnapshot(value) ?? DEFAULT_QUOTATION_BANK_DETAILS;
+const isPdfAttachment = (contentType: unknown, url?: unknown, fileName?: unknown) =>
+  text(contentType).toLowerCase() === "application/pdf" ||
+  /\.pdf(?:$|[?#])/i.test(text(fileName) || text(url));
+const AttachmentPreview = ({
+  url,
+  contentType,
+  fileName,
+  alt,
+  className = "size-full object-cover",
+}: {
+  url?: string;
+  contentType?: string;
+  fileName?: string;
+  alt: string;
+  className?: string;
+}) => isPdfAttachment(contentType, url, fileName) ? (
+  <span className={`grid ${className} place-items-center gap-1 bg-[#fff7f7] px-2 text-center text-[#ab3038]`}>
+    <FileText size={24} aria-hidden="true" />
+    <span className="text-[10px] font-semibold">PDF</span>
+  </span>
+) : (
+  <img src={url} alt={alt} className={className} />
+);
 const statusStyle = (value: unknown) => {
   const v = text(value, "draft").toLowerCase();
   return v.includes("rejected") || v.includes("cancelled") || v.includes("void") || v.includes("overpaid")
@@ -5324,6 +5369,7 @@ function MockupQuotationWorkspace({
   const [revisionNoteQuote, setRevisionNoteQuote] = useState<Row | null>(null);
   const [pdfQuote, setPdfQuote] = useState<Row | null>(null);
   const [pdfWindow, setPdfWindow] = useState<Window | null>(null);
+  const [printAfterOpen, setPrintAfterOpen] = useState(false);
   const [proofQuote, setProofQuote] = useState<Row | null>(null);
   const [paymentQuote, setPaymentQuote] = useState<Row | null>(null);
   const canPrepare = isProjectOfficerRole(role);
@@ -5453,13 +5499,14 @@ function MockupQuotationWorkspace({
     );
     setRequestOpen(true);
   };
-  const openPdf = (quote: Row) => {
+  const openPdf = (quote: Row, shouldPrint = false) => {
     if (text(quote.status) !== "approved") {
       return notice("Only approved quotations can be opened as PDFs.");
     }
     const nextWindow = window.open("about:blank", "_blank");
     if (!nextWindow) return notice("Allow pop-ups to open the quotation PDF.");
     nextWindow.opener = null;
+    setPrintAfterOpen(shouldPrint);
     setPdfWindow(nextWindow);
     setPdfQuote(quote);
   };
@@ -5655,6 +5702,9 @@ function MockupQuotationWorkspace({
                         <ActionIcon label={"View " + documentName(quote) + " PDF"} confirm={false} onClick={() => openPdf(quote)}><FileText size={15} /></ActionIcon>
                       )}
                       {status === "approved" && (
+                        <ActionIcon label={"Print " + documentName(quote)} confirm={false} onClick={() => openPdf(quote, true)}><Printer size={15} /></ActionIcon>
+                      )}
+                      {status === "approved" && (
                         <ActionIcon label={"View signed client proof" + (proofCount ? " (" + proofCount + "/5)" : "")} confirm={false} onClick={() => setProofQuote(quote)}><Paperclip size={15} /></ActionIcon>
                       )}
                       {status === "approved" && (
@@ -5755,7 +5805,7 @@ function MockupQuotationWorkspace({
           reload={reload}
         />
       )}
-      {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); notice(message); }} autoExportPdf pdfWindow={pdfWindow} hidden showInternalCosting={isGeneralManager} />}
+      {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); notice(message); }} autoExportPdf pdfWindow={pdfWindow} printAfterOpen={printAfterOpen} hidden showInternalCosting={isGeneralManager} />}
       {proofQuote && <SignedProofDialog quote={proofQuote} store={store} canUpload={isProjectOfficerRole(role) && isOwner(proofQuote)} close={() => setProofQuote(null)} notice={notice} reload={reload} />}
       {paymentQuote && <QuotationPaymentDialog quote={paymentQuote} store={store} orgId={orgId} role={role} close={() => setPaymentQuote(null)} reload={reload} />}
     </Panel>
@@ -5827,11 +5877,11 @@ function SignedProofDialog({
     if (!selected.length) return;
     const remaining = 5 - proofs.length;
     if (selected.length > remaining) {
-      return notice("You can upload up to five signed proof images. " + remaining + " slot" + (remaining === 1 ? "" : "s") + " remaining.");
+      return notice("You can upload up to five signed proof files. " + remaining + " slot" + (remaining === 1 ? "" : "s") + " remaining.");
     }
-    const validTypes = ["image/jpeg", "image/png", "image/webp"];
+    const validTypes = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
     const invalid = selected.find(({ file }) => !validTypes.includes(file.type) || file.size > 10 * 1024 * 1024);
-    if (invalid) return notice("Signed proof images must be JPEG, PNG, or WebP files no larger than 10 MB each.");
+    if (invalid) return notice("Signed proofs must be JPEG, PNG, WebP, or PDF files no larger than 10 MB each.");
     setPendingUploads(selected.map(({ file, id }) => ({ id, fileName: file.name, status: "queued" })));
     setUploading(true);
     const client = createClient();
@@ -5840,7 +5890,7 @@ function SignedProofDialog({
       for (const { file, id } of selected) {
         activeUploadId = id;
         setPendingUploads((current) => current.map((upload) => upload.id === id ? { ...upload, status: "uploading" } : upload));
-        const extension = file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
+        const extension = file.type === "application/pdf" ? "pdf" : file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
         const path = text(quote.organization_id) + "/" + text(quote.id) + "/" + id + "." + extension;
         const { error: uploadError } = await client.storage.from("quotation-signed-proofs").upload(path, file, { contentType: file.type, upsert: false });
         if (uploadError) throw uploadError;
@@ -5858,7 +5908,7 @@ function SignedProofDialog({
         setPendingUploads((current) => current.map((upload) => upload.id === id ? { ...upload, status: "complete" } : upload));
       }
       activeUploadId = null;
-      notice("Signed client proof uploaded privately.");
+      notice("Signed client proof file uploaded privately.");
       await reload();
       setPendingUploads([]);
     } catch (error) {
@@ -5895,8 +5945,8 @@ function SignedProofDialog({
           <div><h2 id="signed-proof-title" className="text-[16px] font-semibold text-[#202938]">Signed client proof</h2><p className="mt-1 text-[12px] text-[#687386]">{label} {text(quote.quotation_no)} · Private attachment, separate from quotation illustrations.</p></div>
           <button type="button" onClick={close} aria-label="Close signed client proof" className="rounded-md p-1 text-[#687386] hover:bg-[#f0f3f7]"><X size={18} /></button>
         </div>
-        {canUpload && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3"><div><p className="text-[12px] font-medium text-[#202938]">Upload proof images ({proofs.length}/5)</p><p className="mt-0.5 text-[11px] text-[#687386]">JPEG, PNG, or WebP · up to 10 MB each</p></div><label aria-busy={uploadInProgress} className={"inline-flex min-h-8 cursor-pointer items-center rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-semibold text-[#344054] hover:bg-[#f5f7fa] " + (proofs.length >= 5 || uploading ? "pointer-events-none opacity-50" : "")}>{uploadInProgress ? <LoaderCircle size={13} className="mr-1 animate-spin" aria-hidden="true" /> : <Paperclip size={13} className="mr-1" />} {uploadInProgress ? "Uploading..." : "Add images"}<input type="file" accept="image/jpeg,image/png,image/webp" multiple className="sr-only" disabled={proofs.length >= 5 || uploading} onChange={(event) => { void addFiles(event.target.files); event.currentTarget.value = ""; }} /></label></div>}
-        {proofs.length || pendingUploads.length ? <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5" aria-live="polite" aria-busy={uploadInProgress}>{proofs.map((proof, index) => <div key={text(proof.id)} className="group relative overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2"><a href={signedUrls[text(proof.id)]} target="_blank" rel="noreferrer" className="block aspect-square">{signedUrls[text(proof.id)] ? <img src={signedUrls[text(proof.id)]} alt={text(proof.file_name, "Signed proof " + (index + 1))} className="size-full rounded-md object-cover" /> : <span className="grid size-full place-items-center text-[11px] text-[#8b92a1]">Loading…</span>}</a><p className="mt-2 truncate text-[11px] text-[#344054]" title={text(proof.file_name)}>{text(proof.file_name)}</p>{canUpload && <button type="button" onClick={() => void removeProof(proof)} disabled={uploading} aria-label={"Remove " + text(proof.file_name, "signed proof " + (index + 1))} className="absolute right-2 top-2 grid size-7 place-items-center rounded-md bg-white/90 text-[#8b92a1] shadow-sm hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={14} /></button>}</div>)}{pendingUploads.map((upload) => <div key={upload.id} className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2"><div className="grid aspect-square place-items-center rounded-md bg-[#f3f4f6] px-2 text-center" role="status"><div className="flex flex-col items-center gap-2 text-[11px] text-[#687386]">{upload.status === "queued" || upload.status === "uploading" ? <LoaderCircle size={20} className="animate-spin" aria-hidden="true" /> : upload.status === "complete" ? <Check size={20} aria-hidden="true" /> : <XCircle size={20} aria-hidden="true" />}<span>{upload.status === "queued" ? "Waiting..." : upload.status === "uploading" ? "Uploading..." : upload.status === "complete" ? "Uploaded" : "Upload failed"}</span></div></div><p className="mt-2 truncate text-[11px] text-[#344054]" title={upload.fileName}>{upload.fileName}</p></div>)}</div> : <div className="mt-5 rounded-lg border border-dashed border-[#ccd5e0] px-4 py-8 text-center text-[12px] text-[#8b92a1]">{canUpload ? "No signed client proof uploaded yet." : "No signed client proof is available yet."}</div>}
+        {canUpload && <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3"><div><p className="text-[12px] font-medium text-[#202938]">Upload proof files ({proofs.length}/5)</p><p className="mt-0.5 text-[11px] text-[#687386]">JPEG, PNG, WebP, or PDF · up to 10 MB each</p></div><label aria-busy={uploadInProgress} className={"inline-flex min-h-8 cursor-pointer items-center rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-semibold text-[#344054] hover:bg-[#f5f7fa] " + (proofs.length >= 5 || uploading ? "pointer-events-none opacity-50" : "")}>{uploadInProgress ? <LoaderCircle size={13} className="mr-1 animate-spin" aria-hidden="true" /> : <Paperclip size={13} className="mr-1" />} {uploadInProgress ? "Uploading..." : "Add files"}<input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" multiple className="sr-only" disabled={proofs.length >= 5 || uploading} onChange={(event) => { void addFiles(event.target.files); event.currentTarget.value = ""; }} /></label></div>}
+        {proofs.length || pendingUploads.length ? <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5" aria-live="polite" aria-busy={uploadInProgress}>{proofs.map((proof, index) => <div key={text(proof.id)} className="group relative overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2"><a href={signedUrls[text(proof.id)]} target="_blank" rel="noreferrer" className="block aspect-square">{signedUrls[text(proof.id)] ? <AttachmentPreview url={signedUrls[text(proof.id)]} contentType={text(proof.content_type)} fileName={text(proof.file_name)} alt={text(proof.file_name, "Signed proof " + (index + 1))} className="size-full rounded-md object-cover" /> : <span className="grid size-full place-items-center text-[11px] text-[#8b92a1]">Loading…</span>}</a><p className="mt-2 truncate text-[11px] text-[#344054]" title={text(proof.file_name)}>{text(proof.file_name)}</p>{canUpload && <button type="button" onClick={() => void removeProof(proof)} disabled={uploading} aria-label={"Remove " + text(proof.file_name, "signed proof " + (index + 1))} className="absolute right-2 top-2 grid size-7 place-items-center rounded-md bg-white/90 text-[#8b92a1] shadow-sm hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={14} /></button>}</div>)}{pendingUploads.map((upload) => <div key={upload.id} className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2"><div className="grid aspect-square place-items-center rounded-md bg-[#f3f4f6] px-2 text-center" role="status"><div className="flex flex-col items-center gap-2 text-[11px] text-[#687386]">{upload.status === "queued" || upload.status === "uploading" ? <LoaderCircle size={20} className="animate-spin" aria-hidden="true" /> : upload.status === "complete" ? <Check size={20} aria-hidden="true" /> : <XCircle size={20} aria-hidden="true" />}<span>{upload.status === "queued" ? "Waiting..." : upload.status === "uploading" ? "Uploading..." : upload.status === "complete" ? "Uploaded" : "Upload failed"}</span></div></div><p className="mt-2 truncate text-[11px] text-[#344054]" title={upload.fileName}>{upload.fileName}</p></div>)}</div> : <div className="mt-5 rounded-lg border border-dashed border-[#ccd5e0] px-4 py-8 text-center text-[12px] text-[#8b92a1]">{canUpload ? "No signed client proof files uploaded yet." : "No signed client proof is available yet."}</div>}
         <div className="mt-5 flex justify-end"><Button secondary onClick={close}>Close</Button></div>
       </section>
     </div>
@@ -5929,7 +5979,7 @@ function SignedProofViewer({
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 id="signed-proof-viewer-title" className="text-[16px] font-semibold text-[#202938]">Signed proofs</h2>
-            <p className="mt-1 text-[12px] text-[#687386]">Price Quotation and Mockup Quotation proof images.</p>
+            <p className="mt-1 text-[12px] text-[#687386]">Price Quotation and Mockup Quotation proof files.</p>
           </div>
           <button type="button" onClick={close} aria-label="Close signed proofs" className="rounded-md p-1 text-[#687386] hover:bg-[#f0f3f7]"><X size={18} /></button>
         </div>
@@ -5969,6 +6019,7 @@ function SignedProofThumbnails({
       id: text(proof.id, ""),
       storagePath: text(proof.storage_path, ""),
       fileName: text(proof.file_name, ""),
+      contentType: text(proof.content_type, ""),
     })),
     // The serialized proof key is the stable dependency for this derived list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -6056,10 +6107,11 @@ function SignedProofThumbnails({
                 className={`${compact ? "size-10" : "aspect-square min-h-20"} block overflow-hidden rounded-md border border-[#d9e0e9] bg-white`}
               >
                 {signedUrl ? (
-                  <img
-                    src={signedUrl}
+                  <AttachmentPreview
+                    url={signedUrl}
+                    contentType={proof.contentType}
+                    fileName={proof.fileName}
                     alt={proof.fileName || `${label} ${index + 1}`}
-                    className="size-full object-cover"
                   />
                 ) : (
                   <span className="grid size-full place-items-center text-[10px] text-[#8b92a1]">Loading...</span>
@@ -6862,6 +6914,7 @@ function QuotationCostingOverview({
   const [costedOfficerFilter, setCostedOfficerFilter] = useState("all");
   const [pdfQuote, setPdfQuote] = useState<Row | null>(null);
   const [pdfWindow, setPdfWindow] = useState<Window | null>(null);
+  const [printAfterOpen, setPrintAfterOpen] = useState(false);
   const isGeneralManager = memberRole(role);
   const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
   useEffect(() => {
@@ -6921,11 +6974,12 @@ function QuotationCostingOverview({
       costedOfficerName(quote),
     ].some((value) => text(value).toLowerCase().includes(normalizedCostedQuery));
   });
-  const openPdf = (quote: Row) => {
+  const openPdf = (quote: Row, shouldPrint = false) => {
     if (text(quote.status) !== "approved") return notice("Only approved quotations can be opened as PDFs.");
     const nextWindow = window.open("about:blank", "_blank");
     if (!nextWindow) return notice("Allow pop-ups to open the quotation PDF.");
     nextWindow.opener = null;
+    setPrintAfterOpen(shouldPrint);
     setPdfWindow(nextWindow);
     setPdfQuote(quote);
   };
@@ -7023,7 +7077,7 @@ function QuotationCostingOverview({
                   <td className="px-5 py-3">{text(quote.project_types)}</td>
                   <td className="px-5 py-3"><Status value={quote.status} /></td>
                   <td className="px-5 py-3">{day(quote.pricing_reviewed_at ?? quote.updated_at)}</td>
-                  <td className="px-5 py-3">{text(quote.status) === "approved" ? <ActionIcon label={"View " + (tab === "mockup_quotation" ? "Mockup Quotation" : "Price Quotation") + " PDF"} confirm={false} onClick={() => openPdf(quote)}><FileText size={15} /></ActionIcon> : <span className="text-[11px] text-[#8b92a1]">Available after approval</span>}</td>
+                  <td className="px-5 py-3">{text(quote.status) === "approved" ? <span className="flex items-center gap-1"><ActionIcon label={"View " + (tab === "mockup_quotation" ? "Mockup Quotation" : "Price Quotation") + " PDF"} confirm={false} onClick={() => openPdf(quote)}><FileText size={15} /></ActionIcon><ActionIcon label={"Print " + (tab === "mockup_quotation" ? "Mockup Quotation" : "Price Quotation")} confirm={false} onClick={() => openPdf(quote, true)}><Printer size={15} /></ActionIcon></span> : <span className="text-[11px] text-[#8b92a1]">Available after approval</span>}</td>
                 </tr>
               );
             })}
@@ -7033,7 +7087,7 @@ function QuotationCostingOverview({
           <Empty>{costedQuotations.length ? "No Quotations match the selected filters." : tab === "mockup_quotation" ? "No Mockup Quotations costed by this account yet." : "No Price Quotations costed by this account yet."}</Empty>
         )}
       </div>
-      {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); notice(message); }} autoExportPdf pdfWindow={pdfWindow} hidden />}
+      {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); notice(message); }} autoExportPdf pdfWindow={pdfWindow} printAfterOpen={printAfterOpen} hidden />}
     </Panel>
   );
 }
@@ -7249,9 +7303,9 @@ function ProjectCalendar({
       type: "select",
       required: true,
       options: priceProofs.map(
-        (proof) => `${text(proof.id)}|${text(proof.file_name, "Signed proof image")}`,
+        (proof) => `${text(proof.id)}|${text(proof.file_name, "Signed proof file")}`,
       ),
-      hint: "Choose one uploaded signed proof image.",
+      hint: "Choose one uploaded signed proof file.",
     },
     {
       key: "mockup_signed_proof_id",
@@ -7259,9 +7313,9 @@ function ProjectCalendar({
       type: "select",
       required: true,
       options: mockupProofs.map(
-        (proof) => `${text(proof.id)}|${text(proof.file_name, "Signed proof image")}`,
+        (proof) => `${text(proof.id)}|${text(proof.file_name, "Signed proof file")}`,
       ),
-      hint: "Choose one uploaded signed proof image.",
+      hint: "Choose one uploaded signed proof file.",
     },
     { key: "start_date", label: "Start date", type: "date", required: true },
     { key: "due_date", label: "Due Date", type: "date", required: true, hint: "Each Project Type can use a due date once." },
@@ -7574,7 +7628,7 @@ function ProjectCalendar({
       detail={
         isGeneralManager
           ? "Monitor all scheduled projects. Review new schedules, revisions, and completion requests from the Approval Center."
-          : "Select approved Price and Mockup Quotations, attach signed proof images, and request production."
+          : "Select approved Price and Mockup Quotations, attach signed proof files, and request production."
       }
       variant="page"
       hideHeading
@@ -8010,8 +8064,8 @@ function ProjectCalendar({
           {!editingSchedule && (
             <div className="mt-4 grid gap-3 border-t border-[#edf0f5] pt-4">
               <div>
-                <h3 className="text-[12px] font-semibold text-[#202938]">Signed client proof images</h3>
-                <p className="mt-1 text-[11px] text-[#687386]">Choose one proof image for each approved quotation. Add proof images from the quotation record when needed.</p>
+        <h3 className="text-[12px] font-semibold text-[#202938]">Signed client proof files</h3>
+        <p className="mt-1 text-[11px] text-[#687386]">Choose one proof file for each approved quotation. Add proof files from the quotation record when needed.</p>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <SignedProofThumbnails
@@ -10130,7 +10184,10 @@ function Quotations({
       notice("Costing Breakdown PDFs are available after General Manager approval.");
       return;
     }
-    setPdfWindow(null);
+    const nextWindow = window.open("about:blank", "_blank");
+    if (!nextWindow) return notice("Allow pop-ups to open the generated PDF.");
+    nextWindow.opener = null;
+    setPdfWindow(nextWindow);
     setPrintAfterOpen(shouldPrint);
     setGeneratingPdf(isCosting ? "costing" : "quotation");
     setSelected(isCosting ? null : quote);
@@ -10826,14 +10883,25 @@ function Quotations({
                     <div className="flex items-center justify-center gap-1">
                       {isCosting ? (
                         canGenerateCostingPdf && text(q.status) === "approved" ? (
-                          <ActionIcon
-                            label="View Costing Breakdown PDF"
-                            loading={generatingPdf === "costing"}
-                            disabled={generatingPdf !== null}
-                            onClick={() => openPdf(q, true, false)}
-                          >
-                            <FileText size={15} />
-                          </ActionIcon>
+                          <>
+                            <ActionIcon
+                              label="View Costing Breakdown PDF"
+                              loading={generatingPdf === "costing"}
+                              disabled={generatingPdf !== null}
+                              onClick={() => openPdf(q, true, false)}
+                            >
+                              <FileText size={15} />
+                            </ActionIcon>
+                            <ActionIcon
+                              label="Print Costing Breakdown"
+                              confirm={false}
+                              loading={generatingPdf === "costing"}
+                              disabled={generatingPdf !== null}
+                              onClick={() => openPdf(q, true, true)}
+                            >
+                              <Printer size={15} />
+                            </ActionIcon>
+                          </>
                         ) : !isGeneralManager ? (
                           <ActionIcon
                             label="View Costing Breakdown"
@@ -10857,6 +10925,15 @@ function Quotations({
                             onClick={() => openPdf(q, false, false)}
                         >
                           <FileText size={15} />
+                        </ActionIcon>
+                        <ActionIcon
+                          label="Print Price Quotation"
+                          confirm={false}
+                          loading={generatingPdf === "quotation"}
+                          disabled={generatingPdf !== null}
+                          onClick={() => openPdf(q, false, true)}
+                        >
+                          <Printer size={15} />
                         </ActionIcon>
                       </>}
                       {isCosting &&
@@ -11977,6 +12054,8 @@ function PriceQuotationWorkspace({
     imageUrl?: string;
     imageFile?: File;
     imagePreview?: string;
+    fileName?: string;
+    contentType?: string;
   };
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<Row | null>(null);
@@ -12003,6 +12082,7 @@ function PriceQuotationWorkspace({
   const [proofQuote, setProofQuote] = useState<Row | null>(null);
   const [paymentQuote, setPaymentQuote] = useState<Row | null>(null);
   const [endorseQuote, setEndorseQuote] = useState<Row | null>(null);
+  const [printAfterOpen, setPrintAfterOpen] = useState(false);
   const [endorsementValues, setEndorsementValues] = useState<Record<string, string>>({ recipient_user_id: "", note: "" });
   const [endorsing, setEndorsing] = useState(false);
   const [openingEndorsementId, setOpeningEndorsementId] = useState<string | null>(null);
@@ -12106,6 +12186,8 @@ function PriceQuotationWorkspace({
         .map((illustration, index) => ({
           key: text(illustration.id, `illustration-${index}`),
           imageUrl: text(illustration.image_url, "") || undefined,
+          fileName: text(illustration.file_name, "") || undefined,
+          contentType: text(illustration.content_type, "") || undefined,
         })),
     );
     setEditorOpen(true);
@@ -12166,7 +12248,7 @@ function PriceQuotationWorkspace({
     setSaving(true);
     const client = createClient();
     const savedItems: DraftItem[] = [];
-    const savedQuotationIllustrations: { image_url: string }[] = [];
+    const savedQuotationIllustrations: { image_url: string; file_name?: string; content_type?: string }[] = [];
     try {
       for (const item of items) {
         let imageUrl = item.imageUrl;
@@ -12183,16 +12265,20 @@ function PriceQuotationWorkspace({
       }
       for (const illustration of quotationIllustrations) {
         let imageUrl = illustration.imageUrl;
+        let fileName = illustration.fileName;
+        let contentType = illustration.contentType;
         if (illustration.imageFile) {
-          const extension = illustration.imageFile.type === "image/png" ? "png" : illustration.imageFile.type === "image/webp" ? "webp" : "jpg";
+          const extension = illustration.imageFile.type === "application/pdf" ? "pdf" : illustration.imageFile.type === "image/png" ? "png" : illustration.imageFile.type === "image/webp" ? "webp" : "jpg";
           const path = `${orgId}/price-quotation-illustrations/${crypto.randomUUID()}.${extension}`;
           const { error: uploadError } = await client.storage
             .from("quotation-images")
             .upload(path, illustration.imageFile, { contentType: illustration.imageFile.type, upsert: false });
           if (uploadError) throw uploadError;
           imageUrl = client.storage.from("quotation-images").getPublicUrl(path).data.publicUrl;
+          fileName = illustration.imageFile.name;
+          contentType = illustration.imageFile.type;
         }
-        if (imageUrl) savedQuotationIllustrations.push({ image_url: imageUrl });
+        if (imageUrl) savedQuotationIllustrations.push({ image_url: imageUrl, ...(fileName ? { file_name: fileName } : {}), ...(contentType ? { content_type: contentType } : {}) });
       }
     } catch (error) {
       setSaving(false);
@@ -12326,11 +12412,11 @@ function PriceQuotationWorkspace({
     }
     const invalidFile = selected.find(
       (file) =>
-        !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
+        !["image/jpeg", "image/png", "image/webp", "application/pdf"].includes(file.type) ||
         file.size > 5 * 1024 * 1024,
     );
     if (invalidFile) {
-      return notice("Illustrations must be JPEG, PNG, or WebP images no larger than 5 MB each.");
+      return notice("Illustrations must be JPEG, PNG, WebP, or PDF files no larger than 5 MB each.");
     }
     setQuotationIllustrations((current) => [
       ...current,
@@ -12338,10 +12424,12 @@ function PriceQuotationWorkspace({
         key: `quotation-illustration-${crypto.randomUUID()}`,
         imageFile: file,
         imagePreview: URL.createObjectURL(file),
+        fileName: file.name,
+        contentType: file.type,
       })),
     ]);
   };
-  const openPdf = (quote: Row) => {
+  const openPdf = (quote: Row, shouldPrint = false) => {
     if (text(quote.status) !== "approved") {
       return notice("Price Quotations can be opened after General Manager approval.");
     }
@@ -12351,6 +12439,7 @@ function PriceQuotationWorkspace({
     const nextWindow = window.open("about:blank", "_blank");
     if (!nextWindow) return notice("Allow pop-ups to open the quotation PDF.");
     nextWindow.opener = null;
+    setPrintAfterOpen(shouldPrint);
     setPdfWindow(nextWindow);
     setPdfQuote(quote);
   };
@@ -12476,7 +12565,8 @@ function PriceQuotationWorkspace({
                     </ActionIcon>
                   )}
                   {illustrationCount > 0 && <ActionIcon label="View quotation illustrations" confirm={false} onClick={() => setIllustrationQuote(quote)}><ImageIcon size={15} /></ActionIcon>}
-                  {text(quote.status) === "approved" && <ActionIcon label={isGeneralManager ? "View Internal Costing PDF" : "View Price Quotation PDF"} onClick={() => openPdf(quote)}><FileText size={15} /></ActionIcon>}
+                  {text(quote.status) === "approved" && <ActionIcon label={isGeneralManager ? "View Internal Costing PDF" : "View Price Quotation PDF"} confirm={false} onClick={() => openPdf(quote)}><FileText size={15} /></ActionIcon>}
+                  {text(quote.status) === "approved" && <ActionIcon label={isGeneralManager ? "Print Internal Costing" : "Print Price Quotation"} confirm={false} onClick={() => openPdf(quote, true)}><Printer size={15} /></ActionIcon>}
                   {text(quote.status) === "approved" && <ActionIcon label={"View signed client proof" + (proofCount ? " (" + proofCount + "/5)" : "")} confirm={false} onClick={() => setProofQuote(quote)}><Paperclip size={15} /></ActionIcon>}
                   {text(quote.status) === "approved" && <ActionIcon label="View quotation payments" confirm={false} onClick={() => setPaymentQuote(quote)}><ReceiptText size={15} /></ActionIcon>}
                 </div></td>
@@ -12516,10 +12606,10 @@ function PriceQuotationWorkspace({
             <label className="mt-4 block text-[12px] font-medium text-[#202938]">Project Type<select value={projectType} onChange={(event) => setProjectType(event.target.value)} className={`input mt-1 ${projectType ? "text-[#151922]" : "text-[#8b92a1]"}`} required><option value="">Select project type</option>{quotationProjectTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
             <section className="mt-5 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div><h3 className="text-[14px] font-semibold text-[#202938]">Illustrations</h3><p className="mt-1 text-[12px] text-[#687386]">Upload up to five JPEG, PNG, or WebP reference images (5 MB each). They are view-only and are not included in the PDF.</p></div>
-                <label className={`inline-flex min-h-9 cursor-pointer items-center rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium text-[#344054] hover:bg-[#f7f9fc] ${quotationIllustrations.length >= 5 ? "pointer-events-none opacity-50" : ""}`}><input type="file" accept="image/jpeg,image/png,image/webp" multiple className="sr-only" disabled={quotationIllustrations.length >= 5} onChange={(event) => { addQuotationIllustrations(event.target.files ?? undefined); event.currentTarget.value = ""; }} />Add images ({quotationIllustrations.length}/5)</label>
+                <div><h3 className="text-[14px] font-semibold text-[#202938]">Illustrations</h3><p className="mt-1 text-[12px] text-[#687386]">Upload up to five pictures or PDF reference files (5 MB each). They are public, view-only, and are not included in the PDF.</p></div>
+                <label className={`inline-flex min-h-9 cursor-pointer items-center rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium text-[#344054] hover:bg-[#f7f9fc] ${quotationIllustrations.length >= 5 ? "pointer-events-none opacity-50" : ""}`}><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" multiple className="sr-only" disabled={quotationIllustrations.length >= 5} onChange={(event) => { addQuotationIllustrations(event.target.files ?? undefined); event.currentTarget.value = ""; }} />Add files ({quotationIllustrations.length}/5)</label>
               </div>
-              {quotationIllustrations.length > 0 && <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">{quotationIllustrations.map((illustration, index) => <div key={illustration.key} className="relative overflow-hidden rounded-lg border border-[#d9e0e9] bg-white"><a href={illustration.imagePreview || illustration.imageUrl} target="_blank" rel="noreferrer" className="block aspect-square"><img src={illustration.imagePreview || illustration.imageUrl} alt={`Quotation illustration ${index + 1}`} className="size-full object-cover" /></a><button type="button" aria-label={`Remove illustration ${index + 1}`} onClick={() => setQuotationIllustrations((current) => current.filter((item) => item.key !== illustration.key))} className="absolute right-1 top-1 grid size-7 place-items-center rounded-md bg-white/90 text-[#8b92a1] shadow-sm hover:bg-[#fff1f1] hover:text-[#b42318]"><X size={14} /></button><span className="absolute bottom-1 left-1 rounded bg-[#151922]/75 px-1.5 py-0.5 text-[10px] font-medium text-white">{index + 1}</span></div>)}</div>}
+              {quotationIllustrations.length > 0 && <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">{quotationIllustrations.map((illustration, index) => <div key={illustration.key} className="relative overflow-hidden rounded-lg border border-[#d9e0e9] bg-white"><a href={illustration.imagePreview || illustration.imageUrl} target="_blank" rel="noreferrer" className="block aspect-square"><AttachmentPreview url={illustration.imagePreview || illustration.imageUrl} contentType={illustration.contentType} fileName={illustration.fileName} alt={`Quotation illustration ${index + 1}`} className="size-full object-cover" /></a><button type="button" aria-label={`Remove illustration ${index + 1}`} onClick={() => setQuotationIllustrations((current) => current.filter((item) => item.key !== illustration.key))} className="absolute right-1 top-1 grid size-7 place-items-center rounded-md bg-white/90 text-[#8b92a1] shadow-sm hover:bg-[#fff1f1] hover:text-[#b42318]"><X size={14} /></button><span className="absolute bottom-1 left-1 rounded bg-[#151922]/75 px-1.5 py-0.5 text-[10px] font-medium text-white">{index + 1}</span></div>)}</div>}
             </section>
             <div className="mt-5">
               <div className="flex items-center justify-between"><div><h3 className="text-[14px] font-semibold text-[#202938]">Finished products</h3><p className="mt-1 text-[12px] text-[#687386]">List each product requested by the client. The assigned Sales & Pricing Officer adds its internal material, labor, and production costs during review.</p></div></div>
@@ -12553,16 +12643,16 @@ function PriceQuotationWorkspace({
               ...store.price_quotation_illustrations
                 .filter((illustration) => illustration.quotation_id === illustrationQuote.id)
                 .sort((left, right) => n(left.sort_order) - n(right.sort_order))
-                .map((illustration, index) => ({ id: text(illustration.id, `quotation-illustration-${index}`), imageUrl: text(illustration.image_url, ""), description: `Illustration ${index + 1}` })),
+                .map((illustration, index) => ({ id: text(illustration.id, `quotation-illustration-${index}`), imageUrl: text(illustration.image_url, ""), fileName: text(illustration.file_name, ""), contentType: text(illustration.content_type, ""), description: `Illustration ${index + 1}` })),
               ...store.quotation_items
                 .filter((item) => item.quotation_id === illustrationQuote.id && Boolean(text(item.image_url, "")))
-                .map((item) => ({ id: text(item.id), imageUrl: text(item.image_url, ""), description: text(item.description, "Quotation illustration") })),
-            ].map((illustration) => <a key={illustration.id} href={illustration.imageUrl} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><img src={illustration.imageUrl} alt={illustration.description} className="aspect-square w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{illustration.description}</p></a>)}</div>
+                .map((item) => ({ id: text(item.id), imageUrl: text(item.image_url, ""), fileName: undefined, contentType: undefined, description: text(item.description, "Quotation illustration") })),
+            ].map((illustration) => <a key={illustration.id} href={illustration.imageUrl} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><AttachmentPreview url={illustration.imageUrl} contentType={illustration.contentType} fileName={illustration.fileName} alt={illustration.description} className="aspect-square w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{illustration.description}</p></a>)}</div>
             <div className="mt-5 flex justify-end"><Button secondary onClick={() => setIllustrationQuote(null)}>Close</Button></div>
           </section>
         </div>
       )}
-      {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); notice(message); }} autoExportPdf pdfWindow={pdfWindow} hidden showInternalCosting={isGeneralManager} />}
+      {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); notice(message); }} autoExportPdf pdfWindow={pdfWindow} printAfterOpen={printAfterOpen} hidden showInternalCosting={isGeneralManager} />}
       {reviewing && <PriceQuotationReview quotation={reviewing} store={store} saving={saving} showInternalMarkups={isGeneralManager} close={() => setReviewing(null)} notice={notice} reload={reload} />}
       {proofQuote && <SignedProofDialog quote={proofQuote} store={store} canUpload={isProjectOfficerRole(role) && preparedByKey(proofQuote) === currentUserId} close={() => setProofQuote(null)} notice={notice} reload={reload} />}
       {paymentQuote && <QuotationPaymentDialog quote={paymentQuote} store={store} orgId={orgId} role={role} close={() => setPaymentQuote(null)} reload={reload} />}
@@ -12756,7 +12846,7 @@ type PriceQuotationReviewContentProps = {
   lines: Row[];
   projectName: string;
   projectType: string;
-  illustrations: { id: string; description: string; imageUrl: string }[];
+  illustrations: { id: string; description: string; imageUrl: string; fileName?: string; contentType?: string }[];
   productCostings: ProductCostingDraft[];
   pricingDefaults: Row;
   setProductCostings: (next: ProductCostingDraft[] | ((current: ProductCostingDraft[]) => ProductCostingDraft[])) => void;
@@ -12779,6 +12869,8 @@ type PriceQuotationReviewContentProps = {
   review: (decision: "approved" | "needs_revision") => Promise<void>;
   finalApproval: boolean;
   showInternalMarkups: boolean;
+  visibleMarkupKeys?: ReadonlyArray<PricingMarkupKey>;
+  bankVisibility?: ReadonlyArray<boolean>;
   pricingRevision?: boolean;
   documentLabel?: string;
   sourceQuotationNo?: string;
@@ -12993,9 +13085,12 @@ function ProductCostingsSectionWithPricing({
 function PriceQuotationReviewContent({
   lines, projectName, projectType, illustrations, productCostings, pricingDefaults, setProductCostings, prices, setPrices, subtotal, vatRate, setVatRate, tax,
   total, terms, setTerms, bankDetails, setBankDetails,
-  revisionNote, setRevisionNote, close, saving, working, review, finalApproval, showInternalMarkups, pricingRevision,
+  revisionNote, setRevisionNote, close, saving, working, review, finalApproval, showInternalMarkups, visibleMarkupKeys, bankVisibility, pricingRevision,
   documentLabel = "Price Quotation", sourceQuotationNo,
 }: PriceQuotationReviewContentProps) {
+  const displayedBankDetails = bankDetails
+    .map((bank, index) => ({ bank, index }))
+    .filter(({ index }) => !showInternalMarkups || bankVisibility?.[index] !== false);
   return (
     <div className="mt-5 space-y-5">
       <section className="rounded-xl border border-[#e1e6ee] p-4">
@@ -13005,10 +13100,10 @@ function PriceQuotationReviewContent({
           <dd className="font-medium text-[#202938]">{projectType || "—"}</dd>
           {sourceQuotationNo && <><dt className="text-[#687386]">Source Price Quotation</dt><dd className="font-medium text-[#1769e8]">{sourceQuotationNo}</dd></>}
         </dl>
-        {illustrations.length > 0 && <div className="mt-4"><p className="text-[12px] font-medium text-[#687386]">Illustrations</p><div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">{illustrations.map((illustration) => <a key={illustration.id} href={illustration.imageUrl} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><img src={illustration.imageUrl} alt={illustration.description || "Quotation illustration"} className="aspect-square w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{illustration.description}</p></a>)}</div></div>}
+        {illustrations.length > 0 && <div className="mt-4"><p className="text-[12px] font-medium text-[#687386]">Illustrations</p><div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">{illustrations.map((illustration) => <a key={illustration.id} href={illustration.imageUrl} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><AttachmentPreview url={illustration.imageUrl} contentType={illustration.contentType} fileName={illustration.fileName} alt={illustration.description || "Quotation illustration"} className="aspect-square w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{illustration.description}</p></a>)}</div></div>}
       </section>
       <QuotationReviewSummary lines={lines} prices={prices} subtotal={subtotal} vatRate={vatRate} tax={tax} total={total} productCostings={productCostings} />
-      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups visibleMarkupKeys={showInternalMarkups ? internalPricingMarkupKeys : ["discounts"]} canEditVat={finalApproval} showPricingOfficerDiscount={finalApproval} />
+      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups visibleMarkupKeys={visibleMarkupKeys ?? (showInternalMarkups ? internalPricingMarkupKeys : ["discounts"])} canEditVat={finalApproval} showPricingOfficerDiscount={finalApproval} />
       <section className="rounded-xl border border-[#e1e6ee] p-4">
         <h3 className="text-[14px] font-semibold">Terms and Conditions</h3>
         <div className="mt-3 space-y-2">{terms.map((term, index) => <div key={index} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
@@ -13016,7 +13111,8 @@ function PriceQuotationReviewContent({
       </section>
       <section className="rounded-xl border border-[#e1e6ee] p-4">
         <h3 className="text-[14px] font-semibold">Bank Details</h3>
-        <div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
+        <div className="mt-3 space-y-2">{displayedBankDetails.map(({ bank, index }) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
+        {showInternalMarkups && displayedBankDetails.length === 0 && <p className="mt-3 rounded-lg border border-dashed border-[#ccd5e0] px-3 py-3 text-[11px] text-[#8b92a1]">Bank details are hidden from the GM review view in GM Settings.</p>}
         <div className="mt-3 flex justify-end"><Button onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div>
       </section>
       {!pricingRevision && <label className="block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label>}
@@ -13224,6 +13320,8 @@ function PriceQuotationReview({
         id: text(illustration.id, `quotation-illustration-${index}`),
         description: `Illustration ${index + 1}`,
         imageUrl: text(illustration.image_url, ""),
+        fileName: text(illustration.file_name, ""),
+        contentType: text(illustration.content_type, ""),
       })),
     ...lines.flatMap((line) => {
       const imageUrl = text(line.image_url, "");
@@ -13242,6 +13340,18 @@ function PriceQuotationReview({
     return sum + Math.round(unitPrice * n(product?.quantity) * 100) / 100;
   }, 0);
   const tax = Math.round((total - subtotal) * 100) / 100;
+  const gmVisibleMarkupKeys = defaultPricingDefaults
+    .filter((definition) => definition.key !== "vat" && definition.visible !== false)
+    .map((definition) => definition.key);
+  const configuredBankDetails = quotationBankDetailsSnapshot(activePricingDefaultSettings?.default_bank_details) ?? [];
+  const bankVisibility = bankDetails.map((bank, index) => {
+    const configured = configuredBankDetails.find((candidate) =>
+      candidate.bank_name === bank.bank_name &&
+      candidate.account_name === bank.account_name &&
+      candidate.account_number === bank.account_number,
+    ) ?? configuredBankDetails[index];
+    return bank.visible !== false && configured?.visible !== false;
+  });
   const review = async (decision: "approved" | "needs_revision") => {
     if (pricingRevision && decision !== "approved") {
       return notice("GM revisions must be resubmitted to the General Manager.");
@@ -13335,7 +13445,7 @@ function PriceQuotationReview({
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} shipping={shipping} setShipping={setShipping} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} · {text(quotation.client_name)} · Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><div className="mt-5 grid gap-5 lg:grid-cols-[1.45fr_.75fr]"><div><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><section className="mt-5 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="mt-4 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="mt-4 block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label></div><aside><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><div className="border-b border-[#edf0f5] px-4 py-3"><h3 className="text-[14px] font-semibold">Quotation Total</h3></div><Table labels={["Category", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section></aside></div><div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary loading={saving || working} disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></section></div>;
   */
-  return <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review {documentLabel}</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - {pricingRevision ? "Address the General Manager's instructions and resubmit." : finalApproval ? "Finalize approval." : `Complete pricing and submit ${documentLabel} to the General Manager.`}</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectName={text(quotation.project_name, "")} projectType={text(quotation.project_types, "")} sourceQuotationNo={text(sourceQuotation?.quotation_no, "") || undefined} documentLabel={documentLabel} illustrations={illustrations} productCostings={productCostings} pricingDefaults={activePricingDefaultSettings ?? {}} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={updateBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} finalApproval={finalApproval} showInternalMarkups={showInternalMarkups} pricingRevision={pricingRevision} /></section></div>;
+  return <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review {documentLabel}</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - {pricingRevision ? "Address the General Manager's instructions and resubmit." : finalApproval ? "Finalize approval." : `Complete pricing and submit ${documentLabel} to the General Manager.`}</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectName={text(quotation.project_name, "")} projectType={text(quotation.project_types, "")} sourceQuotationNo={text(sourceQuotation?.quotation_no, "") || undefined} documentLabel={documentLabel} illustrations={illustrations} productCostings={productCostings} pricingDefaults={activePricingDefaultSettings ?? {}} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={updateBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} finalApproval={finalApproval} showInternalMarkups={showInternalMarkups} visibleMarkupKeys={showInternalMarkups ? gmVisibleMarkupKeys : ["discounts"]} bankVisibility={bankVisibility} pricingRevision={pricingRevision} /></section></div>;
 }
 
 function GeneralManagerCostingReview({
@@ -13978,6 +14088,7 @@ function Submissions({
   const [selectedPriceQuotation, setSelectedPriceQuotation] = useState<Row | null>(null);
   const [pdfQuote, setPdfQuote] = useState<Row | null>(null);
   const [pdfWindow, setPdfWindow] = useState<Window | null>(null);
+  const [printAfterOpen, setPrintAfterOpen] = useState(false);
   const [approvalQuery, setApprovalQuery] = useState("");
   const [approvalMonth, setApprovalMonth] = useState("");
   const [approvalOfficerFilter, setApprovalOfficerFilter] = useState("all");
@@ -14422,11 +14533,12 @@ function Submissions({
       request.resource_id,
     ),
   );
-  const openQuotationPdf = (quotation?: Row) => {
+  const openQuotationPdf = (quotation?: Row, shouldPrint = false) => {
     if (!quotation) return notice("The Price Quotation for this project could not be found.");
     const nextWindow = window.open("about:blank", "_blank");
     if (!nextWindow) return notice("Allow pop-ups to open the quotation PDF.");
     nextWindow.opener = null;
+    setPrintAfterOpen(shouldPrint);
     setPdfWindow(nextWindow);
     setPdfQuote(quotation);
   };
@@ -14523,7 +14635,7 @@ function Submissions({
         p_schedule_id: text(schedule.id),
         p_decision: decision,
       }),
-      action: <span className="flex items-center gap-1"><ActionIcon label="View Price Quotation PDF" confirm={false} disabled={bulkSaving} onClick={() => openQuotationPdf(store.quotations.find((item) => item.id === schedule.quotation_id))}><FileText size={15} /></ActionIcon><ActionIcon label="Approve production request" tone="green" loading={savingId === schedule.id} disabled={savingId === schedule.id || bulkSaving} onClick={() => void decideProjectSchedule(schedule, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject production request" tone="red" loading={savingId === schedule.id} disabled={savingId === schedule.id || bulkSaving} onClick={() => void decideProjectSchedule(schedule, "rejected")}><X size={15} /></ActionIcon></span>,
+      action: <span className="flex items-center gap-1"><ActionIcon label="View Price Quotation PDF" confirm={false} disabled={bulkSaving} onClick={() => openQuotationPdf(store.quotations.find((item) => item.id === schedule.quotation_id))}><FileText size={15} /></ActionIcon><ActionIcon label="Print Price Quotation" confirm={false} disabled={bulkSaving} onClick={() => openQuotationPdf(store.quotations.find((item) => item.id === schedule.quotation_id), true)}><Printer size={15} /></ActionIcon><ActionIcon label="Approve production request" tone="green" loading={savingId === schedule.id} disabled={savingId === schedule.id || bulkSaving} onClick={() => void decideProjectSchedule(schedule, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject production request" tone="red" loading={savingId === schedule.id} disabled={savingId === schedule.id || bulkSaving} onClick={() => void decideProjectSchedule(schedule, "rejected")}><X size={15} /></ActionIcon></span>,
     })),
     ...visiblePendingProjectScheduleRevisions.map((request) => {
       const schedule = store.project_schedules.find((item) => item.id === request.schedule_id);
@@ -14957,7 +15069,7 @@ function Submissions({
               <td className="px-5 py-3">{day(schedule.start_date)}</td>
               <td className="px-5 py-3">{day(schedule.due_date)}</td>
               <td className="px-5 py-3"><Status value={schedule.status} /></td>
-              <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="View Price Quotation PDF" confirm={false} disabled={bulkSaving} onClick={() => openQuotationPdf(quotation)}><FileText size={15} /></ActionIcon><ActionIcon label="Approve project schedule" tone="green" loading={savingId === schedule.id} disabled={savingId === schedule.id || bulkSaving} onClick={() => void decideProjectSchedule(schedule, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project schedule" tone="red" loading={savingId === schedule.id} disabled={savingId === schedule.id || bulkSaving} onClick={() => void decideProjectSchedule(schedule, "rejected")}><X size={15} /></ActionIcon></div></td>
+              <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="View Price Quotation PDF" confirm={false} disabled={bulkSaving} onClick={() => openQuotationPdf(quotation)}><FileText size={15} /></ActionIcon><ActionIcon label="Print Price Quotation" confirm={false} disabled={bulkSaving} onClick={() => openQuotationPdf(quotation, true)}><Printer size={15} /></ActionIcon><ActionIcon label="Approve project schedule" tone="green" loading={savingId === schedule.id} disabled={savingId === schedule.id || bulkSaving} onClick={() => void decideProjectSchedule(schedule, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project schedule" tone="red" loading={savingId === schedule.id} disabled={savingId === schedule.id || bulkSaving} onClick={() => void decideProjectSchedule(schedule, "rejected")}><X size={15} /></ActionIcon></div></td>
             </tr>
             );
           })}
@@ -15105,7 +15217,7 @@ function Submissions({
           decide={(decision, note) => void decideLeadChange(selectedLeadChange, decision, note)}
         />
       )}
-      {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); notice(message); }} autoExportPdf pdfWindow={pdfWindow} hidden showInternalCosting />}
+      {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); notice(message); }} autoExportPdf pdfWindow={pdfWindow} printAfterOpen={printAfterOpen} hidden showInternalCosting />}
     </Panel>
   );
 }
@@ -17842,7 +17954,10 @@ function SettingsView({
   const [pricingDefaultsOpen, setPricingDefaultsOpen] = useState(false);
   const [pricingDefaults, setPricingDefaults] = useState<Record<string, string>>({});
   const [savingPricingDefaults, setSavingPricingDefaults] = useState(false);
+  const [customMarkupOpen, setCustomMarkupOpen] = useState(false);
+  const [customMarkupValues, setCustomMarkupValues] = useState<Record<string, string>>({ label: "", value: "" });
   const setting = store.business_settings[0];
+  const pricingDefaultEntries = pricingMarkupDefaults(setting?.pricing_markup_defaults, setting);
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileValues, setProfileValues] = useState<Record<string, string>>(
     {},
@@ -17929,56 +18044,113 @@ function SettingsView({
     notice("Sales Executive account created.");
     await reload();
   };
-  const saveDefaultBankDetails = async () => {
+  const saveDefaultBankDetails = async (
+    details = defaultBankDetails,
+    closeDialog = true,
+  ) => {
     setSavingBankDetails(true);
     const payload = {
       organization_id: orgId,
-      default_bank_details: defaultBankDetails.filter((detail) => detail.bank_name || detail.account_name || detail.account_number),
+      default_bank_details: details
+        .filter((detail) => detail.bank_name || detail.account_name || detail.account_number)
+        .map((detail) => ({ ...detail, visible: detail.visible !== false })),
     };
     const { error } = await createClient()
       .from("business_settings")
       .upsert(payload);
     setSavingBankDetails(false);
     if (error) return notice(error.message);
-    setBankDetailsOpen(false);
+    if (closeDialog) setBankDetailsOpen(false);
     notice("Default bank details saved.");
     await reload();
   };
-  const savePricingDefaults = async () => {
-    const defaults = pricingMarkupDefaultDefinitions.map((definition) => ({
-      key: definition.key,
-      label: definition.label,
-      calculationType: "percentage" as const,
-      value: pricingDefaults[`${definition.key}_value`] ?? definition.fallback,
-    }));
-    const invalid = defaults.find((definition) => String(definition.value ?? "").trim() === "" || !Number.isFinite(Number(definition.value)) || n(definition.value) < 0 || n(definition.value) > 100 || (definition.key === "target_profit_margin" && n(definition.value) >= 100));
-    if (invalid) return notice(`${invalid.label} must use a valid percentage; Target Profit Margin must be below 100%.`);
+  const persistPricingDefaults = async (
+    defaults: PricingMarkupDefault[],
+    successMessage = "Pricing defaults saved.",
+  ) => {
+    const invalid = defaults.find((definition) =>
+      String(definition.value ?? "").trim() === "" ||
+      !Number.isFinite(Number(definition.value)) ||
+      n(definition.value) < 0 ||
+      n(definition.value) > 100 ||
+      (definition.key === "target_profit_margin" && n(definition.value) >= 100) ||
+      (definition.custom && !definition.label.trim()),
+    );
+    if (invalid) {
+      notice(`${invalid.label || "Markup"} must use a valid percentage; Target Profit Margin must be below 100%.`);
+      return false;
+    }
     setSavingPricingDefaults(true);
     const { error } = await createClient().rpc("save_pricing_defaults", {
       p_organization_id: orgId,
       p_defaults: pricingMarkupDefaultPayload(defaults),
     });
     setSavingPricingDefaults(false);
-    if (error) return notice(error.message);
-    setPricingDefaultsOpen(false);
-    notice("Pricing defaults saved.");
+    if (error) {
+      notice(error.message);
+      return false;
+    }
+    notice(successMessage);
     await reload();
+    return true;
+  };
+  const savePricingDefaults = async () => {
+    const defaults = pricingDefaultEntries.map((definition) => ({
+      ...definition,
+      calculationType: "percentage" as const,
+      value: pricingDefaults[`${definition.key}_value`] ?? definition.value,
+    }));
+    if (await persistPricingDefaults(defaults)) setPricingDefaultsOpen(false);
+  };
+  const toggleMarkupVisibility = async (key: PricingMarkupKey) => {
+    const next = pricingDefaultEntries.map((definition) =>
+      definition.key === key ? { ...definition, visible: definition.visible === false } : definition,
+    );
+    await persistPricingDefaults(next, "GM markup visibility saved.");
+  };
+  const addCustomMarkup = async () => {
+    const label = text(customMarkupValues.label, "").trim();
+    const value = text(customMarkupValues.value, "").trim();
+    if (!label) return notice("Enter a name for the custom markup.");
+    if (pricingDefaultEntries.some((definition) => definition.label.trim().toLowerCase() === label.toLowerCase())) {
+      return notice("A markup with that name already exists.");
+    }
+    const customMarkup: PricingMarkupDefault = {
+      key: `custom_${crypto.randomUUID()}`,
+      label,
+      calculationType: "percentage",
+      value,
+      visible: true,
+      custom: true,
+    };
+    if (await persistPricingDefaults([...pricingDefaultEntries, customMarkup], "Custom markup added and included in new quotation computations.")) {
+      setCustomMarkupValues({ label: "", value: "" });
+      setCustomMarkupOpen(false);
+    }
+  };
+  const toggleBankVisibility = async (index: number) => {
+    const next = quotationBankDetails(setting?.default_bank_details).map((detail, detailIndex) =>
+      detailIndex === index ? { ...detail, visible: detail.visible === false } : detail,
+    );
+    setDefaultBankDetails(next);
+    await saveDefaultBankDetails(next, false);
   };
   return (
     <div className="space-y-5">
       <AccountProfileDialog open embedded fullWidth role={role} />
-      <Panel title="Pricing defaults - Internal" detail="Applied to new internal product costings as percentages. Existing quotations keep their saved pricing. Sales &amp; Pricing Officers can adjust the VAT percentage per quotation." action={memberRole(role) ? <Button secondary onClick={() => { const defaults = pricingMarkupDefaults(setting?.pricing_markup_defaults, setting); setPricingDefaults(Object.fromEntries(defaults.map((definition) => [`${definition.key}_value`, definition.value]))); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button> : undefined}>
-        <Table labels={["Pricing default", "Default percentage"]}>
-          {pricingMarkupDefaults(setting?.pricing_markup_defaults, setting).map((definition) => <tr key={definition.key}><td className="px-4 py-3 font-medium">{definition.label}</td><td className="px-4 py-3 text-right">{`${n(definition.value)}%`}</td></tr>)}
+      <Panel title="Pricing defaults - Internal" detail="Applied to new internal product costings as percentages. Existing quotations keep their saved pricing. Sales &amp; Pricing Officers can adjust the VAT percentage per quotation." action={memberRole(role) ? <div className="flex flex-wrap justify-end gap-2"><Button secondary onClick={() => { setCustomMarkupValues({ label: "", value: "" }); setCustomMarkupOpen(true); }}><Plus size={14} /> Add markup</Button><Button secondary onClick={() => { setPricingDefaults(Object.fromEntries(pricingDefaultEntries.map((definition) => [`${definition.key}_value`, definition.value]))); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button></div> : undefined}>
+        <Table labels={["Pricing default", "Default percentage", "Visibility in GM review"]}>
+          {pricingDefaultEntries.map((definition) => <tr key={definition.key} className={definition.visible === false ? "bg-[#fafbfc] text-[#8b92a1]" : undefined}><td className="px-4 py-3 font-medium">{definition.label}{definition.custom && <span className="ml-2 rounded-full bg-[#f1f4f8] px-2 py-0.5 text-[10px] font-medium text-[#687386]">Custom</span>}</td><td className="px-4 py-3 text-right">{`${n(definition.value)}%`}</td><td className="px-4 py-3 text-right">{definition.key === "vat" ? <span className="text-[11px] text-[#8b92a1]">Not an internal markup</span> : <ActionIcon label={definition.visible === false ? `Show ${definition.label} in GM review` : `Hide ${definition.label} from GM review`} confirm={false} onClick={() => void toggleMarkupVisibility(definition.key)} loading={savingPricingDefaults}><>{definition.visible === false ? <EyeOff size={15} /> : <Eye size={15} />}</></ActionIcon>}</td></tr>)}
         </Table>
       </Panel>
-      {pricingDefaultsOpen && <Dialog title="Pricing defaults - Internal" fields={pricingMarkupDefaultDefinitions.map((definition) => ({ key: `${definition.key}_value`, label: definition.label, type: "number" as const, required: true }))} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => { if (!savingPricingDefaults) setPricingDefaultsOpen(false); }} saving={savingPricingDefaults} saveLabel="Save pricing defaults" className="max-w-lg" compact />}
+      {pricingDefaultsOpen && <Dialog title="Pricing defaults - Internal" fields={pricingDefaultEntries.map((definition) => ({ key: `${definition.key}_value`, label: definition.label, type: "number" as const, required: true }))} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => { if (!savingPricingDefaults) setPricingDefaultsOpen(false); }} saving={savingPricingDefaults} saveLabel="Save pricing defaults" className="max-w-lg" compact />}
+      {customMarkupOpen && <Dialog title="Add custom markup" fields={[{ key: "label", label: "Markup name", required: true }, { key: "value", label: "Percentage", type: "number" as const, required: true }]} values={customMarkupValues} setValues={setCustomMarkupValues} save={() => void addCustomMarkup()} close={() => { if (!savingPricingDefaults) setCustomMarkupOpen(false); }} saving={savingPricingDefaults} saveLabel="Add markup" className="max-w-lg" compact><p className="mt-3 rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3 text-[11px] leading-5 text-[#687386]">This markup will be included in the computed pricing and used as a default for new quotations. Visibility only controls the GM review view.</p></Dialog>}
       <Panel
         title="Default bank details"
         detail="Shown on new Price Quotations."
         action={<Button secondary onClick={() => { setDefaultBankDetails(quotationBankDetails(setting?.default_bank_details)); setBankDetailsOpen(true); }}><Settings size={14} /> Edit bank details</Button>}
       >
-        {quotationBankDetails(setting?.default_bank_details).length ? <Table labels={["Bank", "Account name", "Account number"]}>{quotationBankDetails(setting?.default_bank_details).map((detail, index) => <tr key={`${detail.bank_name}-${detail.account_number}-${index}`}><td className="px-5 py-3 font-medium">{detail.bank_name}</td><td className="px-5 py-3">{detail.account_name}</td><td className="px-5 py-3">{detail.account_number}</td></tr>)}</Table> : <Empty>No default bank details added.</Empty>}
+        {quotationBankDetails(setting?.default_bank_details).length ? <Table labels={["Bank", "Account name", "Account number", "Visibility in GM review"]}>{quotationBankDetails(setting?.default_bank_details).map((detail, index) => <tr key={`${detail.bank_name}-${detail.account_number}-${index}`} className={detail.visible === false ? "bg-[#fafbfc] text-[#8b92a1]" : undefined}><td className="px-5 py-3 font-medium">{detail.bank_name}</td><td className="px-5 py-3">{detail.account_name}</td><td className="px-5 py-3">{detail.account_number}</td><td className="px-5 py-3 text-right"><ActionIcon label={detail.visible === false ? `Show ${detail.bank_name || "bank details"} in GM review` : `Hide ${detail.bank_name || "bank details"} from GM review`} confirm={false} onClick={() => void toggleBankVisibility(index)} loading={savingBankDetails}>{detail.visible === false ? <EyeOff size={15} /> : <Eye size={15} />}</ActionIcon></td></tr>)}</Table> : <Empty>No default bank details added.</Empty>}
       </Panel>
       <Panel
         title="Business profile"
@@ -18124,7 +18296,7 @@ function SettingsView({
           saveLabel="Save bank details"
         >
           <section className="border-t border-[#edf0f5] pt-5">
-            <div className="flex items-center justify-between gap-3"><div><h3 className="text-[14px] font-semibold text-[#202938]">Bank details</h3><p className="mt-0.5 text-[12px] text-[#687386]">Used for every new Price Quotation.</p></div><Button secondary onClick={() => setDefaultBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div>
+            <div className="flex items-center justify-between gap-3"><div><h3 className="text-[14px] font-semibold text-[#202938]">Bank details</h3><p className="mt-0.5 text-[12px] text-[#687386]">Used for every new Price Quotation.</p></div><Button secondary onClick={() => setDefaultBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "", visible: true }])}><Plus size={13} /> Add bank</Button></div>
             <div className="mt-3 space-y-2">{defaultBankDetails.map((detail, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Default bank ${index + 1} name`} value={detail.bank_name} onChange={(event) => setDefaultBankDetails((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, bank_name: event.target.value } : item))} placeholder="Bank name" className="input mt-0" /><input aria-label={`Default bank ${index + 1} account name`} value={detail.account_name} onChange={(event) => setDefaultBankDetails((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, account_name: event.target.value } : item))} placeholder="Account name" className="input mt-0" /><input aria-label={`Default bank ${index + 1} account number`} value={detail.account_number} onChange={(event) => setDefaultBankDetails((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, account_number: event.target.value } : item))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label="Remove default bank" onClick={() => setDefaultBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] transition-colors hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
           </section>
         </Dialog>
@@ -18608,7 +18780,7 @@ export function HuswellWorkspace({
       title: isManagementRole ? "Project oversight" : projects.title,
       detail: isManagementRole
         ? "Monitor all project schedules; management decisions are collected in the Approval Center."
-        : "Select approved Price and Mockup Quotations, attach signed proof images, and request production.",
+        : "Select approved Price and Mockup Quotations, attach signed proof files, and request production.",
     },
     Mockups: {
       title: "Mockup Quotation",
