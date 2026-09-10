@@ -17956,6 +17956,7 @@ function SettingsView({
   const [savingPricingDefaults, setSavingPricingDefaults] = useState(false);
   const [customMarkupOpen, setCustomMarkupOpen] = useState(false);
   const [customMarkupValues, setCustomMarkupValues] = useState<Record<string, string>>({ label: "", value: "" });
+  const [settingsSensitiveValuesHidden, setSettingsSensitiveValuesHidden] = useState(false);
   const setting = store.business_settings[0];
   const pricingDefaultEntries = pricingMarkupDefaults(setting?.pricing_markup_defaults, setting);
   const [profileOpen, setProfileOpen] = useState(false);
@@ -17969,6 +17970,7 @@ function SettingsView({
   const [creatingProjectManager, setCreatingProjectManager] = useState(false);
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
   const isSuperAdmin = role === "super_admin";
+  const canToggleSettingsPrivacy = role === "admin";
   useEffect(() => {
     const userIds = store.organization_members
       .map((member) => text(member.user_id, ""))
@@ -18102,12 +18104,6 @@ function SettingsView({
     }));
     if (await persistPricingDefaults(defaults)) setPricingDefaultsOpen(false);
   };
-  const toggleMarkupVisibility = async (key: PricingMarkupKey) => {
-    const next = pricingDefaultEntries.map((definition) =>
-      definition.key === key ? { ...definition, visible: definition.visible === false } : definition,
-    );
-    await persistPricingDefaults(next, "GM markup visibility saved.");
-  };
   const addCustomMarkup = async () => {
     const label = text(customMarkupValues.label, "").trim();
     const value = text(customMarkupValues.value, "").trim();
@@ -18128,29 +18124,43 @@ function SettingsView({
       setCustomMarkupOpen(false);
     }
   };
-  const toggleBankVisibility = async (index: number) => {
-    const next = quotationBankDetails(setting?.default_bank_details).map((detail, detailIndex) =>
-      detailIndex === index ? { ...detail, visible: detail.visible === false } : detail,
-    );
-    setDefaultBankDetails(next);
-    await saveDefaultBankDetails(next, false);
+  const toggleSettingsSensitiveValues = () => {
+    setSettingsSensitiveValuesHidden((current) => {
+      const next = !current;
+      if (next) {
+        setBankDetailsOpen(false);
+        setPricingDefaultsOpen(false);
+        setCustomMarkupOpen(false);
+      }
+      return next;
+    });
   };
   return (
     <div className="space-y-5">
       <AccountProfileDialog open embedded fullWidth role={role} />
-      <Panel title="Pricing defaults - Internal" detail="Applied to new internal product costings as percentages. Existing quotations keep their saved pricing. Sales &amp; Pricing Officers can adjust the VAT percentage per quotation." action={memberRole(role) ? <div className="flex flex-wrap justify-end gap-2"><Button secondary onClick={() => { setCustomMarkupValues({ label: "", value: "" }); setCustomMarkupOpen(true); }}><Plus size={14} /> Add markup</Button><Button secondary onClick={() => { setPricingDefaults(Object.fromEntries(pricingDefaultEntries.map((definition) => [`${definition.key}_value`, definition.value]))); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button></div> : undefined}>
-        <Table labels={["Pricing default", "Default percentage", "Visibility in GM review"]}>
-          {pricingDefaultEntries.map((definition) => <tr key={definition.key} className={definition.visible === false ? "bg-[#fafbfc] text-[#8b92a1]" : undefined}><td className="px-4 py-3 font-medium">{definition.label}{definition.custom && <span className="ml-2 rounded-full bg-[#f1f4f8] px-2 py-0.5 text-[10px] font-medium text-[#687386]">Custom</span>}</td><td className="px-4 py-3 text-right">{`${n(definition.value)}%`}</td><td className="px-4 py-3 text-right">{definition.key === "vat" ? <span className="text-[11px] text-[#8b92a1]">Not an internal markup</span> : <ActionIcon label={definition.visible === false ? `Show ${definition.label} in GM review` : `Hide ${definition.label} from GM review`} confirm={false} onClick={() => void toggleMarkupVisibility(definition.key)} loading={savingPricingDefaults}><>{definition.visible === false ? <EyeOff size={15} /> : <Eye size={15} />}</></ActionIcon>}</td></tr>)}
+      {canToggleSettingsPrivacy && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#d9e0e9] bg-[#f8fbff] px-4 py-3">
+        <div>
+          <p className="text-[12px] font-semibold text-[#344054]">Settings privacy</p>
+          <p className="mt-1 text-[11px] text-[#687386]">Mask markup and bank values on this screen before leaving the laptop.</p>
+        </div>
+        <Button secondary onClick={toggleSettingsSensitiveValues}>
+          {settingsSensitiveValuesHidden ? <Eye size={14} /> : <EyeOff size={14} />}
+          {settingsSensitiveValuesHidden ? "Show sensitive values" : "Hide sensitive values"}
+        </Button>
+      </div>}
+      <Panel title="Pricing defaults - Internal" detail="Applied to new internal product costings as percentages. Existing quotations keep their saved pricing. Sales &amp; Pricing Officers can adjust the VAT percentage per quotation." action={memberRole(role) ? <div className="flex flex-wrap justify-end gap-2"><Button secondary disabled={settingsSensitiveValuesHidden} onClick={() => { setCustomMarkupValues({ label: "", value: "" }); setCustomMarkupOpen(true); }}><Plus size={14} /> Add markup</Button><Button secondary disabled={settingsSensitiveValuesHidden} onClick={() => { setPricingDefaults(Object.fromEntries(pricingDefaultEntries.map((definition) => [`${definition.key}_value`, definition.value]))); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button></div> : undefined}>
+        <Table labels={["Pricing default", "Default percentage"]}>
+          {pricingDefaultEntries.map((definition) => <tr key={definition.key} className={settingsSensitiveValuesHidden ? "bg-[#fafbfc] text-[#8b92a1]" : undefined}><td className="px-4 py-3 font-medium">{settingsSensitiveValuesHidden ? "Hidden markup" : <>{definition.label}{definition.custom && <span className="ml-2 rounded-full bg-[#f1f4f8] px-2 py-0.5 text-[10px] font-medium text-[#687386]">Custom</span>}</>}</td><td className="px-4 py-3 text-right">{settingsSensitiveValuesHidden ? "Hidden" : `${n(definition.value)}%`}</td></tr>)}
         </Table>
       </Panel>
       {pricingDefaultsOpen && <Dialog title="Pricing defaults - Internal" fields={pricingDefaultEntries.map((definition) => ({ key: `${definition.key}_value`, label: definition.label, type: "number" as const, required: true }))} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => { if (!savingPricingDefaults) setPricingDefaultsOpen(false); }} saving={savingPricingDefaults} saveLabel="Save pricing defaults" className="max-w-lg" compact />}
-      {customMarkupOpen && <Dialog title="Add custom markup" fields={[{ key: "label", label: "Markup name", required: true }, { key: "value", label: "Percentage", type: "number" as const, required: true }]} values={customMarkupValues} setValues={setCustomMarkupValues} save={() => void addCustomMarkup()} close={() => { if (!savingPricingDefaults) setCustomMarkupOpen(false); }} saving={savingPricingDefaults} saveLabel="Add markup" className="max-w-lg" compact><p className="mt-3 rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3 text-[11px] leading-5 text-[#687386]">This markup will be included in the computed pricing and used as a default for new quotations. Visibility only controls the GM review view.</p></Dialog>}
+      {customMarkupOpen && <Dialog title="Add custom markup" fields={[{ key: "label", label: "Markup name", required: true }, { key: "value", label: "Percentage", type: "number" as const, required: true }]} values={customMarkupValues} setValues={setCustomMarkupValues} save={() => void addCustomMarkup()} close={() => { if (!savingPricingDefaults) setCustomMarkupOpen(false); }} saving={savingPricingDefaults} saveLabel="Add markup" className="max-w-lg" compact><p className="mt-3 rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3 text-[11px] leading-5 text-[#687386]">This markup is included in computed pricing and used as a default for new quotations. The privacy button only masks this Settings screen; it does not change calculations or quotation workflow.</p></Dialog>}
       <Panel
         title="Default bank details"
         detail="Shown on new Price Quotations."
-        action={<Button secondary onClick={() => { setDefaultBankDetails(quotationBankDetails(setting?.default_bank_details)); setBankDetailsOpen(true); }}><Settings size={14} /> Edit bank details</Button>}
+        action={<Button secondary disabled={settingsSensitiveValuesHidden} onClick={() => { setDefaultBankDetails(quotationBankDetails(setting?.default_bank_details)); setBankDetailsOpen(true); }}><Settings size={14} /> Edit bank details</Button>}
       >
-        {quotationBankDetails(setting?.default_bank_details).length ? <Table labels={["Bank", "Account name", "Account number", "Visibility in GM review"]}>{quotationBankDetails(setting?.default_bank_details).map((detail, index) => <tr key={`${detail.bank_name}-${detail.account_number}-${index}`} className={detail.visible === false ? "bg-[#fafbfc] text-[#8b92a1]" : undefined}><td className="px-5 py-3 font-medium">{detail.bank_name}</td><td className="px-5 py-3">{detail.account_name}</td><td className="px-5 py-3">{detail.account_number}</td><td className="px-5 py-3 text-right"><ActionIcon label={detail.visible === false ? `Show ${detail.bank_name || "bank details"} in GM review` : `Hide ${detail.bank_name || "bank details"} from GM review`} confirm={false} onClick={() => void toggleBankVisibility(index)} loading={savingBankDetails}>{detail.visible === false ? <EyeOff size={15} /> : <Eye size={15} />}</ActionIcon></td></tr>)}</Table> : <Empty>No default bank details added.</Empty>}
+        {quotationBankDetails(setting?.default_bank_details).length ? <Table labels={["Bank", "Account name", "Account number"]}>{quotationBankDetails(setting?.default_bank_details).map((detail, index) => <tr key={`${detail.bank_name}-${detail.account_number}-${index}`} className={settingsSensitiveValuesHidden ? "bg-[#fafbfc] text-[#8b92a1]" : undefined}><td className="px-5 py-3 font-medium">{settingsSensitiveValuesHidden ? "Hidden bank detail" : detail.bank_name}</td><td className="px-5 py-3">{settingsSensitiveValuesHidden ? "Hidden" : detail.account_name}</td><td className="px-5 py-3">{settingsSensitiveValuesHidden ? "Hidden" : detail.account_number}</td></tr>)}</Table> : <Empty>No default bank details added.</Empty>}
       </Panel>
       <Panel
         title="Business profile"
