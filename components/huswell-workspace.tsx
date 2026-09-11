@@ -13064,8 +13064,6 @@ function ProductCostingsSectionWithPricing({
                   <dl className={`overflow-hidden rounded-lg border border-[#d9e0e9] text-[12px] ${editableMarkups ? "" : "lg:col-span-2"}`}>
                     {!canEditVat ? <>
                       <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Total Direct Cost</dt><dd className="font-medium">{peso.format(totals.cogs)}</dd></div>
-                      {totals.vat > 0 && <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>VAT</dt><dd>{peso.format(totals.vat)}</dd></div>}
-                      <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2 font-semibold"><dt>Grand Total</dt><dd>{peso.format(totals.sellingIncVat)}</dd></div>
                       <div className="flex justify-between bg-[#f8fbff] px-3 py-2 font-semibold"><dt>Selling Price Per Piece</dt><dd>{peso.format(totals.unitIncVat)}</dd></div>
                     </> : <>
                       <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Total Direct Cost</dt><dd className="font-medium">{peso.format(totals.cogs)}</dd></div>
