@@ -126,6 +126,7 @@
 124. Run `142_general_manager_production_deletion.sql` after migration 141 and before deploying the matching Project Calendar update. It lets General Managers delete approved production schedules from the Active and Completed views while preserving linked quotations, signed proofs, and production jobs.
 125. Run `143_fix_price_quotation_deletion_with_mockups.sql` after migration 142 and before deploying the matching quotation update. It removes linked Mockup Quotations and their dependent workflow records before deleting a Price Quotation, while preserving endorsed quotations and paid commission history.
 126. Run `144_quotation_files_custom_pricing_markups.sql` after migration 143 and before deploying the matching workspace update. It adds PDF support to public quotation illustrations and private signed proofs, stores attachment metadata, permits General Manager custom percentage markups with GM-only review visibility, and applies those custom markups to new pricing costings.
+127. Run `145_allow_assigned_pricing_officer_self_review.sql` after migration 144 and before deploying the matching workspace update. It allows an assigned Sales & Pricing Officer to price and submit a direct Price Quotation they created or prepared, while retaining project-type assignment, costing, role, and General Manager approval guards.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 
