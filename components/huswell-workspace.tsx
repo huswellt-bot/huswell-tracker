@@ -540,28 +540,43 @@ const productCostingDrafts = (
       : loadedMarkups,
   };
   });
-const productCostingsWithMissingDefaultMarkups = (
+const productCostingsWithLatestDefaultMarkups = (
   costings: ProductCostingDraft[],
   defaults: PricingMarkupDefault[],
 ): ProductCostingDraft[] =>
   costings.map((costing) => {
-    const savedMarkupKeys = new Set(
-      costing.markups
-        .map((markup) => markup.markupKey || pricingMarkupKeyForLabel(markup.label))
-        .filter((key): key is PricingMarkupKey => Boolean(key)),
+    // Legacy quotations carry a different pricing formula and must retain
+    // their historical markup snapshot. Settings are authoritative only for
+    // the target-margin model introduced by the pricing workflow.
+    if (costing.pricingModel !== "target_margin") return costing;
+
+    const currentDefaults = defaults.filter(
+      (definition) => definition.key !== "vat" && definition.key !== "discounts",
     );
-    const missingMarkups = defaults
-      .filter((definition) => definition.key !== "vat" && !savedMarkupKeys.has(definition.key))
-      .map((definition) => ({
-        key: `markup-${crypto.randomUUID()}`,
-        markupKey: definition.key,
-        label: definition.label,
-        calculationType: "percentage" as const,
-        value: definition.value,
-      }));
-    return missingMarkups.length
-      ? { ...costing, markups: [...costing.markups, ...missingMarkups] }
-      : costing;
+    const refreshedMarkups = currentDefaults.map((definition) => {
+      const savedMarkup = costing.markups.find(
+        (markup) => (markup.markupKey || pricingMarkupKeyForLabel(markup.label)) === definition.key,
+      );
+      return savedMarkup
+        ? {
+            ...savedMarkup,
+            markupKey: definition.key,
+            label: definition.label,
+            calculationType: "percentage" as const,
+            value: definition.value,
+          }
+        : {
+            key: `markup-${crypto.randomUUID()}`,
+            markupKey: definition.key,
+            label: definition.label,
+            calculationType: "percentage" as const,
+            value: definition.value,
+          };
+    });
+    const discountMarkups = costing.markups.filter(
+      (markup) => (markup.markupKey || pricingMarkupKeyForLabel(markup.label)) === "discounts",
+    );
+    return { ...costing, markups: [...refreshedMarkups, ...discountMarkups] };
   });
 const quotationVatRate = (quote: Row) => {
   const storedRate = n(quote.vat_rate);
@@ -12915,6 +12930,7 @@ function ProductCostingsSectionWithPricing({
   setCostings,
   pricingDefaults,
   editableMarkups,
+  editableInternalMarkups,
   visibleMarkupKeys,
   canEditVat,
   showPricingOfficerDiscount,
@@ -12927,6 +12943,7 @@ function ProductCostingsSectionWithPricing({
   setCostings: (next: ProductCostingDraft[] | ((current: ProductCostingDraft[]) => ProductCostingDraft[])) => void;
   pricingDefaults: Record<string, unknown>;
   editableMarkups: boolean;
+  editableInternalMarkups: boolean;
   visibleMarkupKeys: ReadonlyArray<PricingMarkupKey>;
   canEditVat: boolean;
   showPricingOfficerDiscount: boolean;
@@ -13035,7 +13052,7 @@ function ProductCostingsSectionWithPricing({
 
                 <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
                   {editableMarkups && <div className="space-y-4">
-                    <PricingMarkupEditor costing={costing} editable visibleMarkupKeys={visibleMarkupKeys} update={(next) => updateCosting(costing.key, () => next)} showInternalVat={canEditVat} />
+                    <PricingMarkupEditor costing={costing} editable={editableInternalMarkups} visibleMarkupKeys={visibleMarkupKeys} update={(next) => updateCosting(costing.key, () => next)} showInternalVat={canEditVat} />
                     {showPricingOfficerDiscount && <PricingMarkupEditor
                       costing={costing}
                       editable
@@ -13103,7 +13120,7 @@ function PriceQuotationReviewContent({
         {illustrations.length > 0 && <div className="mt-4"><p className="text-[12px] font-medium text-[#687386]">Illustrations</p><div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">{illustrations.map((illustration) => <a key={illustration.id} href={illustration.imageUrl} target="_blank" rel="noreferrer" className="overflow-hidden rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-2 hover:border-[#c4ccd8]"><AttachmentPreview url={illustration.imageUrl} contentType={illustration.contentType} fileName={illustration.fileName} alt={illustration.description || "Quotation illustration"} className="aspect-square w-full rounded-md object-cover" /><p className="mt-2 text-[12px] font-medium text-[#344054]">{illustration.description}</p></a>)}</div></div>}
       </section>
       <QuotationReviewSummary lines={lines} prices={prices} subtotal={subtotal} vatRate={vatRate} tax={tax} total={total} productCostings={productCostings} />
-      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups visibleMarkupKeys={visibleMarkupKeys ?? (showInternalMarkups ? internalPricingMarkupKeys : ["discounts"])} canEditVat={finalApproval} showPricingOfficerDiscount={finalApproval} />
+      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups editableInternalMarkups={!finalApproval} visibleMarkupKeys={visibleMarkupKeys ?? (showInternalMarkups ? internalPricingMarkupKeys : ["discounts"])} canEditVat={finalApproval} showPricingOfficerDiscount={finalApproval} />
       <section className="rounded-xl border border-[#e1e6ee] p-4">
         <h3 className="text-[14px] font-semibold">Terms and Conditions</h3>
         <div className="mt-3 space-y-2">{terms.map((term, index) => <div key={index} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
@@ -13226,7 +13243,7 @@ function PriceQuotationReview({
       finalApproval ? defaultPricingDefaults : undefined,
     );
     return finalApproval
-      ? productCostingsWithMissingDefaultMarkups(savedCostings, defaultPricingDefaults)
+      ? productCostingsWithLatestDefaultMarkups(savedCostings, defaultPricingDefaults)
       : savedCostings;
   });
   useEffect(() => {
@@ -13263,7 +13280,7 @@ function PriceQuotationReview({
         finalApproval ? defaultPricingDefaults : undefined,
       );
       setProductCostings(finalApproval
-        ? productCostingsWithMissingDefaultMarkups(loadedCostings, defaultPricingDefaults)
+        ? productCostingsWithLatestDefaultMarkups(loadedCostings, defaultPricingDefaults)
         : loadedCostings);
     };
     void loadProductCostings();
@@ -13341,10 +13358,9 @@ function PriceQuotationReview({
   }, 0);
   const tax = Math.round((total - subtotal) * 100) / 100;
   // GM review must show every internal markup used by this quotation. The
-  // Settings visibility flag is not a calculation or GM-access rule; it must
-  // not hide a saved/default markup from the final reviewer. Include saved
-  // keys as well so a historical/custom row remains visible even if the
-  // organization default was later changed or removed.
+  // The Settings visibility flag is not a calculation or GM-access rule; it
+  // must not hide a configured markup from the final reviewer. Legacy saved
+  // keys are included as well so historical markup rows remain visible.
   const gmVisibleMarkupKeys = Array.from(new Set([
     ...defaultPricingDefaults
       .filter((definition) => definition.key !== "vat" && definition.key !== "discounts")
