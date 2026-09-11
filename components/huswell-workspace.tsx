@@ -13340,9 +13340,20 @@ function PriceQuotationReview({
     return sum + Math.round(unitPrice * n(product?.quantity) * 100) / 100;
   }, 0);
   const tax = Math.round((total - subtotal) * 100) / 100;
-  const gmVisibleMarkupKeys = defaultPricingDefaults
-    .filter((definition) => definition.key !== "vat" && definition.visible !== false)
-    .map((definition) => definition.key);
+  // GM review must show every internal markup used by this quotation. The
+  // Settings visibility flag is not a calculation or GM-access rule; it must
+  // not hide a saved/default markup from the final reviewer. Include saved
+  // keys as well so a historical/custom row remains visible even if the
+  // organization default was later changed or removed.
+  const gmVisibleMarkupKeys = Array.from(new Set([
+    ...defaultPricingDefaults
+      .filter((definition) => definition.key !== "vat" && definition.key !== "discounts")
+      .map((definition) => definition.key),
+    ...productCostings
+      .flatMap((costing) => costing.markups)
+      .map((markup) => markup.markupKey || pricingMarkupKeyForLabel(markup.label))
+      .filter((key): key is PricingMarkupKey => Boolean(key) && key !== "vat" && key !== "discounts"),
+  ]));
   const configuredBankDetails = quotationBankDetailsSnapshot(activePricingDefaultSettings?.default_bank_details) ?? [];
   const bankVisibility = bankDetails.map((bank, index) => {
     const configured = configuredBankDetails.find((candidate) =>
