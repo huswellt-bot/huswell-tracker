@@ -3647,8 +3647,9 @@ function Records({
             !canFilterByProjectOfficer ||
             projectOfficerFilter === "all" ||
             (projectOfficerFilter === "unassigned"
-              ? !text(r.assigned_to, "")
-              : text(r.assigned_to ?? r.created_by, "") === projectOfficerFilter),
+              ? !text(r.assigned_to, "") && !text(r.endorsed_to, "")
+              : text(r.assigned_to ?? r.created_by, "") === projectOfficerFilter ||
+                text(r.endorsed_to, "") === projectOfficerFilter),
         )
         .filter(
           (r) =>
@@ -3663,7 +3664,7 @@ function Records({
             isProjectsPage ||
             evaluationFilter === "all" ||
             (evaluationFilter === "unassigned"
-              ? !text(r.assigned_to, "")
+              ? !text(r.assigned_to, "") && !text(r.endorsed_to, "")
               : text(r.evaluation_number, "") === evaluationFilter),
         )
         .filter(
@@ -3706,21 +3707,27 @@ function Records({
     );
     let unassignedCount = 0;
     rows.forEach((lead) => {
-      const assignedTo = text(lead.assigned_to, "");
-      if (!assignedTo) {
+      const officerIds = Array.from(
+        new Set(
+          [text(lead.assigned_to, ""), text(lead.endorsed_to, "")].filter(Boolean),
+        ),
+      );
+      if (!officerIds.length) {
         unassignedCount += 1;
         return;
       }
-      const existing = totals.get(assignedTo);
-      if (existing) {
-        existing.count += 1;
-        return;
-      }
-      const profile = store.profiles.find((item) => item.id === assignedTo);
-      totals.set(assignedTo, {
-        id: assignedTo,
-        name: text(profile?.full_name, "Sales Executive"),
-        count: 1,
+      officerIds.forEach((officerId) => {
+        const existing = totals.get(officerId);
+        if (existing) {
+          existing.count += 1;
+          return;
+        }
+        const profile = store.profiles.find((item) => item.id === officerId);
+        totals.set(officerId, {
+          id: officerId,
+          name: text(profile?.full_name, "Sales Executive"),
+          count: 1,
+        });
       });
     });
     return [
@@ -4057,11 +4064,15 @@ function Records({
   const canDeleteLead = (row: Row) =>
     module.table === "leads" &&
     memberRole(role);
+  const canActOnLead = (row: Row) =>
+    text(row.assigned_to ?? row.created_by, "") === currentUserId ||
+    (role === "sales_pricing_officer" &&
+      text(row.endorsed_to, "") === currentUserId);
   const canRequestLeadDeletion = (row: Row) =>
     module.table === "leads" &&
     !isProjectsPage &&
     isProjectOfficerRole(role) &&
-    text(row.assigned_to ?? row.created_by, "") === currentUserId;
+    canActOnLead(row);
   const canEndorseLead = (row: Row) =>
     module.table === "leads" &&
     !isProjectsPage &&
@@ -4075,7 +4086,7 @@ function Records({
     canUpdate &&
     (module.table !== "leads" ||
       memberRole(role) ||
-      text(row.assigned_to ?? row.created_by, "") === currentUserId);
+      canActOnLead(row));
   const isPageLayout = module.table === "leads";
   const contentPadding = isPageLayout ? "px-4 sm:px-6 lg:px-7" : "px-4 sm:px-5";
   const rowActions = (row: Row) => (
@@ -4314,7 +4325,7 @@ function Records({
           module.table === "leads" &&
           !isProjectsPage &&
           role === "sales_pricing_officer"
-            ? "View leads assigned to you and leads endorsed to you. Endorsed leads are read-only."
+            ? "View and work on leads assigned or endorsed to you."
             : module.detail
         }
         variant={isPageLayout ? "page" : "card"}
@@ -4362,7 +4373,7 @@ function Records({
         {module.table === "leads" && role === "sales_pricing_officer" && !isProjectsPage && (
           <div className={`${contentPadding} border-t border-[#edf0f5] py-3`}>
             <p className="text-[12px] text-[#687386]">
-              View your assigned leads and leads endorsed to you. Endorsed leads remain owned by the Sales Executive and are read-only for you.
+              View and work on leads assigned or endorsed to you.
             </p>
           </div>
         )}
@@ -4705,7 +4716,6 @@ function Records({
               options: pricingOfficers.map(
                 (officer) => `${officer.id}|${officer.name}`,
               ),
-              hint: "The selected officer will receive read-only visibility. The lead remains owned by you.",
             },
           ]}
           values={endorsementValues}
@@ -4718,11 +4728,7 @@ function Records({
           saving={endorsing}
           saveLabel="Endorse lead"
           className="max-w-lg"
-        >
-          <p className="rounded-lg border border-[#d9e0e9] bg-[#f8faff] p-3 text-[12px] leading-5 text-[#344054]">
-            This is a one-time endorsement. The General Manager, you, and the selected Sales & Pricing Officer will be able to see the lead.
-          </p>
-        </Dialog>
+        />
       )}
       <NoteDialog
         open={Boolean(recordNote)}
@@ -12285,7 +12291,10 @@ function PriceQuotationWorkspace({
   const availableLeads = store.leads.filter(
     (lead) =>
       !["won", "lost"].includes(text(lead.status)) &&
-      (!isProjectOfficerRole(role) || Boolean(currentUserId) && lead.assigned_to === currentUserId),
+      (!isProjectOfficerRole(role) || Boolean(currentUserId) && (
+        text(lead.assigned_to, "") === currentUserId ||
+        (role === "sales_pricing_officer" && text(lead.endorsed_to, "") === currentUserId)
+      )),
   );
   const resetEditor = () => {
     setEditorOpen(false);
@@ -18936,7 +18945,7 @@ export function HuswellWorkspace({
       title: isManagementRole ? "Lead management" : leads.title,
       detail:
         role === "sales_pricing_officer"
-          ? "View leads assigned to you and leads endorsed to you. Endorsed leads are read-only."
+          ? "View and work on leads assigned or endorsed to you."
           : isManagementRole
             ? "Add and assign leads, then review officer-submitted lead changes from the Approval Center."
             : leads.detail,
@@ -18969,7 +18978,7 @@ export function HuswellWorkspace({
             : "Price Quotations",
       detail:
         role === "sales_pricing_officer"
-            ? "Prepare and manage your Price Quotations from assigned leads."
+            ? "Prepare and manage your Price Quotations from assigned or endorsed leads."
             : isManagementRole
             ? "View approved and historical quotation records. Management approval actions are collected in the Approval Center."
             : "Prepare quotations from leads, then submit them to the assigned Sales & Pricing Officer.",
