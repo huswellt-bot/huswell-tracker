@@ -1721,6 +1721,16 @@ const leads: Module = {
         return name.includes("@") ? name.split("@")[0] : name;
       },
     },
+    {
+      label: "Endorse To",
+      value: (r, s) => {
+        const name = text(
+          s.profiles.find((profile) => profile.id === r.endorsed_to)?.full_name,
+          "-",
+        );
+        return name.includes("@") ? name.split("@")[0] : name;
+      },
+    },
     { label: "Endorse Date", value: (r) => day(r.endorsed_at) },
     {
       label: "Lead status",
@@ -3760,7 +3770,7 @@ function Records({
             column.label !== "Outbound caller" &&
             (isProjectsPage || column.label !== "Lead / project") &&
             (!isProjectsPage ||
-              !["Endorse By", "Endorse Date"].includes(column.label)),
+              !["Endorse By", "Endorse To", "Endorse Date"].includes(column.label)),
         )
       : module.columns;
   const assignmentColumn = {
@@ -4586,6 +4596,8 @@ function Records({
                                 ? "145px"
                                 : column.label === "Endorse By"
                                   ? "170px"
+                                  : column.label === "Endorse To"
+                                    ? "190px"
                                   : column.label === "Endorse Date"
                                     ? "135px"
                                     : "auto",
