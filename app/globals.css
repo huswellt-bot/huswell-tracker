@@ -698,8 +698,8 @@ select:not([multiple]) {
 }
 .huswell-workspace .leads-table {
   table-layout: fixed;
-  width: 1650px;
-  min-width: 1650px;
+  width: 1950px;
+  min-width: 1950px;
 }
 .huswell-workspace .leads-table thead th {
   white-space: nowrap !important;

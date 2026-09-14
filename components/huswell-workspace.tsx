@@ -842,6 +842,21 @@ const projectOfficerOptions = (store: Store) =>
     })
     .filter((officer) => Boolean(officer.id))
     .sort((left, right) => left.name.localeCompare(right.name));
+const pricingOfficerOptions = (store: Store) =>
+  store.organization_members
+    .filter((member) => text(member.role, "") === "sales_pricing_officer")
+    .map((member) => {
+      const id = text(member.user_id, "");
+      return {
+        id,
+        name: text(
+          store.profiles.find((profile) => profile.id === id)?.full_name,
+          "Sales & Pricing Officer",
+        ),
+      };
+    })
+    .filter((officer) => Boolean(officer.id))
+    .sort((left, right) => left.name.localeCompare(right.name));
 const projectOfficerIdForQuote = (store: Store, quote: Row) => {
   const sourceCosting = quote.costing_source_id
     ? store.quotations.find((item) => item.id === quote.costing_source_id)
@@ -1696,6 +1711,17 @@ const leads: Module = {
     { label: "Date contacted", value: (r) => day(r.date_contacted) },
     { label: "Outbound method", value: (r) => text(r.contact_method, "—") },
     { label: leadRecordedDateLabel, value: (r) => day(r.date_sent) },
+    {
+      label: "Endorse By",
+      value: (r, s) => {
+        const name = text(
+          s.profiles.find((profile) => profile.id === r.endorsed_by)?.full_name,
+          "-",
+        );
+        return name.includes("@") ? name.split("@")[0] : name;
+      },
+    },
+    { label: "Endorse Date", value: (r) => day(r.endorsed_at) },
     {
       label: "Lead status",
       value: (r) => evaluationLabel(r.evaluation_number),
@@ -3535,6 +3561,11 @@ function Records({
   const [projectOfficerFilter, setProjectOfficerFilter] = useState("all");
   const [leadDistributionOpen, setLeadDistributionOpen] = useState(false);
   const [deletionRequestLead, setDeletionRequestLead] = useState<Row | null>(null);
+  const [endorsementLead, setEndorsementLead] = useState<Row | null>(null);
+  const [endorsementValues, setEndorsementValues] = useState<Record<string, string>>({
+    recipient_user_id: "",
+  });
+  const [endorsing, setEndorsing] = useState(false);
   const [recordNote, setRecordNote] = useState<{
     title: string;
     context: string;
@@ -3549,6 +3580,7 @@ function Records({
   const isGeneralManager = memberRole(role);
   const canFilterByProjectOfficer = isGeneralManager && !isProjectsPage;
   const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
+  const pricingOfficers = useMemo(() => pricingOfficerOptions(store), [store]);
   const canCreate =
     !isProjectsPage &&
     !isLeadChangeRequestsPage &&
@@ -3605,7 +3637,9 @@ function Records({
           (r) =>
             module.table !== "leads" ||
             isGeneralManager ||
-            text(r.assigned_to ?? r.created_by, "") === currentUserId,
+            text(r.assigned_to ?? r.created_by, "") === currentUserId ||
+            (role === "sales_pricing_officer" &&
+              text(r.endorsed_to, "") === currentUserId),
         )
         .filter(
           (r) =>
@@ -3649,6 +3683,7 @@ function Records({
       module.table,
       query,
       currentUserId,
+      role,
       isProjectsPage,
       isGeneralManager,
       canFilterByProjectOfficer,
@@ -3716,7 +3751,9 @@ function Records({
       ? module.columns.filter(
           (column) =>
             column.label !== "Outbound caller" &&
-            (isProjectsPage || column.label !== "Lead / project"),
+            (isProjectsPage || column.label !== "Lead / project") &&
+            (!isProjectsPage ||
+              !["Endorse By", "Endorse Date"].includes(column.label)),
         )
       : module.columns;
   const assignmentColumn = {
@@ -3983,6 +4020,25 @@ function Records({
     notice("Lead deletion submitted for General Manager approval.");
     await reload();
   };
+  const endorseLead = async () => {
+    if (!endorsementLead?.id) return;
+    const recipientUserId = text(endorsementValues.recipient_user_id, "").split("|")[0];
+    if (!recipientUserId) {
+      notice("Select a Sales & Pricing Officer.");
+      return;
+    }
+    setEndorsing(true);
+    const { error } = await createClient().rpc("endorse_lead", {
+      p_lead_id: endorsementLead.id,
+      p_recipient_user_id: recipientUserId,
+    });
+    setEndorsing(false);
+    if (error) return notice(error.message);
+    setEndorsementLead(null);
+    setEndorsementValues({ recipient_user_id: "" });
+    notice("Lead endorsed to the selected Sales & Pricing Officer.");
+    await reload();
+  };
   const unsubmitRequest = async (
     request: Row,
     rpc: "unsubmit_lead_change" | "unsubmit_project_edit",
@@ -4006,6 +4062,15 @@ function Records({
     !isProjectsPage &&
     isProjectOfficerRole(role) &&
     text(row.assigned_to ?? row.created_by, "") === currentUserId;
+  const canEndorseLead = (row: Row) =>
+    module.table === "leads" &&
+    !isProjectsPage &&
+    role === "project_manager" &&
+    pricingOfficers.length > 0 &&
+    text(row.assigned_to ?? row.created_by, "") === currentUserId &&
+    !text(row.endorsed_by, "") &&
+    !text(row.endorsed_to, "") &&
+    !text(row.endorsed_at, "");
   const canEditRow = (row: Row) =>
     canUpdate &&
     (module.table !== "leads" ||
@@ -4031,6 +4096,20 @@ function Records({
             label="Edit record"
           >
             <Pencil size={15} />
+          </ActionIcon>
+        )}
+        {canEndorseLead(row) && (
+          <ActionIcon
+            label="Endorse lead to Sales & Pricing Officer"
+            confirm={false}
+            disabled={saving || endorsing}
+            loading={endorsing && endorsementLead?.id === row.id}
+            onClick={() => {
+              setEndorsementLead(row);
+              setEndorsementValues({ recipient_user_id: "" });
+            }}
+          >
+            <Send size={15} />
           </ActionIcon>
         )}
         {onPrint && (
@@ -4231,7 +4310,13 @@ function Records({
       )}
       <Panel
         title={module.title}
-        detail={module.detail}
+        detail={
+          module.table === "leads" &&
+          !isProjectsPage &&
+          role === "sales_pricing_officer"
+            ? "View leads assigned to you and leads endorsed to you. Endorsed leads are read-only."
+            : module.detail
+        }
         variant={isPageLayout ? "page" : "card"}
         hideHeading={isPageLayout}
         action={
@@ -4271,6 +4356,13 @@ function Records({
           <div className={`${contentPadding} border-t border-[#edf0f5] py-3`}>
             <p className="text-[12px] text-[#687386]">
               Manage all leads, add new opportunities, and assign each lead to a Sales Officer. Officer changes are reviewed from the Approval Center.
+            </p>
+          </div>
+        )}
+        {module.table === "leads" && role === "sales_pricing_officer" && !isProjectsPage && (
+          <div className={`${contentPadding} border-t border-[#edf0f5] py-3`}>
+            <p className="text-[12px] text-[#687386]">
+              View your assigned leads and leads endorsed to you. Endorsed leads remain owned by the Sales Executive and are read-only for you.
             </p>
           </div>
         )}
@@ -4468,7 +4560,7 @@ function Records({
             <div className={isPageLayout ? "modern-table-shell" : undefined}>
               <Table
                 labels={module.table === "leads" ? ["Actions", ...columns.map((c) => c.label)] : [...columns.map((c) => c.label), "Actions"]}
-                minWidth={module.table === "leads" ? 1650 : 680}
+                minWidth={module.table === "leads" ? 1950 : 680}
                 scrollable={isPageLayout}
                 columnWidths={
                   module.table === "leads"
@@ -4481,7 +4573,11 @@ function Records({
                               ? "135px"
                               : column.label === "Outbound method"
                                 ? "145px"
-                                : "auto",
+                                : column.label === "Endorse By"
+                                  ? "170px"
+                                  : column.label === "Endorse Date"
+                                    ? "135px"
+                                    : "auto",
                         ),
                       ]
                     : undefined
@@ -4594,6 +4690,37 @@ function Records({
         >
           <p className="rounded-lg border border-[#fed7d7] bg-[#fff5f5] p-3 text-[12px] leading-5 text-[#9b1c1c]">
             The General Manager must approve this request before the lead and its linked workflow records are permanently deleted.
+          </p>
+        </Dialog>
+      )}
+      {endorsementLead && (
+        <Dialog
+          title="Endorse Lead"
+          fields={[
+            {
+              key: "recipient_user_id",
+              label: "Sales & Pricing Officer",
+              type: "select",
+              required: true,
+              options: pricingOfficers.map(
+                (officer) => `${officer.id}|${officer.name}`,
+              ),
+              hint: "The selected officer will receive read-only visibility. The lead remains owned by you.",
+            },
+          ]}
+          values={endorsementValues}
+          setValues={setEndorsementValues}
+          save={() => void endorseLead()}
+          close={() => {
+            setEndorsementLead(null);
+            setEndorsementValues({ recipient_user_id: "" });
+          }}
+          saving={endorsing}
+          saveLabel="Endorse lead"
+          className="max-w-lg"
+        >
+          <p className="rounded-lg border border-[#d9e0e9] bg-[#f8faff] p-3 text-[12px] leading-5 text-[#344054]">
+            This is a one-time endorsement. The General Manager, you, and the selected Sales & Pricing Officer will be able to see the lead.
           </p>
         </Dialog>
       )}
@@ -18807,9 +18934,12 @@ export function HuswellWorkspace({
     },
     Leads: {
       title: isManagementRole ? "Lead management" : leads.title,
-      detail: isManagementRole
-        ? "Add and assign leads, then review officer-submitted lead changes from the Approval Center."
-        : leads.detail,
+      detail:
+        role === "sales_pricing_officer"
+          ? "View leads assigned to you and leads endorsed to you. Endorsed leads are read-only."
+          : isManagementRole
+            ? "Add and assign leads, then review officer-submitted lead changes from the Approval Center."
+            : leads.detail,
     },
     Projects: {
       title: isManagementRole ? "Project oversight" : projects.title,
