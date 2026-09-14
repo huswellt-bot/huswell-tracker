@@ -125,6 +125,7 @@ type View =
   | "Payment Monitoring"
   | "Payment Reviews"
   | "Submissions"
+  | "Announcements"
   | "Policy"
   | "Settings"
   | "Commissions"
@@ -1609,7 +1610,8 @@ const workspaceViewTables = (
     ];
   if (view === "Settings")
     return ["business_settings", "organization_members", "profiles"];
-  if (view === "Policy") return ["announcements", "policies"];
+  if (view === "Announcements") return ["announcements"];
+  if (view === "Policy") return ["policies"];
   return [];
 };
 
@@ -4780,6 +4782,7 @@ function PolicyView({
   reload,
   notice,
   role,
+  section,
   policyAction,
   onPolicyActionHandled,
 }: {
@@ -4788,6 +4791,7 @@ function PolicyView({
   reload: () => Promise<void>;
   notice: (message: string) => void;
   role: string;
+  section: "announcements" | "policy";
   policyAction: "announcement" | "policy" | null;
   onPolicyActionHandled: () => void;
 }) {
@@ -4994,11 +4998,18 @@ function PolicyView({
     <div className="min-h-[calc(100vh-64px)] bg-white">
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-[#edf0f5] px-4 py-4 sm:px-5">
         <div>
-          <h1 className="text-[15px] font-semibold text-[#202938]">Announcements & Policy</h1>
-          <p className="mt-1 text-[12px] text-[#687386]">Read General Manager announcements and company policy documents.</p>
+          <h1 className="text-[15px] font-semibold text-[#202938]">
+            {section === "announcements" ? "Announcements" : "Policy"}
+          </h1>
+          <p className="mt-1 text-[12px] text-[#687386]">
+            {section === "announcements"
+              ? "Read General Manager announcements and company updates."
+              : "Read company policy documents."}
+          </p>
         </div>
       </header>
-      <section>
+      {section === "announcements" && (
+        <section>
         {announcements.length ? (
           <div className="space-y-2 p-3 sm:p-4">
             {announcements.map((announcement) => (
@@ -5033,9 +5044,11 @@ function PolicyView({
             <p className="mt-1 text-[12px] text-[#8b92a1]">New General Manager updates will appear here.</p>
           </div>
         )}
-      </section>
+        </section>
+      )}
 
-      <section className="border-t border-[#edf0f5]">
+      {section === "policy" && (
+        <section className="border-t border-[#edf0f5]">
         <div className="border-b border-[#edf0f5] px-4 py-3 sm:px-5">
           <p className="text-[13px] font-semibold text-[#202938]">Policy Documents</p>
           <p className="mt-0.5 text-[11px] text-[#8b92a1]">Company policy PDFs available to view.</p>
@@ -5100,9 +5113,10 @@ function PolicyView({
           <Empty>No company policies have been uploaded yet.</Empty>
         </div>
       )}
-      </section>
+        </section>
+      )}
 
-      {announcementOpen && (
+      {section === "announcements" && announcementOpen && (
         <Dialog
           title={editingAnnouncement ? "Edit Announcement" : "New Announcement"}
           fields={[
@@ -5119,7 +5133,7 @@ function PolicyView({
         />
       )}
 
-      {addOpen && (
+      {section === "policy" && addOpen && (
         <Dialog
           title="Add Policy"
           fields={[
@@ -18738,7 +18752,6 @@ export function HuswellWorkspace({
       "Price Quotations",
       "Approvals",
       "Finance",
-      "Policy",
       "Settings",
     ],
     owner: [
@@ -18749,6 +18762,7 @@ export function HuswellWorkspace({
       "Price Quotations",
       "Approvals",
       "Finance",
+      "Announcements",
       "Policy",
       "Settings",
     ],
@@ -18760,6 +18774,7 @@ export function HuswellWorkspace({
       "Price Quotations",
       "Approvals",
       "Finance",
+      "Announcements",
       "Policy",
       "Settings",
     ],
@@ -18769,6 +18784,7 @@ export function HuswellWorkspace({
       "Projects",
       "Mockups",
       "Price Quotations",
+      "Announcements",
       "Policy",
     ],
     sales_pricing_officer: [
@@ -18779,13 +18795,14 @@ export function HuswellWorkspace({
       "Price Quotations",
       "Price Quotation Review",
       "Quotation Costing Overview",
+      "Announcements",
       "Policy",
     ],
-    sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Policy"],
-    warehouse: ["Dashboard", "Catalog", "Inventory", "Production", "Policy"],
-    accountant: ["Finance", "Policy"],
-    payroll: ["Dashboard", "Payroll & Leave", "Directory", "Policy"],
-    production: ["Dashboard", "Production", "Inventory", "Policy"],
+    sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Announcements", "Policy"],
+    warehouse: ["Dashboard", "Catalog", "Inventory", "Production", "Announcements", "Policy"],
+    accountant: ["Finance", "Announcements", "Policy"],
+    payroll: ["Dashboard", "Payroll & Leave", "Directory", "Announcements", "Policy"],
+    production: ["Dashboard", "Production", "Inventory", "Announcements", "Policy"],
     viewer: [
       "Dashboard",
       "Quotations",
@@ -18796,6 +18813,7 @@ export function HuswellWorkspace({
       "Expenses",
       "Directory",
       "Targets",
+      "Announcements",
       "Policy",
     ],
   };
@@ -18874,6 +18892,7 @@ export function HuswellWorkspace({
       label: "Business",
       items: [
         { view: "Finance", icon: Wallet },
+        { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
         { view: "Settings", icon: Settings },
       ],
@@ -18904,6 +18923,7 @@ export function HuswellWorkspace({
     {
       label: "Business",
       items: [
+        { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
       ],
     },
@@ -18934,7 +18954,10 @@ export function HuswellWorkspace({
     },
     {
       label: "Company",
-      items: [{ view: "Policy", icon: ScrollText }],
+      items: [
+        { view: "Announcements", icon: MessageSquareText },
+        { view: "Policy", icon: ScrollText },
+      ],
     },
   ];
   const nav = navBase
@@ -19077,9 +19100,13 @@ export function HuswellWorkspace({
       title: isProjectOfficerRole(role) ? "My commissions" : "Sales Executive commissions",
       detail: "Track commission earned from actual customer payments.",
     },
+    Announcements: {
+      title: "Announcements",
+      detail: "Read General Manager announcements and company updates.",
+    },
     Policy: {
-      title: "Announcements & Policy",
-      detail: "Read General Manager announcements and company policy documents.",
+      title: "Policy",
+      detail: "Read company policy documents.",
     },
     Profile: {
       title: "Profile",
@@ -19278,6 +19305,17 @@ export function HuswellWorkspace({
         role={role}
         assignedOnly
       />
+    ) : active === "Announcements" ? (
+      <PolicyView
+        store={store}
+        orgId={organizationId}
+        reload={reload}
+        notice={setMessage}
+        role={role}
+        section="announcements"
+        policyAction={policyAction}
+        onPolicyActionHandled={() => setPolicyAction(null)}
+      />
     ) : active === "Policy" ? (
       <PolicyView
         store={store}
@@ -19285,6 +19323,7 @@ export function HuswellWorkspace({
         reload={reload}
         notice={setMessage}
         role={role}
+        section="policy"
         policyAction={policyAction}
         onPolicyActionHandled={() => setPolicyAction(null)}
       />
@@ -19349,8 +19388,10 @@ export function HuswellWorkspace({
                   const navigationLabel =
                     view === "Dashboard" && (isProjectOfficerRole(role) || role === "admin")
                       ? "KPI"
+                    : view === "Announcements"
+                        ? "Announcements"
                       : view === "Policy"
-                        ? "Announcements & Policy"
+                        ? "Policy"
                       : isManagementRole && view === "Leads"
                           ? "Generated Leads"
                       : view === "Projects"
@@ -19476,11 +19517,13 @@ export function HuswellWorkspace({
             >
               <Menu size={16} strokeWidth={1.75} />
             </button>
+            {active === "Announcements" && role === "admin" && (
+              <Button compact onClick={() => setPolicyAction("announcement")}>
+                <Plus size={13} /> <span className="hidden sm:inline">Add Announcement</span><span className="sm:hidden">Announcement</span>
+              </Button>
+            )}
             {active === "Policy" && role === "admin" && (
               <div className="flex min-w-0 items-center gap-1.5">
-                <Button compact onClick={() => setPolicyAction("announcement")}>
-                  <Plus size={13} /> <span className="hidden sm:inline">Add Announcement</span><span className="sm:hidden">Announcement</span>
-                </Button>
                 <Button compact onClick={() => setPolicyAction("policy")}>
                   <Plus size={13} /> Add Policy
                 </Button>
@@ -19524,7 +19567,7 @@ export function HuswellWorkspace({
             )}
           </div>
         </header>
-        <div className={`workspace-content ${(["Projects", "Price Quotations", "Price Quotation Review", "Approvals", "Payment Monitoring", "Payment Reviews"].includes(active) || active === "Policy") ? "p-0" : "p-2 sm:p-3 lg:p-4"}`}>
+        <div className={`workspace-content ${(["Projects", "Price Quotations", "Price Quotation Review", "Approvals", "Payment Monitoring", "Payment Reviews", "Announcements", "Policy"].includes(active)) ? "p-0" : "p-2 sm:p-3 lg:p-4"}`}>
           {message && (
             <div className="fixed inset-0 z-[999] grid place-items-center bg-[color-mix(in_srgb,var(--color-text-primary)_30%,transparent)] p-4">
               <section
