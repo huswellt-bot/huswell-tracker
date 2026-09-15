@@ -11896,7 +11896,14 @@ function ProductCostingsSectionWithPricing({
             const product = lines.find((line) => line.id === costing.quotationItemId);
             const totals = productCostingTotals(costing, n(product?.quantity), n(vatValue));
             return (
-              <article key={costing.key} className="rounded-lg border border-[#d9e0e9] bg-white p-3">
+              <article key={costing.key} className="overflow-hidden rounded-xl border border-[#d9e0e9] bg-white p-4 shadow-sm">
+                <div className="-mx-4 -mt-4 mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-[#edf0f5] bg-[#fafbfc] px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#687386]">Costing Breakdown {costingIndex + 1}</p>
+                    <p className="mt-1 truncate text-[12px] text-[#344054]">{product ? text(product.description, "Finished product") : "Select a finished product"}</p>
+                  </div>
+                  <Button secondary onClick={() => setCostings((current) => current.filter((item) => item.key !== costing.key))}><Trash2 size={14} /> Remove table</Button>
+                </div>
                 <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[#edf0f5] pb-3">
                   <label className="min-w-64 flex-1 text-[12px] font-medium text-[#202938]">
                     Finished product
@@ -11905,7 +11912,6 @@ function ProductCostingsSectionWithPricing({
                       {lines.map((line, index) => <option key={text(line.id)} value={text(line.id)} disabled={costings.some((other) => other.key !== costing.key && other.quotationItemId === line.id)}>{displayProjectName} - Product {index + 1} - Qty: {n(line.quantity)} pcs</option>)}
                     </select>
                   </label>
-                  <Button secondary onClick={() => setCostings((current) => current.filter((item) => item.key !== costing.key))}><Trash2 size={14} /> Remove table</Button>
                 </div>
 
                 <div className="mt-3">
