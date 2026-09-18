@@ -570,10 +570,15 @@ const productCostingsWithLatestDefaultMarkups = (
             value: definition.value,
           };
     });
+    const currentDefaultKeys = new Set(currentDefaults.map((definition) => definition.key));
+    const historicalMarkups = costing.markups.filter((markup) => {
+      const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
+      return Boolean(key) && key !== "vat" && key !== "discounts" && !currentDefaultKeys.has(key);
+    });
     const discountMarkups = costing.markups.filter(
       (markup) => (markup.markupKey || pricingMarkupKeyForLabel(markup.label)) === "discounts",
     );
-    return { ...costing, markups: [...refreshedMarkups, ...discountMarkups] };
+    return withQuotationDiscount({ ...costing, markups: [...refreshedMarkups, ...historicalMarkups, ...discountMarkups] });
   });
 const quotationVatRate = (quote: Row) => {
   const storedRate = n(quote.vat_rate);
@@ -746,6 +751,7 @@ const wholePeso = new Intl.NumberFormat("en-PH", {
   currency: "PHP",
   maximumFractionDigits: 0,
 });
+const confidentialPricingValue = "••••";
 const n = (value: unknown) =>
   Number.isFinite(Number(value)) ? Number(value) : 0;
 const normalizeDisplayText = (value: string) =>
@@ -11560,6 +11566,7 @@ function PricingMarkupEditor({
   update,
   heading,
   showInternalVat = false,
+  sensitiveValuesHidden = false,
 }: {
   costing: ProductCostingDraft;
   editable: boolean;
@@ -11567,6 +11574,7 @@ function PricingMarkupEditor({
   update: (next: ProductCostingDraft) => void;
   heading?: string;
   showInternalVat?: boolean;
+  sensitiveValuesHidden?: boolean;
 }) {
   const totals = productCostingTotals(costing, 1, 0);
   const visibleMarkups = costing.markups.filter((markup) => {
@@ -11597,17 +11605,17 @@ function PricingMarkupEditor({
                 {isDiscount && editable ? <SegmentedToggle ariaLabel={`${label} calculation basis`} value={rowCalculationType} options={markupBasisOptions} onChange={(value) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, calculationType: value as MarkupCalculationType } : item) })} size="compact" className="w-16" /> : <span className="block text-right text-[#687386]">{rowCalculationType === "fixed_amount" ? "Amount" : "Percent"}</span>}
               </td>}
               <td className="px-2 py-2">
-                {editable ? <div className="flex items-center justify-end gap-1"><input aria-label={`${label} ${rowCalculationType === "fixed_amount" ? "amount" : "percentage"}`} type="number" min="0" max={rowCalculationType === "percentage" ? "100" : undefined} step="any" value={markupValue(markup)} onChange={(event) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, calculationType: isDiscount ? rowCalculationType : "percentage", value: event.target.value } : item) })} className="input mt-0 px-2 py-1.5 tabular-nums" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /><span className="w-4 text-[11px] text-[#687386]">{rowCalculationType === "fixed_amount" ? "₱" : "%"}</span></div> : <span className="block text-right tabular-nums text-[#687386]">{rowCalculationType === "fixed_amount" ? peso.format(n(markupValue(markup))) : `${n(markupValue(markup))}%`}</span>}
+                {editable ? <div className="flex items-center justify-end gap-1"><input aria-label={`${label} ${rowCalculationType === "fixed_amount" ? "amount" : "percentage"}`} type={sensitiveValuesHidden ? "password" : "number"} min="0" max={rowCalculationType === "percentage" ? "100" : undefined} step="any" value={markupValue(markup)} onChange={(event) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, calculationType: isDiscount ? rowCalculationType : "percentage", value: event.target.value } : item) })} className="input mt-0 px-2 py-1.5 tabular-nums" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /><span className="w-4 text-[11px] text-[#687386]">{sensitiveValuesHidden ? confidentialPricingValue : rowCalculationType === "fixed_amount" ? "₱" : "%"}</span></div> : <span className="block text-right tabular-nums text-[#687386]">{sensitiveValuesHidden ? confidentialPricingValue : rowCalculationType === "fixed_amount" ? peso.format(n(markupValue(markup))) : `${n(markupValue(markup))}%`}</span>}
               </td>
-              <td className="px-3 py-2 text-right font-medium tabular-nums">{peso.format(amount)}</td>
+              <td className="px-3 py-2 text-right font-medium tabular-nums">{sensitiveValuesHidden ? confidentialPricingValue : peso.format(amount)}</td>
             </tr>
           );
         })}
         {showInternalVat && <tr className="bg-[#fafbfc]">
           <td className="px-3 py-2 font-medium text-[#344054]">Internal VAT</td>
           {includesDiscount && <td className="px-2 py-2"><span className="block text-right text-[#687386]">Percent</span></td>}
-          <td className="px-2 py-2">{editable ? <div className="flex items-center justify-end gap-1"><input aria-label="Internal VAT percentage" type="number" min="0" max="100" step="any" value={costing.internalVatRate} onChange={(event) => update({ ...costing, internalVatRate: event.target.value })} className="input mt-0 px-2 py-1.5 tabular-nums" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /><span className="w-4 text-[11px] text-[#687386]">%</span></div> : <span className="block text-right tabular-nums text-[#687386]">{`${n(costing.internalVatRate)}%`}</span>}</td>
-          <td className="px-3 py-2 text-right font-medium tabular-nums">{peso.format(totals.internalVatAmount)}</td>
+          <td className="px-2 py-2">{editable ? <div className="flex items-center justify-end gap-1"><input aria-label="Internal VAT percentage" type={sensitiveValuesHidden ? "password" : "number"} min="0" max="100" step="any" value={costing.internalVatRate} onChange={(event) => update({ ...costing, internalVatRate: event.target.value })} className="input mt-0 px-2 py-1.5 tabular-nums" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /><span className="w-4 text-[11px] text-[#687386]">{sensitiveValuesHidden ? confidentialPricingValue : "%"}</span></div> : <span className="block text-right tabular-nums text-[#687386]">{sensitiveValuesHidden ? confidentialPricingValue : `${n(costing.internalVatRate)}%`}</span>}</td>
+          <td className="px-3 py-2 text-right font-medium tabular-nums">{sensitiveValuesHidden ? confidentialPricingValue : peso.format(totals.internalVatAmount)}</td>
         </tr>}
       </Table>
     </div>
@@ -11700,6 +11708,7 @@ type PriceQuotationReviewContentProps = {
   review: (decision: "approved" | "needs_revision") => Promise<boolean>;
   finalApproval: boolean;
   showInternalMarkups: boolean;
+  sensitiveValuesHidden: boolean;
   visibleMarkupKeys?: ReadonlyArray<PricingMarkupKey>;
   bankVisibility?: ReadonlyArray<boolean>;
   pricingRevision?: boolean;
@@ -11799,7 +11808,8 @@ function QuotationReviewSummary({
   total,
   productCostings,
   showPrices = true,
-}: Pick<PriceQuotationReviewContentProps, "lines" | "prices" | "subtotal" | "vatRate" | "tax" | "total" | "productCostings"> & { showPrices?: boolean }) {
+  sensitiveValuesHidden = false,
+}: Pick<PriceQuotationReviewContentProps, "lines" | "prices" | "subtotal" | "vatRate" | "tax" | "total" | "productCostings"> & { showPrices?: boolean; sensitiveValuesHidden?: boolean }) {
   const hasVat = n(vatRate) > 0 && tax > 0;
   const priceLabel = hasVat ? "Selling Price / Unit (VAT inc.)" : "Selling Price / Unit";
   const labels = showPrices
@@ -11816,8 +11826,8 @@ function QuotationReviewSummary({
           <td className="px-4 py-3 text-center">{index + 1}</td>
           <td className="whitespace-pre-wrap break-words px-4 py-3 font-medium">{text(line.description)}</td>
           <td className="px-4 py-3 text-center">{n(line.quantity)}</td>
-          <td className={showPrices ? "px-4 py-2" : "hidden"}>{productCosting ? <span aria-label={`${priceLabel} for ${text(line.description)}`} className="flex min-h-9 items-center justify-center font-medium text-[#202938]">{peso.format(displayedPrice)}</span> : <span aria-label={`${priceLabel} for ${text(line.description)}`} className="flex min-h-9 items-center justify-center text-[#8b92a1]">—</span>}</td>
-          <td className={showPrices ? "px-4 py-3 text-right font-semibold" : "hidden"}>{productCosting ? wholePeso.format(n(line.quantity) * displayedPrice) : <span className="text-[#8b92a1]">—</span>}</td>
+          <td className={showPrices ? "px-4 py-2" : "hidden"}>{productCosting ? <span aria-label={`${priceLabel} for ${text(line.description)}`} className="flex min-h-9 items-center justify-center font-medium text-[#202938]">{sensitiveValuesHidden ? confidentialPricingValue : peso.format(displayedPrice)}</span> : <span aria-label={`${priceLabel} for ${text(line.description)}`} className="flex min-h-9 items-center justify-center text-[#8b92a1]">—</span>}</td>
+          <td className={showPrices ? "px-4 py-3 text-right font-semibold" : "hidden"}>{productCosting ? sensitiveValuesHidden ? confidentialPricingValue : wholePeso.format(n(line.quantity) * displayedPrice) : <span className="text-[#8b92a1]">—</span>}</td>
         </tr>;
       })}
     </Table>
@@ -11836,6 +11846,7 @@ function ProductCostingsSectionWithPricing({
   editableInternalMarkups,
   visibleMarkupKeys,
   canEditVat,
+  sensitiveValuesHidden = false,
 }: {
   projectName: string;
   lines: Row[];
@@ -11848,8 +11859,11 @@ function ProductCostingsSectionWithPricing({
   editableInternalMarkups: boolean;
   visibleMarkupKeys: ReadonlyArray<PricingMarkupKey>;
   canEditVat: boolean;
+  sensitiveValuesHidden?: boolean;
 }) {
   const displayProjectName = projectName.trim() || "Project";
+  const displayCurrency = (value: number) => sensitiveValuesHidden ? confidentialPricingValue : peso.format(value);
+  const sensitiveNumberInputType = sensitiveValuesHidden ? "password" : "number";
   const defaults = pricingMarkupDefaults(pricingDefaults.pricing_markup_defaults, pricingDefaults);
   const updateCosting = (key: string, update: (costing: ProductCostingDraft) => ProductCostingDraft) =>
     setCostings((current) => current.map((costing) => costing.key === key ? update(costing) : costing));
@@ -11909,7 +11923,7 @@ function ProductCostingsSectionWithPricing({
                     Finished product
                     <select value={costing.quotationItemId} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, quotationItemId: event.target.value }))} className="input mt-1">
                       <option value="">Select quotation product</option>
-                      {lines.map((line, index) => <option key={text(line.id)} value={text(line.id)} disabled={costings.some((other) => other.key !== costing.key && other.quotationItemId === line.id)}>{displayProjectName} - Product {index + 1} - Qty: {n(line.quantity)} pcs</option>)}
+                      {lines.map((line, index) => <option key={text(line.id)} value={text(line.id)} disabled={costings.some((other) => other.key !== costing.key && other.quotationItemId === line.id)}>{displayProjectName} - Product {index + 1} - Qty: {sensitiveValuesHidden ? confidentialPricingValue : n(line.quantity)} pcs</option>)}
                     </select>
                   </label>
                 </div>
@@ -11946,9 +11960,9 @@ function ProductCostingsSectionWithPricing({
                             />
                           </td>
                           <td className="min-w-0 !whitespace-normal break-words px-2 py-2"><input aria-label={`Cost ${lineIndex + 1} description`} value={line.description} onChange={(event) => updateLine({ description: titleCaseEntry(event.target.value, "description") })} className="input mt-0 min-w-0 max-w-full px-2" placeholder="Material, labor, logistics" /></td>
-                          <td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-end text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} quantity`} type="number" min="0.001" step="any" value={line.quantity} onChange={(event) => updateLine({ quantity: event.target.value })} className="input mt-0 px-1" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} />}</td>
-                          <td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-end text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} unit cost`} type="number" min="0" step="any" value={line.unitCost} onChange={(event) => updateLine({ unitCost: event.target.value })} className="input mt-0 px-1" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} />}</td>
-                          <td className="min-w-0 px-2 py-2">{isFixedAmount ? <input aria-label={`Cost ${lineIndex + 1} fixed amount`} type="number" min="0" step="any" value={line.amount} onChange={(event) => updateLine({ amount: event.target.value })} className="input mt-0 px-1" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /> : <span className="flex min-h-9 items-center justify-end whitespace-nowrap font-medium">{peso.format(lineAmount)}</span>}</td>
+                          <td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-end text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} quantity`} type={sensitiveNumberInputType} min="0.001" step="any" value={line.quantity} onChange={(event) => updateLine({ quantity: event.target.value })} className="input mt-0 px-1" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} />}</td>
+                          <td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-end text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} unit cost`} type={sensitiveNumberInputType} min="0" step="any" value={line.unitCost} onChange={(event) => updateLine({ unitCost: event.target.value })} className="input mt-0 px-1" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} />}</td>
+                          <td className="min-w-0 px-2 py-2">{isFixedAmount ? <input aria-label={`Cost ${lineIndex + 1} fixed amount`} type={sensitiveNumberInputType} min="0" step="any" value={line.amount} onChange={(event) => updateLine({ amount: event.target.value })} className="input mt-0 px-1" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /> : <span className="flex min-h-9 items-center justify-end whitespace-nowrap font-medium">{sensitiveValuesHidden ? confidentialPricingValue : peso.format(lineAmount)}</span>}</td>
                           <td className="px-1 py-2 text-left"><ActionIcon label={`Remove cost ${lineIndex + 1}`} tone="red" disabled={costing.costLines.length === 1} onClick={() => updateCosting(costing.key, (current) => ({ ...current, costLines: current.costLines.filter((item) => item.key !== line.key) }))}><Trash2 size={14} /></ActionIcon></td>
                         </tr>
                       );
@@ -11959,20 +11973,20 @@ function ProductCostingsSectionWithPricing({
 
                 <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
                   {editableMarkups && <div className="space-y-4">
-                    <PricingMarkupEditor costing={costing} editable={editableInternalMarkups} visibleMarkupKeys={visibleMarkupKeys} update={(next) => updateCosting(costing.key, () => next)} showInternalVat={canEditVat} />
+                    <PricingMarkupEditor costing={costing} editable={editableInternalMarkups} visibleMarkupKeys={visibleMarkupKeys} update={(next) => updateCosting(costing.key, () => next)} showInternalVat={canEditVat} sensitiveValuesHidden={sensitiveValuesHidden} />
                   </div>}
                   <dl className={`overflow-hidden rounded-lg border border-[#d9e0e9] text-[12px] ${editableMarkups ? "" : "lg:col-span-2"}`}>
                     {!canEditVat ? <>
                       <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Total Direct Cost</dt><dd className="font-medium">{peso.format(totals.cogs)}</dd></div>
                     </> : <>
-                      <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Total Direct Cost</dt><dd className="font-medium">{peso.format(totals.cogs)}</dd></div>
-                      {visibleMarkupKeys.length > 1 && <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>All Markups</dt><dd>{peso.format(totals.markupTotal)}</dd></div>}
-                      {visibleMarkupKeys.length > 1 && <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Total Before Discount</dt><dd>{peso.format(totals.listSellingExVat)}</dd></div>}
-                      <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Discount</dt><dd>{peso.format(totals.discountAmount)}</dd></div>
-                      <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2 font-medium"><dt>Net Total</dt><dd>{peso.format(totals.sellingExVat)}</dd></div>
-                      <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>VAT</dt><dd>{peso.format(totals.vat)}</dd></div>
-                      <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2 font-semibold"><dt>Grand Total</dt><dd>{peso.format(totals.sellingIncVat)}</dd></div>
-                      <div className="flex justify-between bg-[#eff7f1] px-3 py-2 font-semibold text-[#176b40]"><dt>Selling Price Per Piece</dt><dd>{peso.format(totals.unitIncVat)}</dd></div>
+                      <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Total Direct Cost</dt><dd className="font-medium">{displayCurrency(totals.cogs)}</dd></div>
+                      {visibleMarkupKeys.length > 1 && <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>All Markups</dt><dd>{displayCurrency(totals.markupTotal)}</dd></div>}
+                      {visibleMarkupKeys.length > 1 && <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Total Before Discount</dt><dd>{displayCurrency(totals.listSellingExVat)}</dd></div>}
+                      <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>Discount</dt><dd>{displayCurrency(totals.discountAmount)}</dd></div>
+                      <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2 font-medium"><dt>Net Total</dt><dd>{displayCurrency(totals.sellingExVat)}</dd></div>
+                      <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2"><dt>VAT</dt><dd>{displayCurrency(totals.vat)}</dd></div>
+                      <div className="flex justify-between border-b border-[#edf0f5] px-3 py-2 font-semibold"><dt>Grand Total</dt><dd>{displayCurrency(totals.sellingIncVat)}</dd></div>
+                      <div className="flex justify-between bg-[#eff7f1] px-3 py-2 font-semibold text-[#176b40]"><dt>Selling Price Per Piece</dt><dd>{displayCurrency(totals.unitIncVat)}</dd></div>
                     </>}
                   </dl>
                 </div>
@@ -11987,8 +12001,8 @@ function ProductCostingsSectionWithPricing({
           <div className="grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-3 border-b border-[#edf0f5] pb-2 text-[10px] font-medium text-[#687386]"><span>Category</span><span>Percentage</span><span className="text-right">Calculated Amount</span></div>
           <div className="mt-2 grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-3">
             <span className="text-[11px] font-medium text-[#344054]">VAT</span>
-            <div className="flex items-center gap-1"><input aria-label="VAT percentage" type="number" min="0" max="100" step="any" value={vatValue} onChange={(event) => setVatValue(event.target.value)} className="input mt-0 px-2 py-1.5" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /><span className="text-[11px] text-[#687386]">%</span></div>
-            <output aria-label="VAT total" className="min-w-20 text-right text-[12px] font-semibold text-[#344054]">{peso.format(vatTotal)}</output>
+            <div className="flex items-center gap-1"><input aria-label="VAT percentage" type={sensitiveNumberInputType} min="0" max="100" step="any" value={vatValue} onChange={(event) => setVatValue(event.target.value)} className="input mt-0 px-2 py-1.5" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /><span className="text-[11px] text-[#687386]">{sensitiveValuesHidden ? confidentialPricingValue : "%"}</span></div>
+            <output aria-label="VAT total" className="min-w-20 text-right text-[12px] font-semibold text-[#344054]">{sensitiveValuesHidden ? confidentialPricingValue : peso.format(vatTotal)}</output>
           </div>
         </div>
       </div>}
@@ -11999,7 +12013,7 @@ function ProductCostingsSectionWithPricing({
 function PriceQuotationReviewContent({
   lines, projectName, projectType, illustrations, productCostings, pricingDefaults, setProductCostings, prices, setPrices, subtotal, vatRate, setVatRate, tax,
   total, terms, setTerms, bankDetails, setBankDetails,
-  revisionNote, setRevisionNote, submissionNote, setSubmissionNote, close, saving, working, review, finalApproval, showInternalMarkups, visibleMarkupKeys, bankVisibility, pricingRevision,
+  revisionNote, setRevisionNote, submissionNote, setSubmissionNote, close, saving, working, review, finalApproval, showInternalMarkups, sensitiveValuesHidden, visibleMarkupKeys, bankVisibility, pricingRevision,
   documentLabel = "Price Quotation", sourceQuotationNo,
 }: PriceQuotationReviewContentProps) {
   const [revisionDialogOpen, setRevisionDialogOpen] = useState(false);
@@ -12021,8 +12035,8 @@ function PriceQuotationReviewContent({
         <h3 className="text-[14px] font-semibold">Note to General Manager</h3>
         <p className="mt-2 whitespace-pre-wrap text-[13px] leading-5 text-[#4b5565]">{submissionNote}</p>
       </section>}
-      <QuotationReviewSummary lines={lines} prices={prices} subtotal={subtotal} vatRate={vatRate} tax={tax} total={total} productCostings={productCostings} showPrices={showInternalMarkups} />
-      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups={showInternalMarkups} editableInternalMarkups={!finalApproval} visibleMarkupKeys={visibleMarkupKeys ?? (showInternalMarkups ? internalPricingMarkupKeys : ["discounts"])} canEditVat={finalApproval} />
+      <QuotationReviewSummary lines={lines} prices={prices} subtotal={subtotal} vatRate={vatRate} tax={tax} total={total} productCostings={productCostings} showPrices={showInternalMarkups} sensitiveValuesHidden={sensitiveValuesHidden} />
+      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups={showInternalMarkups} editableInternalMarkups={finalApproval} visibleMarkupKeys={visibleMarkupKeys ?? (showInternalMarkups ? internalPricingMarkupKeys : ["discounts"])} canEditVat={finalApproval} sensitiveValuesHidden={sensitiveValuesHidden} />
       <section className="rounded-xl border border-[#e1e6ee] p-4">
         <h3 className="text-[14px] font-semibold">Terms and Conditions</h3>
         <div className="mt-3 space-y-2">{terms.map((term, index) => <div key={index} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
@@ -12074,6 +12088,7 @@ function PriceQuotationReview({
 }) {
   const pricingRevision = !finalApproval && isPricingOfficerRevision(quotation);
   const documentLabel = "Price Quotation";
+  const [sensitiveValuesHidden, setSensitiveValuesHidden] = useState(false);
   const illustrationQuotationId = text(quotation.id, "");
   const pricingDefaultSettings = store.business_settings.find(
     (setting) => text(setting.organization_id) === text(quotation.organization_id),
@@ -12270,13 +12285,14 @@ function PriceQuotationReview({
   // must not hide a configured markup from the final reviewer. Legacy saved
   // keys are included as well so historical markup rows remain visible.
   const gmVisibleMarkupKeys = Array.from(new Set([
+    "discounts",
     ...defaultPricingDefaults
-      .filter((definition) => definition.key !== "vat" && definition.key !== "discounts")
+      .filter((definition) => definition.key !== "vat")
       .map((definition) => definition.key),
     ...productCostings
       .flatMap((costing) => costing.markups)
       .map((markup) => markup.markupKey || pricingMarkupKeyForLabel(markup.label))
-      .filter((key): key is PricingMarkupKey => Boolean(key) && key !== "vat" && key !== "discounts"),
+      .filter((key): key is PricingMarkupKey => Boolean(key) && key !== "vat"),
   ]));
   const configuredBankDetails = quotationBankDetailsSnapshot(activePricingDefaultSettings?.default_bank_details) ?? [];
   const bankVisibility = bankDetails.map((bank, index) => {
@@ -12372,7 +12388,7 @@ function PriceQuotationReview({
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} shipping={shipping} setShipping={setShipping} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} · {text(quotation.client_name)} · Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><div className="mt-5 grid gap-5 lg:grid-cols-[1.45fr_.75fr]"><div><Table labels={["Item", "Description", "Quantity", "Selling Price / Unit", "Amount"]}>{lines.map((line, index) => { const price = n(prices[text(line.id)]); return <tr key={text(line.id)}><td className="px-4 py-3 text-center">{index + 1}</td><td className="px-4 py-3 font-medium">{text(line.description)}</td><td className="px-4 py-3 text-center">{n(line.quantity)}</td><td className="px-4 py-2"><input aria-label={`Selling price for ${text(line.description)}`} type="number" min="0" step="any" value={prices[text(line.id)] ?? ""} onChange={(event) => setPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 text-right" /></td><td className="px-4 py-3 text-right font-semibold">{peso.format(n(line.quantity) * price)}</td></tr>; })}</Table><section className="mt-5 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button secondary onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div><div className="mt-3 space-y-2">{terms.map((term, index) => <div key={`${index}-${term}`} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><section className="mt-4 rounded-xl border border-[#e1e6ee] p-4"><div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Bank Details</h3><Button secondary onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div><div className="mt-3 space-y-2">{bankDetails.map((bank, index) => <div key={index} className="grid gap-2 sm:grid-cols-[.8fr_1fr_1fr_auto]"><input aria-label={`Bank ${index + 1} name`} value={bank.bank_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, bank_name: event.target.value } : value))} placeholder="Bank" className="input mt-0" /><input aria-label={`Bank ${index + 1} account name`} value={bank.account_name} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_name: event.target.value } : value))} placeholder="Account name" className="input mt-0" /><input aria-label={`Bank ${index + 1} account number`} value={bank.account_number} onChange={(event) => setBankDetails((current) => current.map((value, itemIndex) => itemIndex === index ? { ...value, account_number: event.target.value } : value))} placeholder="Account number" className="input mt-0" /><button type="button" aria-label={`Remove bank ${index + 1}`} onClick={() => setBankDetails((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div></section><label className="mt-4 block text-[12px] font-medium text-[#202938]">Revision note<textarea rows={3} value={revisionNote} onChange={(event) => setRevisionNote(titleCaseEntry(event.target.value, "revision_note"))} placeholder="Required only when returning for revision" className="input mt-1 min-h-[78px] resize-y" /></label></div><aside><section className="overflow-hidden rounded-xl border border-[#e1e6ee]"><div className="border-b border-[#edf0f5] px-4 py-3"><h3 className="text-[14px] font-semibold">Quotation Total</h3></div><Table labels={["Category", "Amount"]} minWidth={0}><tr><td className="px-4 py-3">Subtotal</td><td className="px-4 py-3 text-right font-medium">{peso.format(subtotal)}</td></tr><tr><td className="px-4 py-2">Tax <input aria-label="Tax percentage" type="number" min="0" step="any" value={vatRate} onChange={(event) => setVatRate(event.target.value)} className="input ml-2 mt-0 w-20 px-2 py-1 text-right" />%</td><td className="px-4 py-3 text-right">{peso.format(tax)}</td></tr><tr><td className="px-4 py-2">Shipping / Handling</td><td className="px-4 py-2"><input aria-label="Shipping and handling" type="number" min="0" step="any" value={shipping} onChange={(event) => setShipping(event.target.value)} className="input mt-0 text-right" /></td></tr><tr className="bg-[#eff7f1] text-[15px] font-bold text-[#176b40]"><td className="px-4 py-3">Total</td><td className="px-4 py-3 text-right">{peso.format(total)}</td></tr></Table></section></aside></div><div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button><Button secondary loading={saving || working} disabled={saving || working} onClick={() => void review("needs_revision")}><RotateCcw size={14} /> Return for revision</Button><Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> Approve Price Quotation</Button></div></section></div>;
   */
-  return <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review {documentLabel}</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - {pricingRevision ? "Address the General Manager's instructions and resubmit." : finalApproval ? "Finalize approval." : `Complete pricing and submit ${documentLabel} to the General Manager.`}</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} projectName={text(quotation.project_name, "")} projectType={text(quotation.project_types, "")} documentLabel={documentLabel} illustrations={illustrations} productCostings={productCostings} pricingDefaults={activePricingDefaultSettings ?? {}} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={updateBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} submissionNote={submissionNote} setSubmissionNote={setSubmissionNote} close={close} saving={saving} working={working} review={review} finalApproval={finalApproval} showInternalMarkups={showInternalMarkups} visibleMarkupKeys={showInternalMarkups ? gmVisibleMarkupKeys : ["discounts"]} bankVisibility={bankVisibility} pricingRevision={pricingRevision} /></section></div>;
+  return <div className="fixed inset-0 z-50 overflow-y-auto overflow-x-hidden bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review {documentLabel}</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - {pricingRevision ? "Address the General Manager's instructions and resubmit." : finalApproval ? "Finalize approval." : `Complete pricing and submit ${documentLabel} to the General Manager.`}</p></div><div className="flex items-center gap-2">{showInternalMarkups && <Button secondary onClick={() => setSensitiveValuesHidden((current) => !current)}>{sensitiveValuesHidden ? <Eye size={14} /> : <EyeOff size={14} />}{sensitiveValuesHidden ? "View pricing" : "Hide pricing"}</Button>}<button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div></div><PriceQuotationReviewContent lines={lines} projectName={text(quotation.project_name, "")} projectType={text(quotation.project_types, "")} documentLabel={documentLabel} illustrations={illustrations} productCostings={productCostings} pricingDefaults={activePricingDefaultSettings ?? {}} setProductCostings={setProductCostings} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={updateBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} submissionNote={submissionNote} setSubmissionNote={setSubmissionNote} close={close} saving={saving} working={working} review={review} finalApproval={finalApproval} showInternalMarkups={showInternalMarkups} sensitiveValuesHidden={sensitiveValuesHidden} visibleMarkupKeys={showInternalMarkups ? gmVisibleMarkupKeys : ["discounts"]} bankVisibility={bankVisibility} pricingRevision={pricingRevision} /></section></div>;
 }
 
 function GeneralManagerCostingReview({
