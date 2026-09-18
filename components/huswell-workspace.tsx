@@ -662,6 +662,126 @@ const productCostingTotals = (
     unitIncVat: productQuantity > 0 ? rounded(sellingIncVat / productQuantity) : 0,
   };
 };
+
+type TargetBudgetAdjustment = {
+  costing: ProductCostingDraft;
+  error?: string;
+};
+
+const adjustCostingToTargetBudget = (
+  costing: ProductCostingDraft,
+  targetBudgetValue: string,
+  productQuantity: number,
+  vatValue: number,
+): TargetBudgetAdjustment => {
+  const rawTarget = targetBudgetValue.trim();
+  if (!rawTarget) return { costing };
+  const targetBudget = Number(rawTarget);
+  if (!Number.isFinite(targetBudget) || targetBudget <= 0) {
+    return { costing, error: "Enter a target selling price greater than zero." };
+  }
+
+  const quantity = n(productQuantity);
+  const targetMarginPricing = costing.pricingModel === "target_margin";
+  const customerVatRate = Math.max(0, n(vatValue));
+  const currentTotals = productCostingTotals(costing, quantity, customerVatRate);
+  if (currentTotals.cogs <= 0 || quantity <= 0) {
+    return { costing, error: "Add a direct cost and product quantity before applying a Target Budget." };
+  }
+
+  const discount = costing.markups.find((markup) => {
+    const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
+    return key === "discounts";
+  });
+  const discountValue = discount ? Math.max(0, n(markupValue(discount))) : 0;
+  const discountType = discount ? markupCalculationType(discount) : "percentage";
+  const targetNetTotal = targetBudget * quantity / (1 + customerVatRate / 100);
+  let targetBeforeDiscount = targetNetTotal;
+  if (targetMarginPricing) {
+    if (discountType === "fixed_amount") {
+      targetBeforeDiscount += discountValue;
+    } else {
+      if (discountValue >= 100) {
+        return { costing, error: "Reduce the Discount below 100% before applying a Target Budget." };
+      }
+      targetBeforeDiscount /= 1 - discountValue / 100;
+    }
+  } else {
+    targetBeforeDiscount -= discountType === "fixed_amount"
+      ? discountValue
+      : currentTotals.cogs * discountValue / 100;
+  }
+
+  const requiredMarkupTotal = targetBeforeDiscount - currentTotals.cogs;
+  if (requiredMarkupTotal < -0.01) {
+    return { costing, error: "The Target Budget is below the unchanged direct cost after the current Discount." };
+  }
+
+  const adjustableMarkups = costing.markups.filter((markup) => {
+    const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
+    return key !== "discounts" && key !== "vat";
+  });
+  if (adjustableMarkups.some((markup) => markupCalculationType(markup) === "fixed_amount")) {
+    return { costing, error: "Change non-discount markup rows to Percentage before applying a Target Budget." };
+  }
+
+  const currentAdjustableTotal = adjustableMarkups.reduce(
+    (sum, markup) => sum + currentTotals.cogs * Math.max(0, n(markupValue(markup))) / 100,
+    currentTotals.cogs * Math.max(0, n(costing.internalVatRate)) / 100,
+  );
+  if (currentAdjustableTotal <= 0) {
+    return { costing, error: "Add at least one percentage markup or Internal VAT before applying a Target Budget." };
+  }
+
+  const factor = requiredMarkupTotal / currentAdjustableTotal;
+  if (!Number.isFinite(factor) || factor < 0) {
+    return { costing, error: "This Target Budget cannot be reached with the current percentage markups." };
+  }
+  const roundRate = (value: number) => Math.round(value * 10000) / 10000;
+  const scaledMarkups = costing.markups.map((markup) => {
+    const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
+    if (key === "discounts" || key === "vat") return markup;
+    const nextValue = roundRate(Math.max(0, n(markupValue(markup))) * factor);
+    return { ...markup, calculationType: "percentage" as MarkupCalculationType, value: String(nextValue) };
+  });
+  const nextInternalVatRate = roundRate(Math.max(0, n(costing.internalVatRate)) * factor);
+  const exceedsAllowedRate = scaledMarkups.some((markup) => {
+    const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
+    return key !== "discounts" && key !== "vat" && n(markupValue(markup)) > 100;
+  }) || nextInternalVatRate > 100;
+  if (exceedsAllowedRate) {
+    return { costing, error: "This Target Budget would require a percentage markup above the allowed 100% limit." };
+  }
+
+  let nextCosting: ProductCostingDraft = {
+    ...costing,
+    internalVatRate: String(nextInternalVatRate),
+    markups: scaledMarkups,
+  };
+  const preferredMarkup = adjustableMarkups.find((markup) => {
+    const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
+    return key === "target_profit_margin";
+  }) ?? adjustableMarkups[0];
+  const nextTotals = productCostingTotals(nextCosting, quantity, customerVatRate);
+  const differencePerPiece = targetBudget - nextTotals.unitIncVat;
+  if (preferredMarkup && Math.abs(differencePerPiece) > 0.005) {
+    const discountFactor = targetMarginPricing && discountType === "percentage" ? 1 - discountValue / 100 : 1;
+    const correctionRate = differencePerPiece * quantity * 100
+      / ((1 + customerVatRate / 100) * discountFactor * currentTotals.cogs);
+    const correctionMarkupKey = preferredMarkup.key;
+    const correctedMarkups = nextCosting.markups.map((markup) => {
+      if (markup.key !== correctionMarkupKey) return markup;
+      const correctedValue = roundRate(n(markupValue(markup)) + correctionRate);
+      return { ...markup, value: String(correctedValue) };
+    });
+    const correctedMarkup = correctedMarkups.find((markup) => markup.key === correctionMarkupKey);
+    if (correctedMarkup && n(markupValue(correctedMarkup)) >= 0 && n(markupValue(correctedMarkup)) <= 100) {
+      nextCosting = { ...nextCosting, markups: correctedMarkups };
+    }
+  }
+  return { costing: nextCosting };
+};
+
 type Field = {
   key: string;
   label: string;
@@ -10796,17 +10916,21 @@ function PriceQuotationSubmissions({
   store,
   reload,
   notice,
+  role,
 }: {
   store: Store;
   reload: () => Promise<void>;
   notice: (message: string) => void;
+  role: string;
 }) {
+  type ReviewQueueTab = "pending" | "gm_revision" | "summary";
   const [selectedPriceQuotation, setSelectedPriceQuotation] = useState<Row | null>(null);
   const [noteQuotation, setNoteQuotation] = useState<Row | null>(null);
   const [search, setSearch] = useState("");
   const [month, setMonth] = useState("");
   const [submissionType, setSubmissionType] = useState<"all" | "new" | "revised">("all");
-  const [queueStage, setQueueStage] = useState<"pending" | "gm_revision">("pending");
+  const [queueTab, setQueueTab] = useState<ReviewQueueTab>("pending");
+  const queueStage = queueTab === "gm_revision" ? "gm_revision" : "pending";
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
@@ -10886,9 +11010,19 @@ function PriceQuotationSubmissions({
       hideHeading
     >
       <div className="app-tabs border-b border-[#edf0f5] px-4 pt-2 sm:px-5">
-        <button type="button" onClick={() => { setQueueStage("pending"); setSelectedPriceQuotation(null); }} aria-current={queueStage === "pending" ? "page" : undefined} className="app-tab">Awaiting Review ({pendingPriceQuotations.length})</button>
-        <button type="button" onClick={() => { setQueueStage("gm_revision"); setSelectedPriceQuotation(null); }} aria-current={queueStage === "gm_revision" ? "page" : undefined} className="app-tab">GM Revisions ({gmRevisionPriceQuotations.length})</button>
+        <button type="button" onClick={() => { setQueueTab("pending"); setSelectedPriceQuotation(null); }} aria-current={queueTab === "pending" ? "page" : undefined} className="app-tab">Awaiting Review ({pendingPriceQuotations.length})</button>
+        <button type="button" onClick={() => { setQueueTab("gm_revision"); setSelectedPriceQuotation(null); }} aria-current={queueTab === "gm_revision" ? "page" : undefined} className="app-tab">GM Revisions ({gmRevisionPriceQuotations.length})</button>
+        {role === "sales_pricing_officer" && <button type="button" onClick={() => { setQueueTab("summary"); setSelectedPriceQuotation(null); setNoteQuotation(null); }} aria-current={queueTab === "summary" ? "page" : undefined} className="app-tab">Costing Breakdown Summary</button>}
       </div>
+      {queueTab === "summary" ? (
+        <QuotationCostingOverview
+          store={store}
+          reload={reload}
+          notice={notice}
+          role={role}
+        />
+      ) : (
+        <>
       <div className="flex flex-wrap items-end gap-2 border-b border-[#edf0f5] px-4 py-3 sm:px-5">
         <label className="min-w-[190px] flex-1 text-[11px] font-medium text-[#687386]">Search<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Quotation, client, or project" className="input mt-1" /></label>
         <label className="text-[11px] font-medium text-[#687386]">Month<input type="month" value={month} onClick={(event) => event.currentTarget.showPicker?.()} onChange={(event) => setMonth(event.target.value)} className="input mt-1 w-[155px]" /></label>
@@ -10929,6 +11063,8 @@ function PriceQuotationSubmissions({
         </div>
       ) : (
         <Empty>{activePendingSubmissions.length ? "No Price Quotations match the selected filters." : queueStage === "gm_revision" ? "No Price Quotations have been returned by the General Manager." : "No Price Quotations are awaiting review."}</Empty>
+      )}
+        </>
       )}
       <NoteDialog
         open={Boolean(noteQuotation)}
@@ -11873,6 +12009,19 @@ function ProductCostingsSectionWithPricing({
   const defaults = pricingMarkupDefaults(pricingDefaults.pricing_markup_defaults, pricingDefaults);
   const updateCosting = (key: string, update: (costing: ProductCostingDraft) => ProductCostingDraft) =>
     setCostings((current) => current.map((costing) => costing.key === key ? update(costing) : costing));
+  const [targetBudgetValues, setTargetBudgetValues] = useState<Record<string, string>>({});
+  const [targetBudgetErrors, setTargetBudgetErrors] = useState<Record<string, string>>({});
+  const applyTargetBudget = (costing: ProductCostingDraft, value: string, productQuantity: number) => {
+    setTargetBudgetValues((current) => ({ ...current, [costing.key]: value }));
+    const result = adjustCostingToTargetBudget(costing, value, productQuantity, n(vatValue));
+    setTargetBudgetErrors((current) => {
+      const next = { ...current };
+      if (result.error) next[costing.key] = result.error;
+      else delete next[costing.key];
+      return next;
+    });
+    if (!result.error && value.trim()) updateCosting(costing.key, () => result.costing);
+  };
   const canAddCosting = costings.length < lines.length;
   const vatTotal = costings.reduce((sum, costing) => {
     const product = lines.find((line) => line.id === costing.quotationItemId);
@@ -11980,6 +12129,31 @@ function ProductCostingsSectionWithPricing({
                 <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
                   {editableMarkups && <div className="space-y-4">
                     <PricingMarkupEditor costing={costing} editable={editableInternalMarkups} visibleMarkupKeys={visibleMarkupKeys} update={(next) => updateCosting(costing.key, () => next)} showInternalVat={canEditVat} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} />
+                    <div className="rounded-lg border border-[#d9e0e9] bg-white p-3">
+                      <div className="flex flex-wrap items-end justify-between gap-3">
+                        <div className="min-w-52 flex-1">
+                          <h4 className="text-[12px] font-semibold text-[#344054]">Target Budget</h4>
+                          <p className="mt-0.5 text-[11px] text-[#687386]">Target selling price per piece, VAT included. Direct costs stay unchanged.</p>
+                        </div>
+                        {editableInternalMarkups ? <label className="text-[11px] font-medium text-[#344054]">
+                          Target Selling Price / Piece
+                          <div className="mt-1 flex items-center gap-1">
+                            <span className="text-[12px] text-[#687386]">₱</span>
+                            <input
+                              aria-label={`Target selling price per piece for ${product ? text(product.description, "finished product") : "product"}`}
+                              type="number"
+                              min="0.01"
+                              step="0.01"
+                              value={targetBudgetValues[costing.key] ?? totals.unitIncVat.toFixed(2)}
+                              onChange={(event) => applyTargetBudget(costing, event.target.value, n(product?.quantity))}
+                              className="input mt-0 w-36 px-2 py-1.5 text-right tabular-nums"
+                            />
+                          </div>
+                        </label> : <output aria-label={`Target selling price per piece for ${product ? text(product.description, "finished product") : "product"}`} className="text-[13px] font-semibold text-[#176b40]">{peso.format(totals.unitIncVat)}</output>}
+                      </div>
+                      <p className="mt-2 text-[11px] text-[#687386]">The percentage markups and Internal VAT are recalculated to reach this target. Discount and customer VAT remain as entered.</p>
+                      {targetBudgetErrors[costing.key] && <p className="mt-2 text-[11px] font-medium text-[#b42318]">{targetBudgetErrors[costing.key]}</p>}
+                    </div>
                   </div>}
                   <dl className={`overflow-hidden rounded-lg border border-[#d9e0e9] text-[12px] ${editableMarkups ? "" : "lg:col-span-2"}`}>
                     {!canEditVat ? <>
@@ -17595,7 +17769,6 @@ export function HuswellWorkspace({
       "Projects",
       "Price Quotations",
       "Price Quotation Review",
-      "Quotation Costing Overview",
       "Announcements",
       "Policy",
     ],
@@ -17704,7 +17877,6 @@ export function HuswellWorkspace({
         { view: "Leads", icon: ClipboardCheck },
         { view: "Price Quotations", icon: FileText },
         { view: "Price Quotation Review", icon: ClipboardCheck, badge: pendingPricingReviewCount },
-        { view: "Quotation Costing Overview", icon: ReceiptText },
       ],
     },
     {
@@ -17950,6 +18122,7 @@ export function HuswellWorkspace({
         store={store}
         reload={reload}
         notice={setMessage}
+        role={role}
       />
     ) : active === "Price Quotations" ? (
         <PriceQuotationWorkspace
