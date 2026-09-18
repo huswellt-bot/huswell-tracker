@@ -12146,7 +12146,7 @@ function ProductCostingsSectionWithPricing({
                               step="0.01"
                               value={targetBudgetValues[costing.key] ?? totals.unitIncVat.toFixed(2)}
                               onChange={(event) => applyTargetBudget(costing, event.target.value, n(product?.quantity))}
-                              className="input mt-0 w-36 px-2 py-1.5 text-right tabular-nums"
+                              className="input mt-0 w-36 px-2 py-1.5 text-center tabular-nums"
                             />
                           </div>
                         </label> : <output aria-label={`Target selling price per piece for ${product ? text(product.description, "finished product") : "product"}`} className="text-[13px] font-semibold text-[#176b40]">{peso.format(totals.unitIncVat)}</output>}
