@@ -1765,6 +1765,8 @@ const directory: Module = {
   ],
 };
 const leadRecordedDateLabel = "Date recorded";
+const leadChangeFieldLabel = (key: string) =>
+  key === "address" ? "Company Address" : key.replaceAll("_", " ");
 const leads: Module = {
   table: "leads",
   title: "Leads",
@@ -1773,10 +1775,11 @@ const leads: Module = {
   add: "Add lead",
   fields: [
     { key: "date_sent", label: leadRecordedDateLabel, type: "date" },
-    { key: "contact_name", label: "Client's Name", required: true },
+    { key: "contact_name", label: "Contact Person's Fullname", required: true },
     { key: "client_name", label: "Company Name" },
+    { key: "address", label: "Company Address", type: "textarea" },
     { key: "email", label: "Email" },
-    { key: "phone", label: "Viber / WhatsApp / Instagram / Messenger" },
+    { key: "phone", label: "Contact Number" },
     { key: "date_contacted", label: "Date contacted", type: "date" },
     {
       key: "contact_method",
@@ -2732,6 +2735,11 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
   const contactName = text(lead?.contact_name ?? customer?.contact_name ?? quote.client_contact_name, "-");
   const contactNumber = text(lead?.phone ?? customer?.phone ?? quote.client_phone, "-");
   const clientEmail = text(lead?.email ?? customer?.email, "-");
+  const clientAddress =
+    text(lead?.address, "").trim() ||
+    text(customer?.billing_address, "").trim() ||
+    text(quote.client_address, "-").trim() ||
+    "-";
   const subtotal = n(quote.subtotal);
   const tax = n(quote.vat_amount);
   const shipping = n(quote.shipping_handling);
@@ -2776,7 +2784,7 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
   const clientSection = (
     <PdfView style={[priceQuotationPdfStyles.clientGrid, compact ? priceQuotationPdfCompactStyles.clientGrid : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientGrid : undefined]}>
       <PdfView style={[priceQuotationPdfStyles.clientColumn, compact ? priceQuotationPdfCompactStyles.clientColumn : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientColumn : undefined]}>{clientField("Company Name", clientName)}{clientField("Contact Person", contactName)}{clientField("Contact Number", contactNumber)}</PdfView>
-      <PdfView style={[priceQuotationPdfStyles.clientColumnRight, compact ? priceQuotationPdfCompactStyles.clientColumnRight : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientColumnRight : undefined]}>{clientField("Date", leadDate)}{clientField("Email", clientEmail)}{clientField("Project Type", text(quote.project_types, "-"))}</PdfView>
+      <PdfView style={[priceQuotationPdfStyles.clientColumnRight, compact ? priceQuotationPdfCompactStyles.clientColumnRight : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.clientColumnRight : undefined]}>{clientField("Date", leadDate)}{clientField("Email", clientEmail)}{clientField("Company Address", clientAddress)}{clientField("Project Type", text(quote.project_types, "-"))}</PdfView>
     </PdfView>
   );
   const salutationSection = <PdfText style={[priceQuotationPdfStyles.salutation, compact ? priceQuotationPdfCompactStyles.salutation : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.salutation : undefined]}>Dear Sir/Madam, Thank you for the opportunity to serve your requirements.</PdfText>;
@@ -4011,6 +4019,8 @@ function Records({
       payload.done_deal_status = null;
     if (module.table === "leads" && typeof payload.client_name === "string")
       payload.client_name = payload.client_name.trim() || null;
+    if (module.table === "leads" && typeof payload.address === "string")
+      payload.address = payload.address.trim() || null;
     if (!editing) {
       Object.assign(payload, { organization_id: orgId });
       if (
@@ -4426,7 +4436,7 @@ function Records({
                   const changes = request.proposed_changes && typeof request.proposed_changes === "object"
                     ? Object.keys(request.proposed_changes as Record<string, unknown>)
                     : [];
-                  const labels = changes.map((change) => change.replaceAll("_", " "));
+                  const labels = changes.map(leadChangeFieldLabel);
                   const changeSummary = text(request.change_type, "") === "delete"
                     ? "Deletion request"
                     : labels.length <= 2
@@ -4521,7 +4531,7 @@ function Records({
                 <tr key={text(request.id)}>
                   <td className="px-4 py-3">{stackedCell(lead?.project_name, [lead?.client_name, lead?.contact_name], " · ")}</td>
                   <td className="px-4 py-3">{day(request.submitted_at)}</td>
-                  <td className="px-4 py-3">{text(request.change_type, "") === "delete" ? "Deletion request" : changes.map((change) => change.replaceAll("_", " ")).join(", ")}</td>
+                  <td className="px-4 py-3">{text(request.change_type, "") === "delete" ? "Deletion request" : changes.map(leadChangeFieldLabel).join(", ")}</td>
                   <td className="px-4 py-3"><Status value={request.status} /></td>
                   <td className="px-4 py-3">{renderRecordNote("General Manager note", text(lead?.project_name, "Lead change"), request.decision_note)}</td>
                 </tr>
@@ -13076,6 +13086,7 @@ function ProjectEditRequestReview({
     project_name: "Project name",
     contact_name: "Client's Name",
     client_name: "Company name",
+    address: "Company Address",
     email: "Email",
     phone: "Phone",
     date_sent: leadRecordedDateLabel,
@@ -13141,6 +13152,7 @@ function LeadChangeRequestReview({
     project_name: "Project name",
     contact_name: "Client's Name",
     client_name: "Company name",
+    address: "Company Address",
     email: "Email",
     phone: "Phone number",
     date_sent: leadRecordedDateLabel,
