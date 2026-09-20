@@ -17,6 +17,7 @@ const LEAD_HEADERS = [
   "Outbound method",
   "Lead status",
 ] as const;
+const LEAD_TEMPLATE_COLUMN_WIDTHS = [16, 32, 28, 36, 30, 20, 18, 18, 30];
 const CONTACT_METHODS = [
   "Viber",
   "WhatsApp",
@@ -341,6 +342,7 @@ export async function GET(request: Request) {
 
   const workbook = XLSX.utils.book_new();
   const sheet = XLSX.utils.aoa_to_sheet([[...LEAD_HEADERS]]);
+  sheet["!cols"] = LEAD_TEMPLATE_COLUMN_WIDTHS.map((wch) => ({ wch }));
   XLSX.utils.book_append_sheet(workbook, sheet, "Leads");
   const output = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
   return new Response(new Uint8Array(output), {

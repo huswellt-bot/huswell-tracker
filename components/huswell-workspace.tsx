@@ -3900,27 +3900,43 @@ function LeadImportDialog({
             </div>
             <div className="mt-4 overflow-hidden rounded-lg border border-[#d6dee8]">
               <div className="max-h-[330px] overflow-auto">
-                <table className="w-full min-w-[760px] text-left text-[12px]">
-                  <thead className="sticky top-0 z-10 border-y border-[#1F4E79] bg-[#1F4E79] text-white">
+                <table className="w-full min-w-[1900px] text-left text-[12px]">
+                  <thead className="sticky top-0 z-20 border-y border-[#1F4E79] bg-[#1F4E79] text-white">
                     <tr>
-                      {['Row', 'Contact', 'Company', 'Lead status', 'Result'].map((label) => (
-                        <th key={label} className="whitespace-nowrap px-3 py-2.5 font-semibold">{label}</th>
-                      ))}
+                      <th className="sticky left-0 z-30 w-[72px] min-w-[72px] bg-[#1F4E79] px-3 py-2.5 font-semibold">#</th>
+                      <th className="w-[135px] min-w-[135px] whitespace-nowrap px-3 py-2.5 font-semibold">Date recorded</th>
+                      <th className="w-[190px] min-w-[190px] whitespace-nowrap px-3 py-2.5 font-semibold">Contact name</th>
+                      <th className="w-[180px] min-w-[180px] whitespace-nowrap px-3 py-2.5 font-semibold">Company name</th>
+                      <th className="w-[240px] min-w-[240px] whitespace-nowrap px-3 py-2.5 font-semibold">Company address</th>
+                      <th className="w-[220px] min-w-[220px] whitespace-nowrap px-3 py-2.5 font-semibold">Email</th>
+                      <th className="w-[155px] min-w-[155px] whitespace-nowrap px-3 py-2.5 font-semibold">Contact number</th>
+                      <th className="w-[135px] min-w-[135px] whitespace-nowrap px-3 py-2.5 font-semibold">Date contacted</th>
+                      <th className="w-[145px] min-w-[145px] whitespace-nowrap px-3 py-2.5 font-semibold">Outbound method</th>
+                      <th className="w-[215px] min-w-[215px] whitespace-nowrap px-3 py-2.5 font-semibold">Lead status</th>
+                      <th className="w-[175px] min-w-[175px] whitespace-nowrap px-3 py-2.5 font-semibold">Result</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#edf0f5]">
-                    {visibleRows.map((row) => (
+                    {visibleRows.map((row, index) => (
                       <tr key={row.row_number} className="align-top">
-                        <td className="px-3 py-2 text-[#687386]">{row.row_number}</td>
-                        <td className="max-w-[220px] px-3 py-2 font-medium text-[#202938]">{row.contact_name || "—"}</td>
-                        <td className="max-w-[220px] px-3 py-2 text-[#344054]">{row.client_name || "—"}</td>
-                        <td className="px-3 py-2 text-[#344054]">{evaluationLabel(row.evaluation_number)}</td>
+                        <td className="sticky left-0 z-10 bg-white px-3 py-2 text-[#687386]">
+                          <span className="font-semibold text-[#202938]">{index + 1}</span>
+                        </td>
+                        <td className="whitespace-normal break-words px-3 py-2 text-[#344054]">{row.date_sent || "—"}</td>
+                        <td className="whitespace-normal break-words px-3 py-2 font-medium text-[#202938]">{row.contact_name || "—"}</td>
+                        <td className="whitespace-normal break-words px-3 py-2 text-[#344054]">{row.client_name || "—"}</td>
+                        <td className="whitespace-normal break-words px-3 py-2 text-[#344054]">{row.address || "—"}</td>
+                        <td className="whitespace-normal break-all px-3 py-2 text-[#344054]">{row.email || "—"}</td>
+                        <td className="whitespace-normal break-words px-3 py-2 text-[#344054]">{row.phone || "—"}</td>
+                        <td className="whitespace-normal break-words px-3 py-2 text-[#344054]">{row.date_contacted || "—"}</td>
+                        <td className="whitespace-normal break-words px-3 py-2 text-[#344054]">{row.contact_method || "—"}</td>
+                        <td className="whitespace-normal break-words px-3 py-2 text-[#344054]">{evaluationLabel(row.evaluation_number)}</td>
                         <td className="px-3 py-2">
                           <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${row.status === "ready" ? "bg-[#edf9f2] text-[#218b55]" : row.status === "duplicate" ? "bg-[#fff8e9] text-[#a76605]" : "bg-[#fef3f2] text-[#b42318]"}`}>
                             {row.status === "ready" ? "Ready" : row.status === "duplicate" ? "Duplicate" : "Invalid"}
                           </span>
                           {(row.errors.length > 0 || row.status === "duplicate") && (
-                            <p className="mt-1 max-w-[300px] text-[11px] leading-4 text-[#687386]">
+                            <p className="mt-1 max-w-[160px] break-words text-[11px] leading-4 text-[#687386]" title={row.errors.join(", ") || "A matching Lead already exists."}>
                               {row.errors.join(", ") || "A matching Lead already exists."}
                             </p>
                           )}
