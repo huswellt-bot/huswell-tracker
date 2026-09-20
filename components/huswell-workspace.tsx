@@ -175,6 +175,7 @@ type TableName =
   | "project_schedule_completion_requests"
   | "lead_change_requests"
   | "lead_unendorsement_requests"
+  | "lead_endorsement_attachments"
   | "quotation_revision_requests"
   | "price_quotation_revision_requests"
   | "project_schedules"
@@ -851,6 +852,7 @@ const tables: TableName[] = [
   "project_schedule_completion_requests",
   "lead_change_requests",
   "lead_unendorsement_requests",
+  "lead_endorsement_attachments",
   "quotation_revision_requests",
   "price_quotation_revision_requests",
   "project_schedules",
@@ -1464,6 +1466,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "project_schedule_completion_requests",
     "lead_change_requests",
     "lead_unendorsement_requests",
+    "lead_endorsement_attachments",
     "quotation_revision_requests",
     "price_quotation_revision_requests",
     "quotation_payment_records",
@@ -1490,6 +1493,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "price_quotation_revision_requests",
     "pricing_officer_project_types",
     "lead_unendorsement_requests",
+    "lead_endorsement_attachments",
   ],
   sales: [
     "business_settings",
@@ -1594,7 +1598,7 @@ const workspaceViewTables = (
     view === "Leads" &&
     (leadMode === "leads" || leadMode === "lead_change_requests")
   )
-    return ["leads", "profiles", "organization_members", "lead_change_requests", "lead_unendorsement_requests"];
+    return ["leads", "profiles", "organization_members", "lead_change_requests", "lead_unendorsement_requests", "lead_endorsement_attachments"];
   if (view === "Projects")
     return [
       "project_schedules",
@@ -3696,6 +3700,9 @@ function Records({
   const [endorsementValues, setEndorsementValues] = useState<Record<string, string>>({
     recipient_user_id: "",
   });
+  const [endorsementImageFile, setEndorsementImageFile] = useState<File | null>(null);
+  const [endorsementImagePreview, setEndorsementImagePreview] = useState("");
+  const [openingEndorsementImageId, setOpeningEndorsementImageId] = useState<string | null>(null);
   const [endorsing, setEndorsing] = useState(false);
   const [recordNote, setRecordNote] = useState<{
     title: string;
@@ -3753,6 +3760,15 @@ function Records({
       active = false;
     };
   }, []);
+  useEffect(() => {
+    if (!endorsementImageFile) {
+      setEndorsementImagePreview("");
+      return;
+    }
+    const previewUrl = URL.createObjectURL(endorsementImageFile);
+    setEndorsementImagePreview(previewUrl);
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [endorsementImageFile]);
   const rows = useMemo(
     () =>
       store[module.table]
@@ -4158,6 +4174,11 @@ function Records({
     notice("Lead deletion submitted for General Manager approval.");
     await reload();
   };
+  const resetEndorsementForm = () => {
+    setEndorsementLead(null);
+    setEndorsementValues({ recipient_user_id: "" });
+    setEndorsementImageFile(null);
+  };
   const endorseLead = async () => {
     if (!endorsementLead?.id) return;
     const recipientUserId = text(endorsementValues.recipient_user_id, "").split("|")[0];
@@ -4165,17 +4186,100 @@ function Records({
       notice("Select another Sales & Pricing Officer.");
       return;
     }
+    const imageFile = endorsementImageFile;
+    if (
+      imageFile &&
+      (!["image/jpeg", "image/png", "image/webp"].includes(imageFile.type) ||
+        imageFile.size <= 0 ||
+        imageFile.size > 10 * 1024 * 1024)
+    ) {
+      notice("Endorsement images must be JPEG, PNG, or WebP files no larger than 10 MB.");
+      return;
+    }
+
     setEndorsing(true);
-    const { error } = await createClient().rpc("endorse_lead", {
-      p_lead_id: endorsementLead.id,
-      p_recipient_user_id: recipientUserId,
-    });
-    setEndorsing(false);
-    if (error) return notice(error.message);
-    setEndorsementLead(null);
-    setEndorsementValues({ recipient_user_id: "" });
-    notice("Lead endorsed to the selected Sales & Pricing Officer.");
-    await reload();
+    const client = createClient();
+    let storagePath: string | null = null;
+    try {
+      if (imageFile) {
+        const endorsementId = crypto.randomUUID();
+        const extension =
+          imageFile.type === "image/png"
+            ? "png"
+            : imageFile.type === "image/webp"
+              ? "webp"
+              : "jpg";
+        storagePath = `${orgId}/${endorsementLead.id}/${endorsementId}.${extension}`;
+        const { error: uploadError } = await client.storage
+          .from("lead-endorsement-images")
+          .upload(storagePath, imageFile, {
+            contentType: imageFile.type,
+            upsert: false,
+          });
+        if (uploadError) throw uploadError;
+
+        const { error: endorsementError } = await client.rpc(
+          "endorse_lead_with_attachment",
+          {
+            p_lead_id: endorsementLead.id,
+            p_recipient_user_id: recipientUserId,
+            p_storage_path: storagePath,
+            p_file_name: imageFile.name,
+            p_content_type: imageFile.type,
+            p_file_size: imageFile.size,
+          },
+        );
+        if (endorsementError) throw endorsementError;
+      } else {
+        const { error } = await client.rpc("endorse_lead", {
+          p_lead_id: endorsementLead.id,
+          p_recipient_user_id: recipientUserId,
+        });
+        if (error) throw error;
+      }
+
+      resetEndorsementForm();
+      notice("Lead endorsed to the selected Sales & Pricing Officer.");
+      await reload();
+    } catch (error) {
+      if (storagePath) {
+        const { data: attachment, error: lookupError } = await client
+          .from("lead_endorsement_attachments")
+          .select("id")
+          .eq("storage_path", storagePath)
+          .maybeSingle();
+        if (!lookupError && !attachment)
+          await client.storage.from("lead-endorsement-images").remove([storagePath]);
+      }
+      notice(error instanceof Error ? error.message : "Lead endorsement could not be saved.");
+    } finally {
+      setEndorsing(false);
+    }
+  };
+  const viewEndorsementImage = async (attachment: Row) => {
+    const path = text(attachment.storage_path, "").trim();
+    const attachmentId = text(attachment.id, "");
+    if (!path) return notice("This endorsement image is unavailable.");
+    const imageWindow = window.open("", "_blank");
+    if (!imageWindow) return notice("Allow pop-ups to view endorsement images.");
+    imageWindow.opener = null;
+    setOpeningEndorsementImageId(attachmentId);
+    try {
+      const { data, error } = await createClient()
+        .storage
+        .from("lead-endorsement-images")
+        .createSignedUrl(path, 5 * 60);
+      if (error || !data?.signedUrl) {
+        imageWindow.close();
+        return notice(error?.message ?? "This endorsement image is unavailable.");
+      }
+      imageWindow.location.href = data.signedUrl;
+    } catch (error) {
+      imageWindow.close();
+      notice(error instanceof Error ? error.message : "This endorsement image is unavailable.");
+    } finally {
+      setOpeningEndorsementImageId(null);
+    }
   };
   const requestLeadUnendorsement = async (row: Row) => {
     if (!row.id) return;
@@ -4272,6 +4376,12 @@ function Records({
   const contentPadding = isPageLayout ? "px-4 sm:px-6 lg:px-7" : "px-4 sm:px-5";
   const rowActions = (row: Row) => {
     const unendorsementRequest = pendingLeadUnendorsement(row);
+    const leadEndorsementAttachment =
+      module.table === "leads"
+        ? store.lead_endorsement_attachments.find(
+            (attachment) => text(attachment.lead_id, "") === text(row.id, ""),
+          )
+        : null;
     return (
     <td className="whitespace-nowrap px-5 py-3">
       <div className="flex gap-2">
@@ -4301,9 +4411,21 @@ function Records({
             onClick={() => {
               setEndorsementLead(row);
               setEndorsementValues({ recipient_user_id: "" });
+              setEndorsementImageFile(null);
             }}
           >
             <Send size={15} />
+          </ActionIcon>
+        )}
+        {leadEndorsementAttachment && (
+          <ActionIcon
+            label="View endorsement image"
+            confirm={false}
+            disabled={Boolean(openingEndorsementImageId)}
+            loading={openingEndorsementImageId === text(leadEndorsementAttachment.id, "")}
+            onClick={() => void viewEndorsementImage(leadEndorsementAttachment)}
+          >
+            <ImageIcon size={15} />
           </ActionIcon>
         )}
         {canRequestLeadUnendorsement(row) && (
@@ -4947,14 +5069,72 @@ function Records({
           values={endorsementValues}
           setValues={setEndorsementValues}
           save={() => void endorseLead()}
-          close={() => {
-            setEndorsementLead(null);
-            setEndorsementValues({ recipient_user_id: "" });
-          }}
+          close={resetEndorsementForm}
           saving={endorsing}
           saveLabel="Endorse lead"
           className="max-w-lg"
-        />
+        >
+          <div className="mt-4 rounded-lg border border-[#e1e6ee] bg-[#fafbfe] p-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-[12px] font-semibold text-[#202938]">
+                  Endorsement image <span className="font-normal text-[#8b92a1]">(Optional)</span>
+                </p>
+                <p className="mt-1 text-[11px] leading-4 text-[#8b92a1]">
+                  JPEG, PNG, or WebP up to 10 MB. It will be visible only to the lead owner, endorsed officer, and General Manager.
+                </p>
+              </div>
+              <label className="inline-flex min-h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-[#d7deea] bg-white px-2.5 text-[12px] font-semibold text-[#344054] transition-colors hover:bg-[#f4f6f9] has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50">
+                <ImageIcon size={14} />
+                {endorsementImageFile ? "Replace image" : "Choose image"}
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="sr-only"
+                  disabled={endorsing}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] ?? null;
+                    event.currentTarget.value = "";
+                    if (!file) return;
+                    if (
+                      !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
+                      file.size <= 0 ||
+                      file.size > 10 * 1024 * 1024
+                    ) {
+                      setEndorsementImageFile(null);
+                      return notice("Endorsement images must be JPEG, PNG, or WebP files no larger than 10 MB.");
+                    }
+                    setEndorsementImageFile(file);
+                  }}
+                />
+              </label>
+            </div>
+            {endorsementImageFile && endorsementImagePreview && (
+              <div className="mt-3 flex items-center gap-3 rounded-lg border border-[#e1e6ee] bg-white p-2">
+                <img
+                  src={endorsementImagePreview}
+                  alt="Selected endorsement image preview"
+                  className="size-16 rounded-md border border-[#e1e6ee] object-cover"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[12px] font-medium text-[#344054]">{endorsementImageFile.name}</p>
+                  <p className="mt-0.5 text-[11px] text-[#8b92a1]">
+                    {(endorsementImageFile.size / (1024 * 1024)).toFixed(2)} MB
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEndorsementImageFile(null)}
+                  disabled={endorsing}
+                  className="grid size-8 shrink-0 place-items-center rounded-md text-[#8b92a1] transition-colors hover:bg-[#fff1f1] hover:text-[#b42318] disabled:opacity-50"
+                  aria-label="Remove endorsement image"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+            )}
+          </div>
+        </Dialog>
       )}
       <NoteDialog
         open={Boolean(recordNote)}
