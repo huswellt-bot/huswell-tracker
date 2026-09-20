@@ -138,6 +138,7 @@
 136. Run `154_gm_pricing_overrides_at_final_approval.sql` after migration 153 and before deploying the matching workspace update. It keeps General Manager-submitted target-margin markup, Discount, and internal VAT values authoritative at final approval, uses current Settings values only as fallbacks for missing rows, and persists the edited internal VAT rate.
 137. Run `155_lead_company_address.sql` after migration 154 and before deploying the matching workspace update. It carries the optional Lead Company Address through Sales Executive edit requests, General Manager approvals, and generated quotation PDFs without changing existing records or role permissions.
 138. Run `156_lead_endorsement_images.sql` after migration 155 and before deploying the matching Leads workspace update. It adds one optional private JPEG/PNG/WebP image to a Lead endorsement, limits signed-url access to the lead owner, active endorsed officer, and General Manager roles, and retains the attachment after approved unendorsement.
+139. Run `157_lead_excel_import.sql` after migration 156 and before deploying the matching Leads workspace update. It lets Sales Executives, Sales & Pricing Officers, and General Managers preview and import new `.xlsx` Leads transactionally, reports duplicate/invalid rows, and records each import batch without updating existing Leads.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 

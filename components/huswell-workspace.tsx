@@ -29,6 +29,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
+  Download,
+  FileSpreadsheet,
   PhilippinePeso,
   Eye,
   EyeOff,
@@ -54,6 +56,7 @@ import {
   ShoppingCart,
   SlidersHorizontal,
   Trash2,
+  Upload,
   UserRound,
   UsersRound,
   Wallet,
@@ -805,6 +808,36 @@ type Field = {
   placeholder?: string;
   readOnly?: boolean;
   shortLabels?: Record<string, ReactNode>;
+};
+type LeadImportDataRow = {
+  row_number: number;
+  date_sent: string | null;
+  contact_name: string;
+  client_name: string | null;
+  address: string | null;
+  email: string | null;
+  phone: string | null;
+  date_contacted: string | null;
+  contact_method: string | null;
+  evaluation_number: number;
+};
+type LeadImportPreviewRow = LeadImportDataRow & {
+  errors: string[];
+  status: "ready" | "duplicate" | "invalid";
+};
+type LeadImportPreview = {
+  file_name: string;
+  total_rows: number;
+  invalid_count: number;
+  duplicate_count: number;
+  ready_count: number;
+  rows: LeadImportPreviewRow[];
+  valid_rows: LeadImportDataRow[];
+};
+type LeadImportResult = {
+  imported_count?: number;
+  duplicate_count?: number;
+  invalid_count?: number;
 };
 type Module = {
   table: TableName;
@@ -3662,6 +3695,274 @@ function Dialog({
   );
 }
 
+function LeadImportDialog({
+  open,
+  organizationId,
+  onClose,
+  onImported,
+  notice,
+}: {
+  open: boolean;
+  organizationId: string;
+  onClose: () => void;
+  onImported: () => Promise<void>;
+  notice: (message: string) => void;
+}) {
+  const [preview, setPreview] = useState<LeadImportPreview | null>(null);
+  const [fileName, setFileName] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const reset = () => {
+    setPreview(null);
+    setFileName("");
+    setLoading(false);
+    setSaving(false);
+    setError("");
+  };
+
+  const close = () => {
+    if (loading || saving) return;
+    reset();
+    onClose();
+  };
+
+  const previewFile = async (file: File) => {
+    setError("");
+    setPreview(null);
+    setFileName(file.name);
+    if (!file.name.toLowerCase().endsWith(".xlsx")) {
+      setError("Only .xlsx Excel files are supported.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const body = new FormData();
+      body.append("organization_id", organizationId);
+      body.append("file", file);
+      const response = await fetch("/api/leads/import", {
+        method: "POST",
+        body,
+      });
+      const result = (await response.json().catch(() => null)) as
+        | (Partial<LeadImportPreview> & { error?: string })
+        | null;
+      if (!response.ok) {
+        throw new Error(result?.error || "Unable to preview this Excel file.");
+      }
+      if (!result?.rows || !result.valid_rows) {
+        throw new Error("The import preview was incomplete. Try the file again.");
+      }
+      setPreview(result as LeadImportPreview);
+    } catch (previewError) {
+      setError(
+        previewError instanceof Error
+          ? previewError.message
+          : "Unable to preview this Excel file.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const importLeads = async () => {
+    if (!preview || preview.ready_count <= 0) return;
+    setError("");
+    setSaving(true);
+    try {
+      const response = await fetch("/api/leads/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          organization_id: organizationId,
+          file_name: preview.file_name,
+          valid_rows: preview.valid_rows,
+          total_rows: preview.total_rows,
+          invalid_count: preview.invalid_count,
+        }),
+      });
+      const result = (await response.json().catch(() => null)) as
+        | (LeadImportResult & { error?: string })
+        | null;
+      if (!response.ok) {
+        throw new Error(result?.error || "Unable to import the Leads.");
+      }
+
+      await onImported();
+      const importedCount = Number(result?.imported_count ?? 0);
+      const duplicateCount = Number(result?.duplicate_count ?? preview.duplicate_count ?? 0);
+      const invalidCount = Number(result?.invalid_count ?? preview.invalid_count ?? 0);
+      const importedLabel = `${importedCount} new lead${importedCount === 1 ? "" : "s"}`;
+      const skipped = [
+        duplicateCount ? `${duplicateCount} duplicate row${duplicateCount === 1 ? "" : "s"} skipped` : "",
+        invalidCount ? `${invalidCount} invalid row${invalidCount === 1 ? "" : "s"} not imported` : "",
+      ].filter(Boolean);
+      notice(
+        importedCount
+          ? `Imported ${importedLabel}${skipped.length ? `. ${skipped.join(" and ")}.` : "."}`
+          : `No new Leads were imported${skipped.length ? `. ${skipped.join(" and ")}.` : "."}`,
+      );
+      reset();
+      onClose();
+    } catch (importError) {
+      setError(
+        importError instanceof Error
+          ? importError.message
+          : "Unable to import the Leads.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open) return null;
+
+  const visibleRows = preview?.rows.slice(0, 100) ?? [];
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-[#151922]/30 p-4">
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="lead-import-title"
+        className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-[14px] border border-[#d9e0e9] bg-white p-3 shadow-xl sm:p-4"
+      >
+        <header className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <FileSpreadsheet size={17} className="text-[#1F4E79]" aria-hidden="true" />
+              <h2 id="lead-import-title" className="text-[15px] font-semibold text-[#202938]">
+                Import Leads from Excel
+              </h2>
+            </div>
+            <p className="mt-1 max-w-3xl text-[12px] leading-5 text-[#687386]">
+              Upload the fixed .xlsx template to preview new Leads. Existing matching Leads are skipped and reported; existing records are never updated.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={close}
+            disabled={loading || saving}
+            aria-label="Close Lead import"
+            className="grid size-8 shrink-0 place-items-center rounded-md text-[#8a95a6] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938] disabled:opacity-50"
+          >
+            <X size={18} />
+          </button>
+        </header>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-[#d9e0e9] bg-[#fafbfe] p-3">
+          <label className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#1F4E79] px-3 text-[12px] font-semibold text-white transition-colors hover:bg-[#173c5e] has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50">
+            <Upload size={14} aria-hidden="true" />
+            {loading ? "Reading Excel..." : "Choose .xlsx file"}
+            <input
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="sr-only"
+              disabled={loading || saving}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.currentTarget.value = "";
+                if (file) void previewFile(file);
+              }}
+            />
+          </label>
+          <a
+            href="/api/leads/import?template=1"
+            download="lead-import-template.xlsx"
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[#d7deea] bg-white px-3 text-[12px] font-semibold text-[#344054] transition-colors hover:bg-[#f4f6f9]"
+          >
+            <Download size={14} aria-hidden="true" />
+            Download template
+          </a>
+          {fileName && <span className="min-w-0 truncate text-[11px] text-[#687386]">{fileName}</span>}
+        </div>
+
+        {error && (
+          <div className="mt-3 rounded-lg border border-[#fed7d7] bg-[#fff5f5] p-3 text-[12px] leading-5 text-[#9b1c1c]">
+            {error}
+          </div>
+        )}
+
+        {preview ? (
+          <>
+            <div className="mt-4 grid gap-2 sm:grid-cols-3">
+              {[
+                ["Ready to import", preview.ready_count, "text-[#218b55]"],
+                ["Duplicates", preview.duplicate_count, "text-[#a76605]"],
+                ["Invalid rows", preview.invalid_count, "text-[#b42318]"],
+              ].map(([label, count, tone]) => (
+                <div key={String(label)} className="rounded-lg border border-[#e1e6ee] bg-white px-3 py-2">
+                  <p className="text-[11px] text-[#8b92a1]">{label}</p>
+                  <p className={`mt-0.5 text-[18px] font-semibold ${tone}`}>{count}</p>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 overflow-hidden rounded-lg border border-[#d6dee8]">
+              <div className="max-h-[330px] overflow-auto">
+                <table className="w-full min-w-[760px] text-left text-[12px]">
+                  <thead className="sticky top-0 z-10 border-y border-[#1F4E79] bg-[#1F4E79] text-white">
+                    <tr>
+                      {['Row', 'Contact', 'Company', 'Lead status', 'Result'].map((label) => (
+                        <th key={label} className="whitespace-nowrap px-3 py-2.5 font-semibold">{label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-[#edf0f5]">
+                    {visibleRows.map((row) => (
+                      <tr key={row.row_number} className="align-top">
+                        <td className="px-3 py-2 text-[#687386]">{row.row_number}</td>
+                        <td className="max-w-[220px] px-3 py-2 font-medium text-[#202938]">{row.contact_name || "—"}</td>
+                        <td className="max-w-[220px] px-3 py-2 text-[#344054]">{row.client_name || "—"}</td>
+                        <td className="px-3 py-2 text-[#344054]">{evaluationLabel(row.evaluation_number)}</td>
+                        <td className="px-3 py-2">
+                          <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${row.status === "ready" ? "bg-[#edf9f2] text-[#218b55]" : row.status === "duplicate" ? "bg-[#fff8e9] text-[#a76605]" : "bg-[#fef3f2] text-[#b42318]"}`}>
+                            {row.status === "ready" ? "Ready" : row.status === "duplicate" ? "Duplicate" : "Invalid"}
+                          </span>
+                          {(row.errors.length > 0 || row.status === "duplicate") && (
+                            <p className="mt-1 max-w-[300px] text-[11px] leading-4 text-[#687386]">
+                              {row.errors.join(", ") || "A matching Lead already exists."}
+                            </p>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {preview.rows.length > visibleRows.length && (
+                <p className="border-t border-[#edf0f5] px-3 py-2 text-[11px] text-[#8b92a1]">
+                  Showing the first {visibleRows.length} of {preview.rows.length} rows. Counts above include the full file.
+                </p>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="mt-4 rounded-lg border border-dashed border-[#cbd5e1] bg-[#fafbfe] px-4 py-8 text-center text-[12px] text-[#687386]">
+            Choose an Excel file to validate its rows before importing.
+          </div>
+        )}
+
+        <footer className="mt-4 flex flex-wrap items-center justify-end gap-2">
+          <p className="mr-auto text-[11px] text-[#8b92a1]">Only new Leads will be added.</p>
+          <Button secondary onClick={close} disabled={loading || saving}>
+            Cancel
+          </Button>
+          <button
+            type="button"
+            onClick={() => void importLeads()}
+            disabled={!preview || preview.ready_count <= 0 || loading || saving}
+            className="inline-flex min-h-8 items-center gap-1.5 rounded-lg bg-[#c43b43] px-3 text-[12px] font-semibold text-white transition-colors hover:bg-[#ab3038] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {saving && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
+            {saving ? "Importing..." : `Import ${preview?.ready_count ?? 0} Leads`}
+          </button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
 function Records({
   module,
   store,
@@ -3695,6 +3996,7 @@ function Records({
   const [monthFilter, setMonthFilter] = useState(currentMonth);
   const [projectOfficerFilter, setProjectOfficerFilter] = useState("all");
   const [leadDistributionOpen, setLeadDistributionOpen] = useState(false);
+  const [leadImportOpen, setLeadImportOpen] = useState(false);
   const [deletionRequestLead, setDeletionRequestLead] = useState<Row | null>(null);
   const [endorsementLead, setEndorsementLead] = useState<Row | null>(null);
   const [endorsementValues, setEndorsementValues] = useState<Record<string, string>>({
@@ -3723,6 +4025,11 @@ function Records({
     !isProjectsPage &&
     !isLeadChangeRequestsPage &&
     canAccess(role, module.table, "create");
+  const canImportLeads =
+    module.table === "leads" &&
+    !isProjectsPage &&
+    !isLeadChangeRequestsPage &&
+    (isProjectOfficerRole(role) || isGeneralManager);
   const canUpdate = canAccess(role, module.table, "update");
   const canArchive = canAccess(role, module.table, "archive");
   const ownProjectEditRequests =
@@ -4674,27 +4981,37 @@ function Records({
         variant={isPageLayout ? "page" : "card"}
         hideHeading={isPageLayout}
         action={
-          canCreate ? (
-            <Button
-              onClick={() => {
-                setEditing(null);
-                setValues({
-                  ...initial(),
-                  ...(module.table === "leads" &&
-                  isProjectOfficerRole(role) &&
-                  currentUserId
-                    ? { assigned_to: currentUserId }
-                    : {}),
-                  ...(isProjectsPage
-                    ? { evaluation_number: "7", done_deal_status: "1" }
-                    : {}),
-                });
-                setOpen(true);
-              }}
-            >
-              <Plus size={15} />
-              {module.add}
-            </Button>
+          canCreate || canImportLeads ? (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {canImportLeads && (
+                <Button secondary onClick={() => setLeadImportOpen(true)}>
+                  <Upload size={15} />
+                  Import Leads
+                </Button>
+              )}
+              {canCreate && (
+                <Button
+                  onClick={() => {
+                    setEditing(null);
+                    setValues({
+                      ...initial(),
+                      ...(module.table === "leads" &&
+                      isProjectOfficerRole(role) &&
+                      currentUserId
+                        ? { assigned_to: currentUserId }
+                        : {}),
+                      ...(isProjectsPage
+                        ? { evaluation_number: "7", done_deal_status: "1" }
+                        : {}),
+                    });
+                    setOpen(true);
+                  }}
+                >
+                  <Plus size={15} />
+                  {module.add}
+                </Button>
+              )}
+            </div>
           ) : undefined
         }
       >
@@ -5136,6 +5453,13 @@ function Records({
           </div>
         </Dialog>
       )}
+      <LeadImportDialog
+        open={leadImportOpen}
+        organizationId={orgId}
+        onClose={() => setLeadImportOpen(false)}
+        onImported={reload}
+        notice={notice}
+      />
       <NoteDialog
         open={Boolean(recordNote)}
         title={recordNote?.title ?? "Note"}
