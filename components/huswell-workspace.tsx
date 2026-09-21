@@ -729,15 +729,20 @@ const adjustCostingToTargetBudget = (
     return { costing, error: "Change non-discount markup rows to Percentage before applying a Target Budget." };
   }
 
-  const currentAdjustableTotal = adjustableMarkups.reduce(
+  const currentAdjustableMarkupTotal = adjustableMarkups.reduce(
     (sum, markup) => sum + currentTotals.cogs * Math.max(0, n(markupValue(markup))) / 100,
-    currentTotals.cogs * Math.max(0, n(costing.internalVatRate)) / 100,
+    0,
   );
-  if (currentAdjustableTotal <= 0) {
-    return { costing, error: "Add at least one percentage markup or Internal VAT before applying a Target Budget." };
+  const unchangedInternalVatAmount = currentTotals.internalVatAmount;
+  const requiredMarkupAmount = requiredMarkupTotal - unchangedInternalVatAmount;
+  if (requiredMarkupAmount < -0.01) {
+    return { costing, error: "The Target Budget is below the unchanged direct cost and Internal VAT after the current Discount." };
+  }
+  if (currentAdjustableMarkupTotal <= 0) {
+    return { costing, error: "Add at least one percentage markup before applying a Target Budget." };
   }
 
-  const factor = requiredMarkupTotal / currentAdjustableTotal;
+  const factor = Math.max(0, requiredMarkupAmount) / currentAdjustableMarkupTotal;
   if (!Number.isFinite(factor) || factor < 0) {
     return { costing, error: "This Target Budget cannot be reached with the current percentage markups." };
   }
@@ -748,14 +753,7 @@ const adjustCostingToTargetBudget = (
     const nextValue = roundRate(Math.max(0, n(markupValue(markup))) * factor);
     return { ...markup, calculationType: "percentage" as MarkupCalculationType, value: String(nextValue) };
   });
-  const nextInternalVatRate = roundRate(Math.max(0, n(costing.internalVatRate)) * factor);
-  const exceedsAllowedRate = scaledMarkups.some((markup) => {
-    const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
-    return key !== "discounts" && key !== "vat" && n(markupValue(markup)) > 100;
-  }) || nextInternalVatRate > 100;
-  if (exceedsAllowedRate) {
-    return { costing, error: "This Target Budget would require a percentage markup above the allowed 100% limit." };
-  }
+  const nextInternalVatRate = roundRate(Math.max(0, n(costing.internalVatRate)));
 
   let nextCosting: ProductCostingDraft = {
     ...costing,
@@ -12277,7 +12275,7 @@ function PricingMarkupEditor({
                 {isDiscount && editable ? <SegmentedToggle ariaLabel={`${label} calculation basis`} value={rowCalculationType} options={markupBasisOptions} onChange={(value) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, calculationType: value as MarkupCalculationType } : item) })} size="compact" className="w-16" /> : <span className="block text-right text-[#687386]">{rowCalculationType === "fixed_amount" ? "Amount" : "Percent"}</span>}
               </td>}
               <td className="px-2 py-2">
-                {editable ? <div className="flex items-center justify-end gap-1"><input aria-label={`${label} ${rowCalculationType === "fixed_amount" ? "amount" : "percentage"}`} type={sensitiveValuesHidden ? "password" : "number"} min="0" max={rowCalculationType === "percentage" ? "100" : undefined} step="any" value={markupValue(markup)} onChange={(event) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, calculationType: isDiscount ? rowCalculationType : "percentage", value: event.target.value } : item) })} className="input mt-0 px-2 py-1.5 tabular-nums" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /><span className="w-4 text-[11px] text-[#687386]">{sensitiveValuesHidden ? confidentialPricingValue : rowCalculationType === "fixed_amount" ? "₱" : "%"}</span></div> : <span className="block text-right tabular-nums text-[#687386]">{sensitiveValuesHidden ? confidentialPricingValue : rowCalculationType === "fixed_amount" ? peso.format(n(markupValue(markup))) : `${n(markupValue(markup))}%`}</span>}
+                {editable ? <div className="flex items-center justify-end gap-1"><input aria-label={`${label} ${rowCalculationType === "fixed_amount" ? "amount" : "percentage"}`} type={sensitiveValuesHidden ? "password" : "number"} min="0" max={isDiscount && rowCalculationType === "percentage" ? "100" : undefined} step="any" value={markupValue(markup)} onChange={(event) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, calculationType: isDiscount ? rowCalculationType : "percentage", value: event.target.value } : item) })} className="input mt-0 px-2 py-1.5 tabular-nums" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /><span className="w-4 text-[11px] text-[#687386]">{sensitiveValuesHidden ? confidentialPricingValue : rowCalculationType === "fixed_amount" ? "₱" : "%"}</span></div> : <span className="block text-right tabular-nums text-[#687386]">{sensitiveValuesHidden ? confidentialPricingValue : rowCalculationType === "fixed_amount" ? peso.format(n(markupValue(markup))) : `${n(markupValue(markup))}%`}</span>}
               </td>
               <td className="px-3 py-2 text-right font-medium tabular-nums">{sensitiveValuesHidden ? confidentialPricingValue : peso.format(amount)}</td>
             </tr>
@@ -12681,7 +12679,7 @@ function ProductCostingsSectionWithPricing({
                           </div>
                         </label> : <output aria-label={`Target selling price per piece for ${product ? text(product.description, "finished product") : "product"}`} className="text-[13px] font-semibold text-[#176b40]">{peso.format(totals.unitIncVat)}</output>}
                       </div>
-                      <p className="mt-2 text-[11px] text-[#687386]">The percentage markups and Internal VAT are recalculated to reach this target. Discount and customer VAT remain as entered.</p>
+                      <p className="mt-2 text-[11px] text-[#687386]">The percentage markups are recalculated to reach this target. Internal VAT, Discount and customer VAT remain as entered; GM markup percentages may exceed 100%.</p>
                       {targetBudgetErrors[costing.key] && <p className="mt-2 text-[11px] font-medium text-[#b42318]">{targetBudgetErrors[costing.key]}</p>}
                     </div>
                   </div>}
