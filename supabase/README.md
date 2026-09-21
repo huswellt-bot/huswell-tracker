@@ -140,6 +140,7 @@
 138. Run `156_lead_endorsement_images.sql` after migration 155 and before deploying the matching Leads workspace update. It adds one optional private JPEG/PNG/WebP image to a Lead endorsement, limits signed-url access to the lead owner, active endorsed officer, and General Manager roles, and retains the attachment after approved unendorsement.
 139. Run `157_lead_excel_import.sql` after migration 156 and before deploying the matching Leads workspace update. It lets Sales Executives, Sales & Pricing Officers, and General Managers preview and import new `.xlsx` Leads transactionally, reports duplicate/invalid rows, and records each import batch without updating existing Leads.
 140. Run `158_unlimited_gm_target_budget_markup.sql` after migration 157 and before deploying the matching workspace update. It allows General Manager target-budget markup percentages above 100% while retaining customer VAT, Discount, and pricing-default validation limits.
+141. Run `159_accurate_shared_kpi_dashboard.sql` after migration 158 and before deploying the matching workspace update. It makes every KPI dashboard use one month-aware aggregate source, excludes draft/void invoices, uses verified quotation receipts with legacy-payment fallback, and returns organization and personal pipeline counts consistently.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 

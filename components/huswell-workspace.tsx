@@ -1216,7 +1216,17 @@ const day = (value: unknown) =>
         year: "numeric",
       }).format(new Date(String(value)))
     : "—";
-const isoToday = () => new Date().toISOString().slice(0, 10);
+const manilaIsoDate = (value: Date) => {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(value);
+  const part = (type: string) => parts.find((entry) => entry.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+};
+const isoToday = () => manilaIsoDate(new Date());
 const currentMonth = () => isoToday().slice(0, 7);
 const newestActivityFirst = (left: Row, right: Row) => {
   const timestamp = (row: Row) => text(
@@ -16754,11 +16764,41 @@ function FinanceReports({
   );
 }
 
+function useSharedKpiDashboard(orgId: string, month = currentMonth()) {
+  const [sharedKpis, setSharedKpis] = useState<Row | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void Promise.resolve(createClient()
+      .rpc("shared_kpi_dashboard", {
+        p_organization_id: orgId,
+        p_month: `${month}-01`,
+      }))
+      .then(({ data }) => {
+        if (active && data && typeof data === "object" && n((data as Row).kpi_version) >= 2)
+          setSharedKpis(data as Row);
+      })
+      .catch(() => {
+        // Preserve the existing funnel values until the aggregate source is available.
+      });
+    return () => {
+      active = false;
+    };
+  }, [month, orgId]);
+
+  return sharedKpis;
+}
+
 function ProjectOfficerSalesFunnel({
   store,
+  orgId,
+  officerScope = false,
 }: {
   store: Store;
+  orgId: string;
+  officerScope?: boolean;
 }) {
+  const sharedKpis = useSharedKpiDashboard(orgId);
   const isColorMode = true;
   const countUniqueLeads = (rows: Row[]) => new Set(rows.map((row) => text(row.lead_id, text(row.id, ""))).filter(Boolean)).size;
   const priceQuotations = store.quotations.filter((quotation) => text(quotation.document_type) === "price_quotation" && ["sent", "approved"].includes(text(quotation.status)));
@@ -16767,19 +16807,21 @@ function ProjectOfficerSalesFunnel({
     (schedule) => Boolean(schedule.completed_at),
   ).length;
   const completedAt = (stage: number) => doneDeals.filter((lead) => n(lead.done_deal_status) >= stage).length;
+  const kpiTotal = (allField: string, officerField: string, fallback: number) =>
+    sharedKpis ? n(sharedKpis[officerScope ? officerField : allField]) : fallback;
   const stages = [
-    { label: "1. Leads Generated", description: "All potential leads collected", total: store.leads.length, color: "#0863c4", Icon: UsersRound },
-    { label: "2. Leads Contacted", description: "Leads that were successfully contacted", total: store.leads.filter((lead) => Boolean(text(lead.date_contacted, ""))).length, color: "#08aabd", Icon: MessageSquareText },
-    { label: "3. Price Quotation", description: "Quotation provided to interested leads", total: countUniqueLeads(priceQuotations), color: "#ee9500", Icon: FileText },
-    { label: "4. Paid Clients", description: "Leads who made a payment / became clients", total: completedAt(6), color: "#e74408", Icon: PhilippinePeso },
-    { label: "5. Completed Projects", description: "General Manager-approved finished projects", total: completedProjects, color: "#075fc3", Icon: Check },
+    { label: "1. Leads Generated", description: "All potential leads collected", total: kpiTotal("funnel_all_leads_generated", "officer_funnel_all_leads_generated", store.leads.length), color: "#0863c4", Icon: UsersRound },
+    { label: "2. Leads Contacted", description: "Leads that were successfully contacted", total: kpiTotal("funnel_all_leads_contacted", "officer_funnel_all_leads_contacted", store.leads.filter((lead) => Boolean(text(lead.date_contacted, ""))).length), color: "#08aabd", Icon: MessageSquareText },
+    { label: "3. Price Quotation", description: "Quotation provided to interested leads", total: kpiTotal("funnel_all_quoted_leads", "officer_funnel_all_quoted_leads", countUniqueLeads(priceQuotations)), color: "#ee9500", Icon: FileText },
+    { label: "4. Paid Clients", description: "Leads who made a payment / became clients", total: kpiTotal("funnel_all_paid_leads", "officer_funnel_all_paid_leads", completedAt(6)), color: "#e74408", Icon: PhilippinePeso },
+    { label: "5. Completed Projects", description: "General Manager-approved finished projects", total: kpiTotal("funnel_all_completed_projects", "officer_funnel_all_completed_projects", completedProjects), color: "#075fc3", Icon: Check },
   ];
   const percentage = (current: number, previous: number) => previous ? `${((current / previous) * 100).toFixed(2)}%` : "—";
   const overallPercentage = percentage(stages.at(-1)?.total ?? 0, stages[0].total);
   const todayLabel = new Intl.DateTimeFormat("en-PH", {
     month: "long",
     year: "numeric",
-  }).format(new Date());
+  }).format(new Date(`${currentMonth()}-01T00:00:00`));
   const ink = isColorMode ? "#092d67" : "#000000";
   const border = isColorMode ? "#6e7480" : "#000000";
   const displayColor = (stage: (typeof stages)[number]) => isColorMode ? stage.color : "#000000";
@@ -16834,10 +16876,12 @@ function ProjectOfficerSalesFunnel({
   </section>;
 }
 
-function GeneralManagerKpiDashboard({ store }: { store: Store }) {
+function GeneralManagerKpiDashboard({ store, orgId }: { store: Store; orgId: string }) {
+  const sharedKpis = useSharedKpiDashboard(orgId);
   const now = new Date();
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
+  const manilaToday = manilaIsoDate(now);
+  const currentMonth = Number(manilaToday.slice(5, 7)) - 1;
+  const currentYear = Number(manilaToday.slice(0, 4));
   const isInMonth = (value: unknown, year: number, month: number) => {
     const date = new Date(String(value));
     return !Number.isNaN(date.getTime()) && date.getFullYear() === year && date.getMonth() === month;
@@ -16875,7 +16919,17 @@ function GeneralManagerKpiDashboard({ store }: { store: Store }) {
   }).reduce((sum, invoice) => sum + n(invoice.total_amount), 0);
   const quota = n(store.target_goals.find((goal) => text(goal.goal_type) === "quarterly_sales" && isInMonth(goal.period_start, currentYear, quarter * 3))?.target_value);
   const quotaProgress = quota ? Math.min(Math.round((quarterSales / quota) * 100), 100) : 0;
-  const monthLabel = new Intl.DateTimeFormat("en-PH", { month: "long", year: "numeric" }).format(now);
+  const displayedTotalSales = sharedKpis ? n(sharedKpis.total_sales) : totalSales;
+  const displayedCollections = sharedKpis ? n(sharedKpis.collections) : collections;
+  const displayedPreviousSales = sharedKpis ? n(sharedKpis.previous_month_sales) : previousSales;
+  const displayedPreviousCollections = sharedKpis ? n(sharedKpis.previous_month_collections) : previousCollections;
+  const displayedReceivables = sharedKpis ? n(sharedKpis.receivables) : receivables;
+  const displayedOverdue = sharedKpis ? n(sharedKpis.overdue_receivables) : overdue;
+  const displayedPreviousOverdue = sharedKpis ? n(sharedKpis.previous_overdue_receivables) : previousOverdue;
+  const displayedQuarterSales = sharedKpis ? n(sharedKpis.quarter_sales) : quarterSales;
+  const displayedQuota = sharedKpis ? n(sharedKpis.quarter_target) : quota;
+  const displayedQuotaProgress = displayedQuota ? Math.min(Math.round((displayedQuarterSales / displayedQuota) * 100), 100) : 0;
+  const monthLabel = new Intl.DateTimeFormat("en-PH", { month: "long", year: "numeric" }).format(new Date(`${manilaToday.slice(0, 7)}-01T00:00:00`));
   const compare = (value: number, previous: number) => previous ? `${Math.abs(((value - previous) / previous) * 100).toFixed(1)}% ${value >= previous ? "up" : "down"}` : "No prior month";
   const financeAmountSize = (value: number) => {
     const length = peso.format(value).length;
@@ -16885,10 +16939,10 @@ function GeneralManagerKpiDashboard({ store }: { store: Store }) {
     return "28px";
   };
   const metricCards = [
-    { title: "TOTAL SALES", value: totalSales, detail: "This month", compare: compare(totalSales, previousSales), previous: previousSales, Icon: TrendingUp, color: "#1262e7", tint: "#edf4ff" },
-    { title: "COLLECTIONS RECEIVED", value: collections, detail: "This month", compare: compare(collections, previousCollections), previous: previousCollections, Icon: Wallet, color: "#087b19", tint: "#edf9ef" },
-    { title: "TOTAL RECEIVABLES", value: receivables, detail: "As of today", Icon: ReceiptText, color: "#f38300", tint: "#fff5e8" },
-    { title: "OVERDUE RECEIVABLES", value: overdue, detail: "As of today", compare: compare(overdue, previousOverdue), previous: previousOverdue, Icon: CalendarDays, color: "#e30719", tint: "#fff0f1" },
+    { title: "TOTAL SALES", value: displayedTotalSales, detail: "This month", compare: compare(displayedTotalSales, displayedPreviousSales), previous: displayedPreviousSales, Icon: TrendingUp, color: "#1262e7", tint: "#edf4ff" },
+    { title: "COLLECTIONS RECEIVED", value: displayedCollections, detail: "This month", compare: compare(displayedCollections, displayedPreviousCollections), previous: displayedPreviousCollections, Icon: Wallet, color: "#087b19", tint: "#edf9ef" },
+    { title: "TOTAL RECEIVABLES", value: displayedReceivables, detail: "As of today", Icon: ReceiptText, color: "#f38300", tint: "#fff5e8" },
+    { title: "OVERDUE RECEIVABLES", value: displayedOverdue, detail: "As of today", compare: compare(displayedOverdue, displayedPreviousOverdue), previous: displayedPreviousOverdue, Icon: CalendarDays, color: "#e30719", tint: "#fff0f1" },
   ];
 
   return <div className="space-y-4">
@@ -16908,14 +16962,14 @@ function GeneralManagerKpiDashboard({ store }: { store: Store }) {
       <section className="mx-4 mb-4 overflow-hidden rounded-lg border border-[#dfe5ed] sm:mx-5 sm:mb-5">
         <div className="flex items-center gap-2 border-b border-[#e4e8ef] px-4 py-3"><span className="grid size-8 place-items-center rounded-md bg-[#16386d] text-white"><Goal size={16} /></span><div><h2 className="text-[14px] font-semibold text-[#202938]">Quarterly sales quota</h2><p className="mt-0.5 text-[11px] text-[#687386]">Q{quarter + 1} {currentYear}</p></div></div>
         <div className="grid gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-center">
-          <div><div className="flex items-end justify-between gap-3"><div><p className="text-[11px] font-medium text-[#687386]">Progress toward target</p><p className="mt-1 text-[24px] font-semibold leading-none tabular-nums text-[#202938]">{quotaProgress}%</p></div><p className="text-right text-[11px] text-[#687386]">{peso.format(quarterSales)} of<br /><span className="font-medium text-[#202938]">{peso.format(quota)}</span></p></div><div className="mt-4 h-2 overflow-hidden rounded-full bg-[#edf0f5]"><div className="h-full rounded-full bg-[#c43b43]" style={{ width: `${quotaProgress}%` }} /></div></div>
+          <div><div className="flex items-end justify-between gap-3"><div><p className="text-[11px] font-medium text-[#687386]">Progress toward target</p><p className="mt-1 text-[24px] font-semibold leading-none tabular-nums text-[#202938]">{displayedQuotaProgress}%</p></div><p className="text-right text-[11px] text-[#687386]">{peso.format(displayedQuarterSales)} of<br /><span className="font-medium text-[#202938]">{peso.format(displayedQuota)}</span></p></div><div className="mt-4 h-2 overflow-hidden rounded-full bg-[#edf0f5]"><div className="h-full rounded-full bg-[#c43b43]" style={{ width: `${displayedQuotaProgress}%` }} /></div></div>
           <dl className="divide-y divide-[#edf0f5]">
-            {[{ label: "Quarterly target", value: quota, Icon: Goal }, { label: "Achieved", value: quarterSales, Icon: Check }, { label: "Remaining", value: Math.max(quota - quarterSales, 0), Icon: Wallet }].map(({ label, value, Icon }) => <div className="flex items-center justify-between gap-3 py-2.5" key={label}><dt className="flex items-center gap-2 text-[12px] text-[#687386]"><Icon size={15} className="text-[#16386d]" />{label}</dt><dd className="text-[13px] font-semibold tabular-nums text-[#202938]">{peso.format(value)}</dd></div>)}
+            {[{ label: "Quarterly target", value: displayedQuota, Icon: Goal }, { label: "Achieved", value: displayedQuarterSales, Icon: Check }, { label: "Remaining", value: Math.max(displayedQuota - displayedQuarterSales, 0), Icon: Wallet }].map(({ label, value, Icon }) => <div className="flex items-center justify-between gap-3 py-2.5" key={label}><dt className="flex items-center gap-2 text-[12px] text-[#687386]"><Icon size={15} className="text-[#16386d]" />{label}</dt><dd className="text-[13px] font-semibold tabular-nums text-[#202938]">{peso.format(value)}</dd></div>)}
           </dl>
         </div>
       </section>
     </section>
-    <ProjectOfficerSalesFunnel store={store} />
+    <ProjectOfficerSalesFunnel store={store} orgId={orgId} />
   </div>;
 }
 
@@ -16930,7 +16984,6 @@ function Dashboard({
   role: string;
   orgId: string;
 }) {
-  const now = new Date();
   const [selectedMonth, setSelectedMonth] = useState(currentMonth);
   const [sharedKpis, setSharedKpis] = useState<Row | null>(null);
   const [selectedYear, selectedMonthIndex] = selectedMonth.split("-").map(Number);
@@ -16941,28 +16994,32 @@ function Dashboard({
   }).format(monthDate);
   const isProjectOfficer = isProjectOfficerRole(role);
   useEffect(() => {
-    if (isProjectOfficer) return;
+    if (isProjectOfficer || role === "admin") return;
     let active = true;
-    void createClient()
+    void Promise.resolve(createClient()
       .rpc("shared_kpi_dashboard", {
         p_organization_id: orgId,
         p_month: `${selectedMonth}-01`,
-      })
+      }))
       .then(({ data }) => {
-        if (active && data && typeof data === "object") setSharedKpis(data as Row);
+        if (active && data && typeof data === "object" && n((data as Row).kpi_version) >= 2)
+          setSharedKpis(data as Row);
+      })
+      .catch(() => {
+        // Preserve the existing dashboard values until the aggregate source is available.
       });
     return () => {
       active = false;
     };
-  }, [isProjectOfficer, orgId, selectedMonth]);
-  if (isProjectOfficer) return <ProjectOfficerSalesFunnel store={store} />;
-  if (role === "admin") return <GeneralManagerKpiDashboard store={store} />;
-  const quarter = Math.floor((selectedMonthIndex - 1) / 3) + 1;
-  const quarterStartMonth = (quarter - 1) * 3;
-  const quarterLabel = `Q${quarter} ${selectedYear}`;
+  }, [isProjectOfficer, orgId, role, selectedMonth]);
+  if (isProjectOfficer) return <ProjectOfficerSalesFunnel store={store} orgId={orgId} officerScope />;
+  if (role === "admin") return <GeneralManagerKpiDashboard store={store} orgId={orgId} />;
+  const quarterStartMonth = (Math.floor((selectedMonthIndex - 1) / 3)) * 3;
   const isCurrentMonth = (value: unknown) => {
-    const date = new Date(String(value));
-    return !Number.isNaN(date.getTime()) && date.getFullYear() === selectedYear && date.getMonth() === selectedMonthIndex - 1;
+    const raw = text(value, "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw.slice(0, 7) === selectedMonth;
+    const date = new Date(raw);
+    return !Number.isNaN(date.getTime()) && manilaIsoDate(date).slice(0, 7) === selectedMonth;
   };
   const nonVoidInvoices = store.invoices.filter((invoice) => text(invoice.status) !== "void");
   const monthInvoices = nonVoidInvoices.filter((invoice) => isCurrentMonth(invoice.issue_date));
@@ -16974,51 +17031,41 @@ function Dashboard({
   const totalSales = monthInvoices.reduce((sum, invoice) => sum + n(invoice.total_amount), 0);
   const collections = monthPayments.reduce((sum, payment) => sum + n(payment.amount), 0);
   const receivables = nonVoidInvoices.reduce((sum, invoice) => sum + invoiceBalance(invoice), 0);
+  const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const overdueReceivables = nonVoidInvoices.filter((invoice) => {
     const dueDate = new Date(text(invoice.due_date, ""));
     return invoiceBalance(invoice) > 0 && !Number.isNaN(dueDate.getTime()) && dueDate < todayStart;
   }).reduce((sum, invoice) => sum + invoiceBalance(invoice), 0);
-  const costings = store.quotations.filter((quotation) => text(quotation.document_type) === "costing_breakdown");
   const priceQuotations = store.quotations.filter((quotation) => text(quotation.document_type) === "price_quotation");
-  const monthlyQuotedValue = priceQuotations.filter((quotation) => isCurrentMonth(quotation.issue_date)).reduce((sum, quotation) => sum + n(quotation.total_amount), 0);
   const leadsGenerated = store.leads.filter((lead) => isCurrentMonth(lead.date_sent ?? lead.created_at)).length;
   const priceQuoteSent = priceQuotations.filter((quotation) => isCurrentMonth(quotation.issue_date) && ["sent", "approved"].includes(text(quotation.status))).length;
   const paidClients = new Set(monthInvoices.filter((invoice) => text(invoice.status) === "paid").map((invoice) => invoice.customer_id).filter(Boolean)).size;
   const isSelectedQuarter = (value: unknown) => {
-    const date = new Date(String(value));
+    const raw = text(value, "");
+    const date = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? new Date(`${raw}T00:00:00`) : new Date(raw);
     return !Number.isNaN(date.getTime()) && date.getFullYear() === selectedYear && date.getMonth() >= quarterStartMonth && date.getMonth() < quarterStartMonth + 3;
   };
-  const quarterSales = nonVoidInvoices
-    .filter((invoice) => isSelectedQuarter(invoice.issue_date))
-    .reduce((sum, invoice) => sum + n(invoice.total_amount), 0);
-  const quarterlySalesTarget = store.target_goals.find(
-    (goal) =>
-      text(goal.goal_type, "") === "quarterly_sales" &&
-      isSelectedQuarter(goal.period_start),
-  );
-  const quarterlyTargetValue = n(quarterlySalesTarget?.target_value);
-  const quarterlyActual = quarterSales;
-  const quarterlyTargetProgress = quarterlyTargetValue
-    ? Math.min(Math.round((quarterlyActual / quarterlyTargetValue) * 100), 100)
-    : 0;
+  const quarterSales = nonVoidInvoices.filter((invoice) => isSelectedQuarter(invoice.issue_date)).reduce((sum, invoice) => sum + n(invoice.total_amount), 0);
+  const quarterlyTargetValue = n(store.target_goals.find((goal) => text(goal.goal_type, "") === "quarterly_sales" && isSelectedQuarter(goal.period_start))?.target_value);
   const monthlyPerformance = Array.from({ length: 12 }, (_, index) => {
     const inMonth = (value: unknown) => {
-      const date = new Date(String(value));
-      return !Number.isNaN(date.getTime()) && date.getFullYear() === selectedYear && date.getMonth() === index;
+      const raw = text(value, "");
+      if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw.slice(0, 4) === String(selectedYear) && Number(raw.slice(5, 7)) - 1 === index;
+      const date = new Date(raw);
+      const month = !Number.isNaN(date.getTime()) ? manilaIsoDate(date) : "";
+      return month.slice(0, 4) === String(selectedYear) && Number(month.slice(5, 7)) - 1 === index;
     };
     return {
       label: new Intl.DateTimeFormat("en-PH", { month: "short" }).format(new Date(selectedYear, index, 1)),
-      revenue: isProjectOfficer
-        ? priceQuotations.filter((quotation) => inMonth(quotation.issue_date)).reduce((sum, quotation) => sum + n(quotation.total_amount), 0)
-        : nonVoidInvoices.filter((invoice) => inMonth(invoice.issue_date)).reduce((sum, invoice) => sum + n(invoice.total_amount), 0),
-      expense: isProjectOfficer
-        ? costings.filter((quotation) => inMonth(quotation.created_at)).reduce((sum, quotation) => sum + n(quotation.total_cost), 0)
-      : store.payments.filter((payment) => !payment.reversed_at && inMonth(payment.paid_at)).reduce((sum, payment) => sum + n(payment.amount), 0),
+      revenue: nonVoidInvoices.filter((invoice) => inMonth(invoice.issue_date)).reduce((sum, invoice) => sum + n(invoice.total_amount), 0),
+      expense: store.payments.filter((payment) => !payment.reversed_at && inMonth(payment.paid_at)).reduce((sum, payment) => sum + n(payment.amount), 0),
     };
   });
+  const quarter = Math.floor((selectedMonthIndex - 1) / 3) + 1;
+  const quarterLabel = `Q${quarter} ${selectedYear}`;
   const sharedPerformance = Array.isArray(sharedKpis?.monthly_performance)
-    ? (sharedKpis.monthly_performance as Row[]).map((point) => ({ label: text(point.label), revenue: n(point.revenue), expense: n(point.expense) }))
+    ? (sharedKpis.monthly_performance as Row[]).map((point) => ({ label: text(point.label), revenue: n(point.revenue), expense: n(point.collections ?? point.expense) }))
     : monthlyPerformance;
   const dashboardSales = sharedKpis ? n(sharedKpis.total_sales) : totalSales;
   const dashboardCollections = sharedKpis ? n(sharedKpis.collections) : collections;
@@ -17029,16 +17076,20 @@ function Dashboard({
   const dashboardOfficerLeads = sharedKpis ? n(sharedKpis.officer_leads_generated) : 0;
   const dashboardOfficerQuotes = sharedKpis ? n(sharedKpis.officer_price_quotations) : 0;
   const dashboardPaidClients = sharedKpis ? n(sharedKpis.paid_clients) : paidClients;
-  const dashboardQuarterSales = sharedKpis ? n(sharedKpis.quarter_sales) : quarterlyActual;
+  const dashboardQuarterSales = sharedKpis ? n(sharedKpis.quarter_sales) : quarterSales;
   const dashboardQuarterTarget = sharedKpis ? n(sharedKpis.quarter_target) : quarterlyTargetValue;
   const dashboardQuarterProgress = dashboardQuarterTarget ? Math.min(Math.round((dashboardQuarterSales / dashboardQuarterTarget) * 100), 100) : 0;
   const readOnlyKpiView = isProjectOfficer ? "Dashboard" as View : "Finance" as View;
+  const quotaLabel = dashboardQuarterTarget ? `${dashboardQuarterProgress}%` : "Not set";
+  const quotaDetail = dashboardQuarterTarget
+    ? `${quarterLabel} · ${peso.format(Math.max(dashboardQuarterTarget - dashboardQuarterSales, 0))} remaining`
+    : `Set a target for ${quarterLabel}`;
   const primaryMetrics = [
     { label: "Total sales", value: peso.format(dashboardSales), detail: "Invoiced this month", icon: TrendingUp, iconClass: "bg-[#1769e8] text-white", accent: "bg-[#1769e8]", view: readOnlyKpiView },
     { label: "Collections received", value: peso.format(dashboardCollections), detail: "Payments received", icon: PhilippinePeso, iconClass: "bg-[#16854f] text-white", accent: "bg-[#16854f]", view: readOnlyKpiView },
     { label: "Total receivables", value: peso.format(dashboardReceivables), detail: "Balance awaiting payment", icon: ReceiptText, iconClass: "bg-[#d98a1d] text-white", accent: "bg-[#d98a1d]", view: readOnlyKpiView },
     { label: "Overdue receivables", value: peso.format(dashboardOverdue), detail: "Past due balances", icon: CalendarDays, iconClass: "bg-[#c43b43] text-white", accent: "bg-[#c43b43]", view: readOnlyKpiView },
-    { label: "Quarterly sales quota", value: dashboardQuarterTarget ? `${dashboardQuarterProgress}%` : "Not set", detail: dashboardQuarterTarget ? `${quarterLabel} · ${peso.format(Math.max(dashboardQuarterTarget - dashboardQuarterSales, 0))} remaining` : `Set a target for ${quarterLabel}`, icon: Goal, iconClass: "bg-[#7043ca] text-white", accent: "bg-[#7043ca]", view: isProjectOfficer ? "Dashboard" as View : "Targets" as View },
+    { label: "Quarterly sales quota", value: quotaLabel, detail: quotaDetail, icon: Goal, iconClass: "bg-[#7043ca] text-white", accent: "bg-[#7043ca]", view: isProjectOfficer ? "Dashboard" as View : "Targets" as View },
   ];
   const operationsMetrics = [
     { label: "Leads generated", value: dashboardLeads, detail: "All sales officers", icon: ClipboardCheck, tone: "bg-[#7043ca]", view: "Leads" as View },
