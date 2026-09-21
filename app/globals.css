@@ -765,6 +765,53 @@ select:not([multiple]) {
 .huswell-workspace .leads-table td:nth-child(12) {
   width: 90px;
 }
+.huswell-workspace .supplier-list-table {
+  table-layout: fixed;
+  width: 2300px;
+  min-width: 2300px;
+}
+.huswell-workspace .supplier-list-table thead th {
+  white-space: nowrap !important;
+  overflow-wrap: normal;
+  line-height: 1.25;
+}
+.huswell-workspace .supplier-list-table th,
+.huswell-workspace .supplier-list-table td {
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  overflow-wrap: normal;
+}
+.huswell-workspace .supplier-list-table th:nth-child(1),
+.huswell-workspace .supplier-list-table td:nth-child(1) { width: 100px; }
+.huswell-workspace .supplier-list-table th:nth-child(2),
+.huswell-workspace .supplier-list-table td:nth-child(2) { width: 140px; }
+.huswell-workspace .supplier-list-table th:nth-child(3),
+.huswell-workspace .supplier-list-table td:nth-child(3) { width: 180px; }
+.huswell-workspace .supplier-list-table th:nth-child(4),
+.huswell-workspace .supplier-list-table td:nth-child(4) {
+  width: 260px;
+  white-space: pre-line !important;
+  overflow-wrap: anywhere;
+}
+.huswell-workspace .supplier-list-table th:nth-child(5),
+.huswell-workspace .supplier-list-table td:nth-child(5) { width: 230px; }
+.huswell-workspace .supplier-list-table th:nth-child(6),
+.huswell-workspace .supplier-list-table td:nth-child(6) { width: 180px; }
+.huswell-workspace .supplier-list-table th:nth-child(7),
+.huswell-workspace .supplier-list-table td:nth-child(7) { width: 145px; }
+.huswell-workspace .supplier-list-table th:nth-child(8),
+.huswell-workspace .supplier-list-table td:nth-child(8) { width: 150px; }
+.huswell-workspace .supplier-list-table th:nth-child(9),
+.huswell-workspace .supplier-list-table td:nth-child(9) { width: 150px; }
+.huswell-workspace .supplier-list-table th:nth-child(10),
+.huswell-workspace .supplier-list-table td:nth-child(10),
+.huswell-workspace .supplier-list-table th:nth-child(11),
+.huswell-workspace .supplier-list-table td:nth-child(11),
+.huswell-workspace .supplier-list-table th:nth-child(12),
+.huswell-workspace .supplier-list-table td:nth-child(12) { width: 190px; }
+.huswell-workspace .supplier-list-table th:nth-child(13),
+.huswell-workspace .supplier-list-table td:nth-child(13) { width: 120px; }
 .huswell-workspace .cost-lines-table th:first-child,
 .huswell-workspace .cost-lines-table td:first-child {
   width: 84px;

@@ -2,7 +2,9 @@
 /* eslint-disable @typescript-eslint/no-unused-vars, react-hooks/set-state-in-effect, @next/next/no-location-assign-relative-destination, @next/next/no-img-element */
 
 import {
+  Dispatch,
   ReactNode,
+  SetStateAction,
   useCallback,
   useEffect,
   useMemo,
@@ -110,8 +112,7 @@ type View =
   | "Price Quotations"
   | "Price Quotation Review"
   | "Materials List"
-  | "Suppliers & Materials"
-  | "Suppliers"
+  | "Supplier's List"
   | "Quotations"
   | "Production"
   | "Catalog"
@@ -793,6 +794,8 @@ type Field = {
   type?:
     | "text"
     | "email"
+    | "tel"
+    | "url"
     | "password"
     | "number"
     | "date"
@@ -1149,6 +1152,8 @@ const fieldPlaceholder = (field: Field) => {
   if (field.placeholder) return field.placeholder;
   if (field.type === "date" || field.type === "select") return undefined;
   if (field.type === "email") return "name@example.com";
+  if (field.type === "tel") return "Enter phone number";
+  if (field.type === "url") return "https://";
   if (field.type === "password") return "Enter password";
   if (field.key.includes("phone")) return "Enter phone number";
   if (field.type === "number") return "0";
@@ -1157,6 +1162,24 @@ const fieldPlaceholder = (field: Field) => {
 };
 const normalizeSupplierName = (value: string) =>
   value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+const supplierListValues = (value: unknown, fallback?: unknown) => {
+  const source = Array.isArray(value)
+    ? value
+    : value === null || value === undefined || value === ""
+      ? []
+      : [value];
+  const normalizedSource = source
+    .map((entry) => String(entry).trim())
+    .filter(Boolean);
+  const fallbackValues = normalizedSource.length || fallback === undefined || fallback === null || fallback === ""
+    ? []
+    : [String(fallback).trim()];
+  return [...normalizedSource, ...fallbackValues]
+    .filter(Boolean)
+    .filter((entry, index, entries) => entries.indexOf(entry) === index);
+};
+const supplierLinkHref = (value: string) =>
+  /^(?:https?:|mailto:|tel:)/i.test(value) ? value : `https://${value}`;
 
 async function optimizeQuotationImage(file: File): Promise<File> {
   // Keep an HD edge for previews and PDFs while avoiding unnecessary camera-size uploads.
@@ -1677,18 +1700,7 @@ const workspaceViewTables = (
       "quotation_payment_records",
       "pricing_officer_project_types",
     ];
-  if (view === "Suppliers & Materials")
-    return [
-      "suppliers",
-      "inventory_items",
-      "inventory_movements",
-      "production_material_usage",
-      "finished_product_stock_ins",
-      "quotation_items",
-      "invoice_items",
-      "expenses",
-      "supplier_payables",
-    ];
+  if (view === "Supplier's List") return ["suppliers"];
   if (view === "Production")
     return [
       "production_jobs",
@@ -8588,6 +8600,436 @@ function SupplierMaterials({
           supplierIdToAdd={supplierIdToAdd}
           onSupplierIdHandled={() => setSupplierIdToAdd(null)}
         />
+      )}
+    </div>
+  );
+}
+
+function SupplierList({
+  store,
+  orgId,
+  reload,
+  notice,
+  role,
+}: {
+  store: Store;
+  orgId: string;
+  reload: () => Promise<void>;
+  notice: (message: string) => void;
+  role: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Row | null>(null);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [emails, setEmails] = useState<string[]>([""]);
+  const [contactNumbers, setContactNumbers] = useState<string[]>([""]);
+  const [query, setQuery] = useState("");
+  const [saving, setSaving] = useState(false);
+  const canCreate = memberRole(role) || role === "sales_pricing_officer";
+  const canManage = memberRole(role);
+
+  const fields: Field[] = [
+    { key: "contact_name", label: "Name" },
+    { key: "company_name", label: "Company", required: true },
+    { key: "address", label: "Address", type: "textarea" },
+    {
+      key: "project_type",
+      label: "Project type",
+      type: "select",
+      options: [...quotationProjectTypes],
+    },
+    { key: "whatsapp", label: "WhatsApp", type: "tel" },
+    { key: "viber", label: "Viber", type: "tel" },
+    { key: "instagram_link", label: "Instagram link", type: "url" },
+    { key: "facebook_link", label: "Facebook link", type: "url" },
+    { key: "website_link", label: "Website link", type: "url" },
+  ];
+
+  const emptyValues = (): Record<string, string> => ({
+    contact_name: "",
+    company_name: "",
+    address: "",
+    project_type: "",
+    whatsapp: "",
+    viber: "",
+    instagram_link: "",
+    facebook_link: "",
+    website_link: "",
+  });
+  const valuesFromSupplier = (supplier: Row) =>
+    Object.fromEntries(
+      fields.map((field) => [field.key, text(supplier[field.key], "")]),
+    );
+  const filteredSuppliers = store.suppliers
+    .filter((supplier) =>
+      JSON.stringify(supplier).toLowerCase().includes(query.toLowerCase()),
+    )
+    .sort((left, right) =>
+      text(left.company_name, "").localeCompare(text(right.company_name, "")),
+    );
+
+  const close = () => {
+    setOpen(false);
+    setEditing(null);
+    setValues({});
+    setEmails([""]);
+    setContactNumbers([""]);
+  };
+  const startNew = () => {
+    setEditing(null);
+    setValues(emptyValues());
+    setEmails([""]);
+    setContactNumbers([""]);
+    setOpen(true);
+  };
+  const startEdit = (supplier: Row) => {
+    setEditing(supplier);
+    setValues(valuesFromSupplier(supplier));
+    setEmails(supplierListValues(supplier.emails, supplier.email).length
+      ? supplierListValues(supplier.emails, supplier.email)
+      : [""]);
+    setContactNumbers(
+      supplierListValues(supplier.contact_numbers, supplier.phone).length
+        ? supplierListValues(supplier.contact_numbers, supplier.phone)
+        : [""],
+    );
+    setOpen(true);
+  };
+  const updateListValue = (
+    setter: Dispatch<SetStateAction<string[]>>,
+    index: number,
+    value: string,
+  ) => {
+    setter((current) =>
+      current.map((entry, entryIndex) =>
+        entryIndex === index ? value : entry,
+      ),
+    );
+  };
+  const saveSupplier = async () => {
+    const companyName = (values.company_name ?? "").trim();
+    if (!companyName) return notice("Enter a supplier company.");
+    const duplicate = store.suppliers.find(
+      (supplier) =>
+        text(supplier.id, "") !== text(editing?.id, "") &&
+        normalizeSupplierName(text(supplier.company_name, "")) ===
+          normalizeSupplierName(companyName),
+    );
+    if (duplicate)
+      return notice(
+        `A supplier named “${text(duplicate.company_name)}” already exists.`,
+      );
+    const emailValues = supplierListValues(emails);
+    const phoneValues = supplierListValues(contactNumbers);
+    setSaving(true);
+    const payload = {
+      company_name: companyName,
+      contact_name: (values.contact_name ?? "").trim(),
+      address: (values.address ?? "").trim(),
+      project_type: (values.project_type ?? "").trim() || null,
+      whatsapp: (values.whatsapp ?? "").trim() || null,
+      viber: (values.viber ?? "").trim() || null,
+      instagram_link: (values.instagram_link ?? "").trim() || null,
+      facebook_link: (values.facebook_link ?? "").trim() || null,
+      website_link: (values.website_link ?? "").trim() || null,
+      emails: emailValues,
+      contact_numbers: phoneValues,
+      email: emailValues[0] || null,
+      phone: phoneValues[0] || null,
+    };
+    const client = createClient();
+    const request = editing?.id
+      ? client
+          .from("suppliers")
+          .update(payload)
+          .eq("id", editing.id)
+          .eq("organization_id", orgId)
+      : client
+          .from("suppliers")
+          .insert({ ...payload, organization_id: orgId });
+    const { error } = await request;
+    setSaving(false);
+    if (error) return notice(error.message);
+    close();
+    notice(editing ? "Supplier updated." : "Supplier added.");
+    await reload();
+  };
+  const toggleAvailability = async (supplier: Row) => {
+    if (!canManage) return;
+    setSaving(true);
+    const { error } = await createClient()
+      .from("suppliers")
+      .update({ is_active: supplier.is_active === false })
+      .eq("id", supplier.id)
+      .eq("organization_id", orgId);
+    setSaving(false);
+    if (error) return notice(error.message);
+    notice(
+      supplier.is_active === false
+        ? "Supplier marked available."
+        : "Supplier marked unavailable.",
+    );
+    await reload();
+  };
+  const deleteSupplier = async (supplier: Row) => {
+    if (!canManage || !supplier.id) return;
+    const supplierId = text(supplier.id, "");
+    const hasDependencies = [
+      store.inventory_items.some((item) => text(item.supplier_id, "") === supplierId),
+      store.expenses.some((expense) => text(expense.supplier_id, "") === supplierId),
+      store.supplier_payables.some((payable) => text(payable.supplier_id, "") === supplierId),
+    ].some(Boolean);
+    if (hasDependencies) {
+      return notice(
+        "This supplier has linked business records and cannot be deleted. Mark it unavailable instead.",
+      );
+    }
+    setSaving(true);
+    const { error } = await createClient()
+      .from("suppliers")
+      .delete()
+      .eq("id", supplierId)
+      .eq("organization_id", orgId);
+    setSaving(false);
+    if (error) return notice(error.message);
+    notice("Supplier deleted.");
+    await reload();
+  };
+  const displayList = (value: unknown, fallback?: unknown, kind?: "email" | "phone" | "link") => {
+    const entries = supplierListValues(value, fallback);
+    if (!entries.length) return <span className="text-[#8b92a1]">—</span>;
+    return (
+      <div className="space-y-1">
+        {entries.map((entry) => {
+          const href = kind === "email"
+            ? `mailto:${entry}`
+            : kind === "phone"
+              ? `tel:${entry}`
+              : kind === "link"
+                ? supplierLinkHref(entry)
+                : undefined;
+          return href ? (
+            <a
+              key={entry}
+              href={href}
+              target={kind === "link" ? "_blank" : undefined}
+              rel={kind === "link" ? "noreferrer" : undefined}
+              className="block max-w-[220px] truncate text-[#1769e8] hover:underline"
+            >
+              {entry}
+            </a>
+          ) : (
+            <span key={entry} className="block whitespace-nowrap">
+              {entry}
+            </span>
+          );
+        })}
+      </div>
+    );
+  };
+
+  return (
+    <div className="-m-3 min-h-[calc(100vh-76px)] bg-white sm:-m-4 sm:min-h-[calc(100vh-84px)] lg:-m-5">
+      <Panel
+        title="Supplier's List"
+        detail="Maintain supplier contacts, project types, and social links."
+        variant="page"
+        hideHeading
+        action={
+          canCreate ? (
+            <Button onClick={startNew}>
+              <Plus size={15} /> Add Supplier
+            </Button>
+          ) : undefined
+        }
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#edf0f5] px-4 py-3 sm:px-6 lg:px-7">
+          <span className="inline-flex items-center gap-2 rounded-md border border-[#d9e0e9] bg-[#f8faff] px-3 py-1.5 text-[12px] font-medium text-[#344054]">
+            Total Suppliers
+            <b className="text-[15px] text-[#151922]">{filteredSuppliers.length}</b>
+          </span>
+          <span className="text-[11px] text-[#8b92a1]">
+            {canManage ? "General Managers manage supplier records." : "You can add supplier records."}
+          </span>
+        </div>
+        <div className="flex flex-wrap gap-2 border-t border-[#edf0f5] px-4 py-2 sm:px-6 lg:px-7">
+          <label className="relative min-w-0 flex-1 sm:min-w-56">
+            <Search className="absolute left-3 top-2.5 text-[#8b92a1]" size={15} />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              className="w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
+              placeholder="Search suppliers"
+            />
+          </label>
+        </div>
+        {filteredSuppliers.length ? (
+          <div className="modern-table-shell">
+            <Table
+              labels={[
+                "Actions",
+                "Name",
+                "Company",
+                "Address",
+                "Email",
+                "Contact Number",
+                "Project type",
+                "WhatsApp",
+                "Viber",
+                "Instagram link",
+                "Facebook link",
+                "Website link",
+                "Status",
+              ]}
+              minWidth={2200}
+              className="supplier-list-table modern-page-table"
+            >
+              {filteredSuppliers.map((supplier) => (
+                <tr key={text(supplier.id)} className="hover:bg-[#fbfcff]">
+                  <td className="whitespace-nowrap px-5 py-3 align-middle">
+                    <div className="flex gap-2">
+                      {canManage && (
+                        <ActionIcon
+                          label={`Edit ${text(supplier.company_name)}`}
+                          confirm={false}
+                          disabled={saving}
+                          onClick={() => startEdit(supplier)}
+                        >
+                          <Pencil size={15} />
+                        </ActionIcon>
+                      )}
+                      {canManage && (
+                        <ActionIcon
+                          label={`Delete ${text(supplier.company_name)}`}
+                          tone="red"
+                          disabled={saving}
+                          confirm
+                          confirmationDescription="This deletes the supplier only when no materials, expenses, or payables are linked to it."
+                          onClick={() => void deleteSupplier(supplier)}
+                        >
+                          <Trash2 size={15} />
+                        </ActionIcon>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-5 py-3 align-middle">{text(supplier.contact_name, "—")}</td>
+                  <td className="px-5 py-3 align-middle font-semibold text-[#202938]">{text(supplier.company_name)}</td>
+                  <td className="max-w-[280px] whitespace-pre-line px-5 py-3 align-middle text-[#626b7a]">{text(supplier.address, "—")}</td>
+                  <td className="px-5 py-3 align-middle">{displayList(supplier.emails, supplier.email, "email")}</td>
+                  <td className="px-5 py-3 align-middle">{displayList(supplier.contact_numbers, supplier.phone, "phone")}</td>
+                  <td className="px-5 py-3 align-middle">{text(supplier.project_type, "—")}</td>
+                  <td className="px-5 py-3 align-middle">{text(supplier.whatsapp, "—")}</td>
+                  <td className="px-5 py-3 align-middle">{text(supplier.viber, "—")}</td>
+                  <td className="px-5 py-3 align-middle">{displayList(supplier.instagram_link, undefined, "link")}</td>
+                  <td className="px-5 py-3 align-middle">{displayList(supplier.facebook_link, undefined, "link")}</td>
+                  <td className="px-5 py-3 align-middle">{displayList(supplier.website_link, undefined, "link")}</td>
+                  <td className="px-5 py-3 align-middle">
+                    <div className="flex items-center gap-2 whitespace-nowrap">
+                      {canManage && (
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={supplier.is_active !== false}
+                          aria-label={`${supplier.is_active !== false ? "Mark unavailable" : "Mark available"}: ${text(supplier.company_name)}`}
+                          disabled={saving}
+                          onClick={() => void toggleAvailability(supplier)}
+                          className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${supplier.is_active !== false ? "bg-[#218b55]" : "bg-[#c7ced8]"} disabled:opacity-50`}
+                        >
+                          <span className={`inline-block size-3.5 rounded-full bg-white shadow transition ${supplier.is_active !== false ? "translate-x-[18px]" : "translate-x-1"}`} />
+                        </button>
+                      )}
+                      <Status value={supplier.is_active === false ? "unavailable" : "available"} />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </Table>
+          </div>
+        ) : (
+          <Empty>No suppliers match this view.</Empty>
+        )}
+      </Panel>
+      {open && (
+        <Dialog
+          title={editing ? "Edit Supplier" : "Add Supplier"}
+          fields={fields}
+          values={values}
+          setValues={setValues}
+          save={() => void saveSupplier()}
+          close={close}
+          saving={saving}
+          saveLabel={editing ? "Save changes" : "Add supplier"}
+          className="max-w-3xl"
+        >
+          <div className="mt-4 grid gap-4 border-t border-[#edf0f5] pt-4 sm:grid-cols-2">
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[12px] font-medium text-[#202938]">Email</p>
+                <button
+                  type="button"
+                  onClick={() => setEmails((current) => [...current, ""])}
+                  className="text-[11px] font-semibold text-[#c43b43] hover:underline"
+                >
+                  + Add email
+                </button>
+              </div>
+              {emails.map((email, index) => (
+                <div key={`email-${index}`} className="mt-2 flex items-center gap-2">
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(event) => updateListValue(setEmails, index, event.target.value)}
+                    placeholder={`Email ${index + 1}`}
+                    className="input mt-0 min-w-0 flex-1"
+                  />
+                  {emails.length > 1 && (
+                    <button
+                      type="button"
+                      aria-label={`Remove email ${index + 1}`}
+                      onClick={() => setEmails((current) => current.filter((_, entryIndex) => entryIndex !== index))}
+                      className="grid size-8 shrink-0 place-items-center rounded-md text-[#8b92a1] hover:bg-[#fff1f1] hover:text-[#c43b43]"
+                    >
+                      <X size={15} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[12px] font-medium text-[#202938]">Contact Number</p>
+                <button
+                  type="button"
+                  onClick={() => setContactNumbers((current) => [...current, ""])}
+                  className="text-[11px] font-semibold text-[#c43b43] hover:underline"
+                >
+                  + Add number
+                </button>
+              </div>
+              {contactNumbers.map((phone, index) => (
+                <div key={`phone-${index}`} className="mt-2 flex items-center gap-2">
+                  <input
+                    type="tel"
+                    value={phone}
+                    onChange={(event) => updateListValue(setContactNumbers, index, event.target.value)}
+                    placeholder={`Contact Number ${index + 1}`}
+                    className="input mt-0 min-w-0 flex-1"
+                  />
+                  {contactNumbers.length > 1 && (
+                    <button
+                      type="button"
+                      aria-label={`Remove contact number ${index + 1}`}
+                      onClick={() => setContactNumbers((current) => current.filter((_, entryIndex) => entryIndex !== index))}
+                      className="grid size-8 shrink-0 place-items-center rounded-md text-[#8b92a1] hover:bg-[#fff1f1] hover:text-[#c43b43]"
+                    >
+                      <X size={15} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </Dialog>
       )}
     </div>
   );
@@ -18375,6 +18817,7 @@ export function HuswellWorkspace({
     super_admin: [
       "Dashboard",
       "Leads",
+      "Supplier's List",
       "Projects",
       "Price Quotations",
       "Approvals",
@@ -18384,6 +18827,7 @@ export function HuswellWorkspace({
     owner: [
       "Dashboard",
       "Leads",
+      "Supplier's List",
       "Projects",
       "Price Quotations",
       "Quotation Costing Overview",
@@ -18396,6 +18840,7 @@ export function HuswellWorkspace({
     admin: [
       "Dashboard",
       "Leads",
+      "Supplier's List",
       "Projects",
       "Price Quotations",
       "Quotation Costing Overview",
@@ -18416,6 +18861,7 @@ export function HuswellWorkspace({
     sales_pricing_officer: [
       "Dashboard",
       "Leads",
+      "Supplier's List",
       "Projects",
       "Price Quotations",
       "Price Quotation Review",
@@ -18496,6 +18942,7 @@ export function HuswellWorkspace({
         { view: "Dashboard", icon: LayoutDashboard },
         { view: "Approvals", icon: ClipboardCheck, badge: pendingManagementApprovalCount },
         { view: "Leads", icon: ClipboardCheck },
+        { view: "Supplier's List", icon: UsersRound },
       ],
     },
     {
@@ -18526,6 +18973,7 @@ export function HuswellWorkspace({
       label: "Sales & Pricing",
       items: [
         { view: "Leads", icon: ClipboardCheck },
+        { view: "Supplier's List", icon: UsersRound },
         { view: "Price Quotations", icon: FileText },
         { view: "Quotation Costing Overview", icon: ReceiptText },
         { view: "Price Quotation Review", icon: ClipboardCheck, badge: pendingPricingReviewCount },
@@ -18554,7 +19002,6 @@ export function HuswellWorkspace({
         { view: "Price Quotation Review", icon: ClipboardCheck },
         { view: "Quotation Costing Overview", icon: ReceiptText },
         { view: "Projects", icon: ClipboardCheck },
-        { view: "Suppliers & Materials", icon: UsersRound },
       ],
     },
     {
@@ -18638,13 +19085,9 @@ export function HuswellWorkspace({
       title: "Materials List",
       detail: "Maintain the material choices used in Price Quotations.",
     },
-    "Suppliers & Materials": {
-      title: "Suppliers & Materials",
-      detail: "Maintain the vendors and materials used for Price Quotations.",
-    },
-    Suppliers: {
-      title: "Suppliers",
-      detail: supplierDirectory.detail,
+    "Supplier's List": {
+      title: "Supplier's List",
+      detail: "Maintain supplier contacts, project types, and social links.",
     },
     Quotations: {
       title: "Quotation workflow moved",
@@ -18798,8 +19241,8 @@ export function HuswellWorkspace({
           leadMode={activeLeadWorkspaceMode}
           onLeadModeChange={selectLeadWorkspaceMode}
         />
-    ) : active === "Suppliers & Materials" ? (
-      <SupplierMaterials
+    ) : active === "Supplier's List" ? (
+      <SupplierList
         store={store}
         orgId={organizationId}
         reload={reload}
