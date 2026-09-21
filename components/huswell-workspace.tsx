@@ -16789,32 +16789,70 @@ function useSharedKpiDashboard(orgId: string, month = currentMonth()) {
   return sharedKpis;
 }
 
+function useSharedSalesPipeline(
+  orgId: string,
+  month = currentMonth(),
+  enabled = true,
+) {
+  const [pipeline, setPipeline] = useState<Row | null>(null);
+
+  useEffect(() => {
+    if (!enabled) return;
+    let active = true;
+    void Promise.resolve(createClient()
+      .rpc("shared_kpi_sales_pipeline", {
+        p_organization_id: orgId,
+        p_month: `${month}-01`,
+      }))
+      .then(({ data }) => {
+        if (active && data && typeof data === "object" && n((data as Row).kpi_version) >= 2)
+          setPipeline(data as Row);
+      })
+      .catch(() => {
+        // Preserve the existing pipeline values until the aggregate source is available.
+      });
+    return () => {
+      active = false;
+    };
+  }, [enabled, month, orgId]);
+
+  return pipeline;
+}
+
 function ProjectOfficerSalesFunnel({
   store,
   orgId,
-  officerScope = false,
 }: {
   store: Store;
   orgId: string;
-  officerScope?: boolean;
 }) {
-  const sharedKpis = useSharedKpiDashboard(orgId);
+  const pipeline = useSharedSalesPipeline(orgId);
   const isColorMode = true;
+  const reportingMonth = currentMonth();
+  const inReportingMonth = (value: unknown) => {
+    const raw = text(value, "");
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw.slice(0, 7) === reportingMonth;
+    const date = new Date(raw);
+    return !Number.isNaN(date.getTime()) && manilaIsoDate(date).slice(0, 7) === reportingMonth;
+  };
   const countUniqueLeads = (rows: Row[]) => new Set(rows.map((row) => text(row.lead_id, text(row.id, ""))).filter(Boolean)).size;
-  const priceQuotations = store.quotations.filter((quotation) => text(quotation.document_type) === "price_quotation" && ["sent", "approved"].includes(text(quotation.status)));
+  const priceQuotations = store.quotations.filter((quotation) => text(quotation.document_type) === "price_quotation" && ["sent", "approved"].includes(text(quotation.status)) && inReportingMonth(quotation.issue_date));
   const doneDeals = store.leads.filter((lead) => n(lead.evaluation_number) === 7);
   const completedProjects = store.project_schedules.filter(
-    (schedule) => Boolean(schedule.completed_at),
+    (schedule) => Boolean(schedule.completed_at) && inReportingMonth(schedule.completed_at),
   ).length;
-  const completedAt = (stage: number) => doneDeals.filter((lead) => n(lead.done_deal_status) >= stage).length;
-  const kpiTotal = (allField: string, officerField: string, fallback: number) =>
-    sharedKpis ? n(sharedKpis[officerScope ? officerField : allField]) : fallback;
+  const completedAt = (stage: number) =>
+    doneDeals.filter((lead) =>
+      inReportingMonth(lead.date_sent ?? lead.created_at)
+      && n(lead.done_deal_status) >= stage
+    ).length;
+  const kpiTotal = (field: string, fallback: number) => pipeline ? n(pipeline[field]) : fallback;
   const stages = [
-    { label: "1. Leads Generated", description: "All potential leads collected", total: kpiTotal("funnel_all_leads_generated", "officer_funnel_all_leads_generated", store.leads.length), color: "#0863c4", Icon: UsersRound },
-    { label: "2. Leads Contacted", description: "Leads that were successfully contacted", total: kpiTotal("funnel_all_leads_contacted", "officer_funnel_all_leads_contacted", store.leads.filter((lead) => Boolean(text(lead.date_contacted, ""))).length), color: "#08aabd", Icon: MessageSquareText },
-    { label: "3. Price Quotation", description: "Quotation provided to interested leads", total: kpiTotal("funnel_all_quoted_leads", "officer_funnel_all_quoted_leads", countUniqueLeads(priceQuotations)), color: "#ee9500", Icon: FileText },
-    { label: "4. Paid Clients", description: "Leads who made a payment / became clients", total: kpiTotal("funnel_all_paid_leads", "officer_funnel_all_paid_leads", completedAt(6)), color: "#e74408", Icon: PhilippinePeso },
-    { label: "5. Completed Projects", description: "General Manager-approved finished projects", total: kpiTotal("funnel_all_completed_projects", "officer_funnel_all_completed_projects", completedProjects), color: "#075fc3", Icon: Check },
+    { label: "1. Leads Generated", description: "All potential leads collected", total: kpiTotal("leads_generated", store.leads.filter((lead) => inReportingMonth(lead.date_sent ?? lead.created_at)).length), color: "#0863c4", Icon: UsersRound },
+    { label: "2. Leads Contacted", description: "Leads that were successfully contacted", total: kpiTotal("leads_contacted", store.leads.filter((lead) => inReportingMonth(lead.date_sent ?? lead.created_at) && Boolean(text(lead.date_contacted, ""))).length), color: "#08aabd", Icon: MessageSquareText },
+    { label: "3. Price Quotation", description: "Quotation provided to interested leads", total: kpiTotal("quoted_leads", countUniqueLeads(priceQuotations)), color: "#ee9500", Icon: FileText },
+    { label: "4. Paid Clients", description: "Leads who made a payment / became clients", total: kpiTotal("funnel_paid_leads", completedAt(6)), color: "#e74408", Icon: PhilippinePeso },
+    { label: "5. Completed Projects", description: "General Manager-approved finished projects", total: kpiTotal("funnel_completed_projects", completedProjects), color: "#075fc3", Icon: Check },
   ];
   const percentage = (current: number, previous: number) => previous ? `${((current / previous) * 100).toFixed(2)}%` : "—";
   const overallPercentage = percentage(stages.at(-1)?.total ?? 0, stages[0].total);
@@ -16993,6 +17031,11 @@ function Dashboard({
     year: "numeric",
   }).format(monthDate);
   const isProjectOfficer = isProjectOfficerRole(role);
+  const sharedPipeline = useSharedSalesPipeline(
+    orgId,
+    selectedMonth,
+    !isProjectOfficer && role !== "admin",
+  );
   useEffect(() => {
     if (isProjectOfficer || role === "admin") return;
     let active = true;
@@ -17012,7 +17055,7 @@ function Dashboard({
       active = false;
     };
   }, [isProjectOfficer, orgId, role, selectedMonth]);
-  if (isProjectOfficer) return <ProjectOfficerSalesFunnel store={store} orgId={orgId} officerScope />;
+  if (isProjectOfficer) return <ProjectOfficerSalesFunnel store={store} orgId={orgId} />;
   if (role === "admin") return <GeneralManagerKpiDashboard store={store} orgId={orgId} />;
   const quarterStartMonth = (Math.floor((selectedMonthIndex - 1) / 3)) * 3;
   const isCurrentMonth = (value: unknown) => {
@@ -17079,6 +17122,9 @@ function Dashboard({
   const dashboardQuarterSales = sharedKpis ? n(sharedKpis.quarter_sales) : quarterSales;
   const dashboardQuarterTarget = sharedKpis ? n(sharedKpis.quarter_target) : quarterlyTargetValue;
   const dashboardQuarterProgress = dashboardQuarterTarget ? Math.min(Math.round((dashboardQuarterSales / dashboardQuarterTarget) * 100), 100) : 0;
+  const pipelineLeads = sharedPipeline ? n(sharedPipeline.leads_generated) : dashboardLeads;
+  const pipelineQuotedLeads = sharedPipeline ? n(sharedPipeline.quoted_leads) : dashboardQuotes;
+  const pipelinePaidLeads = sharedPipeline ? n(sharedPipeline.funnel_paid_leads) : dashboardPaidClients;
   const readOnlyKpiView = isProjectOfficer ? "Dashboard" as View : "Finance" as View;
   const quotaLabel = dashboardQuarterTarget ? `${dashboardQuarterProgress}%` : "Not set";
   const quotaDetail = dashboardQuarterTarget
@@ -17102,9 +17148,9 @@ function Dashboard({
     { label: "My price quotations", value: dashboardOfficerQuotes, detail: "Your sent or approved", icon: UserRound, tone: "bg-[#1769e8]" },
   ];
   const funnel = [
-    { label: "Leads generated", value: dashboardLeads, width: "w-full", color: "bg-[#7043ca]", view: isProjectOfficer ? "Dashboard" as View : "Leads" as View },
-    { label: "Price quotations", value: dashboardQuotes, width: "w-[72%]", color: "bg-[#1769e8]", view: isProjectOfficer ? "Dashboard" as View : "Price Quotations" as View },
-    { label: "Paid clients", value: dashboardPaidClients, width: "w-[58%]", color: "bg-[#16854f]", view: readOnlyKpiView },
+    { label: "Leads generated", value: pipelineLeads, width: "w-full", color: "bg-[#7043ca]", view: isProjectOfficer ? "Dashboard" as View : "Leads" as View },
+    { label: "Price quotations", value: pipelineQuotedLeads, width: "w-[72%]", color: "bg-[#1769e8]", view: isProjectOfficer ? "Dashboard" as View : "Price Quotations" as View },
+    { label: "Paid clients", value: pipelinePaidLeads, width: "w-[58%]", color: "bg-[#16854f]", view: readOnlyKpiView },
   ];
   const canReviewSubmissions = ["admin", "owner", "super_admin"].includes(role);
   const funnelMax = Math.max(1, ...funnel.map((stage) => stage.value));
