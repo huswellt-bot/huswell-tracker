@@ -255,6 +255,7 @@ function SegmentedToggle({
   onChange,
   size = "default",
   className = "",
+  disabled = false,
 }: {
   ariaLabel: string;
   value: string;
@@ -262,6 +263,7 @@ function SegmentedToggle({
   onChange: (value: string) => void;
   size?: "compact" | "default";
   className?: string;
+  disabled?: boolean;
 }) {
   const sizing = size === "compact"
     ? "min-h-6 px-1 text-[10px] font-semibold"
@@ -282,6 +284,7 @@ function SegmentedToggle({
             aria-label={option.ariaLabel}
             title={option.ariaLabel}
             aria-pressed={selected}
+            disabled={disabled}
             onClick={() => onChange(option.value)}
             className={`inline-flex min-w-0 flex-1 items-center justify-center ${sizing} transition-colors ${selected ? "bg-[var(--color-accent)] text-[var(--color-on-accent)]" : "bg-white text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)]"} focus-visible:relative focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)]`}
           >
@@ -6709,6 +6712,7 @@ function QuotationCostingOverview({
   const [pdfQuote, setPdfQuote] = useState<Row | null>(null);
   const [pdfWindow, setPdfWindow] = useState<Window | null>(null);
   const [printAfterOpen, setPrintAfterOpen] = useState(false);
+  const [computationQuote, setComputationQuote] = useState<Row | null>(null);
   const isGeneralManager = memberRole(role);
   const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
   useEffect(() => {
@@ -6775,7 +6779,7 @@ function QuotationCostingOverview({
   };
   return (
     <Panel
-      title="Quotation Costing Overview"
+      title="Costing Breakdown Summary"
       detail={isGeneralManager ? "Review all costed Price Quotations with their current approval status." : "Review Price Quotations that you have costed, including their current approval status."}
       variant="page"
       hideHeading
@@ -6839,7 +6843,7 @@ function QuotationCostingOverview({
         </div>
         {filteredCostedQuotations.length ? (
           <div className="modern-table-shell">
-          <Table labels={["Price Quotation", "Client", "Project Type", "Status", "Costed", "PDF"]} minWidth={850} className="!w-full">
+          <Table labels={["Price Quotation", "Client", "Project Type", "Status", "Costed", "Actions"]} minWidth={900} className="!w-full">
             {filteredCostedQuotations.map((quote) => {
               const party = quotationParty(quote, store);
               return (
@@ -6849,7 +6853,7 @@ function QuotationCostingOverview({
                   <td className="px-5 py-3">{text(quote.project_types)}</td>
                   <td className="px-5 py-3"><Status value={quote.status} /></td>
                   <td className="px-5 py-3">{day(quote.pricing_reviewed_at ?? quote.updated_at)}</td>
-                  <td className="px-5 py-3">{text(quote.status) === "approved" ? <span className="flex items-center gap-1"><ActionIcon label="View Price Quotation PDF" confirm={false} onClick={() => openPdf(quote)}><FileText size={15} /></ActionIcon><ActionIcon label="Print Price Quotation" confirm={false} onClick={() => openPdf(quote, true)}><Printer size={15} /></ActionIcon></span> : <span className="text-[11px] text-[#8b92a1]">Available after approval</span>}</td>
+                  <td className="px-5 py-3"><span className="flex items-center gap-1"><ActionIcon label="View costing computation" confirm={false} onClick={() => setComputationQuote(quote)}><Eye size={15} /></ActionIcon>{text(quote.status) === "approved" && <><ActionIcon label="View Price Quotation PDF" confirm={false} onClick={() => openPdf(quote)}><FileText size={15} /></ActionIcon><ActionIcon label="Print Price Quotation" confirm={false} onClick={() => openPdf(quote, true)}><Printer size={15} /></ActionIcon></>}</span></td>
                 </tr>
               );
             })}
@@ -6860,6 +6864,7 @@ function QuotationCostingOverview({
         )}
       </div>
       {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); notice(message); }} autoExportPdf pdfWindow={pdfWindow} printAfterOpen={printAfterOpen} hidden />}
+      {computationQuote && <PriceQuotationReview quotation={computationQuote} store={store} saving={false} finalApproval={isGeneralManager} showInternalMarkups={isGeneralManager} readOnly close={() => setComputationQuote(null)} notice={notice} reload={reload} />}
     </Panel>
   );
 }
@@ -12395,6 +12400,7 @@ type PriceQuotationReviewContentProps = {
   pricingRevision?: boolean;
   documentLabel?: string;
   sourceQuotationNo?: string;
+  readOnly?: boolean;
 };
 
 function RevisionRequestDialog({
@@ -12528,6 +12534,7 @@ function ProductCostingsSectionWithPricing({
   canEditVat,
   sensitiveValuesHidden = false,
   toggleSensitiveValues,
+  readOnly = false,
 }: {
   projectName: string;
   lines: Row[];
@@ -12542,6 +12549,7 @@ function ProductCostingsSectionWithPricing({
   canEditVat: boolean;
   sensitiveValuesHidden?: boolean;
   toggleSensitiveValues: () => void;
+  readOnly?: boolean;
 }) {
   const displayProjectName = projectName.trim() || "Project";
   const defaults = pricingMarkupDefaults(pricingDefaults.pricing_markup_defaults, pricingDefaults);
@@ -12568,6 +12576,7 @@ function ProductCostingsSectionWithPricing({
 
   return (
     <section className="rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4">
+      <fieldset disabled={readOnly} className="min-w-0 border-0 p-0">
       {canEditVat && <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-[#edf0f5] pb-3">
         <p className="text-[12px] text-[#687386]">The customer selling price per piece is the final grand total divided by quantity.</p>
       </div>}
@@ -12576,23 +12585,23 @@ function ProductCostingsSectionWithPricing({
           <h3 className="text-[14px] font-semibold text-[#202938]">Internal product costings</h3>
           <p className="mt-1 text-[12px] text-[#687386]">General Manager / Sales &amp; Pricing Officer only. Add one costing table for each finished product; internal pricing adjustments calculate the quotation price automatically.</p>
         </div>
-        <Button
-          disabled={!canAddCosting}
-          onClick={() => {
-            const nextLine = lines.find((line) => !costings.some((costing) => costing.quotationItemId === line.id));
-            if (nextLine?.id) {
-              const nextCosting = newProductCostingDraft(text(nextLine.id), defaults);
-              setCostings((current) => [
-                ...current,
-                visibleMarkupKeys.includes("discounts")
-                  ? withQuotationDiscount(nextCosting)
-                  : nextCosting,
-              ]);
-            }
-          }}
-        >
-          <Plus size={14} /> Add Costing Breakdown
-        </Button>
+        {!readOnly && <Button
+            disabled={!canAddCosting}
+            onClick={() => {
+              const nextLine = lines.find((line) => !costings.some((costing) => costing.quotationItemId === line.id));
+              if (nextLine?.id) {
+                const nextCosting = newProductCostingDraft(text(nextLine.id), defaults);
+                setCostings((current) => [
+                  ...current,
+                  visibleMarkupKeys.includes("discounts")
+                    ? withQuotationDiscount(nextCosting)
+                    : nextCosting,
+                ]);
+              }
+            }}
+          >
+            <Plus size={14} /> Add Costing Breakdown
+          </Button>}
       </div>
 
       {costings.length === 0 ? (
@@ -12609,12 +12618,12 @@ function ProductCostingsSectionWithPricing({
                     <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#687386]">Costing Breakdown {costingIndex + 1}</p>
                     <p className="mt-1 truncate text-[12px] text-[#344054]">{product ? text(product.description, "Finished product") : "Select a finished product"}</p>
                   </div>
-                  <Button secondary onClick={() => setCostings((current) => current.filter((item) => item.key !== costing.key))}><Trash2 size={14} /> Remove table</Button>
+                  {!readOnly && <Button secondary onClick={() => setCostings((current) => current.filter((item) => item.key !== costing.key))}><Trash2 size={14} /> Remove table</Button>}
                 </div>
                 <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[#edf0f5] pb-3">
                   <label className="min-w-64 flex-1 text-[12px] font-medium text-[#202938]">
                     Finished product
-                    <select value={costing.quotationItemId} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, quotationItemId: event.target.value }))} className="input mt-1">
+                    <select value={costing.quotationItemId} disabled={readOnly} onChange={(event) => updateCosting(costing.key, (current) => ({ ...current, quotationItemId: event.target.value }))} className="input mt-1">
                       <option value="">Select quotation product</option>
                       {lines.map((line, index) => <option key={text(line.id)} value={text(line.id)} disabled={costings.some((other) => other.key !== costing.key && other.quotationItemId === line.id)}>{displayProjectName} - Product {index + 1} - Qty: {n(line.quantity)} pcs</option>)}
                     </select>
@@ -12643,6 +12652,7 @@ function ProductCostingsSectionWithPricing({
                               options={costLineCalculationOptions}
                               size="compact"
                               className="w-full"
+                              disabled={readOnly}
                               onChange={(value) => {
                                 if (value === "fixed_amount") {
                                   updateLine({ calculationType: "fixed_amount", amount: line.calculationType === "fixed_amount" ? line.amount : String(n(line.quantity) * n(line.unitCost)) });
@@ -12724,6 +12734,7 @@ function ProductCostingsSectionWithPricing({
           </div>
         </div>
       </div>}
+      </fieldset>
     </section>
   );
 }
@@ -12731,7 +12742,7 @@ function ProductCostingsSectionWithPricing({
 function PriceQuotationReviewContent({
   lines, projectName, projectType, illustrations, productCostings, pricingDefaults, setProductCostings, prices, setPrices, subtotal, vatRate, setVatRate, tax,
   total, terms, setTerms, bankDetails, setBankDetails,
-  revisionNote, setRevisionNote, submissionNote, setSubmissionNote, close, saving, working, review, finalApproval, showInternalMarkups, sensitiveValuesHidden, toggleSensitiveValues, visibleMarkupKeys, bankVisibility, pricingRevision,
+  revisionNote, setRevisionNote, submissionNote, setSubmissionNote, close, saving, working, review, finalApproval, showInternalMarkups, sensitiveValuesHidden, toggleSensitiveValues, visibleMarkupKeys, bankVisibility, pricingRevision, readOnly = false,
   documentLabel = "Price Quotation", sourceQuotationNo,
 }: PriceQuotationReviewContentProps) {
   const [revisionDialogOpen, setRevisionDialogOpen] = useState(false);
@@ -12754,7 +12765,8 @@ function PriceQuotationReviewContent({
         <p className="mt-2 whitespace-pre-wrap text-[13px] leading-5 text-[#4b5565]">{submissionNote}</p>
       </section>}
       <QuotationReviewSummary lines={lines} prices={prices} subtotal={subtotal} vatRate={vatRate} tax={tax} total={total} productCostings={productCostings} showPrices={showInternalMarkups} />
-      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups={showInternalMarkups} editableInternalMarkups={finalApproval} visibleMarkupKeys={visibleMarkupKeys ?? (showInternalMarkups ? internalPricingMarkupKeys : ["discounts"])} canEditVat={finalApproval} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} />
+      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups={showInternalMarkups} editableInternalMarkups={finalApproval} visibleMarkupKeys={visibleMarkupKeys ?? (showInternalMarkups ? internalPricingMarkupKeys : ["discounts"])} canEditVat={finalApproval} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
+      <fieldset disabled={readOnly} className="min-w-0 border-0 p-0">
       <section className="rounded-xl border border-[#e1e6ee] p-4">
         <h3 className="text-[14px] font-semibold">Terms and Conditions</h3>
         <div className="mt-3 space-y-2">{terms.map((term, index) => <div key={index} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
@@ -12767,7 +12779,8 @@ function PriceQuotationReviewContent({
         <div className="mt-3 flex justify-end"><Button onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div>
       </section>
       {!finalApproval && <label className="block text-[12px] font-medium text-[#202938]">Note to General Manager (optional)<textarea rows={4} value={submissionNote} onChange={(event) => setSubmissionNote(event.target.value)} placeholder="Add an optional note for the General Manager." className="input mt-1 min-h-[96px] resize-y" /></label>}
-      <div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button>{!pricingRevision && <Button secondary loading={saving || working} disabled={saving || working} onClick={() => setRevisionDialogOpen(true)}><RotateCcw size={14} /> Request Revision</Button>}<Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> {pricingRevision ? `Resubmit ${documentLabel} to General Manager` : finalApproval ? `Approve ${documentLabel}` : `Submit ${documentLabel} to General Manager`}</Button></div>
+      </fieldset>
+      <div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button>{!readOnly && !pricingRevision && <Button secondary loading={saving || working} disabled={saving || working} onClick={() => setRevisionDialogOpen(true)}><RotateCcw size={14} /> Request Revision</Button>}{!readOnly && <Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> {pricingRevision ? `Resubmit ${documentLabel} to General Manager` : finalApproval ? `Approve ${documentLabel}` : `Submit ${documentLabel} to General Manager`}</Button>}</div>
       <RevisionRequestDialog
         open={revisionDialogOpen}
         documentLabel={documentLabel}
@@ -12794,6 +12807,7 @@ function PriceQuotationReview({
   reload,
   finalApproval = false,
   showInternalMarkups = finalApproval,
+  readOnly = false,
 }: {
   quotation: Row;
   store: Store;
@@ -12803,6 +12817,7 @@ function PriceQuotationReview({
   reload: () => Promise<void>;
   finalApproval?: boolean;
   showInternalMarkups?: boolean;
+  readOnly?: boolean;
 }) {
   const pricingRevision = !finalApproval && isPricingOfficerRevision(quotation);
   const documentLabel = "Price Quotation";
@@ -13111,8 +13126,8 @@ function PriceQuotationReview({
       <section className="mx-auto my-4 w-full max-w-6xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
         <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4">
           <div>
-            <h2 className="text-[17px] font-semibold text-[#202938]">Review {documentLabel}</h2>
-            <p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - {pricingRevision ? "Address the General Manager's instructions and resubmit." : finalApproval ? "Finalize approval." : `Complete pricing and submit ${documentLabel} to the General Manager.`}</p>
+            <h2 className="text-[17px] font-semibold text-[#202938]">{readOnly ? "View" : "Review"} {documentLabel}</h2>
+            <p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - {readOnly ? "Read-only costing computation." : pricingRevision ? "Address the General Manager's instructions and resubmit." : finalApproval ? "Finalize approval." : `Complete pricing and submit ${documentLabel} to the General Manager.`}</p>
           </div>
           <button type="button" onClick={close} aria-label="Close review" className="grid size-8 shrink-0 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button>
         </div>
@@ -13151,6 +13166,7 @@ function PriceQuotationReview({
           visibleMarkupKeys={showInternalMarkups ? gmVisibleMarkupKeys : ["discounts"]}
           bankVisibility={bankVisibility}
           pricingRevision={pricingRevision}
+          readOnly={readOnly}
         />
       </section>
     </div>
@@ -18365,6 +18381,7 @@ export function HuswellWorkspace({
       "Leads",
       "Projects",
       "Price Quotations",
+      "Quotation Costing Overview",
       "Approvals",
       "Finance",
       "Announcements",
@@ -18376,6 +18393,7 @@ export function HuswellWorkspace({
       "Leads",
       "Projects",
       "Price Quotations",
+      "Quotation Costing Overview",
       "Approvals",
       "Finance",
       "Announcements",
@@ -18396,6 +18414,7 @@ export function HuswellWorkspace({
       "Projects",
       "Price Quotations",
       "Price Quotation Review",
+      "Quotation Costing Overview",
       "Announcements",
       "Policy",
     ],
@@ -18503,6 +18522,7 @@ export function HuswellWorkspace({
       items: [
         { view: "Leads", icon: ClipboardCheck },
         { view: "Price Quotations", icon: FileText },
+        { view: "Quotation Costing Overview", icon: ReceiptText },
         { view: "Price Quotation Review", icon: ClipboardCheck, badge: pendingPricingReviewCount },
       ],
     },
@@ -18583,8 +18603,10 @@ export function HuswellWorkspace({
         : "Select an approved Price Quotation and request production with the start and due dates.",
     },
     "Quotation Costing Overview": {
-      title: "Quotation Costing Overview",
-      detail: "Review Price Quotations that you have costed and their current statuses.",
+      title: "Costing Breakdown Summary",
+      detail: isManagementRole
+        ? "Review all costed Price Quotations and their current statuses."
+        : "Review Price Quotations that you have costed and their current statuses.",
     },
     "Costing Breakdown": {
       title: "Costing Breakdown",
@@ -18976,6 +18998,8 @@ export function HuswellWorkspace({
                             ? "Production"
                             : role === "sales_pricing_officer" && view === "Price Quotation Review"
                               ? "Quotation Review Queue"
+                            : view === "Quotation Costing Overview"
+                              ? "Costing Breakdown Summary"
                             : isManagementRole && view === "Price Quotations"
                               ? "Price Quotations"
                               : view === "Approvals"
