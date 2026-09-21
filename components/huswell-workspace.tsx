@@ -12247,6 +12247,7 @@ function PricingMarkupEditor({
   showInternalVat = false,
   sensitiveValuesHidden = false,
   toggleSensitiveValues,
+  readOnly = false,
 }: {
   costing: ProductCostingDraft;
   editable: boolean;
@@ -12256,6 +12257,7 @@ function PricingMarkupEditor({
   showInternalVat?: boolean;
   sensitiveValuesHidden?: boolean;
   toggleSensitiveValues: () => void;
+  readOnly?: boolean;
 }) {
   const totals = productCostingTotals(costing, 1, 0);
   const visibleMarkups = costing.markups.filter((markup) => {
@@ -12273,6 +12275,7 @@ function PricingMarkupEditor({
           {sensitiveValuesHidden ? "View markups" : "Hide markups"}
         </Button>}
       </div>
+      <fieldset disabled={readOnly} className="min-w-0 border-0 p-0">
       <Table labels={includesDiscount ? ["Category", "Basis", "Value", "Calculated amount"] : ["Category", "Percentage", "Calculated amount"]} minWidth={0} compact alignRightLabels={includesDiscount ? ["Value", "Calculated amount"] : ["Percentage", "Calculated amount"]}>
         {visibleMarkups.map((markup) => {
           const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
@@ -12303,6 +12306,7 @@ function PricingMarkupEditor({
           <td className="px-3 py-2 text-right font-medium tabular-nums">{sensitiveValuesHidden ? confidentialPricingValue : peso.format(totals.internalVatAmount)}</td>
         </tr>}
       </Table>
+      </fieldset>
     </div>
   );
 }
@@ -12576,7 +12580,6 @@ function ProductCostingsSectionWithPricing({
 
   return (
     <section className="rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4">
-      <fieldset disabled={readOnly} className="min-w-0 border-0 p-0">
       {canEditVat && <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-[#edf0f5] pb-3">
         <p className="text-[12px] text-[#687386]">The customer selling price per piece is the final grand total divided by quantity.</p>
       </div>}
@@ -12630,6 +12633,7 @@ function ProductCostingsSectionWithPricing({
                   </label>
                 </div>
 
+                <fieldset disabled={readOnly} className="min-w-0 border-0 p-0">
                 <div className="mt-3">
                   <div className="mb-3 flex items-center justify-between gap-3">
                     <h4 className="text-[12px] font-semibold text-[#344054]">Internal costs</h4>
@@ -12673,10 +12677,11 @@ function ProductCostingsSectionWithPricing({
                   </Table>
                   <div className="mt-2 flex justify-end"><Button onClick={() => updateCosting(costing.key, (current) => ({ ...current, costLines: [...current.costLines, { key: `cost-line-${crypto.randomUUID()}`, description: "", calculationType: "quantity_unit_cost", quantity: "1", unitCost: "0", amount: "0" }] }))}><Plus size={13} /> Add cost</Button></div>
                 </div>
+                </fieldset>
 
                 <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
                   {editableMarkups && <div className="space-y-4">
-                    <PricingMarkupEditor costing={costing} editable={editableInternalMarkups} visibleMarkupKeys={visibleMarkupKeys} update={(next) => updateCosting(costing.key, () => next)} showInternalVat={canEditVat} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} />
+                    <PricingMarkupEditor costing={costing} editable={editableInternalMarkups} visibleMarkupKeys={visibleMarkupKeys} update={(next) => updateCosting(costing.key, () => next)} showInternalVat={canEditVat} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
                     <div className="rounded-lg border border-[#d9e0e9] bg-white p-3">
                       <div className="flex flex-wrap items-end justify-between gap-3">
                         <div className="min-w-52 flex-1">
@@ -12694,6 +12699,7 @@ function ProductCostingsSectionWithPricing({
                               step="0.01"
                               value={targetBudgetValues[costing.key] ?? totals.unitIncVat.toFixed(2)}
                               onChange={(event) => applyTargetBudget(costing, event.target.value, n(product?.quantity))}
+                              disabled={readOnly}
                               className="input mt-0 w-36 px-2 py-1.5 text-center tabular-nums"
                             />
                           </div>
@@ -12729,12 +12735,11 @@ function ProductCostingsSectionWithPricing({
           <div className="grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-3 border-b border-[#edf0f5] pb-2 text-[10px] font-medium text-[#687386]"><span>Category</span><span>Percentage</span><span className="text-right">Calculated Amount</span></div>
           <div className="mt-2 grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-3">
             <span className="text-[11px] font-medium text-[#344054]">VAT</span>
-            <div className="flex items-center gap-1"><input aria-label="VAT percentage" type="number" min="0" max="100" step="any" value={vatValue} onChange={(event) => setVatValue(event.target.value)} className="input mt-0 px-2 py-1.5" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /><span className="text-[11px] text-[#687386]">%</span></div>
+            <div className="flex items-center gap-1"><input aria-label="VAT percentage" type="number" min="0" max="100" step="any" value={vatValue} onChange={(event) => setVatValue(event.target.value)} disabled={readOnly} className="input mt-0 px-2 py-1.5" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /><span className="text-[11px] text-[#687386]">%</span></div>
             <output aria-label="VAT total" className="min-w-20 text-right text-[12px] font-semibold text-[#344054]">{peso.format(vatTotal)}</output>
           </div>
         </div>
       </div>}
-      </fieldset>
     </section>
   );
 }
