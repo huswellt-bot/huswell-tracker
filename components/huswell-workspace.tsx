@@ -1178,8 +1178,56 @@ const supplierListValues = (value: unknown, fallback?: unknown) => {
     .filter(Boolean)
     .filter((entry, index, entries) => entries.indexOf(entry) === index);
 };
+const supplierOptionText = (value: unknown) =>
+  String(value ?? "").replace(/\s+/g, " ").trim();
+const supplierOptionKey = (value: unknown) =>
+  supplierOptionText(value).toLocaleLowerCase();
+const supplierCountryOptions = (value: unknown) => {
+  const source = Array.isArray(value) ? value : [];
+  return source
+    .map(supplierOptionText)
+    .filter(Boolean)
+    .filter(
+      (option, index, options) =>
+        options.findIndex((item) => supplierOptionKey(item) === supplierOptionKey(option)) === index,
+    );
+};
+const supplierProjectTypeOptions = quotationProjectTypes.filter(
+  (projectType) => !["mockup", "mock up"].includes(supplierOptionKey(projectType)),
+);
 const supplierLinkHref = (value: string) =>
   /^(?:https?:|mailto:|tel:)/i.test(value) ? value : `https://${value}`;
+
+type WorkspaceBackupResource = "leads" | "suppliers";
+
+const downloadWorkspaceBackup = async (resource: WorkspaceBackupResource) => {
+  const response = await fetch(
+    `/api/backups/export?resource=${encodeURIComponent(resource)}`,
+    { cache: "no-store", credentials: "same-origin" },
+  );
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as
+      | { error?: string }
+      | null;
+    throw new Error(payload?.error || "Unable to create the backup file.");
+  }
+
+  const contentDisposition = response.headers.get("content-disposition") ?? "";
+  const filename =
+    /filename="([^"]+)"/i.exec(contentDisposition)?.[1] ??
+    `${resource}-backup.xlsx`;
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+  return Number(response.headers.get("x-backup-row-count") ?? 0);
+};
 
 async function optimizeQuotationImage(file: File): Promise<File> {
   // Keep an HD edge for previews and PDFs while avoiding unnecessary camera-size uploads.
@@ -1700,7 +1748,7 @@ const workspaceViewTables = (
       "quotation_payment_records",
       "pricing_officer_project_types",
     ];
-  if (view === "Supplier's List") return ["suppliers"];
+  if (view === "Supplier's List") return ["suppliers", "business_settings"];
   if (view === "Production")
     return [
       "production_jobs",
@@ -1715,6 +1763,7 @@ const workspaceViewTables = (
   if (view === "Catalog") return ["inventory_items"];
   if (view === "Inventory")
     return [
+      "business_settings",
       "inventory_items",
       "inventory_movements",
       "production_material_usage",
@@ -2917,6 +2966,384 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
   </PdfDocument>;
 }
 
+function InternalCostingBreakdownPdf({
+  quotes,
+  store,
+}: {
+  quotes: Row[];
+  store: Store;
+}) {
+  const currency = (value: number) =>
+    new Intl.NumberFormat("en-PH", {
+      style: "currency",
+      currency: "PHP",
+    }).format(value);
+
+  return (
+    <PdfDocument
+      title={
+        quotes.length === 1
+          ? `Internal Costing Breakdown ${text(quotes[0]?.quotation_no)}`
+          : "Internal Costing Breakdowns"
+      }
+    >
+      {quotes.map((quote, quoteIndex) => {
+        const lines = store.quotation_items.filter(
+          (item) => item.quotation_id === quote.id,
+        );
+        const productCostings = store.price_quotation_product_costings.filter(
+          (costing) => costing.quotation_id === quote.id,
+        );
+        const businessSettings = store.business_settings.find(
+          (setting) =>
+            text(setting.organization_id) === text(quote.organization_id),
+        );
+        const pricingDefaults = pricingMarkupDefaults(
+          businessSettings?.pricing_markup_defaults,
+          businessSettings,
+        );
+        const loadedCostings = productCostingDrafts(
+          productCostings,
+          store.price_quotation_costing_lines,
+          store.price_quotation_costing_markups,
+          pricingDefaults,
+        );
+        const costingDrafts = productCostingsWithLatestDefaultMarkups(
+          loadedCostings,
+          pricingDefaults,
+        );
+        const vatRate = quotationVatRate(quote);
+        const lead = store.leads.find((item) => item.id === quote.lead_id);
+        const customer = store.customers.find(
+          (item) => item.id === quote.customer_id,
+        );
+        const clientName = text(
+          quote.client_contact_name,
+          text(lead?.contact_name, text(customer?.contact_name, "-")),
+        );
+        const companyName = text(
+          quote.client_name,
+          text(lead?.client_name, text(customer?.company_name, "-")),
+        );
+        const projectName = text(quote.project_name, "Project");
+        const status = text(quote.status, "draft").replaceAll("_", " ");
+        const metaField = (label: string, value: string) => (
+          <PdfView key={label} style={priceQuotationPdfStyles.clientField}>
+            <PdfText style={priceQuotationPdfStyles.clientLabel}>
+              {label}
+            </PdfText>
+            <PdfText style={priceQuotationPdfStyles.clientColon}>:</PdfText>
+            <PdfText style={priceQuotationPdfStyles.clientValue}>
+              {value || "-"}
+            </PdfText>
+          </PdfView>
+        );
+
+        return (
+          <PdfPage
+            key={text(quote.id, String(quoteIndex))}
+            size={LEGAL_PORTRAIT}
+            orientation="portrait"
+            style={priceQuotationPdfStyles.page}
+          >
+            <PdfText style={priceQuotationPdfStyles.internalTitle}>
+              INTERNAL COSTING BREAKDOWN
+            </PdfText>
+            <PdfText
+              style={[
+                priceQuotationPdfStyles.internalNote,
+                { marginBottom: quotes.length > 1 ? 5 : 12 },
+              ]}
+            >
+              General Manager confidential - do not share with the client or
+              Sales Executive.
+            </PdfText>
+            {quotes.length > 1 && (
+              <PdfText
+                style={[priceQuotationPdfStyles.internalNote, { marginBottom: 4 }]}
+              >
+                Costing {quoteIndex + 1} of {quotes.length}
+              </PdfText>
+            )}
+            <PdfView style={priceQuotationPdfStyles.clientGrid}>
+              <PdfView style={priceQuotationPdfStyles.clientColumn}>
+                {metaField("Lead / Client", clientName)}
+                {metaField("Company", companyName)}
+                {metaField("Project", projectName)}
+                {metaField("Project Type", text(quote.project_types))}
+              </PdfView>
+              <PdfView style={priceQuotationPdfStyles.clientColumnRight}>
+                {metaField("Quotation No.", text(quote.quotation_no))}
+                {metaField("Status", status)}
+                {metaField(
+                  "Costed Date",
+                  day(quote.pricing_reviewed_at ?? quote.updated_at ?? quote.created_at),
+                )}
+              </PdfView>
+            </PdfView>
+
+            {costingDrafts.length ? (
+              costingDrafts.map((costing, costingIndex) => {
+                const product = lines.find(
+                  (line) => line.id === costing.quotationItemId,
+                );
+                const quantity = n(product?.quantity);
+                const totals = productCostingTotals(costing, quantity, vatRate);
+                return (
+                  <PdfView key={costing.key} wrap>
+                    <PdfText style={priceQuotationPdfStyles.internalProductTitle}>
+                      {`${costingIndex + 1}. ${text(product?.description, "Quotation product")} - ${quantity} ${quantity === 1 ? "pc" : "pcs"}`}
+                    </PdfText>
+                    <PdfView style={priceQuotationPdfStyles.table}>
+                      <PdfView style={priceQuotationPdfStyles.row}>
+                        <PriceQuotationPdfCell width="49%" header description>
+                          INTERNAL COST
+                        </PriceQuotationPdfCell>
+                        <PriceQuotationPdfCell width="15%" header>
+                          QTY
+                        </PriceQuotationPdfCell>
+                        <PriceQuotationPdfCell width="18%" header>
+                          UNIT COST
+                        </PriceQuotationPdfCell>
+                        <PriceQuotationPdfCell width="18%" header>
+                          AMOUNT
+                        </PriceQuotationPdfCell>
+                      </PdfView>
+                      {costing.costLines.map((line, lineIndex) => {
+                        const isFixedAmount =
+                          line.calculationType === "fixed_amount";
+                        const amount = isFixedAmount
+                          ? n(line.amount)
+                          : Math.round(
+                              n(line.quantity) * n(line.unitCost) * 100,
+                            ) / 100;
+                        return (
+                          <PdfView
+                            key={line.key || String(lineIndex)}
+                            style={priceQuotationPdfStyles.row}
+                            wrap={false}
+                          >
+                            <PriceQuotationPdfCell width="49%" description>
+                              {text(line.description)}
+                            </PriceQuotationPdfCell>
+                            <PriceQuotationPdfCell width="15%">
+                              {isFixedAmount ? "-" : n(line.quantity)}
+                            </PriceQuotationPdfCell>
+                            <PriceQuotationPdfCell width="18%">
+                              {isFixedAmount ? "-" : currency(n(line.unitCost))}
+                            </PriceQuotationPdfCell>
+                            <PriceQuotationPdfCell width="18%">
+                              {currency(amount)}
+                            </PriceQuotationPdfCell>
+                          </PdfView>
+                        );
+                      })}
+                    </PdfView>
+                    <PdfView style={priceQuotationPdfStyles.internalSummary}>
+                      <PdfView style={priceQuotationPdfStyles.row}>
+                        <PriceQuotationPdfCell
+                          width="58%"
+                          description
+                          style={priceQuotationPdfStyles.totalLabel}
+                        >
+                          TOTAL DIRECT COST
+                        </PriceQuotationPdfCell>
+                        <PriceQuotationPdfCell
+                          width="42%"
+                          style={priceQuotationPdfStyles.totalValue}
+                        >
+                          {currency(totals.cogs)}
+                        </PriceQuotationPdfCell>
+                      </PdfView>
+                      {costing.markups.map((markup, index) => {
+                        const key =
+                          markup.markupKey || pricingMarkupKeyForLabel(markup.label);
+                        const type = markupCalculationType(markup);
+                        const value = n(markupValue(markup));
+                        const label =
+                          pricingMarkupDefinition(key as PricingMarkupKey)?.label ??
+                          markup.label;
+                        return (
+                          <PdfView
+                            key={markup.key || String(index)}
+                            style={priceQuotationPdfStyles.row}
+                          >
+                            <PriceQuotationPdfCell
+                              width="58%"
+                              description
+                              style={priceQuotationPdfStyles.totalLabel}
+                            >
+                              {`${label} (${type === "fixed_amount" ? currency(value) : `${value}%`})`}
+                            </PriceQuotationPdfCell>
+                            <PriceQuotationPdfCell
+                              width="42%"
+                              style={priceQuotationPdfStyles.totalValue}
+                            >
+                              {currency(totals.markupAmounts[markup.key] ?? 0)}
+                            </PriceQuotationPdfCell>
+                          </PdfView>
+                        );
+                      })}
+                      <PdfView style={priceQuotationPdfStyles.row}>
+                        <PriceQuotationPdfCell
+                          width="58%"
+                          description
+                          style={priceQuotationPdfStyles.totalLabel}
+                        >
+                          {`INTERNAL VAT (${n(costing.internalVatRate)}%)`}
+                        </PriceQuotationPdfCell>
+                        <PriceQuotationPdfCell
+                          width="42%"
+                          style={priceQuotationPdfStyles.totalValue}
+                        >
+                          {currency(totals.internalVatAmount)}
+                        </PriceQuotationPdfCell>
+                      </PdfView>
+                      <PdfView style={priceQuotationPdfStyles.row}>
+                        <PriceQuotationPdfCell
+                          width="58%"
+                          description
+                          style={priceQuotationPdfStyles.totalLabel}
+                        >
+                          TOTAL BEFORE DISCOUNT
+                        </PriceQuotationPdfCell>
+                        <PriceQuotationPdfCell
+                          width="42%"
+                          style={priceQuotationPdfStyles.totalValue}
+                        >
+                          {currency(totals.listSellingExVat)}
+                        </PriceQuotationPdfCell>
+                      </PdfView>
+                      <PdfView style={priceQuotationPdfStyles.row}>
+                        <PriceQuotationPdfCell
+                          width="58%"
+                          description
+                          style={priceQuotationPdfStyles.totalLabel}
+                        >
+                          NET SELLING PRICE VAT EX (TOTAL)
+                        </PriceQuotationPdfCell>
+                        <PriceQuotationPdfCell
+                          width="42%"
+                          style={priceQuotationPdfStyles.totalValue}
+                        >
+                          {currency(totals.sellingExVat)}
+                        </PriceQuotationPdfCell>
+                      </PdfView>
+                      <PdfView style={priceQuotationPdfStyles.row}>
+                        <PriceQuotationPdfCell
+                          width="58%"
+                          description
+                          style={priceQuotationPdfStyles.totalLabel}
+                        >
+                          {`VAT (${vatRate}%)`}
+                        </PriceQuotationPdfCell>
+                        <PriceQuotationPdfCell
+                          width="42%"
+                          style={priceQuotationPdfStyles.totalValue}
+                        >
+                          {currency(totals.vat)}
+                        </PriceQuotationPdfCell>
+                      </PdfView>
+                      <PdfView style={priceQuotationPdfStyles.row}>
+                        <PriceQuotationPdfCell
+                          width="58%"
+                          description
+                          style={priceQuotationPdfStyles.totalLabel}
+                        >
+                          SELLING PRICE VAT EX / PIECE
+                        </PriceQuotationPdfCell>
+                        <PriceQuotationPdfCell
+                          width="42%"
+                          style={priceQuotationPdfStyles.totalValue}
+                        >
+                          {currency(totals.unitExVat)}
+                        </PriceQuotationPdfCell>
+                      </PdfView>
+                      <PdfView style={priceQuotationPdfStyles.row}>
+                        <PriceQuotationPdfCell
+                          width="58%"
+                          description
+                          style={[
+                            priceQuotationPdfStyles.totalRow,
+                            priceQuotationPdfStyles.totalLabelStrong,
+                          ]}
+                        >
+                          SELLING PRICE VAT INC / PIECE
+                        </PriceQuotationPdfCell>
+                        <PriceQuotationPdfCell
+                          width="42%"
+                          style={[
+                            priceQuotationPdfStyles.totalRow,
+                            priceQuotationPdfStyles.totalValueStrong,
+                          ]}
+                        >
+                          {currency(totals.unitIncVat)}
+                        </PriceQuotationPdfCell>
+                      </PdfView>
+                    </PdfView>
+                  </PdfView>
+                );
+              })
+            ) : (
+              <PdfText style={priceQuotationPdfStyles.internalNote}>
+                No internal costing table is available for this quotation.
+              </PdfText>
+            )}
+          </PdfPage>
+        );
+      })}
+    </PdfDocument>
+  );
+}
+
+function CostingBreakdownPdfDocument({
+  quotes,
+  store,
+  close,
+  onPdfError,
+  pdfWindow = null,
+  printAfterOpen = false,
+}: {
+  quotes: Row[];
+  store: Store;
+  close: () => void;
+  onPdfError?: (message: string) => void;
+  pdfWindow?: Window | null;
+  printAfterOpen?: boolean;
+}) {
+  useEffect(() => {
+    let cancelled = false;
+    const exportPdf = async () => {
+      const pdfBlob = await pdf(
+        <InternalCostingBreakdownPdf quotes={quotes} store={store} />,
+      ).toBlob();
+      if (pdfBlob.size === 0 || pdfBlob.type !== "application/pdf") {
+        throw new Error("Unable to open the Costing Breakdown PDF.");
+      }
+      if (cancelled) return;
+      showGeneratedPdfWindow(pdfWindow, pdfBlob, printAfterOpen);
+      close();
+    };
+    const exportTimer = window.setTimeout(() => {
+      void exportPdf().catch((error) => {
+        if (!cancelled) {
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Unable to generate the Costing Breakdown PDF.";
+          if (onPdfError) onPdfError(message);
+          else window.alert(message);
+        }
+      });
+    }, 100);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(exportTimer);
+    };
+  }, [close, onPdfError, pdfWindow, printAfterOpen, quotes, store]);
+  return null;
+}
+
 function PriceQuotationPdfLegacy({ quote, store, origin }: { quote: Row; store: Store; origin: string }) {
   const customer = store.customers.find((item) => item.id === quote.customer_id);
   const lead = store.leads.find((item) => item.id === quote.lead_id);
@@ -4036,6 +4463,7 @@ function Records({
   const [projectOfficerFilter, setProjectOfficerFilter] = useState("all");
   const [leadDistributionOpen, setLeadDistributionOpen] = useState(false);
   const [leadImportOpen, setLeadImportOpen] = useState(false);
+  const [exportingBackup, setExportingBackup] = useState(false);
   const [deletionRequestLead, setDeletionRequestLead] = useState<Row | null>(null);
   const [endorsementLead, setEndorsementLead] = useState<Row | null>(null);
   const [endorsementValues, setEndorsementValues] = useState<Record<string, string>>({
@@ -4069,6 +4497,10 @@ function Records({
     !isProjectsPage &&
     !isLeadChangeRequestsPage &&
     (isProjectOfficerRole(role) || isGeneralManager);
+  const canExportLeadsBackup =
+    module.table === "leads" &&
+    leadMode === "leads" &&
+    isGeneralManager;
   const canUpdate = canAccess(role, module.table, "update");
   const canArchive = canAccess(role, module.table, "archive");
   const ownProjectEditRequests =
@@ -4083,6 +4515,22 @@ function Records({
           (request) => text(request.submitted_by, "") === currentUserId,
         )
       : [];
+  const exportLeadsBackup = async () => {
+    if (!canExportLeadsBackup || exportingBackup) return;
+    setExportingBackup(true);
+    try {
+      const count = await downloadWorkspaceBackup("leads");
+      notice(`Leads backup downloaded (${count.toLocaleString()} records).`);
+    } catch (error) {
+      notice(
+        error instanceof Error
+          ? error.message
+          : "Unable to create the Leads backup file.",
+      );
+    } finally {
+      setExportingBackup(false);
+    }
+  };
   const renderRecordNote = (title: string, context: string, value: unknown) => {
     const note = text(value, "").trim();
     return note ? (
@@ -5020,8 +5468,18 @@ function Records({
         variant={isPageLayout ? "page" : "card"}
         hideHeading={isPageLayout}
         action={
-          canCreate || canImportLeads ? (
+          canCreate || canImportLeads || canExportLeadsBackup ? (
             <div className="flex flex-wrap items-center justify-end gap-2">
+              {canExportLeadsBackup && (
+                <Button
+                  secondary
+                  disabled={exportingBackup}
+                  onClick={() => void exportLeadsBackup()}
+                >
+                  <Download size={15} />
+                  {exportingBackup ? "Preparing backup..." : "Export Leads Backup"}
+                </Button>
+              )}
               {canImportLeads && (
                 <Button secondary onClick={() => setLeadImportOpen(true)}>
                   <Upload size={15} />
@@ -6725,6 +7183,13 @@ function QuotationCostingOverview({
   const [pdfWindow, setPdfWindow] = useState<Window | null>(null);
   const [printAfterOpen, setPrintAfterOpen] = useState(false);
   const [computationQuote, setComputationQuote] = useState<Row | null>(null);
+  const [selectedCostingIds, setSelectedCostingIds] = useState<Set<string>>(
+    new Set(),
+  );
+  const [costingPdfQuotes, setCostingPdfQuotes] = useState<Row[]>([]);
+  const [costingPdfWindow, setCostingPdfWindow] = useState<Window | null>(null);
+  const [costingPdfPrint, setCostingPdfPrint] = useState(false);
+  const [generatingCostingPdf, setGeneratingCostingPdf] = useState(false);
   const isGeneralManager = memberRole(role);
   const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
   useEffect(() => {
@@ -6780,6 +7245,44 @@ function QuotationCostingOverview({
       costedOfficerName(quote),
     ].some((value) => text(value).toLowerCase().includes(normalizedCostedQuery));
   });
+  const selectedCostedQuotations = filteredCostedQuotations.filter((quote) =>
+    selectedCostingIds.has(text(quote.id, "")),
+  );
+  const allCurrentCostingsSelected =
+    filteredCostedQuotations.length > 0 &&
+    filteredCostedQuotations.every((quote) =>
+      selectedCostingIds.has(text(quote.id, "")),
+    );
+  const someCurrentCostingsSelected =
+    !allCurrentCostingsSelected &&
+    filteredCostedQuotations.some((quote) =>
+      selectedCostingIds.has(text(quote.id, "")),
+    );
+  useEffect(() => {
+    setSelectedCostingIds(new Set());
+  }, [costedOfficerFilter, costedMonth, costedQuery, costedStatus]);
+  const toggleCostingSelection = (quoteId: string) => {
+    setSelectedCostingIds((current) => {
+      const next = new Set(current);
+      if (next.has(quoteId)) next.delete(quoteId);
+      else next.add(quoteId);
+      return next;
+    });
+  };
+  const toggleAllCostingSelection = () => {
+    const visibleIds = filteredCostedQuotations
+      .map((quote) => text(quote.id, ""))
+      .filter(Boolean);
+    setSelectedCostingIds((current) => {
+      const next = new Set(current);
+      if (allCurrentCostingsSelected) {
+        visibleIds.forEach((id) => next.delete(id));
+      } else {
+        visibleIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  };
   const openPdf = (quote: Row, shouldPrint = false) => {
     if (text(quote.status) !== "approved") return notice("Only approved quotations can be opened as PDFs.");
     const nextWindow = window.open("about:blank", "_blank");
@@ -6788,6 +7291,30 @@ function QuotationCostingOverview({
     setPrintAfterOpen(shouldPrint);
     setPdfWindow(nextWindow);
     setPdfQuote(quote);
+  };
+  const closeCostingPdf = () => {
+    setCostingPdfQuotes([]);
+    setCostingPdfWindow(null);
+    setCostingPdfPrint(false);
+    setGeneratingCostingPdf(false);
+  };
+  const openCostingPdf = (quotes: Row[], shouldPrint = false) => {
+    if (!isGeneralManager || !quotes.length || generatingCostingPdf) return;
+    const nextWindow = window.open("about:blank", "_blank");
+    if (!nextWindow) {
+      return notice("Allow pop-ups to open the Costing Breakdown PDF.");
+    }
+    nextWindow.opener = null;
+    setComputationQuote(null);
+    setGeneratingCostingPdf(true);
+    setCostingPdfPrint(shouldPrint);
+    setCostingPdfWindow(nextWindow);
+    setCostingPdfQuotes(quotes);
+  };
+  const handleCostingPdfError = (message: string) => {
+    if (costingPdfWindow && !costingPdfWindow.closed) costingPdfWindow.close();
+    closeCostingPdf();
+    notice(message);
   };
   return (
     <Panel
@@ -6853,19 +7380,71 @@ function QuotationCostingOverview({
             </Button>
           )}
         </div>
+        {isGeneralManager && filteredCostedQuotations.length > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#edf0f5] py-3">
+            <div className="flex items-center gap-2 text-[12px] text-[#687386]">
+              <SelectionCheckbox
+                checked={allCurrentCostingsSelected}
+                indeterminate={someCurrentCostingsSelected}
+                disabled={generatingCostingPdf}
+                label="Select all costing breakdowns currently shown"
+                onChange={toggleAllCostingSelection}
+              />
+              <span>
+                {selectedCostedQuotations.length
+                  ? `${selectedCostedQuotations.length} selected`
+                  : "Select costing breakdowns to print together"}
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                loading={generatingCostingPdf}
+                disabled={generatingCostingPdf || !selectedCostedQuotations.length}
+                onClick={() => openCostingPdf(selectedCostedQuotations, true)}
+              >
+                <Printer size={14} /> Print selected Costing Breakdowns
+              </Button>
+              {selectedCostedQuotations.length > 0 && (
+                <Button
+                  secondary
+                  disabled={generatingCostingPdf}
+                  onClick={() => setSelectedCostingIds(new Set())}
+                >
+                  Clear selection
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
         {filteredCostedQuotations.length ? (
           <div className="modern-table-shell">
-          <Table labels={["Price Quotation", "Client", "Project Type", "Status", "Costed", "Actions"]} minWidth={900} className="!w-full">
+          <Table labels={isGeneralManager ? ["Select", "Price Quotation", "Client", "Project Type", "Status", "Costed", "Actions"] : ["Price Quotation", "Client", "Project Type", "Status", "Costed", "Actions"]} minWidth={isGeneralManager ? 960 : 900} className="!w-full">
             {filteredCostedQuotations.map((quote) => {
               const party = quotationParty(quote, store);
               return (
                 <tr key={text(quote.id)}>
+                  {isGeneralManager && (
+                    <td className="px-5 py-3 align-middle">
+                      <SelectionCheckbox
+                        checked={selectedCostingIds.has(text(quote.id, ""))}
+                        disabled={generatingCostingPdf}
+                        label={`Select Costing Breakdown ${text(quote.quotation_no, "quotation")}`}
+                        onChange={() => toggleCostingSelection(text(quote.id, ""))}
+                      />
+                    </td>
+                  )}
                   <td className="px-5 py-3">{stackedCell(quote.quotation_no, quote.project_name)}</td>
                   <td className="px-5 py-3">{stackedCell(party.clientName, party.companyName)}</td>
                   <td className="px-5 py-3">{text(quote.project_types)}</td>
                   <td className="px-5 py-3"><Status value={quote.status} /></td>
                   <td className="px-5 py-3">{day(quote.pricing_reviewed_at ?? quote.updated_at)}</td>
-                  <td className="px-5 py-3"><span className="flex items-center gap-1"><ActionIcon label="View costing computation" confirm={false} onClick={() => setComputationQuote(quote)}><Eye size={15} /></ActionIcon>{text(quote.status) === "approved" && <><ActionIcon label="View Price Quotation PDF" confirm={false} onClick={() => openPdf(quote)}><FileText size={15} /></ActionIcon><ActionIcon label="Print Price Quotation" confirm={false} onClick={() => openPdf(quote, true)}><Printer size={15} /></ActionIcon></>}</span></td>
+                  <td className="px-5 py-3"><span className="flex items-center gap-1">
+                    {isGeneralManager ? <>
+                      <ActionIcon label="View Costing Breakdown PDF" confirm={false} loading={generatingCostingPdf} disabled={generatingCostingPdf} onClick={() => openCostingPdf([quote])}><FileText size={15} /></ActionIcon>
+                      <ActionIcon label="Print Costing Breakdown PDF" confirm={false} loading={generatingCostingPdf} disabled={generatingCostingPdf} onClick={() => openCostingPdf([quote], true)}><Printer size={15} /></ActionIcon>
+                    </> : <ActionIcon label="View costing computation" confirm={false} onClick={() => setComputationQuote(quote)}><Eye size={15} /></ActionIcon>}
+                    {text(quote.status) === "approved" && <><ActionIcon label="View Price Quotation PDF" confirm={false} onClick={() => openPdf(quote)}><FileText size={15} /></ActionIcon><ActionIcon label="Print Price Quotation" confirm={false} onClick={() => openPdf(quote, true)}><Printer size={15} /></ActionIcon></>}
+                  </span></td>
                 </tr>
               );
             })}
@@ -6876,6 +7455,7 @@ function QuotationCostingOverview({
         )}
       </div>
       {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); notice(message); }} autoExportPdf pdfWindow={pdfWindow} printAfterOpen={printAfterOpen} hidden />}
+      {costingPdfQuotes.length > 0 && <CostingBreakdownPdfDocument quotes={costingPdfQuotes} store={store} close={closeCostingPdf} onPdfError={handleCostingPdfError} pdfWindow={costingPdfWindow} printAfterOpen={costingPdfPrint} />}
       {computationQuote && <PriceQuotationReview quotation={computationQuote} store={store} saving={false} finalApproval={isGeneralManager} showInternalMarkups={isGeneralManager} readOnly close={() => setComputationQuote(null)} notice={notice} reload={reload} />}
     </Panel>
   );
@@ -8218,6 +8798,8 @@ type SupplierDraft = {
   address: string;
   email: string;
   phone: string;
+  products_services: string;
+  country: string;
 };
 
 function SuppliersList({
@@ -8241,10 +8823,14 @@ function SuppliersList({
   const [saving, setSaving] = useState(false);
   const [query, setQuery] = useState("");
   const canManage = memberRole(role);
+  const countryOptions = supplierCountryOptions(
+    store.business_settings[0]?.supplier_countries,
+  );
   const suppliers = store.suppliers
-    .filter((supplier) =>
-      JSON.stringify(supplier).toLowerCase().includes(query.toLowerCase()),
-    )
+    .filter((supplier) => {
+      const normalizedQuery = query.trim().toLocaleLowerCase();
+      return !normalizedQuery || JSON.stringify(supplier).toLocaleLowerCase().includes(normalizedQuery);
+    })
     .sort((a, b) =>
       text(a.company_name, "").localeCompare(text(b.company_name, "")),
     );
@@ -8255,6 +8841,8 @@ function SuppliersList({
     address: "",
     email: "",
     phone: "",
+    products_services: "",
+    country: "",
   });
   const toDraft = (supplier: Row): SupplierDraft => ({
     company_name: text(supplier.company_name),
@@ -8262,6 +8850,8 @@ function SuppliersList({
     address: text(supplier.address),
     email: text(supplier.email),
     phone: text(supplier.phone),
+    products_services: text(supplier.products_services, ""),
+    country: text(supplier.country, ""),
   });
   const clearEditor = () => {
     setNewSupplier(null);
@@ -8271,6 +8861,18 @@ function SuppliersList({
   const saveSupplier = async (supplierDraft: SupplierDraft, isNew: boolean) => {
     const companyName = supplierDraft.company_name.trim();
     if (!companyName) return notice("Enter a supplier name.");
+    const productsServices = supplierDraft.products_services.trim();
+    const selectedCountry = supplierDraft.country.trim();
+    if (!productsServices)
+      return notice("Enter all products or services of the supplier.");
+    if (!selectedCountry) return notice("Select a supplier country.");
+    if (!countryOptions.length)
+      return notice("Ask a General Manager to add a country in Settings first.");
+    const canonicalCountry = countryOptions.find(
+      (option) => supplierOptionKey(option) === supplierOptionKey(selectedCountry),
+    );
+    if (!canonicalCountry)
+      return notice("Select a country configured by the General Manager.");
     const duplicate = store.suppliers.find(
       (supplier) =>
         text(supplier.id, "") !== (editingId ?? "") &&
@@ -8288,6 +8890,8 @@ function SuppliersList({
       address: supplierDraft.address.trim(),
       email: supplierDraft.email.trim(),
       phone: supplierDraft.phone.trim(),
+      products_services: productsServices,
+      country: canonicalCountry,
     };
     const client = createClient();
     const { data, error } = isNew
@@ -8390,6 +8994,30 @@ function SuppliersList({
           />
         </td>
         <td className="px-3 py-3 align-middle">
+          <textarea
+            rows={2}
+            value={supplierDraft.products_services}
+            onChange={(event) => update({ products_services: event.target.value })}
+            placeholder="Products or services"
+            className="input mt-0 min-h-[64px] min-w-[230px] resize-y"
+          />
+        </td>
+        <td className="px-3 py-3 align-middle">
+          <select
+            required
+            value={supplierDraft.country}
+            onChange={(event) => update({ country: event.target.value })}
+            className={`input mt-0 min-w-[150px] ${supplierDraft.country ? "text-[#151922]" : "text-[#8b92a1]"}`}
+          >
+            <option value="">Select country</option>
+            {countryOptions.map((country) => (
+              <option key={country} value={country}>
+                {country}
+              </option>
+            ))}
+          </select>
+        </td>
+        <td className="px-3 py-3 align-middle">
           <input
             type="email"
             value={supplierDraft.email}
@@ -8470,12 +9098,14 @@ function SuppliersList({
           "Supplier",
           "Contact person",
           "Address",
+          "Products / Services",
+          "Country",
           "Email",
           "Phone",
           "Available",
           "Actions",
         ]}
-        minWidth={980}
+        minWidth={1400}
       >
         {newSupplier && renderEditorRow(newSupplier, true, "new-supplier")}
         {suppliers.map((supplier) =>
@@ -8490,6 +9120,10 @@ function SuppliersList({
               <td className="max-w-[300px] whitespace-pre-line px-4 py-3 text-[#626b7a]">
                 {text(supplier.address, "—")}
               </td>
+              <td className="max-w-[300px] whitespace-pre-line px-4 py-3">
+                {text(supplier.products_services, "—")}
+              </td>
+              <td className="px-4 py-3">{text(supplier.country, "—")}</td>
               <td className="px-4 py-3">{text(supplier.email, "—")}</td>
               <td className="px-4 py-3">{text(supplier.phone, "—")}</td>
               <td className="px-4 py-3 text-center">
@@ -8544,7 +9178,7 @@ function SuppliersList({
         )}
         {!suppliers.length && !newSupplier && (
           <tr>
-            <td colSpan={7}>
+            <td colSpan={9}>
               <Empty>No suppliers match this view.</Empty>
             </td>
           </tr>
@@ -8625,8 +9259,12 @@ function SupplierList({
   const [contactNumbers, setContactNumbers] = useState<string[]>([""]);
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState(false);
+  const [exportingBackup, setExportingBackup] = useState(false);
   const canCreate = memberRole(role) || role === "sales_pricing_officer";
   const canManage = memberRole(role);
+  const countryOptions = supplierCountryOptions(
+    store.business_settings[0]?.supplier_countries,
+  );
 
   const fields: Field[] = [
     { key: "contact_name", label: "Name" },
@@ -8636,7 +9274,22 @@ function SupplierList({
       key: "project_type",
       label: "Project type",
       type: "select",
-      options: [...quotationProjectTypes],
+      options: [...supplierProjectTypeOptions],
+    },
+    {
+      key: "products_services",
+      label: "Type of Product or Service",
+      type: "textarea",
+      required: true,
+      hint: "Please include all products or services of the supplier so it’s searchable.",
+    },
+    {
+      key: "country",
+      label: "Country",
+      type: "select",
+      required: true,
+      options: countryOptions,
+      hint: "Countries are managed by General Managers in Settings.",
     },
     { key: "whatsapp", label: "WhatsApp", type: "tel" },
     { key: "viber", label: "Viber", type: "tel" },
@@ -8650,6 +9303,8 @@ function SupplierList({
     company_name: "",
     address: "",
     project_type: "",
+    products_services: "",
+    country: "",
     whatsapp: "",
     viber: "",
     instagram_link: "",
@@ -8661,12 +9316,30 @@ function SupplierList({
       fields.map((field) => [field.key, text(supplier[field.key], "")]),
     );
   const filteredSuppliers = store.suppliers
-    .filter((supplier) =>
-      JSON.stringify(supplier).toLowerCase().includes(query.toLowerCase()),
-    )
+    .filter((supplier) => {
+      const normalizedQuery = query.trim().toLocaleLowerCase();
+      return !normalizedQuery || JSON.stringify(supplier).toLocaleLowerCase().includes(normalizedQuery);
+    })
     .sort((left, right) =>
       text(left.company_name, "").localeCompare(text(right.company_name, "")),
     );
+
+  const exportSuppliersBackup = async () => {
+    if (!canManage || exportingBackup) return;
+    setExportingBackup(true);
+    try {
+      const count = await downloadWorkspaceBackup("suppliers");
+      notice(`Suppliers backup downloaded (${count.toLocaleString()} records).`);
+    } catch (error) {
+      notice(
+        error instanceof Error
+          ? error.message
+          : "Unable to create the Suppliers backup file.",
+      );
+    } finally {
+      setExportingBackup(false);
+    }
+  };
 
   const close = () => {
     setOpen(false);
@@ -8709,6 +9382,22 @@ function SupplierList({
   const saveSupplier = async () => {
     const companyName = (values.company_name ?? "").trim();
     if (!companyName) return notice("Enter a supplier company.");
+    const projectType = (values.project_type ?? "").trim();
+    const productsServices = (values.products_services ?? "").trim();
+    const selectedCountry = (values.country ?? "").trim();
+    if (!productsServices)
+      return notice("Enter all products or services of the supplier.");
+    if (!selectedCountry)
+      return notice("Select a supplier country.");
+    if (!countryOptions.length)
+      return notice("Ask a General Manager to add a country in Settings first.");
+    const canonicalCountry = countryOptions.find(
+      (option) => supplierOptionKey(option) === supplierOptionKey(selectedCountry),
+    );
+    if (!canonicalCountry)
+      return notice("Select a country configured by the General Manager.");
+    if (supplierOptionKey(projectType) === "mockup" || supplierOptionKey(projectType) === "mock up")
+      return notice("Mock Up is not available for suppliers.");
     const duplicate = store.suppliers.find(
       (supplier) =>
         text(supplier.id, "") !== text(editing?.id, "") &&
@@ -8726,7 +9415,9 @@ function SupplierList({
       company_name: companyName,
       contact_name: (values.contact_name ?? "").trim(),
       address: (values.address ?? "").trim(),
-      project_type: (values.project_type ?? "").trim() || null,
+      project_type: projectType || null,
+      products_services: productsServices,
+      country: canonicalCountry,
       whatsapp: (values.whatsapp ?? "").trim() || null,
       viber: (values.viber ?? "").trim() || null,
       instagram_link: (values.instagram_link ?? "").trim() || null,
@@ -8832,14 +9523,28 @@ function SupplierList({
     <div className="-m-3 min-h-[calc(100vh-76px)] bg-white sm:-m-4 sm:min-h-[calc(100vh-84px)] lg:-m-5">
       <Panel
         title="Supplier's List"
-        detail="Maintain supplier contacts, project types, and social links."
+        detail="Maintain supplier contacts, product/service coverage, project types, countries, and social links."
         variant="page"
         hideHeading
         action={
           canCreate ? (
-            <Button onClick={startNew}>
-              <Plus size={15} /> Add Supplier
-            </Button>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {canManage && (
+                <Button
+                  secondary
+                  disabled={exportingBackup}
+                  onClick={() => void exportSuppliersBackup()}
+                >
+                  <Download size={15} />
+                  {exportingBackup
+                    ? "Preparing backup..."
+                    : "Export Suppliers Backup"}
+                </Button>
+              )}
+              <Button onClick={startNew}>
+                <Plus size={15} /> Add Supplier
+              </Button>
+            </div>
           ) : undefined
         }
       >
@@ -8874,6 +9579,8 @@ function SupplierList({
                 "Email",
                 "Contact Number",
                 "Project type",
+                "Products / Services",
+                "Country",
                 "WhatsApp",
                 "Viber",
                 "Instagram link",
@@ -8881,7 +9588,7 @@ function SupplierList({
                 "Website link",
                 "Status",
               ]}
-              minWidth={2200}
+              minWidth={2500}
               className="supplier-list-table modern-page-table"
             >
               {filteredSuppliers.map((supplier) => (
@@ -8918,6 +9625,8 @@ function SupplierList({
                   <td className="px-5 py-3 align-middle">{displayList(supplier.emails, supplier.email, "email")}</td>
                   <td className="px-5 py-3 align-middle">{displayList(supplier.contact_numbers, supplier.phone, "phone")}</td>
                   <td className="px-5 py-3 align-middle">{text(supplier.project_type, "—")}</td>
+                  <td className="max-w-[300px] whitespace-pre-line px-5 py-3 align-middle">{text(supplier.products_services, "—")}</td>
+                  <td className="px-5 py-3 align-middle">{text(supplier.country, "—")}</td>
                   <td className="px-5 py-3 align-middle">{text(supplier.whatsapp, "—")}</td>
                   <td className="px-5 py-3 align-middle">{text(supplier.viber, "—")}</td>
                   <td className="px-5 py-3 align-middle">{displayList(supplier.instagram_link, undefined, "link")}</td>
@@ -18214,7 +18923,10 @@ function SettingsView({
   const [customMarkupOpen, setCustomMarkupOpen] = useState(false);
   const [customMarkupValues, setCustomMarkupValues] = useState<Record<string, string>>({ label: "", value: "" });
   const [settingsSensitiveValuesHidden, setSettingsSensitiveValuesHidden] = useState(false);
+  const [supplierCountryDraft, setSupplierCountryDraft] = useState("");
+  const [savingSupplierCountries, setSavingSupplierCountries] = useState(false);
   const setting = store.business_settings[0];
+  const configuredSupplierCountries = supplierCountryOptions(setting?.supplier_countries);
   const pricingDefaultEntries = pricingMarkupDefaults(setting?.pricing_markup_defaults, setting);
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileValues, setProfileValues] = useState<Record<string, string>>(
@@ -18228,6 +18940,7 @@ function SettingsView({
   const [staffNames, setStaffNames] = useState<Record<string, string>>({});
   const isSuperAdmin = role === "super_admin";
   const canToggleSettingsPrivacy = role === "admin";
+  const canManageSupplierCountries = memberRole(role);
   useEffect(() => {
     const userIds = store.organization_members
       .map((member) => text(member.user_id, ""))
@@ -18323,6 +19036,52 @@ function SettingsView({
     notice("Default bank details saved.");
     await reload();
   };
+  const persistSupplierCountryOptions = async (nextOptions: string[]) => {
+    if (!canManageSupplierCountries || savingSupplierCountries) return false;
+    const normalizedOptions = supplierCountryOptions(nextOptions);
+    setSavingSupplierCountries(true);
+    const { error } = await createClient()
+      .from("business_settings")
+      .upsert(
+        {
+          organization_id: orgId,
+          supplier_countries: normalizedOptions,
+        },
+        { onConflict: "organization_id" },
+      );
+    setSavingSupplierCountries(false);
+    if (error) {
+      notice(error.message);
+      return false;
+    }
+    await reload();
+    return true;
+  };
+  const addSupplierCountry = async () => {
+    const country = supplierOptionText(supplierCountryDraft);
+    if (!country) return notice("Enter a country name.");
+    if (configuredSupplierCountries.some((option) => supplierOptionKey(option) === supplierOptionKey(country))) {
+      return notice("That country is already configured.");
+    }
+    if (await persistSupplierCountryOptions([...configuredSupplierCountries, country])) {
+      setSupplierCountryDraft("");
+      notice("Supplier country added.");
+    }
+  };
+  const removeSupplierCountry = async (country: string) => {
+    if (!canManageSupplierCountries || savingSupplierCountries) return;
+    const { data, error } = await createClient()
+      .from("suppliers")
+      .select("id,country")
+      .eq("organization_id", orgId);
+    if (error) return notice(error.message);
+    if ((data ?? []).some((supplier) => supplierOptionKey(supplier.country) === supplierOptionKey(country))) {
+      return notice("This country is assigned to a supplier and cannot be removed.");
+    }
+    if (await persistSupplierCountryOptions(configuredSupplierCountries.filter((option) => supplierOptionKey(option) !== supplierOptionKey(country)))) {
+      notice("Supplier country removed.");
+    }
+  };
   const persistPricingDefaults = async (
     defaults: PricingMarkupDefault[],
     successMessage = "Pricing defaults saved.",
@@ -18412,6 +19171,65 @@ function SettingsView({
       </Panel>
       {pricingDefaultsOpen && <Dialog title="Pricing defaults - Internal" fields={pricingDefaultEntries.map((definition) => ({ key: `${definition.key}_value`, label: definition.label, type: "number" as const, required: true }))} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => { if (!savingPricingDefaults) setPricingDefaultsOpen(false); }} saving={savingPricingDefaults} saveLabel="Save pricing defaults" className="max-w-lg" compact />}
       {customMarkupOpen && <Dialog title="Add custom markup" fields={[{ key: "label", label: "Markup name", required: true }, { key: "value", label: "Percentage", type: "number" as const, required: true }]} values={customMarkupValues} setValues={setCustomMarkupValues} save={() => void addCustomMarkup()} close={() => { if (!savingPricingDefaults) setCustomMarkupOpen(false); }} saving={savingPricingDefaults} saveLabel="Add markup" className="max-w-lg" compact><p className="mt-3 rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3 text-[11px] leading-5 text-[#687386]">This markup is included in computed pricing and used as a default for new quotations. The privacy button only masks this Settings screen; it does not change calculations or quotation workflow.</p></Dialog>}
+      {canManageSupplierCountries && (
+        <Panel
+          title="Supplier country options"
+          detail="These countries appear in the required Country field when adding or editing suppliers."
+        >
+          <div className="space-y-4 p-5">
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <input
+                aria-label="New supplier country"
+                value={supplierCountryDraft}
+                onChange={(event) => setSupplierCountryDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void addSupplierCountry();
+                  }
+                }}
+                placeholder="Country name"
+                className="input mt-0 min-w-0 flex-1"
+                disabled={savingSupplierCountries}
+              />
+              <Button
+                disabled={savingSupplierCountries}
+                loading={savingSupplierCountries}
+                onClick={() => void addSupplierCountry()}
+              >
+                <Plus size={14} />
+                Add country
+              </Button>
+            </div>
+            {configuredSupplierCountries.length ? (
+              <div className="flex flex-wrap gap-2">
+                {configuredSupplierCountries.map((country) => (
+                  <span
+                    key={country}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-[#d9e0e9] bg-[#f8fbff] px-3 py-1.5 text-[12px] text-[#344054]"
+                  >
+                    {country}
+                    <button
+                      type="button"
+                      aria-label={`Remove ${country}`}
+                      title={`Remove ${country}`}
+                      disabled={savingSupplierCountries}
+                      onClick={() => void removeSupplierCountry(country)}
+                      className="grid size-5 place-items-center rounded-full text-[#8b92a1] hover:bg-[#fff1f1] hover:text-[#c43b43] disabled:opacity-50"
+                    >
+                      <X size={12} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-[12px] text-[#687386]">
+                No supplier countries configured yet. Add at least one before creating a supplier.
+              </p>
+            )}
+          </div>
+        </Panel>
+      )}
       <Panel
         title="Default bank details"
         detail="Shown on new Price Quotations."
@@ -19087,7 +19905,7 @@ export function HuswellWorkspace({
     },
     "Supplier's List": {
       title: "Supplier's List",
-      detail: "Maintain supplier contacts, project types, and social links.",
+      detail: "Maintain supplier contacts, product/service coverage, project types, countries, and social links.",
     },
     Quotations: {
       title: "Quotation workflow moved",
