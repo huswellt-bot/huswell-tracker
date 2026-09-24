@@ -22,8 +22,11 @@ type RpcImportResult = {
   invalid_count?: number;
 };
 
-const jsonError = (message: string, status = 400) =>
-  Response.json({ error: message }, { status });
+const jsonError = (
+  message: string,
+  status = 400,
+  details?: Record<string, unknown>,
+) => Response.json({ error: message, ...details }, { status });
 
 const getOrganizationId = (value: unknown) =>
   typeof value === "string" && value.trim() ? value.trim() : null;
@@ -84,12 +87,29 @@ export async function POST(request: Request) {
       return jsonError("Excel files must be smaller than 5 MB.");
     }
 
+    const aiAvailable = Boolean(process.env.LEAD_IMPORT_AI_API_KEY?.trim());
+    let workbook: XLSX.WorkBook;
     try {
-      const workbook = XLSX.read(await file.arrayBuffer(), {
+      workbook = XLSX.read(await file.arrayBuffer(), {
         type: "array",
         cellDates: true,
       });
-      const parsed = parseWorkbook(workbook);
+    } catch (error) {
+      return jsonError(error instanceof Error ? error.message : "Unable to read the Excel file.");
+    }
+
+    let parsed: ReturnType<typeof parseWorkbook>;
+    try {
+      parsed = parseWorkbook(workbook);
+    } catch (error) {
+      return jsonError(
+        error instanceof Error ? error.message : "Unable to interpret the Excel file.",
+        400,
+        { ai_fallback_available: aiAvailable },
+      );
+    }
+
+    try {
       const rows = parsed.rows;
       const validRows = importRows(rows);
       const invalidRows = rows.filter((row) => row.status === "invalid").length;
@@ -118,7 +138,7 @@ export async function POST(request: Request) {
         file_name: file.name,
         sheet_name: parsed.sheetName,
         header_row_number: parsed.headerRowIndex + 1,
-        ai_available: Boolean(process.env.LEAD_IMPORT_AI_API_KEY?.trim()),
+        ai_available: aiAvailable,
         total_rows: rows.length,
         invalid_count: invalidRows,
         duplicate_count: result.duplicate_count ?? duplicateRows.size,

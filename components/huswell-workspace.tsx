@@ -834,6 +834,7 @@ type LeadImportPreview = {
   sheet_name?: string;
   header_row_number?: number;
   ai_available?: boolean;
+  ai_fallback_available?: boolean;
   ai_assisted?: boolean;
   ai_mapped_fields?: string[];
   total_rows: number;
@@ -4168,6 +4169,8 @@ function LeadImportDialog({
   const [fileName, setFileName] = useState("");
   const [loading, setLoading] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
+  const [aiAvailable, setAiAvailable] = useState<boolean | null>(null);
+  const [aiAttempted, setAiAttempted] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -4177,6 +4180,8 @@ function LeadImportDialog({
     setFileName("");
     setLoading(false);
     setAiLoading(false);
+    setAiAvailable(null);
+    setAiAttempted(false);
     setSaving(false);
     setError("");
   };
@@ -4190,6 +4195,8 @@ function LeadImportDialog({
   const previewFile = async (file: File) => {
     setError("");
     setPreview(null);
+    setAiAvailable(null);
+    setAiAttempted(false);
     setFileName(file.name);
     setSelectedFile(null);
     if (!file.name.toLowerCase().endsWith(".xlsx")) {
@@ -4199,6 +4206,7 @@ function LeadImportDialog({
     setSelectedFile(file);
 
     setLoading(true);
+    let useAiFallback = false;
     try {
       const body = new FormData();
       body.append("organization_id", organizationId);
@@ -4211,31 +4219,47 @@ function LeadImportDialog({
         | (Partial<LeadImportPreview> & { error?: string })
         | null;
       if (!response.ok) {
-        throw new Error(result?.error || "Unable to preview this Excel file.");
+        if (result?.ai_fallback_available) {
+          useAiFallback = true;
+          setAiAvailable(true);
+        } else {
+          throw new Error(result?.error || "Unable to preview this Excel file.");
+        }
       }
-      if (!result?.rows || !result.valid_rows) {
-        throw new Error("The import preview was incomplete. Try the file again.");
+      if (response.ok) {
+        if (!result?.rows || !result.valid_rows) {
+          throw new Error("The import preview was incomplete. Try the file again.");
+        }
+        const nextPreview = result as LeadImportPreview;
+        setAiAvailable(nextPreview.ai_available === true);
+        setPreview(nextPreview);
+        useAiFallback =
+          nextPreview.ai_available === true &&
+          (nextPreview.invalid_count > 0 || nextPreview.total_rows === 0);
       }
-      setPreview(result as LeadImportPreview);
     } catch (previewError) {
-      setError(
-        previewError instanceof Error
-          ? previewError.message
-          : "Unable to preview this Excel file.",
-      );
+      if (!useAiFallback) {
+        setError(
+          previewError instanceof Error
+            ? previewError.message
+            : "Unable to preview this Excel file.",
+        );
+      }
     } finally {
       setLoading(false);
     }
+    if (useAiFallback) void analyzeWithAi(file);
   };
 
-  const analyzeWithAi = async () => {
-    if (!selectedFile || loading || saving) return;
+  const analyzeWithAi = async (file: File | null = selectedFile) => {
+    if (!file || aiLoading || saving) return;
     setError("");
+    setAiAttempted(true);
     setAiLoading(true);
     try {
       const body = new FormData();
       body.append("organization_id", organizationId);
-      body.append("file", selectedFile);
+      body.append("file", file);
       const response = await fetch("/api/leads/import/assist", {
         method: "POST",
         body,
@@ -4249,6 +4273,7 @@ function LeadImportDialog({
       if (!result?.rows || !result.valid_rows) {
         throw new Error("The AI-assisted preview was incomplete. Try the file again.");
       }
+      setAiAvailable(true);
       setPreview(result as LeadImportPreview);
     } catch (analysisError) {
       setError(
@@ -4331,7 +4356,7 @@ function LeadImportDialog({
               </h2>
             </div>
             <p className="mt-1 max-w-3xl text-[12px] leading-5 text-[#687386]">
-              Upload an .xlsx file to preview new Leads. AI-assisted detection can help with differently named columns; existing matching Leads are skipped and existing records are never updated.
+              Upload an .xlsx file to preview new Leads. AI-assisted detection automatically checks unclear columns or values; existing matching Leads are skipped and existing records are never updated.
             </p>
           </div>
           <button
@@ -4348,7 +4373,7 @@ function LeadImportDialog({
         <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-[#d9e0e9] bg-[#fafbfe] p-3">
           <label className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#1F4E79] px-3 text-[12px] font-semibold text-white transition-colors hover:bg-[#173c5e] has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50">
             <Upload size={14} aria-hidden="true" />
-            {loading ? "Reading Excel..." : "Choose .xlsx file"}
+            {loading ? "Reading Excel..." : aiLoading ? "Analyzing Excel..." : "Choose .xlsx file"}
             <input
               type="file"
               accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -4370,7 +4395,7 @@ function LeadImportDialog({
             Download template
           </a>
           {fileName && <span className="min-w-0 truncate text-[11px] text-[#687386]">{fileName}</span>}
-          {preview && (preview.invalid_count > 0 || preview.total_rows === 0) && selectedFile && preview.ai_available !== false && (
+          {preview && (preview.invalid_count > 0 || preview.total_rows === 0) && selectedFile && aiAvailable === true && !aiLoading && (
             <Button
               secondary
               compact
@@ -4378,15 +4403,21 @@ function LeadImportDialog({
               disabled={loading || saving}
               onClick={() => void analyzeWithAi()}
             >
-              Improve detection with AI
+              {aiAttempted ? "Retry AI detection" : "Improve detection with AI"}
             </Button>
           )}
         </div>
 
+        {aiLoading && (
+          <div className="mt-3 rounded-lg border border-[#cfe3f6] bg-[#f5faff] p-3 text-[12px] leading-5 text-[#315b7d]">
+            AI is automatically checking unclear workbook columns and supported values before you review the preview.
+          </div>
+        )}
+
         {error && (
           <div className="mt-3 rounded-lg border border-[#fed7d7] bg-[#fff5f5] p-3 text-[12px] leading-5 text-[#9b1c1c]">
             <p>{error}</p>
-            {selectedFile && (
+            {selectedFile && aiAvailable === true && (
               <div className="mt-2">
                 <Button
                   secondary
@@ -4395,7 +4426,7 @@ function LeadImportDialog({
                   disabled={loading || saving}
                   onClick={() => void analyzeWithAi()}
                 >
-                  Improve detection with AI
+                  {aiAttempted ? "Retry AI detection" : "Improve detection with AI"}
                 </Button>
               </div>
             )}
