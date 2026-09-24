@@ -831,6 +831,11 @@ type LeadImportPreviewRow = LeadImportDataRow & {
 };
 type LeadImportPreview = {
   file_name: string;
+  sheet_name?: string;
+  header_row_number?: number;
+  ai_available?: boolean;
+  ai_assisted?: boolean;
+  ai_mapped_fields?: string[];
   total_rows: number;
   invalid_count: number;
   duplicate_count: number;
@@ -4159,21 +4164,25 @@ function LeadImportDialog({
   notice: (message: string) => void;
 }) {
   const [preview, setPreview] = useState<LeadImportPreview | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileName, setFileName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const reset = () => {
     setPreview(null);
+    setSelectedFile(null);
     setFileName("");
     setLoading(false);
+    setAiLoading(false);
     setSaving(false);
     setError("");
   };
 
   const close = () => {
-    if (loading || saving) return;
+    if (loading || aiLoading || saving) return;
     reset();
     onClose();
   };
@@ -4182,10 +4191,12 @@ function LeadImportDialog({
     setError("");
     setPreview(null);
     setFileName(file.name);
+    setSelectedFile(null);
     if (!file.name.toLowerCase().endsWith(".xlsx")) {
       setError("Only .xlsx Excel files are supported.");
       return;
     }
+    setSelectedFile(file);
 
     setLoading(true);
     try {
@@ -4214,6 +4225,39 @@ function LeadImportDialog({
       );
     } finally {
       setLoading(false);
+    }
+  };
+
+  const analyzeWithAi = async () => {
+    if (!selectedFile || loading || saving) return;
+    setError("");
+    setAiLoading(true);
+    try {
+      const body = new FormData();
+      body.append("organization_id", organizationId);
+      body.append("file", selectedFile);
+      const response = await fetch("/api/leads/import/assist", {
+        method: "POST",
+        body,
+      });
+      const result = (await response.json().catch(() => null)) as
+        | (Partial<LeadImportPreview> & { error?: string })
+        | null;
+      if (!response.ok) {
+        throw new Error(result?.error || "AI-assisted detection was not completed.");
+      }
+      if (!result?.rows || !result.valid_rows) {
+        throw new Error("The AI-assisted preview was incomplete. Try the file again.");
+      }
+      setPreview(result as LeadImportPreview);
+    } catch (analysisError) {
+      setError(
+        analysisError instanceof Error
+          ? analysisError.message
+          : "AI-assisted detection was not completed.",
+      );
+    } finally {
+      setAiLoading(false);
     }
   };
 
@@ -4287,13 +4331,13 @@ function LeadImportDialog({
               </h2>
             </div>
             <p className="mt-1 max-w-3xl text-[12px] leading-5 text-[#687386]">
-              Upload the fixed .xlsx template to preview new Leads. Existing matching Leads are skipped and reported; existing records are never updated.
+              Upload an .xlsx file to preview new Leads. AI-assisted detection can help with differently named columns; existing matching Leads are skipped and existing records are never updated.
             </p>
           </div>
           <button
             type="button"
             onClick={close}
-            disabled={loading || saving}
+            disabled={loading || aiLoading || saving}
             aria-label="Close Lead import"
             className="grid size-8 shrink-0 place-items-center rounded-md text-[#8a95a6] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938] disabled:opacity-50"
           >
@@ -4309,7 +4353,7 @@ function LeadImportDialog({
               type="file"
               accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
               className="sr-only"
-              disabled={loading || saving}
+              disabled={loading || aiLoading || saving}
               onChange={(event) => {
                 const file = event.target.files?.[0];
                 event.currentTarget.value = "";
@@ -4326,16 +4370,51 @@ function LeadImportDialog({
             Download template
           </a>
           {fileName && <span className="min-w-0 truncate text-[11px] text-[#687386]">{fileName}</span>}
+          {preview && (preview.invalid_count > 0 || preview.total_rows === 0) && selectedFile && preview.ai_available !== false && (
+            <Button
+              secondary
+              compact
+              loading={aiLoading}
+              disabled={loading || saving}
+              onClick={() => void analyzeWithAi()}
+            >
+              Improve detection with AI
+            </Button>
+          )}
         </div>
 
         {error && (
           <div className="mt-3 rounded-lg border border-[#fed7d7] bg-[#fff5f5] p-3 text-[12px] leading-5 text-[#9b1c1c]">
-            {error}
+            <p>{error}</p>
+            {selectedFile && (
+              <div className="mt-2">
+                <Button
+                  secondary
+                  compact
+                  loading={aiLoading}
+                  disabled={loading || saving}
+                  onClick={() => void analyzeWithAi()}
+                >
+                  Improve detection with AI
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
         {preview ? (
           <>
+            {preview.ai_assisted && (
+              <div className="mt-4 rounded-lg border border-[#cfe3f6] bg-[#f5faff] px-3 py-2.5 text-[12px] leading-5 text-[#315b7d]">
+                <p className="font-semibold text-[#1F4E79]">AI-assisted detection applied</p>
+                <p className="mt-0.5">The workbook structure and supported values were rechecked. Review any remaining invalid rows before importing.</p>
+                {preview.ai_mapped_fields && preview.ai_mapped_fields.length > 0 && (
+                  <p className="mt-1 text-[11px] text-[#56728a]">
+                    Mapped columns: {preview.ai_mapped_fields.join(" · ")}
+                  </p>
+                )}
+              </div>
+            )}
             <div className="mt-4 grid gap-2 sm:grid-cols-3">
               {[
                 ["Ready to import", preview.ready_count, "text-[#218b55]"],
@@ -4411,13 +4490,13 @@ function LeadImportDialog({
 
         <footer className="mt-4 flex flex-wrap items-center justify-end gap-2">
           <p className="mr-auto text-[11px] text-[#8b92a1]">Only new Leads will be added.</p>
-          <Button secondary onClick={close} disabled={loading || saving}>
+          <Button secondary onClick={close} disabled={loading || aiLoading || saving}>
             Cancel
           </Button>
           <button
             type="button"
             onClick={() => void importLeads()}
-            disabled={!preview || preview.ready_count <= 0 || loading || saving}
+            disabled={!preview || preview.ready_count <= 0 || loading || aiLoading || saving}
             className="inline-flex min-h-8 items-center gap-1.5 rounded-lg bg-[#c43b43] px-3 text-[12px] font-semibold text-white transition-colors hover:bg-[#ab3038] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
