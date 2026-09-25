@@ -31,6 +31,7 @@ type ManagedUser = {
   email: string;
   role: string;
   project_types: string[];
+  production_approval_enabled: boolean;
   banned: boolean;
   signature_url: string | null;
 };
@@ -41,6 +42,7 @@ type UserFormValues = {
   password: string;
   role: string;
   project_types: string[];
+  production_approval_enabled: boolean;
 };
 
 const displayRole = workspaceRoleLabel;
@@ -80,6 +82,7 @@ export function SuperAdminConsole({
     password: "",
     role: "project_manager",
     project_types: [],
+    production_approval_enabled: false,
   });
   const [editValues, setEditValues] = useState<UserFormValues>({
     full_name: "",
@@ -87,6 +90,7 @@ export function SuperAdminConsole({
     password: "",
     role: "project_manager",
     project_types: [],
+    production_approval_enabled: false,
   });
   const [signatureFile, setSignatureFile] = useState<File | null>(null);
   const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
@@ -172,6 +176,7 @@ export function SuperAdminConsole({
       password: "",
       role: "project_manager",
       project_types: [],
+      production_approval_enabled: false,
     });
     setSignatureFile(null);
     setMessage(
@@ -192,6 +197,7 @@ export function SuperAdminConsole({
       password: "",
       role: user.role,
       project_types: user.project_types ?? [],
+      production_approval_enabled: user.production_approval_enabled,
     });
     setEditSignatureFile(null);
     setShowNewPassword(false);
@@ -359,6 +365,7 @@ export function SuperAdminConsole({
                   <th className="px-4 py-2">Email</th>
                   <th className="px-4 py-2">User Type</th>
                   <th className="px-4 py-2">Assigned Project Types</th>
+                  <th className="px-4 py-2">Production Approval</th>
                   <th className="px-4 py-2">Account Status</th>
                   <th className="px-4 py-2 text-center">Actions</th>
                 </tr>
@@ -367,7 +374,7 @@ export function SuperAdminConsole({
                 {loading ? (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={7}
                       className="px-5 py-10 text-center text-[#7d8797]"
                     >
                       Loading Users…
@@ -391,6 +398,16 @@ export function SuperAdminConsole({
                             ? user.project_types.join(" · ")
                             : "Not assigned"
                           : "—"}
+                      </td>
+                      <td className="px-5 py-4">
+                        {isPricingRole(user.role) && user.production_approval_enabled ? (
+                          <span className="inline-flex items-center gap-1.5 text-[#218b55]">
+                            <span className="size-1.5 rounded-full bg-[#218b55]" />
+                            Enabled
+                          </span>
+                        ) : (
+                          <span className="text-[#8b92a1]">-</span>
+                        )}
                       </td>
                       <td className="px-5 py-4">
                         {user.banned ? (
@@ -467,7 +484,7 @@ export function SuperAdminConsole({
                 ) : (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={7}
                       className="px-5 py-10 text-center text-[#7d8797]"
                     >
                       No Users Found.
@@ -550,9 +567,17 @@ export function SuperAdminConsole({
                 User Type
                 <select
                   value={editValues.role}
-                  onChange={(event) =>
-                    setEditValues({ ...editValues, role: event.target.value })
-                  }
+                  onChange={(event) => {
+                    const role = event.target.value;
+                    setEditValues({
+                      ...editValues,
+                      role,
+                      production_approval_enabled:
+                        role === "sales_pricing_officer"
+                          ? editValues.production_approval_enabled
+                          : false,
+                    });
+                  }}
                   className="mt-1.5 w-full rounded-lg border border-[#cfd8e3] bg-white px-3 py-2 text-[14px] outline-none focus:border-[#c43b43]"
                 >
                   <option value="project_manager">Sales Executive</option>
@@ -585,6 +610,27 @@ export function SuperAdminConsole({
                     ))}
                   </div>
                 </fieldset>
+              )}
+              {isPricingRole(editValues.role) && (
+                <label className="flex items-start gap-2 rounded-lg border border-[#dfe5ed] bg-white p-3 text-[13px] font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={editValues.production_approval_enabled}
+                    onChange={(event) =>
+                      setEditValues({
+                        ...editValues,
+                        production_approval_enabled: event.target.checked,
+                      })
+                    }
+                    className="mt-0.5 size-4 accent-[#c43b43]"
+                  />
+                  <span>
+                    <span className="block">Can approve production</span>
+                    <span className="mt-0.5 block text-[12px] font-normal text-[#7d8797]">
+                      Allows approval of new production requests, date revisions, and project completion requests.
+                    </span>
+                  </span>
+                </label>
               )}
               {["project_manager", "sales_pricing_officer", "admin"].includes(editValues.role) && (
                 <label className="block text-[14px] font-semibold">
@@ -730,9 +776,17 @@ export function SuperAdminConsole({
                 User Type
                 <select
                   value={values.role}
-                  onChange={(event) =>
-                    setValues({ ...values, role: event.target.value })
-                  }
+                  onChange={(event) => {
+                    const role = event.target.value;
+                    setValues({
+                      ...values,
+                      role,
+                      production_approval_enabled:
+                        role === "sales_pricing_officer"
+                          ? values.production_approval_enabled
+                          : false,
+                    });
+                  }}
                   className="mt-1.5 w-full rounded-lg border border-[#cfd8e3] bg-white px-3 py-2 text-[14px] outline-none focus:border-[#c43b43]"
                 >
                   <option value="project_manager">Sales Executive</option>
@@ -765,6 +819,27 @@ export function SuperAdminConsole({
                     ))}
                   </div>
                 </fieldset>
+              )}
+              {isPricingRole(values.role) && (
+                <label className="flex items-start gap-2 rounded-lg border border-[#dfe5ed] bg-white p-3 text-[13px] font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={values.production_approval_enabled}
+                    onChange={(event) =>
+                      setValues({
+                        ...values,
+                        production_approval_enabled: event.target.checked,
+                      })
+                    }
+                    className="mt-0.5 size-4 accent-[#c43b43]"
+                  />
+                  <span>
+                    <span className="block">Can approve production</span>
+                    <span className="mt-0.5 block text-[12px] font-normal text-[#7d8797]">
+                      Allows approval of new production requests, date revisions, and project completion requests.
+                    </span>
+                  </span>
+                </label>
               )}
               {["project_manager", "sales_pricing_officer", "admin"].includes(values.role) && (
                 <label className="block text-[14px] font-semibold">

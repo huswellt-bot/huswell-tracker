@@ -48,11 +48,26 @@ export async function requireWorkspaceAccess() {
     .eq("id", membership.organization_id)
     .single();
 
+  const isManagementRole = ["super_admin", "owner", "admin"].includes(
+    String(membership.role),
+  );
+  const { data: productionApprovalPermission } = isManagementRole
+    ? { data: null }
+    : await supabase
+        .from("production_approval_permissions")
+        .select("is_active")
+        .eq("organization_id", membership.organization_id)
+        .eq("user_id", user.id)
+        .eq("is_active", true)
+        .maybeSingle();
+
   return {
     organizationId: membership.organization_id,
     organizationName: organization?.name ?? "Huswell Trading",
     profileName: user.user_metadata.full_name ?? user.email ?? "User",
     profileEmail: user.email ?? "",
     role: membership.role,
+    productionApprovalEnabled:
+      isManagementRole || Boolean(productionApprovalPermission?.is_active),
   };
 }

@@ -1697,7 +1697,23 @@ const roleReadableTables: Record<string, TableName[]> = {
     "policies",
   ],
 };
-const canReadTable = (role: string, table: TableName) =>
+const productionApprovalTables: TableName[] = [
+  "project_schedules",
+  "project_schedule_revision_requests",
+  "project_schedule_completion_requests",
+  "quotations",
+  "quotation_items",
+  "profiles",
+  "organization_members",
+  "customers",
+  "leads",
+];
+const canReadTable = (
+  role: string,
+  table: TableName,
+  productionApprovalEnabled = false,
+) =>
+  (productionApprovalEnabled && productionApprovalTables.includes(table)) ||
   memberRole(role) ||
   roleCapabilityRoles(role).some((capability) =>
     (roleReadableTables[capability] ?? roleReadableTables.viewer).includes(table),
@@ -7505,9 +7521,9 @@ function ProjectCalendar({
     const note = text(value, "").trim();
     return note ? (
       <NoteAction
-        label="View General Manager note"
+        label="View approval note"
         tone="amber"
-        onClick={() => setCalendarDecisionNote({ title: "General Manager note", context, note })}
+        onClick={() => setCalendarDecisionNote({ title: "Approval note", context, note })}
       />
     ) : null;
   };
@@ -7664,7 +7680,7 @@ function ProjectCalendar({
         setOpen(false);
         setEditingSchedule(null);
         await reload();
-        notice("Project schedule revision submitted for General Manager approval.");
+        notice("Project schedule revision submitted for production approval.");
       } catch (error) {
         notice(
           error instanceof Error
@@ -7731,7 +7747,7 @@ function ProjectCalendar({
       if (error) throw error;
       setOpen(false);
       await reload();
-      notice(rejectedSchedule ? "Production request resubmitted for General Manager approval." : "Production request submitted for General Manager approval.");
+      notice(rejectedSchedule ? "Production request resubmitted for production approval." : "Production request submitted for production approval.");
     } catch (error) {
       const message = error && typeof error === "object" && "message" in error && typeof error.message === "string"
         ? error.message
@@ -7751,7 +7767,7 @@ function ProjectCalendar({
       );
       if (error) throw error;
       await reload();
-      notice("Project completion submitted for General Manager approval.");
+      notice("Project completion submitted for production approval.");
     } catch (error) {
       notice(
         error instanceof Error
@@ -8097,7 +8113,7 @@ function ProjectCalendar({
                     <ActionIcon
                       label={
                         hasPendingScheduleCompletion(schedule)
-                          ? "Project completion is awaiting General Manager approval"
+                          ? "Project completion is awaiting production approval"
                           : "Request project completion"
                       }
                       tone="green"
@@ -8112,7 +8128,7 @@ function ProjectCalendar({
                     <ActionIcon
                       label={
                         hasPendingScheduleRevision(schedule)
-                          ? "A schedule revision is awaiting General Manager approval"
+                          ? "A schedule revision is awaiting production approval"
                           : "Request project schedule revision"
                       }
                       disabled={saving || hasPendingScheduleRevision(schedule)}
@@ -8199,7 +8215,7 @@ function ProjectCalendar({
         )}
         <NoteDialog
           open={Boolean(calendarDecisionNote)}
-          title={calendarDecisionNote?.title ?? "General Manager note"}
+          title={calendarDecisionNote?.title ?? "Approval note"}
           context={calendarDecisionNote?.context}
           note={calendarDecisionNote?.note ?? ""}
           titleId="project-calendar-decision-note-title"
@@ -8235,7 +8251,7 @@ function ProjectCalendar({
                         <Button
                           secondary
                           confirm
-                          confirmationText="Unsubmit this schedule revision? The General Manager will no longer be able to review it."
+                          confirmationText="Unsubmit this schedule revision? The production approver will no longer be able to review it."
                           loading={saving}
                           disabled={saving}
                           onClick={() => void unsubmitScheduleRequest(request, "unsubmit_project_schedule_revision", "Schedule revision")}
@@ -8267,7 +8283,7 @@ function ProjectCalendar({
                         <Button
                           secondary
                           confirm
-                          confirmationText="Unsubmit this project completion request? The General Manager will no longer be able to review it."
+                          confirmationText="Unsubmit this project completion request? The production approver will no longer be able to review it."
                           loading={saving}
                           disabled={saving}
                           onClick={() => void unsubmitScheduleRequest(request, "unsubmit_project_schedule_completion", "Project completion")}
@@ -14958,11 +14974,13 @@ function Submissions({
   orgId,
   reload,
   notice,
+  productionOnly = false,
 }: {
   store: Store;
   orgId: string;
   reload: () => Promise<void>;
   notice: (message: string) => void;
+  productionOnly?: boolean;
 }) {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Row | null>(null);
@@ -15617,12 +15635,20 @@ function Submissions({
       action: <span className="flex items-center gap-1"><ActionIcon label="Approve request" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideApprovalRequest(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject request" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideApprovalRequest(request, "rejected")}><X size={15} /></ActionIcon></span>,
     })),
   ];
+  const approvalQueueItems = productionOnly
+    ? pendingQueueItems.filter((item) =>
+        ["calendar_projects", "calendar_revisions", "calendar_completions"].includes(item.tab),
+      )
+    : pendingQueueItems;
+  const approvalPendingTotal = productionOnly
+    ? approvalQueueItems.length
+    : pendingTotal;
   const pendingQueueItemByKey = new Map(
-    pendingQueueItems.map((item) => [item.key, item]),
+    approvalQueueItems.map((item) => [item.key, item]),
   );
   const currentApprovalItems = tab === "all"
-    ? pendingQueueItems
-    : pendingQueueItems.filter((item) => item.tab === tab);
+    ? approvalQueueItems
+    : approvalQueueItems.filter((item) => item.tab === tab);
   const currentSelectableItems = currentApprovalItems.filter(
     (item) => item.selectable && item.bulkAction,
   );
@@ -15740,23 +15766,35 @@ function Submissions({
   };
   return (
     <Panel
-      title="Management Approval Center"
-      detail="One queue for management decisions across quotations, production, project changes, leads, and other approval requests."
+      title={productionOnly ? "Production Approval Center" : "Management Approval Center"}
+      detail={
+        productionOnly
+          ? "One queue for production requests, schedule revisions, and project completion requests."
+          : "One queue for management decisions across quotations, production, project changes, leads, and other approval requests."
+      }
       hideHeading
     >
       <div className="app-tabs px-5">
-        <button type="button" onClick={() => setTab("all")} aria-current={tab === "all" ? "page" : undefined} className="app-tab">All Pending ({pendingTotal})</button>
-        <button type="button" onClick={() => setTab("quotations")} aria-current={tab === "quotations" ? "page" : undefined} className="app-tab">Price Quotations ({visiblePendingPriceQuotations.length})</button>
-        <button type="button" onClick={() => setTab("price_revisions")} aria-current={tab === "price_revisions" ? "page" : undefined} className="app-tab">Quotation Revisions ({visiblePendingPriceQuotationRevisions.length})</button>
-        <button type="button" onClick={() => setTab("costings")} aria-current={tab === "costings" ? "page" : undefined} className="app-tab">Costing Breakdowns ({visiblePendingCostings.length})</button>
-        <button type="button" onClick={() => setTab("revisions")} aria-current={tab === "revisions" ? "page" : undefined} className="app-tab">Costing Revisions ({visiblePendingQuotationRevisions.length})</button>
+        <button type="button" onClick={() => setTab("all")} aria-current={tab === "all" ? "page" : undefined} className="app-tab">All Pending ({approvalPendingTotal})</button>
+        {!productionOnly && (
+          <>
+            <button type="button" onClick={() => setTab("quotations")} aria-current={tab === "quotations" ? "page" : undefined} className="app-tab">Price Quotations ({visiblePendingPriceQuotations.length})</button>
+            <button type="button" onClick={() => setTab("price_revisions")} aria-current={tab === "price_revisions" ? "page" : undefined} className="app-tab">Quotation Revisions ({visiblePendingPriceQuotationRevisions.length})</button>
+            <button type="button" onClick={() => setTab("costings")} aria-current={tab === "costings" ? "page" : undefined} className="app-tab">Costing Breakdowns ({visiblePendingCostings.length})</button>
+            <button type="button" onClick={() => setTab("revisions")} aria-current={tab === "revisions" ? "page" : undefined} className="app-tab">Costing Revisions ({visiblePendingQuotationRevisions.length})</button>
+          </>
+        )}
         <button type="button" onClick={() => setTab("calendar_projects")} aria-current={tab === "calendar_projects" ? "page" : undefined} className="app-tab">Production Requests ({visiblePendingProjectSchedules.length})</button>
         <button type="button" onClick={() => setTab("calendar_revisions")} aria-current={tab === "calendar_revisions" ? "page" : undefined} className="app-tab">Project Revisions ({visiblePendingProjectScheduleRevisions.length})</button>
         <button type="button" onClick={() => setTab("calendar_completions")} aria-current={tab === "calendar_completions" ? "page" : undefined} className="app-tab">Project Completion ({visiblePendingProjectScheduleCompletions.length})</button>
-        <button type="button" onClick={() => setTab("projects")} aria-current={tab === "projects" ? "page" : undefined} className="app-tab">Project Edits ({visiblePendingProjectEdits.length})</button>
-        <button type="button" onClick={() => setTab("leads")} aria-current={tab === "leads" ? "page" : undefined} className="app-tab">Lead Changes ({visiblePendingLeadChanges.length})</button>
-        <button type="button" onClick={() => setTab("lead_unendorsements")} aria-current={tab === "lead_unendorsements" ? "page" : undefined} className="app-tab">Lead Unendorsements ({visiblePendingLeadUnendorsements.length})</button>
-        <button type="button" onClick={() => setTab("other")} aria-current={tab === "other" ? "page" : undefined} className="app-tab">Other ({visiblePendingApprovalRequests.length})</button>
+        {!productionOnly && (
+          <>
+            <button type="button" onClick={() => setTab("projects")} aria-current={tab === "projects" ? "page" : undefined} className="app-tab">Project Edits ({visiblePendingProjectEdits.length})</button>
+            <button type="button" onClick={() => setTab("leads")} aria-current={tab === "leads" ? "page" : undefined} className="app-tab">Lead Changes ({visiblePendingLeadChanges.length})</button>
+            <button type="button" onClick={() => setTab("lead_unendorsements")} aria-current={tab === "lead_unendorsements" ? "page" : undefined} className="app-tab">Lead Unendorsements ({visiblePendingLeadUnendorsements.length})</button>
+            <button type="button" onClick={() => setTab("other")} aria-current={tab === "other" ? "page" : undefined} className="app-tab">Other ({visiblePendingApprovalRequests.length})</button>
+          </>
+        )}
       </div>
       <div className="px-5">
         <WorkspaceListFilters
@@ -15835,9 +15873,9 @@ function Submissions({
         </div>
       ) : null}
       <div className="modern-table-shell">
-      {tab === "all" && (pendingQueueItems.length ? (
+      {tab === "all" && (approvalQueueItems.length ? (
         <Table labels={["Select", "Category", "Request", "Requester", "Submitted", "Review"]} minWidth={940}>
-          {pendingQueueItems.sort((left, right) => text(right.submittedAt).localeCompare(text(left.submittedAt))).map((item) => (
+          {approvalQueueItems.sort((left, right) => text(right.submittedAt).localeCompare(text(left.submittedAt))).map((item) => (
             <tr key={item.key}>
               {renderSelectionCell(item.key)}
               <td className="px-5 py-3"><Status value={item.category} /></td>
@@ -15848,7 +15886,7 @@ function Submissions({
             </tr>
           ))}
         </Table>
-      ) : <Empty>No management approvals are awaiting review.</Empty>)}
+      ) : <Empty>{productionOnly ? "No production approvals are awaiting review." : "No management approvals are awaiting review."}</Empty>)}
       {tab === "quotations" && (visiblePendingPriceQuotations.length ? (
         <Table labels={["Select", "Price Quotation", "Client's Name", "Company Name", "Prepared by", "Submitted", "Note", "Review"]} minWidth={1060}>
           {visiblePendingPriceQuotations.map((quotation) => {
@@ -16122,7 +16160,7 @@ function Submissions({
           decide={(decision, note) => void decideLeadChange(selectedLeadChange, decision, note)}
         />
       )}
-      {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); notice(message); }} autoExportPdf pdfWindow={pdfWindow} printAfterOpen={printAfterOpen} hidden showInternalCosting />}
+      {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); notice(message); }} autoExportPdf pdfWindow={pdfWindow} printAfterOpen={printAfterOpen} hidden showInternalCosting={!productionOnly} />}
     </Panel>
   );
 }
@@ -19436,6 +19474,7 @@ export function HuswellWorkspace({
   profileEmail,
   organizationId,
   role,
+  productionApprovalEnabled = false,
   initialView,
 }: {
   organizationName: string;
@@ -19443,6 +19482,7 @@ export function HuswellWorkspace({
   profileEmail: string;
   organizationId: string;
   role: string;
+  productionApprovalEnabled?: boolean;
   initialView?: View;
 }) {
   const defaultWorkspaceView: View = role === "accountant" ? "Finance" : "Dashboard";
@@ -19527,7 +19567,7 @@ export function HuswellWorkspace({
     showLoading = false,
   ) => {
     const tablesToRefresh = [...new Set(requestedTables)].filter((table) =>
-      canReadTable(role, table),
+      canReadTable(role, table, productionApprovalEnabled),
     );
     if (!tablesToRefresh.length) {
       if (showLoading) setLoading(false);
@@ -19571,7 +19611,7 @@ export function HuswellWorkspace({
       setMessage(
         `Workspace data could not load: ${errors.join(" | ")}`,
       );
-  }, [fetchTable, role]);
+  }, [fetchTable, productionApprovalEnabled, role]);
   const load = useCallback(
     async (showLoading = false) => refreshTables(tables, showLoading),
     [refreshTables],
@@ -19588,7 +19628,9 @@ export function HuswellWorkspace({
     });
   }, [active, leadMode, refreshTables, role]);
   useEffect(() => {
-    const realtimeTables = tables.filter((table) => canReadTable(role, table));
+    const realtimeTables = tables.filter((table) =>
+      canReadTable(role, table, productionApprovalEnabled),
+    );
     if (!realtimeTables.length) return;
     const pendingTables = pendingRealtimeTables.current;
 
@@ -19625,7 +19667,7 @@ export function HuswellWorkspace({
       pendingTables.clear();
       void client.removeChannel(channel);
     };
-  }, [client, organizationId, refreshTables, role]);
+  }, [client, organizationId, productionApprovalEnabled, refreshTables, role]);
   useEffect(() => {
     const refreshDate = () => setNavigationDate(new Date());
     refreshDate();
@@ -19708,6 +19750,13 @@ export function HuswellWorkspace({
     ],
   };
   const isManagementRole = memberRole(role);
+  const productionApprovalOnly = productionApprovalEnabled && !isManagementRole;
+  const allowedRoleViews = [
+    ...(allowedViews[role] ?? allowedViews.viewer),
+  ];
+  if (productionApprovalOnly && !allowedRoleViews.includes("Approvals")) {
+    allowedRoleViews.push("Approvals");
+  }
   const pendingManagementApprovalCount = isManagementRole
     ? store.quotations.filter(
         (quotation) =>
@@ -19727,6 +19776,11 @@ export function HuswellWorkspace({
       + store.lead_change_requests.filter((request) => text(request.status) === "pending").length
       + store.lead_unendorsement_requests.filter((request) => text(request.status) === "pending").length
       + store.approval_requests.filter((request) => text(request.status) === "pending" && text(request.resource_type) !== "quotation").length
+    : 0;
+  const pendingProductionApprovalCount = productionApprovalOnly
+    ? store.project_schedules.filter((schedule) => text(schedule.status) === "pending").length
+      + store.project_schedule_revision_requests.filter((request) => text(request.status) === "pending").length
+      + store.project_schedule_completion_requests.filter((request) => text(request.status) === "pending").length
     : 0;
   const assignedProjectTypes = new Set(
     store.pricing_officer_project_types
@@ -19801,6 +19855,7 @@ export function HuswellWorkspace({
     {
       label: "Operations",
       items: [
+        { view: "Approvals", icon: ClipboardCheck, badge: pendingProductionApprovalCount },
         { view: "Projects", icon: ClipboardCheck },
       ],
     },
@@ -19846,7 +19901,7 @@ export function HuswellWorkspace({
     .map((group) => ({
       ...group,
       items: group.items.filter((item) =>
-        (allowedViews[role] ?? allowedViews.viewer).includes(item.view),
+        allowedRoleViews.includes(item.view),
       ),
     }))
     .filter((group) => group.items.length > 0);
@@ -19951,8 +20006,10 @@ export function HuswellWorkspace({
       detail: targets.detail,
     },
     Approvals: {
-      title: "Management Approval Center",
-      detail: "Review every pending management decision from one queue.",
+      title: productionApprovalOnly ? "Production Approval Center" : "Management Approval Center",
+      detail: productionApprovalOnly
+        ? "Review production requests, schedule revisions, and project completion requests."
+        : "Review every pending management decision from one queue.",
     },
     "Payment Monitoring": {
       title: "Payment Monitoring",
@@ -19963,8 +20020,10 @@ export function HuswellWorkspace({
       detail: "Verify client payment receipts assigned to you before they count as paid.",
     },
     Submissions: {
-      title: "Management Approval Center",
-      detail: "Review every pending management decision from one queue.",
+      title: productionApprovalOnly ? "Production Approval Center" : "Management Approval Center",
+      detail: productionApprovalOnly
+        ? "Review production requests, schedule revisions, and project completion requests."
+        : "Review every pending management decision from one queue.",
     },
     Settings: {
       title: "Business settings",
@@ -20000,11 +20059,11 @@ export function HuswellWorkspace({
     ) : loading ? (
       <Panel
         title={
-          active === "Leads" ? leads.title : active === "Projects" ? projects.title : active === "Price Quotation Review" ? "Price Quotation Review" : active === "Approvals" || active === "Submissions" ? "Management Approval Center" : active === "Payment Monitoring" ? "Payment Monitoring" : active === "Payment Reviews" ? "Payment Reviews" : "Loading workspace"
+          active === "Leads" ? leads.title : active === "Projects" ? projects.title : active === "Price Quotation Review" ? "Price Quotation Review" : active === "Approvals" || active === "Submissions" ? (productionApprovalOnly ? "Production Approval Center" : "Management Approval Center") : active === "Payment Monitoring" ? "Payment Monitoring" : active === "Payment Reviews" ? "Payment Reviews" : "Loading workspace"
         }
         detail={
           active === "Leads" || active === "Projects" || active === "Price Quotation Review" || active === "Approvals" || active === "Submissions" || active === "Payment Monitoring" || active === "Payment Reviews"
-            ? (active === "Projects" ? projects.detail : active === "Price Quotation Review" ? "Loading Price Quotation review queue." : active === "Approvals" || active === "Submissions" ? "Loading management approval queue." : active === "Payment Monitoring" ? "Loading payment monitoring." : active === "Payment Reviews" ? "Loading assigned payment reviews." : leads.detail)
+            ? (active === "Projects" ? projects.detail : active === "Price Quotation Review" ? "Loading Price Quotation review queue." : active === "Approvals" || active === "Submissions" ? (productionApprovalOnly ? "Loading production approval queue." : "Loading management approval queue.") : active === "Payment Monitoring" ? "Loading payment monitoring." : active === "Payment Reviews" ? "Loading assigned payment reviews." : leads.detail)
             : "Loading business data."
         }
       >
@@ -20156,6 +20215,7 @@ export function HuswellWorkspace({
         orgId={organizationId}
         reload={reload}
         notice={setMessage}
+        productionOnly={productionApprovalOnly}
       />
     ) : active === "Payment Monitoring" ? (
       <PaymentMonitoring

@@ -9,6 +9,7 @@ type CreateUserRequest = {
   email?: unknown;
   password?: unknown;
   role?: unknown;
+  production_approval_enabled?: unknown;
 };
 type UserOperationRequest = {
   user_id?: unknown;
@@ -17,10 +18,14 @@ type UserOperationRequest = {
   email?: unknown;
   password?: unknown;
   role?: unknown;
+  production_approval_enabled?: unknown;
 };
 
 const json = (body: Record<string, unknown>, status: number) =>
   Response.json(body, { status });
+const isMissingProductionApprovalTable = (
+  error: { code?: string } | null | undefined,
+) => Boolean(error && ["42P01", "PGRST205"].includes(error.code ?? ""));
 
 async function getSuperAdminOrganization() {
   const supabase = await createClient();
@@ -37,7 +42,9 @@ async function getSuperAdminOrganization() {
     .order("created_at", { ascending: true })
     .limit(1)
     .maybeSingle();
-  return membership?.organization_id ?? null;
+  return membership?.organization_id
+    ? { organizationId: membership.organization_id, userId: user.id }
+    : null;
 }
 
 function adminClient() {
@@ -50,10 +57,48 @@ function adminClient() {
   );
 }
 
+async function setProductionApprovalPermission(
+  admin: NonNullable<ReturnType<typeof adminClient>>,
+  organizationId: string,
+  userId: string,
+  actorUserId: string,
+  enabled: boolean,
+): Promise<{ error: { message: string } | null }> {
+  const now = new Date().toISOString();
+  const result = enabled
+    ? await admin.from("production_approval_permissions").upsert(
+        {
+          organization_id: organizationId,
+          user_id: userId,
+          is_active: true,
+          granted_by: actorUserId,
+          granted_at: now,
+          revoked_by: null,
+          revoked_at: null,
+          updated_at: now,
+        },
+        { onConflict: "organization_id,user_id" },
+      )
+    : await admin
+        .from("production_approval_permissions")
+        .update({
+          is_active: false,
+          revoked_by: actorUserId,
+          revoked_at: now,
+          updated_at: now,
+        })
+        .eq("organization_id", organizationId)
+        .eq("user_id", userId);
+  if (result.error && !enabled && isMissingProductionApprovalTable(result.error))
+    return { error: null };
+  return { error: result.error ? { message: result.error.message } : null };
+}
+
 export async function GET() {
-  const organizationId = await getSuperAdminOrganization();
-  if (!organizationId)
+  const context = await getSuperAdminOrganization();
+  if (!context)
     return json({ error: "Only the Super Admin can view users." }, 403);
+  const { organizationId } = context;
   const admin = adminClient();
   if (!admin)
     return json(
@@ -84,7 +129,11 @@ export async function GET() {
     );
 
   const userIds = (memberships ?? []).map((member) => member.user_id);
-  const [{ data: profiles, error: profileError }, { data: projectTypeAssignments, error: assignmentError }] = await Promise.all([
+  const [
+    { data: profiles, error: profileError },
+    { data: projectTypeAssignments, error: assignmentError },
+    { data: productionApprovals, error: productionApprovalError },
+  ] = await Promise.all([
     userIds.length
       ? admin.from("profiles").select("id, signature_url").in("id", userIds)
       : Promise.resolve({ data: [], error: null }),
@@ -94,9 +143,22 @@ export async function GET() {
           .select("pricing_officer_user_id, project_type")
           .in("pricing_officer_user_id", userIds)
       : Promise.resolve({ data: [], error: null }),
+    userIds.length
+      ? admin
+          .from("production_approval_permissions")
+          .select("user_id, is_active")
+          .eq("organization_id", organizationId)
+          .eq("is_active", true)
+          .in("user_id", userIds)
+      : Promise.resolve({ data: [], error: null }),
   ]);
-  if (profileError || assignmentError)
-    return json({ error: profileError?.message ?? assignmentError?.message ?? "Unable to load user details." }, 500);
+  if (
+    profileError ||
+    assignmentError ||
+    (productionApprovalError &&
+      !isMissingProductionApprovalTable(productionApprovalError))
+  )
+    return json({ error: profileError?.message ?? assignmentError?.message ?? productionApprovalError?.message ?? "Unable to load user details." }, 500);
 
   const authUsers = new Map(
     (authData.users ?? []).map((user) => [user.id, user]),
@@ -110,6 +172,11 @@ export async function GET() {
     userProjectTypes.push(assignment.project_type);
     projectTypesByUserId.set(assignment.pricing_officer_user_id, userProjectTypes);
   });
+  const productionApprovalUserIds = new Set(
+    (productionApprovals ?? [])
+      .filter((permission) => permission.is_active)
+      .map((permission) => permission.user_id),
+  );
   return Response.json({
     users: (memberships ?? [])
       .filter((member) => member.role !== "super_admin")
@@ -124,6 +191,7 @@ export async function GET() {
           email: user?.email ?? "—",
           role: member.role,
           project_types: projectTypesByUserId.get(member.user_id) ?? [],
+          production_approval_enabled: productionApprovalUserIds.has(member.user_id),
           signature_url: profileByUserId.get(member.user_id)?.signature_url ?? null,
           created_at: member.created_at,
           banned: Boolean(
@@ -136,9 +204,10 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const organizationId = await getSuperAdminOrganization();
-  if (!organizationId)
+  const context = await getSuperAdminOrganization();
+  if (!context)
     return json({ error: "Only the Super Admin can add users." }, 403);
+  const { organizationId, userId: actorUserId } = context;
   const admin = adminClient();
   if (!admin)
     return json(
@@ -163,6 +232,7 @@ export async function POST(request: Request) {
     body?.role === "sales_pricing_officer"
       ? body.role
       : null;
+  const productionApprovalEnabled = body?.production_approval_enabled === true;
   if (
     !fullName ||
     !/^\S+@\S+\.\S+$/.test(email) ||
@@ -174,6 +244,11 @@ export async function POST(request: Request) {
         error:
           "Enter a full name, valid email address, password with at least 6 characters, and user type.",
       },
+      400,
+    );
+  if (productionApprovalEnabled && role !== "sales_pricing_officer")
+    return json(
+      { error: "Production approval can only be assigned to a Sales & Pricing Officer." },
       400,
     );
 
@@ -205,6 +280,22 @@ export async function POST(request: Request) {
   if (membershipError) {
     await admin.auth.admin.deleteUser(userId);
     return json({ error: membershipError.message }, 500);
+  }
+
+  if (productionApprovalEnabled) {
+    const { error: permissionError } = await setProductionApprovalPermission(
+      admin,
+      organizationId,
+      userId,
+      actorUserId,
+      true,
+    );
+    if (permissionError) {
+      await admin.from("organization_members").delete().eq("organization_id", organizationId).eq("user_id", userId);
+      await admin.from("profiles").delete().eq("id", userId);
+      await admin.auth.admin.deleteUser(userId);
+      return json({ error: permissionError.message }, 500);
+    }
   }
 
   return Response.json(
@@ -245,9 +336,10 @@ async function getManagedUser(organizationId: string, userId: string) {
 }
 
 export async function PATCH(request: Request) {
-  const organizationId = await getSuperAdminOrganization();
-  if (!organizationId)
+  const context = await getSuperAdminOrganization();
+  if (!context)
     return json({ error: "Only the Super Admin can manage users." }, 403);
+  const { organizationId, userId: actorUserId } = context;
   const body = (await request
     .json()
     .catch(() => null)) as UserOperationRequest | null;
@@ -286,6 +378,10 @@ export async function PATCH(request: Request) {
     body?.role === "sales_pricing_officer"
       ? body.role
       : null;
+  const productionApprovalRequested =
+    typeof body?.production_approval_enabled === "boolean"
+      ? body.production_approval_enabled
+      : null;
   if (
     !fullName ||
     !/^\S+@\S+\.\S+$/.test(email) ||
@@ -299,6 +395,30 @@ export async function PATCH(request: Request) {
       },
       400,
     );
+  if (productionApprovalRequested === true && role !== "sales_pricing_officer")
+    return json(
+      { error: "Production approval can only be assigned to a Sales & Pricing Officer." },
+      400,
+    );
+  let productionApprovalEnabled = productionApprovalRequested === true;
+  if (
+    role === "sales_pricing_officer" &&
+    productionApprovalRequested === null
+  ) {
+    const { data: existingPermission, error: permissionReadError } =
+      await managed.admin
+        .from("production_approval_permissions")
+        .select("is_active")
+        .eq("organization_id", organizationId)
+        .eq("user_id", userId)
+        .maybeSingle();
+    if (
+      permissionReadError &&
+      !isMissingProductionApprovalTable(permissionReadError)
+    )
+      return json({ error: permissionReadError.message }, 500);
+    productionApprovalEnabled = existingPermission?.is_active === true;
+  }
 
   const { error: authError } = await managed.admin.auth.admin.updateUserById(
     userId,
@@ -330,13 +450,23 @@ export async function PATCH(request: Request) {
     .eq("user_id", userId);
   if (membershipError) return json({ error: membershipError.message }, 500);
 
+  const { error: permissionError } = await setProductionApprovalPermission(
+    managed.admin,
+    organizationId,
+    userId,
+    actorUserId,
+    productionApprovalEnabled,
+  );
+  if (permissionError) return json({ error: permissionError.message }, 500);
+
   return Response.json({ message: "User account updated." });
 }
 
 export async function DELETE(request: Request) {
-  const organizationId = await getSuperAdminOrganization();
-  if (!organizationId)
+  const context = await getSuperAdminOrganization();
+  if (!context)
     return json({ error: "Only the Super Admin can manage users." }, 403);
+  const { organizationId, userId: actorUserId } = context;
   const body = (await request
     .json()
     .catch(() => null)) as UserOperationRequest | null;
@@ -345,6 +475,15 @@ export async function DELETE(request: Request) {
   const managed = await getManagedUser(organizationId, userId);
   if (!managed.admin || !managed.role || managed.error)
     return json({ error: managed.error ?? "Unable to delete the user." }, 400);
+
+  const { error: permissionError } = await setProductionApprovalPermission(
+    managed.admin,
+    organizationId,
+    userId,
+    actorUserId,
+    false,
+  );
+  if (permissionError) return json({ error: permissionError.message }, 500);
 
   const { error: membershipError } = await managed.admin
     .from("organization_members")
