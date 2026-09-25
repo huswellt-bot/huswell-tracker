@@ -7923,7 +7923,7 @@ function ProjectCalendar({
               setOpen(true);
             }}
           >
-            <Plus size={14} /> Request production
+            <Plus size={14} /> Add Due Date
           </Button>
         ) : undefined
       }
