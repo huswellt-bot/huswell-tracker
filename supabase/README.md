@@ -144,6 +144,8 @@
 142. Run `160_unified_kpi_sales_pipeline.sql` after migration 159 and before deploying the matching workspace update. It gives every non-Super-Admin KPI page the same organization-wide, month-aware Sales Pipeline aggregate while preserving the existing role-specific GUI.
 143. Run `161_supplier_directory.sql` after migration 160 and before deploying the matching Supplier's List workspace update. It adds supplier project/social fields, repeatable email and contact-number storage, and permits Sales & Pricing Officers to create supplier records while retaining General Manager control of edits, availability, and deletion.
 144. Run `162_supplier_country_and_products_services.sql` after migration 161 and before deploying the matching Supplier's List workspace update. It adds GM-managed supplier countries, searchable product/service descriptions, clears only legacy supplier Mock Up project-type values, and guards new or edited supplier data without changing quotation project types.
+145. Run `163_production_approval_permissions.sql` after migration 162 and before deploying the matching production-approval update. It adds the Super Admin-controlled production approval permission and its role, RLS, and production-review guards.
+146. Run `164_fix_production_approval_activity_log.sql` after migration 163 and before retrying production-approval permission changes. It replaces the incompatible generic audit trigger with a composite-key-aware trigger without changing permission data.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 

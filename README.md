@@ -38,4 +38,4 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 ## Production approval delegate migration
 
-Apply 163_production_approval_permissions.sql after migration 162 and before deploying the matching application update. It adds the Super Admin-controlled production approval permission, its RLS boundary, and the protected review RPC rules for production requests, schedule revisions, and project completion requests. Apply it through the approved Supabase migration path; pushing the repository does not apply database SQL.
+Apply 163_production_approval_permissions.sql after migration 162 and 164_fix_production_approval_activity_log.sql after migration 163, before deploying the matching application update. Migration 163 adds the Super Admin-controlled production approval permission, its RLS boundary, and the protected review RPC rules for production requests, schedule revisions, and project completion requests. Migration 164 fixes its composite-key-aware activity audit trigger. Apply both through the approved Supabase migration path; pushing the repository does not apply database SQL.
