@@ -22,11 +22,8 @@ type RpcImportResult = {
   invalid_count?: number;
 };
 
-const jsonError = (
-  message: string,
-  status = 400,
-  details?: Record<string, unknown>,
-) => Response.json({ error: message, ...details }, { status });
+const jsonError = (message: string, status = 400) =>
+  Response.json({ error: message }, { status });
 
 const getOrganizationId = (value: unknown) =>
   typeof value === "string" && value.trim() ? value.trim() : null;
@@ -87,7 +84,6 @@ export async function POST(request: Request) {
       return jsonError("Excel files must be smaller than 5 MB.");
     }
 
-    const aiAvailable = Boolean(process.env.LEAD_IMPORT_AI_API_KEY?.trim());
     let workbook: XLSX.WorkBook;
     try {
       workbook = XLSX.read(await file.arrayBuffer(), {
@@ -105,7 +101,6 @@ export async function POST(request: Request) {
       return jsonError(
         error instanceof Error ? error.message : "Unable to interpret the Excel file.",
         400,
-        { ai_fallback_available: aiAvailable },
       );
     }
 
@@ -138,7 +133,6 @@ export async function POST(request: Request) {
         file_name: file.name,
         sheet_name: parsed.sheetName,
         header_row_number: parsed.headerRowIndex + 1,
-        ai_available: aiAvailable,
         total_rows: rows.length,
         invalid_count: invalidRows,
         duplicate_count: result.duplicate_count ?? duplicateRows.size,
