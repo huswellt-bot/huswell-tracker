@@ -5157,8 +5157,7 @@ function Records({
     canActOnLead(row) &&
     !text(row.endorsed_by, "") &&
     !text(row.endorsed_to, "") &&
-    !text(row.endorsed_at, "") &&
-    text(row.endorsement_history_locked, "false") !== "true";
+    !text(row.endorsed_at, "");
   const pendingLeadUnendorsement = (row: Row) =>
     store.lead_unendorsement_requests.find(
       (request) =>

@@ -148,6 +148,7 @@
 146. Run `164_fix_production_approval_activity_log.sql` after migration 163 and before retrying production-approval permission changes. It replaces the incompatible generic audit trigger with a composite-key-aware trigger without changing permission data.
 147. Run `165_add_instagram_outbound_method.sql` before using Instagram in the Add Lead Outbound Method dropdown. It preserves existing lead values and adds Instagram to the database constraint.
 148. Run `166_add_instagram_to_lead_excel_import.sql` after migration 165 and before deploying the matching lead-import update. It adds Instagram to both the Excel preview parser and the transactional import RPC while preserving existing security and duplicate checks.
+149. Run `167_allow_lead_reendorsement_after_unendorsement.sql` after migration 166 and before deploying the matching Leads workspace update. It allows a new active endorsement after an approved unendorsement while retaining the immutable endorsement history marker, audit entries, and historical private images.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 
