@@ -19057,7 +19057,7 @@ function CommissionSummaryView({
   const dialogSummaryValues = formHasQuotation
     ? {
         ...summaryValues,
-        receivable_balance: String(calculatedReceivableBalance),
+        receivable_balance: peso.format(calculatedReceivableBalance ?? 0),
       }
     : summaryValues;
   const quotationOptions = eligibleQuotations.map(
@@ -19069,7 +19069,7 @@ function CommissionSummaryView({
         { key: "commission_rate", label: "Commission %", type: "number", required: true },
         { key: "va_commission_rate", label: "VA Commission %", type: "number", required: true },
         { key: "downpayment_amount", label: "Downpayment Amount", type: "number", required: true },
-        { key: "receivable_balance", label: "Receivable / Due Balance", type: "number", required: true, readOnly: true, hint: "Automatically calculated as Grand Total minus Downpayment Amount." },
+        { key: "receivable_balance", label: "Receivable / Due Balance", type: "text", required: true, readOnly: true },
         { key: "payment_due_date", label: "Payment Due Date", type: "date", required: true },
       ]
     : [
@@ -19077,7 +19077,7 @@ function CommissionSummaryView({
         { key: "commission_rate", label: "Commission %", type: "number", required: true },
         { key: "va_commission_rate", label: "VA Commission %", type: "number", required: true },
         { key: "downpayment_amount", label: "Downpayment Amount", type: "number", required: true },
-        { key: "receivable_balance", label: "Receivable / Due Balance", type: "number", required: true, readOnly: true, hint: "Automatically calculated as Grand Total minus Downpayment Amount." },
+        { key: "receivable_balance", label: "Receivable / Due Balance", type: "text", required: true, readOnly: true },
         { key: "payment_due_date", label: "Payment Due Date", type: "date", required: true },
       ];
   const formatStatus = (summary: Row) =>
@@ -19287,13 +19287,13 @@ function CommissionSummaryView({
         >
           {editingSummary ? (
             <p className="mt-3 mb-3 rounded-lg bg-[#fafbfc] p-3 text-[12px] text-[#687386]">
-              {text(editingSummary.quotation_no)} · Grand total {peso.format(n(editingSummary.grand_total))}. Paid records cannot be edited.
+              {text(editingSummary.quotation_no)} · Grand total <b className="text-[13px] font-semibold text-[#176b40]">{peso.format(n(editingSummary.grand_total))}</b>. Paid records cannot be edited.
             </p>
           ) : selectedQuotation ? (
             <p className="mt-3 mb-3 rounded-lg bg-[#fafbfc] p-3 text-[12px] text-[#687386]">
               Preparator: <b>{text(selectedQuotation.preparator_name, userName(selectedQuotation.preparator_user_id))}</b>
               {Boolean(selectedQuotation.va_endorser_user_id) && <> · VA endorser: <b>{text(selectedQuotation.va_endorser_name, userName(selectedQuotation.va_endorser_user_id))}</b></>}
-              <br />Grand total: <b>{peso.format(n(selectedQuotation.grand_total))}</b>
+              <br />Grand total: <b className="text-[13px] font-semibold text-[#176b40]">{peso.format(n(selectedQuotation.grand_total))}</b>
             </p>
           ) : null}
           {summaryError && <p role="alert" className="mb-3 text-sm text-[#b42318]">{summaryError}</p>}
