@@ -917,6 +917,7 @@ const wholePeso = new Intl.NumberFormat("en-PH", {
 const confidentialPricingValue = "••••";
 const n = (value: unknown) =>
   Number.isFinite(Number(value)) ? Number(value) : 0;
+const roundCurrency = (value: number) => Math.round(value * 100) / 100;
 const normalizeDisplayText = (value: string) =>
   value
     .replaceAll("â€”", "-")
@@ -18948,7 +18949,18 @@ function CommissionSummaryView({
       const commissionRate = n(summaryValues.commission_rate);
       const vaCommissionRate = n(summaryValues.va_commission_rate);
       const downpaymentAmount = n(summaryValues.downpayment_amount);
-      const receivableBalance = n(summaryValues.receivable_balance);
+      const grandTotal = editingSummary
+        ? n(editingSummary.grand_total)
+        : n(selectedQuotation?.grand_total);
+      if (!editingSummary && !selectedQuotation) {
+        throw new Error("Select a Price Quotation.");
+      }
+      if (downpaymentAmount > grandTotal) {
+        throw new Error("Downpayment Amount cannot exceed the Grand Total.");
+      }
+      const receivableBalance = roundCurrency(
+        Math.max(grandTotal - downpaymentAmount, 0),
+      );
       const paymentDueDate = text(summaryValues.payment_due_date, "").trim();
       if (!paymentDueDate) throw new Error("Payment Due Date is required.");
       if (editingSummary) {
@@ -19033,6 +19045,21 @@ function CommissionSummaryView({
       text(quotation.quotation_id, "") ===
       text(summaryValues.quotation_id, "").split("|")[0],
   );
+  const formGrandTotal = editingSummary
+    ? n(editingSummary.grand_total)
+    : n(selectedQuotation?.grand_total);
+  const formHasQuotation = Boolean(editingSummary || selectedQuotation);
+  const calculatedReceivableBalance = formHasQuotation
+    ? roundCurrency(
+        Math.max(formGrandTotal - n(summaryValues.downpayment_amount), 0),
+      )
+    : null;
+  const dialogSummaryValues = formHasQuotation
+    ? {
+        ...summaryValues,
+        receivable_balance: String(calculatedReceivableBalance),
+      }
+    : summaryValues;
   const quotationOptions = eligibleQuotations.map(
     (quotation) =>
       `${text(quotation.quotation_id)}|${text(quotation.quotation_no, "Price Quotation")} · ${text(quotation.client_name, "Unnamed client")} · ${peso.format(n(quotation.grand_total))}`,
@@ -19042,7 +19069,7 @@ function CommissionSummaryView({
         { key: "commission_rate", label: "Commission %", type: "number", required: true },
         { key: "va_commission_rate", label: "VA Commission %", type: "number", required: true },
         { key: "downpayment_amount", label: "Downpayment Amount", type: "number", required: true },
-        { key: "receivable_balance", label: "Receivable / Due Balance", type: "number", required: true },
+        { key: "receivable_balance", label: "Receivable / Due Balance", type: "number", required: true, readOnly: true, hint: "Automatically calculated as Grand Total minus Downpayment Amount." },
         { key: "payment_due_date", label: "Payment Due Date", type: "date", required: true },
       ]
     : [
@@ -19050,7 +19077,7 @@ function CommissionSummaryView({
         { key: "commission_rate", label: "Commission %", type: "number", required: true },
         { key: "va_commission_rate", label: "VA Commission %", type: "number", required: true },
         { key: "downpayment_amount", label: "Downpayment Amount", type: "number", required: true },
-        { key: "receivable_balance", label: "Receivable / Due Balance", type: "number", required: true },
+        { key: "receivable_balance", label: "Receivable / Due Balance", type: "number", required: true, readOnly: true, hint: "Automatically calculated as Grand Total minus Downpayment Amount." },
         { key: "payment_due_date", label: "Payment Due Date", type: "date", required: true },
       ];
   const formatStatus = (summary: Row) =>
@@ -19236,7 +19263,7 @@ function CommissionSummaryView({
         <Dialog
           title={editingSummary ? "Edit Commission Summary" : "Add Commission Summary"}
           fields={summaryFields}
-          values={summaryValues}
+          values={dialogSummaryValues}
           setValues={setSummaryValues}
           save={() => void saveSummary()}
           close={closeSummaryForm}
