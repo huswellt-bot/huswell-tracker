@@ -19286,20 +19286,17 @@ function CommissionSummaryView({
           }}
         >
           {editingSummary ? (
-            <p className="mb-3 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px] text-[#687386]">
+            <p className="mt-3 mb-3 rounded-lg bg-[#fafbfc] p-3 text-[12px] text-[#687386]">
               {text(editingSummary.quotation_no)} · Grand total {peso.format(n(editingSummary.grand_total))}. Paid records cannot be edited.
             </p>
           ) : selectedQuotation ? (
-            <p className="mb-3 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px] text-[#687386]">
+            <p className="mt-3 mb-3 rounded-lg bg-[#fafbfc] p-3 text-[12px] text-[#687386]">
               Preparator: <b>{text(selectedQuotation.preparator_name, userName(selectedQuotation.preparator_user_id))}</b>
               {Boolean(selectedQuotation.va_endorser_user_id) && <> · VA endorser: <b>{text(selectedQuotation.va_endorser_name, userName(selectedQuotation.va_endorser_user_id))}</b></>}
               <br />Grand total: <b>{peso.format(n(selectedQuotation.grand_total))}</b>
             </p>
           ) : null}
           {summaryError && <p role="alert" className="mb-3 text-sm text-[#b42318]">{summaryError}</p>}
-          <p className="text-[11px] leading-5 text-[#687386]">
-            Commission is computed from the VAT-inclusive Grand Total. The percentage values are saved on this row, so later changes to GM Settings affect new summaries only.
-          </p>
         </Dialog>
       )}
 
