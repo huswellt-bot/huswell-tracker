@@ -130,13 +130,12 @@ type View =
   | "Announcements"
   | "Policy"
   | "Settings"
-  | "Commissions"
+  | "My Commission Summary"
   | "Profile";
 
 const TEMPORARILY_HIDDEN_VIEWS: ReadonlyArray<View> = [
   "Payment Monitoring",
   "Payment Reviews",
-  "Commissions",
 ];
 
 const isTemporarilyHiddenView = (view: View) =>
@@ -186,7 +185,8 @@ type TableName =
   | "activity_log"
   | "leads"
   | "supplier_payables"
-  | "organization_members";
+  | "organization_members"
+  | "commission_summaries";
 type Row = { id?: string; [key: string]: unknown };
 type Store = Record<TableName, Row[]>;
 type ApprovalDecision = "approved" | "rejected";
@@ -899,6 +899,7 @@ const tables: TableName[] = [
   "leads",
   "supplier_payables",
   "organization_members",
+  "commission_summaries",
 ];
 const blank = (): Store =>
   Object.fromEntries(tables.map((t) => [t, []])) as unknown as Store;
@@ -1611,6 +1612,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "pricing_officer_project_types",
     "lead_unendorsement_requests",
     "lead_endorsement_attachments",
+    "commission_summaries",
   ],
   sales: [
     "business_settings",
@@ -1641,6 +1643,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "policies",
   ],
   accountant: [
+    "profiles",
     "customers",
     "suppliers",
     "employees",
@@ -1652,6 +1655,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "expenses",
     "cash_flow_entries",
     "supplier_payables",
+    "commission_summaries",
     "announcements",
     "policies",
   ],
@@ -1731,7 +1735,7 @@ const workspaceViewTables = (
     view === "Leads" &&
     (leadMode === "leads" || leadMode === "lead_change_requests")
   )
-    return ["leads", "profiles", "organization_members", "lead_change_requests", "lead_unendorsement_requests", "lead_endorsement_attachments"];
+    return ["leads", "quotations", "profiles", "organization_members", "lead_change_requests", "lead_unendorsement_requests", "lead_endorsement_attachments"];
   if (view === "Projects")
     return [
       "project_schedules",
@@ -1801,7 +1805,11 @@ const workspaceViewTables = (
       "customers",
       "suppliers",
       "supplier_payables",
+      "commission_summaries",
+      "profiles",
     ];
+  if (view === "My Commission Summary")
+    return ["commission_summaries", "profiles"];
   if (view === "Payroll & Leave")
     return ["employees", "payroll_periods", "payroll_entries", "leave_requests"];
   if (view === "Directory") return ["customers", "suppliers", "employees"];
@@ -1818,7 +1826,6 @@ const workspaceViewTables = (
       "organization_members",
       "pricing_officer_project_types",
     ];
-  if (view === "Commissions") return ["quotations", "profiles", "organization_members"];
   if (view === "Approvals" || view === "Submissions")
     return [
       "quotations",
@@ -5149,10 +5156,20 @@ function Records({
     !isProjectsPage &&
     isProjectOfficerRole(role) &&
     canActOnLead(row);
+  const leadHasApprovedPriceQuotation = (row: Row) =>
+    module.table === "leads" &&
+    store.quotations.some(
+      (quotation) =>
+        text(quotation.lead_id, "") === text(row.id, "") &&
+        text(quotation.document_type, "") === "price_quotation" &&
+        !quotation.costing_source_id &&
+        text(quotation.status, "") === "approved",
+    );
   const canEndorseLead = (row: Row) =>
     module.table === "leads" &&
     !isProjectsPage &&
     isProjectOfficerRole(role) &&
+    !leadHasApprovedPriceQuotation(row) &&
     pricingOfficers.some((officer) => officer.id !== currentUserId) &&
     canActOnLead(row) &&
     !text(row.endorsed_by, "") &&
@@ -5168,6 +5185,7 @@ function Records({
     module.table === "leads" &&
     !isProjectsPage &&
     isProjectOfficerRole(role) &&
+    !leadHasApprovedPriceQuotation(row) &&
     text(row.endorsed_by, "") === currentUserId &&
     Boolean(text(row.endorsed_to, "")) &&
     !pendingLeadUnendorsement(row);
@@ -5175,6 +5193,7 @@ function Records({
     module.table === "leads" &&
     !isProjectsPage &&
     role === "sales_pricing_officer" &&
+    !leadHasApprovedPriceQuotation(row) &&
     text(row.endorsed_to, "") === currentUserId &&
     Boolean(pendingLeadUnendorsement(row));
   const canEditRow = (row: Row) =>
@@ -5273,7 +5292,9 @@ function Records({
           </>
         )}
         {unendorsementRequest && !canReviewLeadUnendorsement(row) && (
-          <span className="self-center text-[10px] font-medium text-[#a76605]">Unendorsement pending</span>
+          <span className="self-center text-[10px] font-medium text-[#a76605]">
+            {leadHasApprovedPriceQuotation(row) ? "Endorsement locked after approval" : "Unendorsement pending"}
+          </span>
         )}
         {onPrint && (
           <ActionIcon
@@ -17674,6 +17695,7 @@ function FinanceReports({
   notice: (m: string) => void;
   role: string;
 }) {
+  const [financeSection, setFinanceSection] = useState<"overview" | "commission_summary">("overview");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const inRange = (value: unknown) => {
@@ -17744,8 +17766,39 @@ function FinanceReports({
       sum + Math.max(n(payable.amount) - n(payable.amount_paid), 0),
     0,
   );
+  const sectionTabs = (
+    <div className="flex flex-wrap gap-2" role="tablist" aria-label="Finance sections">
+      <Button
+        secondary={financeSection !== "overview"}
+        onClick={() => setFinanceSection("overview")}
+      >
+        Finance overview
+      </Button>
+      <Button
+        secondary={financeSection !== "commission_summary"}
+        onClick={() => setFinanceSection("commission_summary")}
+      >
+        Commission Summary
+      </Button>
+    </div>
+  );
+  if (financeSection === "commission_summary") {
+    return (
+      <div className="space-y-5">
+        {sectionTabs}
+        <CommissionSummaryView
+          store={store}
+          orgId={orgId}
+          reload={reload}
+          notice={notice}
+          role={role}
+        />
+      </div>
+    );
+  }
   return (
     <div className="space-y-5">
+      {sectionTabs}
       <div className="flex flex-wrap items-end gap-3 rounded-[14px] border border-[#d9e0e9] bg-white p-4">
         <label className="text-[12px] font-medium">
           From
@@ -18739,200 +18792,504 @@ function Approvals({
   );
 }
 
-function CommissionsView({ store, role }: { store: Store; role: string }) {
-  const [rows, setRows] = useState<Row[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
+function CommissionSummaryView({
+  store,
+  orgId,
+  reload,
+  notice,
+  role,
+  readOnly = false,
+}: {
+  store: Store;
+  orgId: string;
+  reload: () => Promise<void>;
+  notice: (m: string) => void;
+  role: string;
+  readOnly?: boolean;
+}) {
+  const canManage = !readOnly && (memberRole(role) || role === "accountant");
+  const canUndoPaid = !readOnly && memberRole(role);
+  const [eligibleQuotations, setEligibleQuotations] = useState<Row[]>([]);
+  const [officerOptions, setOfficerOptions] = useState<Row[]>([]);
+  const [eligibleError, setEligibleError] = useState("");
   const [commissionQuery, setCommissionQuery] = useState("");
-  const [commissionMonth, setCommissionMonth] = useState("");
-  const [commissionOfficerFilter, setCommissionOfficerFilter] = useState("all");
-  const [payoutRow, setPayoutRow] = useState<Row | null>(null);
-  const [payoutValues, setPayoutValues] = useState<Record<string, string>>({});
-  const [payoutSaving, setPayoutSaving] = useState(false);
-  const [payoutError, setPayoutError] = useState("");
-  const isGeneralManager = memberRole(role);
-  const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
-  const loadCommissions = useCallback(async () => {
-    setLoading(true);
-    setLoadError("");
-    const { data, error } = await createClient().rpc("sales_project_officer_commissions");
-    if (error) {
-      setRows([]);
-      setLoadError(error.message);
-    } else {
-      setRows((data ?? []) as Row[]);
+  const [officerFilter, setOfficerFilter] = useState("all");
+  const [summaryFormOpen, setSummaryFormOpen] = useState(false);
+  const [editingSummary, setEditingSummary] = useState<Row | null>(null);
+  const [summaryValues, setSummaryValues] = useState<Record<string, string>>({});
+  const [summaryError, setSummaryError] = useState("");
+  const [summarySaving, setSummarySaving] = useState(false);
+  const [undoRow, setUndoRow] = useState<Row | null>(null);
+  const [undoValues, setUndoValues] = useState<Record<string, string>>({ reason: "" });
+  const [undoError, setUndoError] = useState("");
+  const [undoSaving, setUndoSaving] = useState(false);
+  const [paidId, setPaidId] = useState<string | null>(null);
+  const summarySignature = store.commission_summaries
+    .map((summary) => `${text(summary.id)}:${text(summary.status)}`)
+    .join(",");
+
+  const loadEligibleQuotations = useCallback(async () => {
+    if (!canManage) return;
+    setEligibleError("");
+    const client = createClient();
+    const [eligibleResponse, officerResponse] = await Promise.all([
+      client.rpc("commission_summary_eligible_quotations", {
+        p_organization_id: orgId,
+      }),
+      client.rpc("commission_summary_officer_options", {
+        p_organization_id: orgId,
+      }),
+    ]);
+    if (eligibleResponse.error) {
+      setEligibleQuotations([]);
+      setEligibleError(eligibleResponse.error.message);
+      return;
     }
-    setLoading(false);
-  }, []);
+    if (officerResponse.error) {
+      setOfficerOptions([]);
+      setEligibleError(officerResponse.error.message);
+    } else {
+      setOfficerOptions((officerResponse.data ?? []) as Row[]);
+    }
+    setEligibleQuotations((eligibleResponse.data ?? []) as Row[]);
+  }, [canManage, orgId]);
+
   useEffect(() => {
-    void loadCommissions();
-  }, [loadCommissions]);
-  const quoteFor = (row: Row) => store.quotations.find((quote) => quote.id === row.quotation_id);
-  const officerName = (row: Row) =>
+    void loadEligibleQuotations();
+  }, [loadEligibleQuotations, summarySignature]);
+
+  const userName = (userId: unknown, fallback = "Sales & Pricing Officer") =>
     text(
-      store.profiles.find((profile) => profile.id === row.officer_user_id)?.full_name,
-      "Sales staff",
+      store.profiles.find((profile) => profile.id === userId)?.full_name,
+      fallback,
     );
+  const officerIds = Array.from(
+    new Set([
+      ...officerOptions.map((officer) => text(officer.user_id, "")),
+      ...store.commission_summaries.flatMap((summary) =>
+        [summary.preparator_user_id, summary.va_endorser_user_id]
+          .map((userId) => text(userId, ""))
+          .filter(Boolean),
+      ),
+    ]),
+  );
   const normalizedQuery = commissionQuery.trim().toLowerCase();
-  const filteredRows = rows.filter((row) => {
-    const quotation = quoteFor(row);
-    const commissionDate = text(
-      row.last_verified_at ?? quotation?.approved_at ?? quotation?.issue_date ?? quotation?.created_at,
-      "",
-    );
-    if (commissionMonth && commissionDate.slice(0, 7) !== commissionMonth) return false;
-    if (isGeneralManager && commissionOfficerFilter !== "all" && text(row.officer_user_id, "") !== commissionOfficerFilter) return false;
+  const filteredRows = store.commission_summaries.filter((summary) => {
+    if (
+      officerFilter !== "all" &&
+      ![summary.preparator_user_id, summary.va_endorser_user_id].some(
+        (userId) => text(userId, "") === officerFilter,
+      )
+    )
+      return false;
     if (!normalizedQuery) return true;
     return [
-      row.quotation_no,
-      row.project_name,
-      row.client_name,
-      officerName(row),
+      summary.quotation_no,
+      summary.project_name,
+      summary.client_name,
+      userName(summary.preparator_user_id),
+      summary.va_endorser_user_id
+        ? userName(summary.va_endorser_user_id)
+        : "",
     ].some((value) => text(value, "").toLowerCase().includes(normalizedQuery));
   });
-  const paid = filteredRows.reduce((sum, row) => sum + n(row.paid_amount), 0);
-  const earned = filteredRows.reduce((sum, row) => sum + n(row.earned_commission), 0);
-  const paidOut = filteredRows.reduce((sum, row) => sum + n(row.paid_out_commission), 0);
-  const payable = filteredRows.reduce((sum, row) => sum + n(row.payable_commission), 0);
-  const openPayout = (row: Row) => {
-    setPayoutError("");
-    setPayoutValues({
-      amount: n(row.payable_commission).toFixed(2),
-      reference_no: "",
-      notes: "",
+  const commissionTotal = filteredRows.reduce(
+    (sum, summary) => sum + n(summary.commission_amount),
+    0,
+  );
+  const vaCommissionTotal = filteredRows.reduce(
+    (sum, summary) => sum + n(summary.va_commission_amount),
+    0,
+  );
+  const totalCommission = commissionTotal + vaCommissionTotal;
+
+  const openCreate = () => {
+    setEditingSummary(null);
+    setSummaryError("");
+    setSummaryValues({
+      quotation_id: "",
+      commission_rate: "",
+      va_commission_rate: "",
+      downpayment_amount: "",
+      receivable_balance: "",
+      payment_due_date: "",
     });
-    setPayoutRow(row);
+    setSummaryFormOpen(true);
   };
-  const savePayout = async () => {
-    if (!payoutRow) return;
-    const amount = n(payoutValues.amount);
-    const payableAmount = n(payoutRow.payable_commission);
-    if (amount <= 0) {
-      setPayoutError("Enter a payout amount greater than zero.");
-      return;
+  const openEdit = (summary: Row) => {
+    setEditingSummary(summary);
+    setSummaryError("");
+    setSummaryValues({
+      commission_rate: String(n(summary.commission_rate)),
+      va_commission_rate: String(n(summary.va_commission_rate)),
+      downpayment_amount: String(n(summary.downpayment_amount)),
+      receivable_balance: String(n(summary.receivable_balance)),
+      payment_due_date: text(summary.payment_due_date, "").slice(0, 10),
+    });
+    setSummaryFormOpen(true);
+  };
+  const closeSummaryForm = () => {
+    if (!summarySaving) {
+      setSummaryError("");
+      setSummaryFormOpen(false);
+      setEditingSummary(null);
     }
-    if (amount > payableAmount) {
-      setPayoutError(`Payout cannot exceed the earned unpaid commission of ${peso.format(payableAmount)}.`);
-      return;
-    }
-    setPayoutSaving(true);
-    setPayoutError("");
+  };
+  const refreshSummaryData = async () => {
+    await reload();
+    await loadEligibleQuotations();
+  };
+  const saveSummary = async () => {
+    setSummarySaving(true);
+    setSummaryError("");
     try {
-      const { error } = await createClient().rpc("mark_sales_commission_paid", {
-        p_quotation_id: payoutRow.quotation_id,
-        p_amount: amount,
-        p_reference_no: payoutValues.reference_no.trim() || null,
-        p_notes: payoutValues.notes.trim() || null,
-      });
-      if (error) throw error;
-      setPayoutRow(null);
-      await loadCommissions();
+      const client = createClient();
+      const commissionRate = n(summaryValues.commission_rate);
+      const vaCommissionRate = n(summaryValues.va_commission_rate);
+      const downpaymentAmount = n(summaryValues.downpayment_amount);
+      const receivableBalance = n(summaryValues.receivable_balance);
+      const paymentDueDate = text(summaryValues.payment_due_date, "").trim();
+      if (!paymentDueDate) throw new Error("Payment Due Date is required.");
+      if (editingSummary) {
+        const { error } = await client.rpc("update_commission_summary", {
+          p_summary_id: editingSummary.id,
+          p_downpayment_amount: downpaymentAmount,
+          p_receivable_balance: receivableBalance,
+          p_payment_due_date: paymentDueDate,
+          p_commission_rate: commissionRate,
+          p_va_commission_rate: vaCommissionRate,
+        });
+        if (error) throw error;
+        notice("Commission Summary updated.");
+      } else {
+        const quotationId = text(summaryValues.quotation_id, "").split("|")[0];
+        if (!quotationId) throw new Error("Select a Price Quotation.");
+        const { error } = await client.rpc("create_commission_summary", {
+          p_quotation_id: quotationId,
+          p_downpayment_amount: downpaymentAmount,
+          p_receivable_balance: receivableBalance,
+          p_payment_due_date: paymentDueDate,
+          p_commission_rate: commissionRate,
+          p_va_commission_rate: vaCommissionRate,
+        });
+        if (error) throw error;
+        notice("Commission Summary added.");
+      }
+      setSummaryFormOpen(false);
+      setEditingSummary(null);
+      await refreshSummaryData();
     } catch (error) {
-      setPayoutError(error instanceof Error ? error.message : "Commission payout could not be saved.");
+      setSummaryError(
+        error instanceof Error
+          ? error.message
+          : "Commission Summary could not be saved.",
+      );
     } finally {
-      setPayoutSaving(false);
+      setSummarySaving(false);
     }
   };
+  const markPaid = async (summary: Row) => {
+    const summaryId = text(summary.id, "");
+    if (!summaryId) return;
+    setPaidId(summaryId);
+    const { error } = await createClient().rpc("mark_commission_summary_paid", {
+      p_summary_id: summaryId,
+    });
+    setPaidId(null);
+    if (error) return notice(error.message);
+    notice("Commission and VA Commission marked paid.");
+    await refreshSummaryData();
+  };
+  const openUndo = (summary: Row) => {
+    setUndoRow(summary);
+    setUndoValues({ reason: "" });
+    setUndoError("");
+  };
+  const undoPaid = async () => {
+    if (!undoRow) return;
+    const reason = text(undoValues.reason, "").trim();
+    if (reason.length < 3) {
+      setUndoError("Enter a reason before undoing Paid status.");
+      return;
+    }
+    setUndoSaving(true);
+    setUndoError("");
+    const { error } = await createClient().rpc("undo_commission_summary_paid", {
+      p_summary_id: undoRow.id,
+      p_reason: reason,
+    });
+    setUndoSaving(false);
+    if (error) {
+      setUndoError(error.message);
+      return;
+    }
+    setUndoRow(null);
+    notice("Paid status undone. The Commission Summary can be edited again.");
+    await refreshSummaryData();
+  };
+  const selectedQuotation = eligibleQuotations.find(
+    (quotation) =>
+      text(quotation.quotation_id, "") ===
+      text(summaryValues.quotation_id, "").split("|")[0],
+  );
+  const quotationOptions = eligibleQuotations.map(
+    (quotation) =>
+      `${text(quotation.quotation_id)}|${text(quotation.quotation_no, "Price Quotation")} · ${text(quotation.client_name, "Unnamed client")} · ${peso.format(n(quotation.grand_total))}`,
+  );
+  const summaryFields: Field[] = editingSummary
+    ? [
+        { key: "commission_rate", label: "Commission %", type: "number", required: true },
+        { key: "va_commission_rate", label: "VA Commission %", type: "number", required: true },
+        { key: "downpayment_amount", label: "Downpayment Amount", type: "number", required: true },
+        { key: "receivable_balance", label: "Receivable / Due Balance", type: "number", required: true },
+        { key: "payment_due_date", label: "Payment Due Date", type: "date", required: true },
+      ]
+    : [
+        { key: "quotation_id", label: "Price Quotation", type: "select", required: true, options: quotationOptions },
+        { key: "commission_rate", label: "Commission %", type: "number", required: true },
+        { key: "va_commission_rate", label: "VA Commission %", type: "number", required: true },
+        { key: "downpayment_amount", label: "Downpayment Amount", type: "number", required: true },
+        { key: "receivable_balance", label: "Receivable / Due Balance", type: "number", required: true },
+        { key: "payment_due_date", label: "Payment Due Date", type: "date", required: true },
+      ];
+  const formatStatus = (summary: Row) =>
+    summary.status === "paid" ? "Paid" : "Not yet paid";
   return (
     <div className="space-y-5">
       <Panel
-        title={isProjectOfficerRole(role) ? "My commissions" : "Sales commissions"}
-        detail="Commission uses the VAT-exclusive quotation value. It earns from verified client receipts: first PHP 300,000 at 3%, then the balance at 5%."
+        title={readOnly ? "My Commission Summary" : "Commission Summary"}
+        detail={
+          readOnly
+            ? "View Commission and eligible VA Commission for Price Quotations you prepared or endorsed."
+            : "Add one summary for each direct Price Quotation whose production job is In Production."
+        }
+        action={
+          canManage ? (
+            <Button
+              onClick={openCreate}
+              disabled={!eligibleQuotations.length}
+            >
+              <Plus size={14} />
+              Add commission
+            </Button>
+          ) : undefined
+        }
       >
-        <div className="grid gap-2 p-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px]"><p className="text-[#687386]">Verified client payments</p><p className="mt-1 text-[16px] font-semibold text-[#202938]">{peso.format(paid)}</p></div>
-          <div className="rounded-[8px] border border-[#b7dfc5] bg-[#f1fbf4] p-3 text-[12px]"><p className="text-[#687386]">Commission earned</p><p className="mt-1 text-[16px] font-semibold text-[#176b40]">{peso.format(earned)}</p></div>
-          <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px]"><p className="text-[#687386]">Commission paid out</p><p className="mt-1 text-[16px] font-semibold text-[#202938]">{peso.format(paidOut)}</p></div>
-          <div className="rounded-[8px] border border-[#f1d294] bg-[#fff8e9] p-3 text-[12px]"><p className="text-[#687386]">Commission payable</p><p className="mt-1 text-[16px] font-semibold text-[#a76605]">{peso.format(payable)}</p></div>
+        <div className="grid gap-2 border-b border-[#e4e8ef] p-4 sm:grid-cols-3">
+          <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px]">
+            <p className="text-[#687386]">Commission total</p>
+            <p className="mt-1 text-[16px] font-semibold text-[#202938]">{peso.format(commissionTotal)}</p>
+          </div>
+          <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px]">
+            <p className="text-[#687386]">VA Commission total</p>
+            <p className="mt-1 text-[16px] font-semibold text-[#202938]">{peso.format(vaCommissionTotal)}</p>
+          </div>
+          <div className="rounded-[8px] border border-[#b7dfc5] bg-[#f1fbf4] p-3 text-[12px]">
+            <p className="text-[#687386]">Total commission</p>
+            <p className="mt-1 text-[16px] font-semibold text-[#176b40]">{peso.format(totalCommission)}</p>
+          </div>
         </div>
-        <div className="px-4 sm:px-5">
-          <WorkspaceListFilters
-            query={commissionQuery}
-            onQueryChange={setCommissionQuery}
-            queryPlaceholder="Search quotation, client, or staff"
-            month={commissionMonth}
-            onMonthChange={setCommissionMonth}
-            monthLabel="Commission month"
-            showOfficer={isGeneralManager}
-            officerFilter={commissionOfficerFilter}
-            onOfficerChange={setCommissionOfficerFilter}
-            officerOptions={projectOfficers}
-            onClear={() => {
-              setCommissionQuery("");
-              setCommissionMonth("");
-              setCommissionOfficerFilter("all");
-            }}
-            hasFilters={Boolean(commissionQuery || commissionMonth || commissionOfficerFilter !== "all")}
-          />
+        <div className="flex flex-wrap items-end gap-3 border-b border-[#e4e8ef] px-4 py-3 sm:px-5">
+          <label className="min-w-56 flex-1 text-[12px] font-medium">
+            Search
+            <input
+              value={commissionQuery}
+              onChange={(event) => setCommissionQuery(event.target.value)}
+              placeholder="Quotation, client, or officer"
+              className="input mt-1"
+            />
+          </label>
+          {canManage && (
+            <label className="min-w-56 text-[12px] font-medium">
+              Pricing officer
+              <select
+                value={officerFilter}
+                onChange={(event) => setOfficerFilter(event.target.value)}
+                className="input mt-1"
+              >
+                <option value="all">All pricing officers</option>
+                {officerIds.map((userId) => (
+                  <option key={userId} value={userId}>
+                    {text(
+                      officerOptions.find((officer) => text(officer.user_id, "") === userId)?.full_name,
+                      userName(userId),
+                    )}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {(commissionQuery || officerFilter !== "all") && (
+            <Button
+              secondary
+              onClick={() => {
+                setCommissionQuery("");
+                setOfficerFilter("all");
+              }}
+            >
+              Clear filters
+            </Button>
+          )}
         </div>
-        {loading ? (
-          <Empty>Loading commissions...</Empty>
-        ) : loadError ? (
-          <Empty>Commission data could not be loaded: {loadError}</Empty>
-        ) : filteredRows.length ? (
+        {canManage && eligibleError && (
+          <p role="alert" className="border-b border-[#f1d0d0] bg-[#fff6f6] px-4 py-3 text-[12px] text-[#b42318] sm:px-5">
+            Eligible quotations could not be loaded: {eligibleError}
+          </p>
+        )}
+        {filteredRows.length ? (
           <Table
-            labels={isGeneralManager
-              ? ["Officer", "Quotation", "Client", "Base VAT excl.", "Client paid", "Payment", "Projected", "Earned", "Paid out", "Payable", "Payout", "Actions"]
-              : ["Quotation", "Client", "Base VAT excl.", "Client paid", "Payment", "Projected", "Earned", "Paid out", "Payable", "Payout"]}
-            minWidth={isGeneralManager ? 1540 : 1220}
+            labels={[
+              "Quotation",
+              "Client / project",
+              "Grand total",
+              "Preparator / Commission",
+              "VA endorser / VA Commission",
+              "Downpayment",
+              "Receivable / due balance",
+              "Payment due date",
+              "Total commission",
+              "Status",
+              ...(canManage ? ["Actions"] : []),
+            ]}
+            minWidth={canManage ? 1660 : 1460}
           >
-            {filteredRows.map((row) => (
-              <tr key={text(row.quotation_id)}>
-                {isGeneralManager && <td className="px-4 py-3 font-medium">{officerName(row)}</td>}
-                <td className="px-4 py-3">{stackedCell(row.quotation_no, row.project_name)}</td>
-                <td className="px-4 py-3">{text(row.client_name)}</td>
-                <td className="px-4 py-3 text-right">{peso.format(n(row.quoted_amount))}</td>
-                <td className="px-4 py-3 text-right">{peso.format(n(row.paid_amount))}</td>
-                <td className="px-4 py-3"><Status value={text(row.payment_status)} /></td>
-                <td className="px-4 py-3 text-right">{peso.format(n(row.projected_commission))}</td>
-                <td className="px-4 py-3 text-right font-semibold text-[var(--color-success)]">{peso.format(n(row.earned_commission))}</td>
-                <td className="px-4 py-3 text-right">{peso.format(n(row.paid_out_commission))}</td>
-                <td className="px-4 py-3 text-right font-semibold text-[var(--color-success)]">{peso.format(n(row.payable_commission))}</td>
-                <td className="px-4 py-3"><Status value={text(row.payout_status)} /></td>
-                {isGeneralManager && (
+            {filteredRows.map((summary) => {
+              const hasLeadEndorsement = Boolean(summary.lead_endorser_user_id);
+              const rowTotal = n(summary.commission_amount) + n(summary.va_commission_amount);
+              return (
+                <tr key={text(summary.id)}>
+                  <td className="px-4 py-3">{stackedCell(summary.quotation_no, text(summary.created_at, "").slice(0, 10))}</td>
+                  <td className="px-4 py-3">{stackedCell(summary.client_name, summary.project_name)}</td>
+                  <td className="px-4 py-3 text-right font-medium">{peso.format(n(summary.grand_total))}</td>
                   <td className="px-4 py-3">
-                    <Button
-                      tone="green"
-                      compact
-                      onClick={() => openPayout(row)}
-                      disabled={n(row.payable_commission) <= 0}
-                    >
-                      <PhilippinePeso className="h-3.5 w-3.5" aria-hidden="true" />
-                      Pay
-                    </Button>
+                    {stackedCell(userName(summary.preparator_user_id), `${n(summary.commission_rate)}% · ${peso.format(n(summary.commission_amount))}`)}
                   </td>
-                )}
-              </tr>
-            ))}
+                  <td className="px-4 py-3">
+                    {stackedCell(
+                      summary.va_endorser_user_id
+                        ? userName(summary.va_endorser_user_id)
+                        : hasLeadEndorsement
+                          ? "No eligible VA recipient"
+                          : "—",
+                      summary.va_endorser_user_id
+                        ? `${n(summary.va_commission_rate)}% · ${peso.format(n(summary.va_commission_amount))}`
+                        : "No VA Commission",
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right">{peso.format(n(summary.downpayment_amount))}</td>
+                  <td className="px-4 py-3 text-right">{peso.format(n(summary.receivable_balance))}</td>
+                  <td className="px-4 py-3">{day(summary.payment_due_date)}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-[#176b40]">{peso.format(rowTotal)}</td>
+                  <td className="px-4 py-3"><Status value={formatStatus(summary)} /></td>
+                  {canManage && (
+                    <td className="px-4 py-3">
+                      <div className="flex flex-wrap gap-2">
+                        {summary.status !== "paid" ? (
+                          <>
+                            <Button secondary compact onClick={() => openEdit(summary)}>
+                              <Pencil size={13} />
+                              Edit
+                            </Button>
+                            <Button
+                              tone="green"
+                              compact
+                              confirm
+                              confirmationText="Mark both Commission and VA Commission as paid?"
+                              disabled={paidId === text(summary.id, "")}
+                              loading={paidId === text(summary.id, "")}
+                              onClick={() => void markPaid(summary)}
+                            >
+                              <Check size={13} />
+                              Paid
+                            </Button>
+                          </>
+                        ) : canUndoPaid ? (
+                          <Button secondary compact onClick={() => openUndo(summary)}>
+                            <RotateCcw size={13} />
+                            Undo paid
+                          </Button>
+                        ) : (
+                          <span className="self-center text-[11px] text-[#687386]">Read-only after paid</span>
+                        )}
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
           </Table>
         ) : (
-          <Empty>{rows.length ? "No commissions match the selected filters." : "No approved quotations with commission eligibility yet."}</Empty>
+          <Empty>
+            {store.commission_summaries.length
+              ? "No Commission Summaries match the selected filters."
+              : canManage
+                ? eligibleQuotations.length
+                  ? "No summaries yet. Select Add commission to record an eligible production quotation."
+                  : "No direct approved Price Quotations are currently In Production and waiting for a summary."
+                : "No Commission Summary records are assigned to you yet."}
+          </Empty>
         )}
       </Panel>
 
-      {isGeneralManager && payoutRow && (
+      {canManage && summaryFormOpen && (
         <Dialog
-          title="Record commission payout"
-          fields={[
-            { key: "amount", label: "Payout amount", type: "number", required: true, hint: `Earned unpaid commission: ${peso.format(n(payoutRow.payable_commission))}` },
-            { key: "reference_no", label: "Reference number", type: "text", placeholder: "Optional payout reference" },
-            { key: "notes", label: "Notes", type: "textarea", placeholder: "Optional payout note" },
-          ]}
-          values={payoutValues}
-          setValues={setPayoutValues}
-          save={() => void savePayout()}
-          close={() => {
-            if (payoutSaving) return;
-            setPayoutError("");
-            setPayoutRow(null);
+          title={editingSummary ? "Edit Commission Summary" : "Add Commission Summary"}
+          fields={summaryFields}
+          values={summaryValues}
+          setValues={setSummaryValues}
+          save={() => void saveSummary()}
+          close={closeSummaryForm}
+          saving={summarySaving}
+          saveLabel={editingSummary ? "Save changes" : "Add commission"}
+          className="max-w-2xl"
+          onFieldChange={(key, value, current) => {
+            if (key !== "quotation_id") return { ...current, [key]: value };
+            const quotation = eligibleQuotations.find(
+              (candidate) => text(candidate.quotation_id, "") === value.split("|")[0],
+            );
+            return {
+              ...current,
+              [key]: value,
+              commission_rate: quotation ? String(n(quotation.commission_default_rate)) : "",
+              va_commission_rate: quotation?.va_endorser_user_id
+                ? String(n(quotation.va_commission_default_rate))
+                : "0",
+            };
           }}
-          saving={payoutSaving}
-          saveLabel="Record payout"
         >
-          <p className="mb-3 text-sm text-[var(--color-text-muted)]">
-            This records company payment to {officerName(payoutRow)}. It does not change the client payment receipt.
+          {editingSummary ? (
+            <p className="mb-3 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px] text-[#687386]">
+              {text(editingSummary.quotation_no)} · Grand total {peso.format(n(editingSummary.grand_total))}. Paid records cannot be edited.
+            </p>
+          ) : selectedQuotation ? (
+            <p className="mb-3 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px] text-[#687386]">
+              Preparator: <b>{text(selectedQuotation.preparator_name, userName(selectedQuotation.preparator_user_id))}</b>
+              {Boolean(selectedQuotation.va_endorser_user_id) && <> · VA endorser: <b>{text(selectedQuotation.va_endorser_name, userName(selectedQuotation.va_endorser_user_id))}</b></>}
+              <br />Grand total: <b>{peso.format(n(selectedQuotation.grand_total))}</b>
+            </p>
+          ) : null}
+          {summaryError && <p role="alert" className="mb-3 text-sm text-[#b42318]">{summaryError}</p>}
+          <p className="text-[11px] leading-5 text-[#687386]">
+            Commission is computed from the VAT-inclusive Grand Total. The percentage values are saved on this row, so later changes to GM Settings affect new summaries only.
           </p>
-          {payoutError && <p role="alert" className="mb-3 text-sm text-[var(--color-danger)]">{payoutError}</p>}
+        </Dialog>
+      )}
+
+      {canUndoPaid && undoRow && (
+        <Dialog
+          title="Undo paid Commission Summary"
+          fields={[{ key: "reason", label: "Reason", type: "textarea", required: true, placeholder: "Explain why this paid record must be reopened." }]}
+          values={undoValues}
+          setValues={setUndoValues}
+          save={() => void undoPaid()}
+          close={() => { if (!undoSaving) setUndoRow(null); }}
+          saving={undoSaving}
+          saveLabel="Undo paid status"
+        >
+          <p className="mb-3 rounded-lg border border-[#f1d294] bg-[#fff8e9] p-3 text-[12px] text-[#805b17]">
+            This returns the row to Not yet paid and makes its fields editable again. The reason is retained in the activity history.
+          </p>
+          {undoError && <p role="alert" className="mb-3 text-sm text-[#b42318]">{undoError}</p>}
         </Dialog>
       )}
     </div>
@@ -18958,6 +19315,9 @@ function SettingsView({
   const [pricingDefaultsOpen, setPricingDefaultsOpen] = useState(false);
   const [pricingDefaults, setPricingDefaults] = useState<Record<string, string>>({});
   const [savingPricingDefaults, setSavingPricingDefaults] = useState(false);
+  const [commissionDefaultsOpen, setCommissionDefaultsOpen] = useState(false);
+  const [commissionDefaults, setCommissionDefaults] = useState<Record<string, string>>({});
+  const [savingCommissionDefaults, setSavingCommissionDefaults] = useState(false);
   const [customMarkupOpen, setCustomMarkupOpen] = useState(false);
   const [customMarkupValues, setCustomMarkupValues] = useState<Record<string, string>>({ label: "", value: "" });
   const [settingsSensitiveValuesHidden, setSettingsSensitiveValuesHidden] = useState(false);
@@ -19158,6 +19518,29 @@ function SettingsView({
     }));
     if (await persistPricingDefaults(defaults)) setPricingDefaultsOpen(false);
   };
+  const saveCommissionDefaults = async () => {
+    const commissionRate = n(commissionDefaults.commission_rate);
+    const vaCommissionRate = n(commissionDefaults.va_commission_rate);
+    if (commissionRate < 0 || commissionRate > 100) {
+      notice("Commission percentage must be between 0 and 100.");
+      return;
+    }
+    if (vaCommissionRate < 0 || vaCommissionRate > 100) {
+      notice("VA Commission percentage must be between 0 and 100.");
+      return;
+    }
+    setSavingCommissionDefaults(true);
+    const { error } = await createClient().rpc("save_commission_defaults", {
+      p_organization_id: orgId,
+      p_commission_rate: commissionRate,
+      p_va_commission_rate: vaCommissionRate,
+    });
+    setSavingCommissionDefaults(false);
+    if (error) return notice(error.message);
+    setCommissionDefaultsOpen(false);
+    notice("Commission defaults saved.");
+    await reload();
+  };
   const addCustomMarkup = async () => {
     const label = text(customMarkupValues.label, "").trim();
     const value = text(customMarkupValues.value, "").trim();
@@ -19185,6 +19568,7 @@ function SettingsView({
         setBankDetailsOpen(false);
         setPricingDefaultsOpen(false);
         setCustomMarkupOpen(false);
+        setCommissionDefaultsOpen(false);
       }
       return next;
     });
@@ -19209,6 +19593,40 @@ function SettingsView({
       </Panel>
       {pricingDefaultsOpen && <Dialog title="Pricing defaults - Internal" fields={pricingDefaultEntries.map((definition) => ({ key: `${definition.key}_value`, label: definition.label, type: "number" as const, required: true }))} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => { if (!savingPricingDefaults) setPricingDefaultsOpen(false); }} saving={savingPricingDefaults} saveLabel="Save pricing defaults" className="max-w-lg" compact />}
       {customMarkupOpen && <Dialog title="Add custom markup" fields={[{ key: "label", label: "Markup name", required: true }, { key: "value", label: "Percentage", type: "number" as const, required: true }]} values={customMarkupValues} setValues={setCustomMarkupValues} save={() => void addCustomMarkup()} close={() => { if (!savingPricingDefaults) setCustomMarkupOpen(false); }} saving={savingPricingDefaults} saveLabel="Add markup" className="max-w-lg" compact><p className="mt-3 rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3 text-[11px] leading-5 text-[#687386]">This markup is included in computed pricing and used as a default for new quotations. The privacy button only masks this Settings screen; it does not change calculations or quotation workflow.</p></Dialog>}
+      <Panel
+        title="Commission Summary defaults"
+        detail="Defaults for new Commission Summary rows. These are separate from quotation selling-price markups; existing summaries keep their saved rates."
+        action={
+          memberRole(role) ? (
+            <Button
+              secondary
+              disabled={settingsSensitiveValuesHidden}
+              onClick={() => {
+                setCommissionDefaults({
+                  commission_rate: text(setting?.commission_default_rate, "5"),
+                  va_commission_rate: text(setting?.va_commission_default_rate, "0"),
+                });
+                setCommissionDefaultsOpen(true);
+              }}
+            >
+              <Settings size={14} />
+              Edit commission defaults
+            </Button>
+          ) : undefined
+        }
+      >
+        <Table labels={["Commission type", "Default percentage"]}>
+          <tr className={settingsSensitiveValuesHidden ? "bg-[#fafbfc] text-[#8b92a1]" : undefined}>
+            <td className="px-4 py-3 font-medium">Commission · Price Quotation preparator</td>
+            <td className="px-4 py-3 text-right">{settingsSensitiveValuesHidden ? "Hidden" : `${n(setting?.commission_default_rate ?? 5)}%`}</td>
+          </tr>
+          <tr className={settingsSensitiveValuesHidden ? "bg-[#fafbfc] text-[#8b92a1]" : undefined}>
+            <td className="px-4 py-3 font-medium">VA Commission · eligible lead endorser</td>
+            <td className="px-4 py-3 text-right">{settingsSensitiveValuesHidden ? "Hidden" : `${n(setting?.va_commission_default_rate ?? 0)}%`}</td>
+          </tr>
+        </Table>
+      </Panel>
+      {commissionDefaultsOpen && <Dialog title="Commission Summary defaults" fields={[{ key: "commission_rate", label: "Commission %", type: "number", required: true }, { key: "va_commission_rate", label: "VA Commission %", type: "number", required: true }]} values={commissionDefaults} setValues={setCommissionDefaults} save={() => void saveCommissionDefaults()} close={() => { if (!savingCommissionDefaults) setCommissionDefaultsOpen(false); }} saving={savingCommissionDefaults} saveLabel="Save commission defaults" className="max-w-lg" compact><p className="mt-3 rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3 text-[11px] leading-5 text-[#687386]">Commission uses the VAT-inclusive Grand Total. VA Commission is applied only when the active lead endorsement was made by a Sales &amp; Pricing Officer to the officer who prepared the quotation.</p></Dialog>}
       {canManageSupplierCountries && (
         <Panel
           title="Supplier country options"
@@ -19726,6 +20144,7 @@ export function HuswellWorkspace({
       "Price Quotations",
       "Price Quotation Review",
       "Quotation Costing Overview",
+      "My Commission Summary",
       "Announcements",
       "Policy",
     ],
@@ -19863,6 +20282,7 @@ export function HuswellWorkspace({
       items: [
         { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
+        { view: "My Commission Summary", icon: PhilippinePeso },
       ],
     },
   ] : [
@@ -20028,9 +20448,9 @@ export function HuswellWorkspace({
       title: "Business settings",
       detail: "Manage business defaults, profile details, and staff access.",
     },
-    Commissions: {
-      title: isProjectOfficerRole(role) ? "My commissions" : "Sales Executive commissions",
-      detail: "Track commission earned from actual customer payments.",
+    "My Commission Summary": {
+      title: "My Commission Summary",
+      detail: "View Commission and VA Commission assigned to your Price Quotations.",
     },
     Announcements: {
       title: "Announcements",
@@ -20183,6 +20603,15 @@ export function HuswellWorkspace({
         notice={setMessage}
         role={role}
       />
+    ) : active === "My Commission Summary" ? (
+      <CommissionSummaryView
+        store={store}
+        orgId={organizationId}
+        reload={reload}
+        notice={setMessage}
+        role={role}
+        readOnly
+      />
     ) : active === "Payroll & Leave" ? (
       <PayrollLeave
         store={store}
@@ -20253,8 +20682,6 @@ export function HuswellWorkspace({
         policyAction={policyAction}
         onPolicyActionHandled={() => setPolicyAction(null)}
       />
-    ) : active === "Commissions" ? (
-      <CommissionsView store={store} role={role} />
     ) : (
       <SettingsView
         store={store}
