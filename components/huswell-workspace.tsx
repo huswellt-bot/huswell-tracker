@@ -19062,7 +19062,7 @@ function CommissionSummaryView({
         detail={
           readOnly
             ? "View Commission and eligible VA Commission for Price Quotations you prepared or endorsed."
-            : "Add one summary for each direct Price Quotation whose production job is Queued."
+            : "Add one summary for each direct Price Quotation with an approved active Project Calendar due date."
         }
         action={
           canManage ? (
@@ -19226,7 +19226,7 @@ function CommissionSummaryView({
               : canManage
                 ? eligibleQuotations.length
                   ? "No summaries yet. Select Add commission to record an eligible production quotation."
-                  : "No direct approved Price Quotations are currently Queued and waiting for a summary."
+                  : "No direct approved Price Quotations with an approved active Project Calendar due date are waiting for a summary."
                 : "No Commission Summary records are assigned to you yet."}
           </Empty>
         )}
