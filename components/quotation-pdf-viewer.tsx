@@ -7,6 +7,7 @@ import {
   type QuotationPdfRow,
   type QuotationPdfStore,
 } from "@/components/huswell-workspace";
+import { ThemeToggle } from "@/components/theme-provider";
 
 export function QuotationPdfViewer({
   quote,
@@ -65,19 +66,22 @@ export function QuotationPdfViewer({
               {String(quote.quotation_no ?? "Quotation")}
             </p>
           </div>
-          {pdfUrl && (
-            <a
-              href={pdfUrl}
-              download={`${quote.quotation_no ?? "quotation"}.pdf`}
-              className="rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[13px] font-medium text-[var(--color-text-primary)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-subtle)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)]"
-            >
-              Download PDF
-            </a>
-          )}
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            {pdfUrl && (
+              <a
+                href={pdfUrl}
+                download={`${quote.quotation_no ?? "quotation"}.pdf`}
+                className="rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[13px] font-medium text-[var(--color-text-primary)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-subtle)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)]"
+              >
+                Download PDF
+              </a>
+            )}
+          </div>
         </header>
         {error ? (
           <div className="grid flex-1 place-items-center p-6 text-center">
-            <p className="text-[13px] text-[var(--color-danger)]">{error}</p>
+            <p className="text-[13px] text-[var(--color-danger-text)]">{error}</p>
           </div>
         ) : pdfUrl ? (
           <iframe

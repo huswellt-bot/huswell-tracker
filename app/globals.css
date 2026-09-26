@@ -27,6 +27,30 @@
   --color-danger: #dc2626;
   --color-success: #16a34a;
   --color-warning: #d97706;
+  --color-danger-text: var(--color-danger);
+  --color-success-text: var(--color-success);
+  --color-warning-text: var(--color-warning);
+  --color-danger-subtle: color-mix(in srgb, var(--color-danger) 8%, white);
+  --color-danger-border: color-mix(in srgb, var(--color-danger) 30%, white);
+  --color-success-subtle: color-mix(in srgb, var(--color-success) 8%, white);
+  --color-success-border: color-mix(in srgb, var(--color-success) 30%, white);
+  --color-warning-subtle: color-mix(in srgb, var(--color-warning) 10%, white);
+  --color-warning-border: color-mix(in srgb, var(--color-warning) 30%, white);
+  --color-overlay: color-mix(in srgb, #151922 30%, transparent);
+  --color-overlay-subtle: color-mix(in srgb, #151922 20%, transparent);
+  --color-overlay-strong: color-mix(in srgb, #151922 40%, transparent);
+  --color-chart-primary: #1769e8;
+  --color-chart-secondary: #159957;
+  --color-chart-grid: #edf0f5;
+  --color-chart-axis: #8b92a1;
+  --color-chart-cursor: #cfd7e3;
+  --color-chart-tooltip-bg: #ffffff;
+  --color-chart-tooltip-border: #e4e8ef;
+  --color-chart-tooltip-text: #151922;
+  --color-chart-tooltip-muted: #626b7a;
+  --color-chart-positive: #218b55;
+  --color-chart-negative: #b42318;
+  --color-chart-zero: #d9e0e9;
   --canvas: var(--color-bg);
   --surface: var(--color-surface);
   --surface-muted: var(--color-surface-subtle);
@@ -167,6 +191,46 @@
   --font-size-display-lg: var(--font-size-display);
   --line-height-display-lg: 1.2;
   --control-min-height: 32px;
+}
+
+html.dark {
+  color-scheme: dark;
+  --color-bg: #111827;
+  --color-surface: #182334;
+  --color-surface-subtle: #243041;
+  --color-border: #344255;
+  --color-border-strong: #536175;
+  --color-text-primary: #f3f4f6;
+  --color-text-secondary: #cbd5e1;
+  --color-text-disabled: #64748b;
+  --color-text-tertiary: #94a3b8;
+  --color-sidebar-label: #d1d5db;
+  --color-sidebar-icon: #94a3b8;
+  --color-accent-subtle: color-mix(in srgb, var(--brand) 18%, var(--color-surface-subtle));
+  --color-accent-border: color-mix(in srgb, var(--brand) 55%, var(--color-border));
+  --color-accent-text: color-mix(in srgb, var(--brand) 72%, white);
+  --color-danger-text: #fca5a5;
+  --color-success-text: #86efac;
+  --color-warning-text: #fbbf24;
+  --color-danger-subtle: color-mix(in srgb, var(--color-danger) 18%, var(--color-surface));
+  --color-danger-border: color-mix(in srgb, var(--color-danger) 45%, var(--color-border));
+  --color-success-subtle: color-mix(in srgb, var(--color-success) 18%, var(--color-surface));
+  --color-success-border: color-mix(in srgb, var(--color-success) 45%, var(--color-border));
+  --color-warning-subtle: color-mix(in srgb, var(--color-warning) 18%, var(--color-surface));
+  --color-warning-border: color-mix(in srgb, var(--color-warning) 45%, var(--color-border));
+  --color-overlay: color-mix(in srgb, #000000 48%, transparent);
+  --color-overlay-subtle: color-mix(in srgb, #000000 34%, transparent);
+  --color-overlay-strong: color-mix(in srgb, #000000 64%, transparent);
+  --color-chart-grid: #344255;
+  --color-chart-axis: #94a3b8;
+  --color-chart-cursor: #536175;
+  --color-chart-tooltip-bg: #182334;
+  --color-chart-tooltip-border: #536175;
+  --color-chart-tooltip-text: #f3f4f6;
+  --color-chart-tooltip-muted: #cbd5e1;
+  --color-chart-positive: #86efac;
+  --color-chart-negative: #fca5a5;
+  --color-chart-zero: #536175;
 }
 
 @theme inline {
@@ -425,6 +489,10 @@ select:not([multiple]) {
 }
 .huswell-sidebar-logo {
   filter: none;
+}
+html.dark .huswell-brand-logo {
+  filter: url("#huswell-logo-transparent");
+  mix-blend-mode: screen;
 }
 .auth-card form > button {
   padding: var(--space-control-y) var(--space-control-x);
@@ -920,16 +988,16 @@ select option[value=""] {
   box-shadow: none;
 }
 .table-action--success:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-success) 8%, white);
-  color: var(--success);
+  background: var(--color-success-subtle);
+  color: var(--color-success-text);
 }
 .table-action--warning:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-warning) 10%, white);
-  color: var(--warning);
+  background: var(--color-warning-subtle);
+  color: var(--color-warning-text);
 }
 .table-action--danger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--color-danger) 8%, white);
-  color: var(--danger);
+  background: var(--color-danger-subtle);
+  color: var(--color-danger-text);
 }
 
 @layer base {
@@ -1063,6 +1131,18 @@ select option[value=""] {
   color: var(--color-accent-text) !important;
 }
 
+/* Dark mode remaps remaining legacy light utility colors while preserving
+   explicit document/PDF markup and the targeted semantic mappings below. */
+:where(html.dark) .compact-ui :not([data-pdf-document], [data-pdf-document] *)[class*="bg-white"],
+:where(html.dark) .compact-ui :not([data-pdf-document], [data-pdf-document] *)[class*="bg-[#e"],
+:where(html.dark) .compact-ui :not([data-pdf-document], [data-pdf-document] *)[class*="bg-[#f"] {
+  background-color: var(--color-surface) !important;
+}
+
+:where(html.dark) .compact-ui :not([data-pdf-document], [data-pdf-document] *)[class*="text-[#"] {
+  color: var(--color-text-primary) !important;
+}
+
 .compact-ui header,
 .super-admin-console header,
 .quotation-pdf-viewer header {
@@ -1128,7 +1208,7 @@ select option[value=""] {
 .compact-ui [class*="bg-[#061426]/"],
 .auth-page [class*="bg-[#151922]/"],
 .super-admin-console [class*="bg-[#151922]/"] {
-  background-color: color-mix(in srgb, var(--color-text-primary) 30%, transparent) !important;
+  background-color: var(--color-overlay) !important;
 }
 
 .compact-ui [class*="bg-white/"],
@@ -1171,39 +1251,39 @@ select option[value=""] {
 .compact-ui [class*="bg-[#eff7f1]"],
 .compact-ui [class*="bg-[#ecfdf3]"],
 .super-admin-console [class*="bg-[#edf9f2]"] {
-  background-color: color-mix(in srgb, var(--color-success) 8%, white) !important;
+  background-color: var(--color-success-subtle) !important;
 }
 
 .compact-ui [class*="text-[#16854f]"],
 .compact-ui [class*="text-[#176b40]"],
 .compact-ui [class*="text-[#218b55]"],
 .super-admin-console [class*="text-[#218b55]"] {
-  color: var(--color-success) !important;
+  color: var(--color-success-text) !important;
 }
 
 .compact-ui [class*="bg-[#fff8e8]"],
 .compact-ui [class*="bg-[#fff8e9]"],
 .compact-ui [class*="bg-[#fff4dd]"] {
-  background-color: color-mix(in srgb, var(--color-warning) 10%, white) !important;
+  background-color: var(--color-warning-subtle) !important;
 }
 
 .compact-ui [class*="text-[#d98a1d]"],
 .compact-ui [class*="text-[#a76605]"],
 .compact-ui [class*="text-[#9a6700]"] {
-  color: var(--color-warning) !important;
+  color: var(--color-warning-text) !important;
 }
 
 .compact-ui [class*="bg-[#fff0f0]"],
 .compact-ui [class*="bg-[#fff0f1]"],
 .compact-ui [class*="bg-[#fef3f2]"],
 .super-admin-console [class*="bg-[#b42318]"] {
-  background-color: color-mix(in srgb, var(--color-danger) 8%, white) !important;
+  background-color: var(--color-danger-subtle) !important;
 }
 
 .compact-ui [class*="text-[#b42318]"],
 .compact-ui [class*="text-[#b4232d]"],
 .super-admin-console [class*="text-[#b42318]"] {
-  color: var(--color-danger) !important;
+  color: var(--color-danger-text) !important;
 }
 
 .compact-ui [class*="text-[#c43b43]"],

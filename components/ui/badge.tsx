@@ -6,8 +6,8 @@ const badgeVariants = cva("inline-flex rounded-[var(--radius-control)] border px
   variants: {
     variant: {
       default: "border-[var(--color-accent-border)] bg-[var(--color-accent-subtle)] text-[var(--color-accent-text)]",
-      success: "border-[color-mix(in_srgb,var(--color-success)_30%,white)] bg-[color-mix(in_srgb,var(--color-success)_8%,white)] text-[var(--color-success)]",
-      warning: "border-[color-mix(in_srgb,var(--color-warning)_30%,white)] bg-[color-mix(in_srgb,var(--color-warning)_10%,white)] text-[var(--color-warning)]",
+      success: "border-[var(--color-success-border)] bg-[var(--color-success-subtle)] text-[var(--color-success-text)]",
+      warning: "border-[var(--color-warning-border)] bg-[var(--color-warning-subtle)] text-[var(--color-warning-text)]",
       muted: "border-[var(--color-border)] bg-[var(--color-surface-subtle)] text-[var(--color-text-secondary)]",
     },
   },

@@ -21,6 +21,7 @@ import {
 import { useRouter } from "next/navigation";
 import { AccountProfileDialog } from "@/components/account-profile-dialog";
 import { FixedIconTooltip } from "@/components/fixed-icon-tooltip";
+import { ThemeToggle } from "@/components/theme-provider";
 import { createClient } from "@/lib/supabase/client";
 import { quotationProjectTypes } from "@/lib/quotation-project-types";
 import { workspaceAccountLabel, workspaceRoleLabel } from "@/lib/role-labels";
@@ -304,7 +305,7 @@ export function SuperAdminConsole({
               width={489}
               height={153}
               priority
-              className="h-auto w-28"
+              className="huswell-brand-logo h-auto w-28"
             />
             <span className="hidden h-8 w-px bg-[#dfe5ed] sm:block" />
             <div>
@@ -315,6 +316,7 @@ export function SuperAdminConsole({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             <button
               type="button"
               onClick={() => setProfileOpen(true)}

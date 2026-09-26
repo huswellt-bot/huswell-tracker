@@ -87,6 +87,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { AccountProfileDialog } from "@/components/account-profile-dialog";
 import { FixedIconTooltip } from "@/components/fixed-icon-tooltip";
+import { ThemeToggle } from "@/components/theme-provider";
 import {
   quotationProjectTypeColors,
   quotationProjectTypes,
@@ -2487,7 +2488,7 @@ function ConfirmationDialog({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-[70] grid place-items-center bg-[color-mix(in_srgb,var(--color-text-primary)_30%,transparent)] p-4"
+      className="fixed inset-0 z-[70] grid place-items-center bg-[var(--color-overlay)] p-4"
       role="presentation"
     >
       <section
@@ -2612,7 +2613,7 @@ function NoteDialog({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-[70] grid place-items-center bg-[color-mix(in_srgb,var(--color-text-primary)_30%,transparent)] p-4"
+      className="fixed inset-0 z-[70] grid place-items-center bg-[var(--color-overlay)] p-4"
       role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
@@ -3598,8 +3599,8 @@ function MonthlyPerformanceChart({
   data,
   primaryLabel = "Invoiced revenue",
   secondaryLabel = "Recorded expenses",
-  primaryColor = "#1769e8",
-  secondaryColor = "#159957",
+  primaryColor = "var(--color-chart-primary)",
+  secondaryColor = "var(--color-chart-secondary)",
 }: {
   data: MonthlyPerformancePoint[];
   primaryLabel?: string;
@@ -3614,7 +3615,7 @@ function MonthlyPerformanceChart({
 
   return (
     <div className="px-4 pb-4 pt-1 sm:px-5">
-      <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] text-[#626b7a]">
+      <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] text-[var(--color-chart-tooltip-muted)]">
         <span className="inline-flex items-center gap-2">
           <i className="size-2 rounded-full" style={{ backgroundColor: primaryColor }} /> {primaryLabel}
         </span>
@@ -3635,18 +3636,18 @@ function MonthlyPerformanceChart({
                 <stop offset="95%" stopColor={secondaryColor} stopOpacity={0.01} />
               </linearGradient>
             </defs>
-            <CartesianGrid vertical={false} stroke="#edf0f5" strokeDasharray="3 5" />
-            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "#8b92a1", fontSize: 10 }} dy={8} />
-            <YAxis axisLine={false} tickLine={false} tick={{ fill: "#8b92a1", fontSize: 10 }} tickFormatter={(value) => compact.format(value)} width={42} />
+            <CartesianGrid vertical={false} stroke="var(--color-chart-grid)" strokeDasharray="3 5" />
+            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "var(--color-chart-axis)", fontSize: 10 }} dy={8} />
+            <YAxis axisLine={false} tickLine={false} tick={{ fill: "var(--color-chart-axis)", fontSize: 10 }} tickFormatter={(value) => compact.format(value)} width={42} />
             <Tooltip
-              cursor={{ stroke: "#cfd7e3", strokeDasharray: "3 3" }}
-              contentStyle={{ borderRadius: 10, border: "1px solid #e4e8ef", boxShadow: "0 10px 24px rgb(16 24 40 / 12%)", padding: "9px 11px" }}
-              labelStyle={{ color: "#151922", fontSize: 12, fontWeight: 600, marginBottom: 5 }}
-              itemStyle={{ color: "#626b7a", fontSize: 11, padding: 0 }}
+              cursor={{ stroke: "var(--color-chart-cursor)", strokeDasharray: "3 3" }}
+              contentStyle={{ borderRadius: 10, border: "1px solid var(--color-chart-tooltip-border)", backgroundColor: "var(--color-chart-tooltip-bg)", boxShadow: "none", padding: "9px 11px" }}
+              labelStyle={{ color: "var(--color-chart-tooltip-text)", fontSize: 12, fontWeight: 600, marginBottom: 5 }}
+              itemStyle={{ color: "var(--color-chart-tooltip-muted)", fontSize: 11, padding: 0 }}
               formatter={(value, name) => [peso.format(Number(value)), name === "revenue" ? primaryLabel : secondaryLabel]}
             />
-            <Area type="monotone" dataKey="expense" name="expense" stroke={secondaryColor} strokeWidth={2.25} fill="url(#dashboard-secondary-area)" activeDot={{ r: 4, fill: secondaryColor, stroke: "#fff", strokeWidth: 2 }} />
-            <Area type="monotone" dataKey="revenue" name="revenue" stroke={primaryColor} strokeWidth={2.75} fill="url(#dashboard-primary-area)" activeDot={{ r: 4, fill: primaryColor, stroke: "#fff", strokeWidth: 2 }} />
+            <Area type="monotone" dataKey="expense" name="expense" stroke={secondaryColor} strokeWidth={2.25} fill="url(#dashboard-secondary-area)" activeDot={{ r: 4, fill: secondaryColor, stroke: "var(--color-surface)", strokeWidth: 2 }} />
+            <Area type="monotone" dataKey="revenue" name="revenue" stroke={primaryColor} strokeWidth={2.75} fill="url(#dashboard-primary-area)" activeDot={{ r: 4, fill: primaryColor, stroke: "var(--color-surface)", strokeWidth: 2 }} />
           </AreaChart>
         </ResponsiveContainer>
       </div>
@@ -3674,7 +3675,7 @@ function CumulativePerformanceChart({
   const chartHeight = 132;
   const top = 16;
   const toY = (value: number) => top + ((max - value) / range) * chartHeight;
-  const lineColor = runningTotal >= 0 ? "#218b55" : "#b42318";
+  const lineColor = runningTotal >= 0 ? "var(--color-chart-positive)" : "var(--color-chart-negative)";
   const points = values
     .map((value, index) => {
       const x = left + (plotWidth / (data.length - 1)) * index;
@@ -3685,9 +3686,9 @@ function CumulativePerformanceChart({
 
   return (
     <div className="px-5 pb-5">
-      <div className="mb-3 flex items-center justify-between gap-3 text-[12px] text-[#626b7a]">
+      <div className="mb-3 flex items-center justify-between gap-3 text-[12px] text-[var(--color-chart-tooltip-muted)]">
         <span>Running income less expenses</span>
-        <b className={runningTotal >= 0 ? "text-[#218b55]" : "text-[#b42318]"}>
+        <b className={runningTotal >= 0 ? "text-[var(--color-chart-positive)]" : "text-[var(--color-chart-negative)]"}>
           {peso.format(runningTotal)}
         </b>
       </div>
@@ -3697,7 +3698,7 @@ function CumulativePerformanceChart({
         role="img"
         aria-label="Cumulative operating result by month"
       >
-        <line x1={left} x2="704" y1={zeroY} y2={zeroY} stroke="#d9e0e9" />
+        <line x1={left} x2="704" y1={zeroY} y2={zeroY} stroke="var(--color-chart-zero)" />
         <polyline
           points={points}
           fill="none"
@@ -3716,7 +3717,7 @@ function CumulativePerformanceChart({
                 x={x}
                 y="174"
                 textAnchor="middle"
-                fill="#8b92a1"
+                fill="var(--color-chart-axis)"
                 fontSize="10"
               >
                 {data[index].label}
@@ -3755,9 +3756,9 @@ function QuotationStatusPie({ data }: { data: [string, number][] }) {
         role="img"
         aria-label={`Quotation status distribution, ${total} quotations`}
       >
-        <div className="grid size-20 place-items-center rounded-full bg-white text-center">
+        <div className="grid size-20 place-items-center rounded-full bg-[var(--color-surface)] text-center">
           <b className="text-[22px] leading-none">{total}</b>
-          <span className="text-[11px] text-[#8b92a1]">quotes</span>
+          <span className="text-[11px] text-[var(--color-chart-axis)]">quotes</span>
         </div>
       </div>
       <div className="grid flex-1 gap-2">
@@ -3766,7 +3767,7 @@ function QuotationStatusPie({ data }: { data: [string, number][] }) {
             key={status}
             className="flex items-center justify-between gap-3 text-[13px]"
           >
-            <span className="inline-flex items-center gap-2 capitalize text-[#626b7a]">
+            <span className="inline-flex items-center gap-2 capitalize text-[var(--color-chart-tooltip-muted)]">
               <i
                 className="size-2 rounded-full"
                 style={{ backgroundColor: colors[index % colors.length] }}
@@ -5699,7 +5700,7 @@ function Records({
         </div>
         {leadDistributionOpen && (
           <div
-            className="fixed inset-0 z-50 flex justify-end bg-[color-mix(in_srgb,var(--color-text-primary)_30%,transparent)]"
+            className="fixed inset-0 z-50 flex justify-end bg-[var(--color-overlay)]"
             role="presentation"
           >
             <button
@@ -13615,7 +13616,7 @@ function RevisionRequestDialog({
   if (!open) return null;
   return (
     <div
-      className="fixed inset-0 z-[70] grid place-items-center bg-[color-mix(in_srgb,var(--color-text-primary)_30%,transparent)] p-4"
+      className="fixed inset-0 z-[70] grid place-items-center bg-[var(--color-overlay)] p-4"
       role="presentation"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget && !saving) onClose();
@@ -18525,8 +18526,8 @@ function Dashboard({
             data={sharedPerformance}
             primaryLabel="Total sales"
             secondaryLabel="Collections received"
-            primaryColor="#1769e8"
-            secondaryColor="#16854f"
+            primaryColor="var(--color-chart-primary)"
+            secondaryColor="var(--color-chart-secondary)"
           />
         </section>
       </div>
@@ -20812,7 +20813,7 @@ export function HuswellWorkspace({
         </div>
       </aside>
       {signOutOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-[color-mix(in_srgb,var(--color-text-primary)_30%,transparent)] p-4">
+        <div className="fixed inset-0 z-50 grid place-items-center bg-[var(--color-overlay)] p-4">
           <section
             role="dialog"
             aria-modal="true"
@@ -20855,7 +20856,7 @@ export function HuswellWorkspace({
       )}
       {mobile && (
         <button
-          className="fixed inset-0 z-20 bg-[color-mix(in_srgb,var(--color-text-primary)_20%,transparent)] lg:hidden"
+          className="fixed inset-0 z-20 bg-[var(--color-overlay-subtle)] lg:hidden"
           onClick={() => setMobile(false)}
           aria-label="Close navigation"
         />
@@ -20896,6 +20897,7 @@ export function HuswellWorkspace({
             <span className="max-w-[150px] truncate text-[11px] font-medium sm:max-w-[220px]">
               {workspaceAccountLabel(role)}
             </span>
+            <ThemeToggle />
             {canEditOwnProfile && isManagementRole ? (
               <button
                 type="button"
@@ -20922,7 +20924,7 @@ export function HuswellWorkspace({
         </header>
         <div className={`workspace-content ${(["Projects", "Price Quotations", "Price Quotation Review", "Approvals", "Payment Monitoring", "Payment Reviews", "Announcements", "Policy"].includes(active)) ? "p-0" : "p-2 sm:p-3 lg:p-4"}`}>
           {message && (
-            <div className="fixed inset-0 z-[999] grid place-items-center bg-[color-mix(in_srgb,var(--color-text-primary)_30%,transparent)] p-4">
+            <div className="fixed inset-0 z-[999] grid place-items-center bg-[var(--color-overlay)] p-4">
               <section
                 role="dialog"
                 aria-modal="true"

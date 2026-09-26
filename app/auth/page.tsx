@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Eye, EyeOff, LoaderCircle } from "lucide-react";
+import { ThemeToggle } from "@/components/theme-provider";
 import { createClient } from "@/lib/supabase/client";
 
 export default function AuthPage() {
@@ -47,7 +48,10 @@ export default function AuthPage() {
   }
 
   return (
-    <main className="auth-page compact-ui grid min-h-screen w-full min-w-0 max-w-[100vw] place-items-center overflow-x-hidden bg-[#182334] p-4 text-[12px] leading-[16px] text-[#151922]">
+    <main className="auth-page compact-ui relative grid min-h-screen w-full min-w-0 max-w-[100vw] place-items-center overflow-x-hidden bg-[#182334] p-4 text-[12px] leading-[16px] text-[#151922]">
+      <div className="absolute right-4 top-4">
+        <ThemeToggle />
+      </div>
       <section className="auth-card w-full min-w-0 max-w-sm rounded-[14px] border border-white/15 bg-white p-5 shadow-2xl shadow-black/25 sm:p-6">
         <div className="w-full min-w-0 max-w-full">
           <div className="mb-5 flex justify-center">
@@ -57,7 +61,7 @@ export default function AuthPage() {
               width={489}
               height={153}
               priority
-              className="h-auto w-44"
+              className="huswell-brand-logo h-auto w-44"
             />
           </div>
           <h1 className="mb-1 border-t border-[#dfe5ed] pt-4 text-center text-[20px] font-semibold tracking-tight text-[#182334]">
