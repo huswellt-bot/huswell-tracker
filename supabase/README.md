@@ -146,6 +146,7 @@
 144. Run `162_supplier_country_and_products_services.sql` after migration 161 and before deploying the matching Supplier's List workspace update. It adds GM-managed supplier countries, searchable product/service descriptions, clears only legacy supplier Mock Up project-type values, and guards new or edited supplier data without changing quotation project types.
 145. Run `163_production_approval_permissions.sql` after migration 162 and before deploying the matching production-approval update. It adds the Super Admin-controlled production approval permission and its role, RLS, and production-review guards.
 146. Run `164_fix_production_approval_activity_log.sql` after migration 163 and before retrying production-approval permission changes. It replaces the incompatible generic audit trigger with a composite-key-aware trigger without changing permission data.
+147. Run `165_add_instagram_outbound_method.sql` before using Instagram in the Add Lead Outbound Method dropdown. It preserves existing lead values and adds Instagram to the database constraint.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 

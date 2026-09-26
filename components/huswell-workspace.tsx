@@ -1912,7 +1912,7 @@ const leads: Module = {
       key: "contact_method",
       label: "Outbound method",
       type: "select",
-      options: ["Viber", "WhatsApp", "Messenger", "Phone Call", "Email"],
+      options: ["Viber", "WhatsApp", "Messenger", "Instagram", "Phone Call", "Email"],
     },
     {
       key: "evaluation_number",
