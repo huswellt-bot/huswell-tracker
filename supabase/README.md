@@ -147,6 +147,7 @@
 145. Run `163_production_approval_permissions.sql` after migration 162 and before deploying the matching production-approval update. It adds the Super Admin-controlled production approval permission and its role, RLS, and production-review guards.
 146. Run `164_fix_production_approval_activity_log.sql` after migration 163 and before retrying production-approval permission changes. It replaces the incompatible generic audit trigger with a composite-key-aware trigger without changing permission data.
 147. Run `165_add_instagram_outbound_method.sql` before using Instagram in the Add Lead Outbound Method dropdown. It preserves existing lead values and adds Instagram to the database constraint.
+148. Run `166_add_instagram_to_lead_excel_import.sql` after migration 165 and before deploying the matching lead-import update. It adds Instagram to both the Excel preview parser and the transactional import RPC while preserving existing security and duplicate checks.
 
 Before connecting the app, replace the placeholders in the project-root `.env.local` with the **Project URL** and **Publishable key** from Supabase Dashboard > Connect. `.env.example` is the shareable template.
 

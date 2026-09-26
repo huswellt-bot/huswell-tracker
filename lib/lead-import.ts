@@ -18,6 +18,7 @@ export const CONTACT_METHODS = [
   "Viber",
   "WhatsApp",
   "Messenger",
+  "Instagram",
   "Phone Call",
   "Email",
 ] as const;
