@@ -949,6 +949,76 @@ const text = (value: unknown, fallback = "-") =>
       ? fallback
       : String(value),
   );
+const productionBoxMakers = [
+  "Kuya Diego",
+  "Kuya Ted",
+  "Kuya Bimbo",
+  "Kuya Rex",
+  "Kuya Jeff",
+  "Kuya Mity",
+  "Kuya Aries",
+  "Kuya Archie",
+] as const;
+const agreementFileTypes = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/pdf",
+] as const;
+const agreementFileMaxSize = 10 * 1024 * 1024;
+const agreementFileExtension = (file: File) => {
+  const extensions: Record<(typeof agreementFileTypes)[number], string> = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "application/pdf": "pdf",
+  };
+  return extensions[file.type as (typeof agreementFileTypes)[number]] ?? "bin";
+};
+const openPrivateAgreement = async (
+  storagePath: string,
+  notice: (message: string) => void,
+) => {
+  const nextWindow = window.open("about:blank", "_blank");
+  if (!nextWindow) {
+    notice("Allow pop-ups to open the agreement.");
+    return;
+  }
+  nextWindow.opener = null;
+  const { data, error } = await createClient()
+    .storage
+    .from("production-agreements")
+    .createSignedUrl(storagePath, 5 * 60);
+  if (error || !data?.signedUrl) {
+    nextWindow.close();
+    notice(error?.message ?? "The agreement could not be opened.");
+    return;
+  }
+  nextWindow.location.href = data.signedUrl;
+};
+function AgreementAction({
+  storagePath,
+  notice,
+  disabled = false,
+}: {
+  storagePath: unknown;
+  notice: (message: string) => void;
+  disabled?: boolean;
+}) {
+  const path = text(storagePath, "");
+  return path ? (
+    <ActionIcon
+      label="View agreement"
+      confirm={false}
+      disabled={disabled}
+      onClick={() => void openPrivateAgreement(path, notice)}
+    >
+      <FileText size={15} />
+    </ActionIcon>
+  ) : (
+    <span className="text-[11px] text-[#8b92a1]">—</span>
+  );
+}
 const leadOwnerId = (lead: Row) =>
   text(lead.assigned_to, "") || text(lead.created_by, "");
 const isPricingOfficerRevision = (quote: Row) =>
@@ -7860,6 +7930,8 @@ function ProjectCalendar({
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [agreementFile, setAgreementFile] = useState<File | null>(null);
+  const [agreementInputKey, setAgreementInputKey] = useState(0);
   const [editingSchedule, setEditingSchedule] = useState<Row | null>(null);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [projectQuery, setProjectQuery] = useState("");
@@ -7954,6 +8026,23 @@ function ProjectCalendar({
       text(quote.status, "") === "approved" &&
       !scheduledQuoteIds.has(text(quote.id, "")),
   );
+  const rejectedScheduleForSelectedQuote = !editingSchedule
+    ? schedules.find(
+        (schedule) =>
+          text(schedule.quotation_id, "") ===
+            (values.quotation_id ?? "").split("|")[0] &&
+          text(schedule.status, "") === "rejected",
+      )
+    : null;
+  const existingAgreementForSelectedQuote = rejectedScheduleForSelectedQuote
+    ? text(rejectedScheduleForSelectedQuote.agreement_file_name, "")
+    : "";
+  const hasExistingAgreementForSelectedQuote = Boolean(
+    rejectedScheduleForSelectedQuote?.agreement_storage_path &&
+      rejectedScheduleForSelectedQuote.agreement_file_name &&
+      rejectedScheduleForSelectedQuote.agreement_content_type &&
+      n(rejectedScheduleForSelectedQuote.agreement_file_size) > 0,
+  );
   const canCreateSchedule = isProjectOfficerRole(role);
   const isGeneralManager = memberRole(role);
   const scheduleLifecycleStatus = (schedule: Row) =>
@@ -7996,6 +8085,13 @@ function ProjectCalendar({
     },
     { key: "start_date", label: "Start date", type: "date", required: true },
     { key: "due_date", label: "Due Date", type: "date", required: true, hint: "Each Project Type can use a due date once." },
+    {
+      key: "assigned_box_maker",
+      label: "Assigned Box Maker",
+      type: "select",
+      required: true,
+      options: [...productionBoxMakers],
+    },
   ];
   const revisionFields: Field[] = [
     { key: "start_date", label: "Start date", type: "date", required: true },
@@ -8016,6 +8112,35 @@ function ProjectCalendar({
     const start = monthStartFromValue(month);
     start.setMonth(start.getMonth() + offset);
     setMonth(monthValue(start));
+  };
+  const handleAgreementFileChange = (file: File | null) => {
+    if (!file) {
+      setAgreementFile(null);
+      return;
+    }
+    if (
+      !agreementFileTypes.includes(
+        file.type as (typeof agreementFileTypes)[number],
+      )
+    ) {
+      setAgreementFile(null);
+      setAgreementInputKey((current) => current + 1);
+      notice("Agreement must be a JPEG, PNG, WebP, or PDF file.");
+      return;
+    }
+    if (!file.name.trim() || file.name.length > 255) {
+      setAgreementFile(null);
+      setAgreementInputKey((current) => current + 1);
+      notice("The agreement file name must be 255 characters or fewer.");
+      return;
+    }
+    if (file.size <= 0 || file.size > agreementFileMaxSize) {
+      setAgreementFile(null);
+      setAgreementInputKey((current) => current + 1);
+      notice("Agreement files must be no larger than 10 MB.");
+      return;
+    }
+    setAgreementFile(file);
   };
   const save = async () => {
     if (editingSchedule?.id) {
@@ -8052,8 +8177,15 @@ function ProjectCalendar({
       return;
     }
     const quotationId = (values.quotation_id ?? "").split("|")[0];
-    if (!quotationId || !values.start_date || !values.due_date)
-      return notice("Select an approved Price Quotation and the production dates.");
+    if (
+      !quotationId ||
+      !values.start_date ||
+      !values.due_date ||
+      !values.assigned_box_maker
+    )
+      return notice(
+        "Select an approved Price Quotation, the production dates, and an assigned box maker.",
+      );
     if (values.due_date < values.start_date)
       return notice("The deadline cannot be before the start date.");
     const quotation = approvedQuotes.find((quote) => text(quote.id, "") === quotationId);
@@ -8067,9 +8199,10 @@ function ProjectCalendar({
     if (isDueDateReserved(values.due_date, productName))
       return notice("This Project Type already has a project due on that date.");
     const quantity = n(firstItem?.quantity) > 0 ? n(firstItem?.quantity) : 1;
+    const client = createClient();
+    let uploadedAgreementPath = "";
     setSaving(true);
     try {
-      const client = createClient();
       const { data } = await client.auth.getUser();
       if (!data.user) throw new Error("Please sign in again before scheduling a project.");
       const rejectedSchedule = schedules.find(
@@ -8077,6 +8210,20 @@ function ProjectCalendar({
           text(schedule.quotation_id, "") === quotationId &&
           text(schedule.status, "") === "rejected",
       );
+      const existingAgreement =
+        rejectedSchedule?.agreement_storage_path &&
+        rejectedSchedule.agreement_file_name &&
+        rejectedSchedule.agreement_content_type &&
+        n(rejectedSchedule.agreement_file_size) > 0
+          ? {
+              storagePath: text(rejectedSchedule.agreement_storage_path, ""),
+              fileName: text(rejectedSchedule.agreement_file_name, ""),
+              contentType: text(rejectedSchedule.agreement_content_type, ""),
+              fileSize: n(rejectedSchedule.agreement_file_size),
+            }
+          : null;
+      if (!agreementFile && !existingAgreement)
+        return notice("Upload the agreement before submitting the production request.");
       const payload = {
         project_name: projectName,
         client_name: clientName,
@@ -8085,8 +8232,32 @@ function ProjectCalendar({
         start_date: values.start_date,
         due_date: values.due_date,
       };
+      const scheduleId = text(rejectedSchedule?.id, "") || crypto.randomUUID();
+      const newAgreementPath = agreementFile
+        ? `${orgId}/${scheduleId}/${crypto.randomUUID()}.${agreementFileExtension(agreementFile)}`
+        : existingAgreement?.storagePath ?? "";
+      if (agreementFile) {
+        const { error: uploadError } = await client.storage
+          .from("production-agreements")
+          .upload(newAgreementPath, agreementFile, {
+            cacheControl: "3600",
+            contentType: agreementFile.type,
+            upsert: false,
+          });
+        if (uploadError) throw uploadError;
+        uploadedAgreementPath = newAgreementPath;
+      }
+      const agreement = agreementFile
+        ? {
+            storagePath: newAgreementPath,
+            fileName: agreementFile.name,
+            contentType: agreementFile.type,
+            fileSize: agreementFile.size,
+          }
+        : existingAgreement;
+      if (!agreement) throw new Error("Upload the agreement before submitting the production request.");
       const { error } = rejectedSchedule?.id
-        ? await client.rpc("resubmit_project_schedule", {
+        ? await client.rpc("resubmit_project_schedule_with_agreement", {
             p_schedule_id: rejectedSchedule.id,
             p_project_name: payload.project_name,
             p_client_name: payload.client_name,
@@ -8094,20 +8265,51 @@ function ProjectCalendar({
             p_quantity: payload.quantity,
             p_start_date: payload.start_date,
             p_due_date: payload.due_date,
+            p_assigned_box_maker: values.assigned_box_maker,
+            p_agreement_storage_path: agreement.storagePath,
+            p_agreement_file_name: agreement.fileName,
+            p_agreement_content_type: agreement.contentType,
+            p_agreement_file_size: agreement.fileSize,
           })
-        : await client.from("project_schedules").insert({
-            organization_id: orgId,
-            quotation_id: quotationId,
-            ...payload,
-            status: "pending",
-            assigned_to: data.user.id,
-            created_by: data.user.id,
+        : await client.rpc("submit_project_schedule", {
+            p_schedule_id: scheduleId,
+            p_quotation_id: quotationId,
+            p_project_name: payload.project_name,
+            p_client_name: payload.client_name,
+            p_product_name: payload.product_name,
+            p_quantity: payload.quantity,
+            p_start_date: payload.start_date,
+            p_due_date: payload.due_date,
+            p_assigned_box_maker: values.assigned_box_maker,
+            p_agreement_storage_path: agreement.storagePath,
+            p_agreement_file_name: agreement.fileName,
+            p_agreement_content_type: agreement.contentType,
+            p_agreement_file_size: agreement.fileSize,
           });
       if (error) throw error;
+      let agreementCleanupWarning = false;
+      if (
+        existingAgreement?.storagePath &&
+        existingAgreement.storagePath !== agreement.storagePath
+      ) {
+        const { error: cleanupError } = await client.storage
+          .from("production-agreements")
+          .remove([existingAgreement.storagePath]);
+        if (cleanupError) {
+          agreementCleanupWarning = true;
+        }
+      }
       setOpen(false);
+      setAgreementFile(null);
+      setAgreementInputKey((current) => current + 1);
       await reload();
-      notice(rejectedSchedule ? "Production request resubmitted for production approval." : "Production request submitted for production approval.");
+      notice(
+        `${rejectedSchedule ? "Production request resubmitted for production approval." : "Production request submitted for production approval."}${agreementCleanupWarning ? " The previous agreement could not be removed." : ""}`,
+      );
     } catch (error) {
+      if (uploadedAgreementPath) {
+        await client.storage.from("production-agreements").remove([uploadedAgreementPath]);
+      }
       const message = error && typeof error === "object" && "message" in error && typeof error.message === "string"
         ? error.message
         : "Project scheduling could not be saved.";
@@ -8265,17 +8467,23 @@ function ProjectCalendar({
     const scheduleId = text(schedule.id, "");
     if (!scheduleId || !canDeleteSchedule(schedule)) return;
     setSaving(true);
-    const { data, error } = await createClient()
-      .from("project_schedules")
-      .delete()
-      .eq("id", scheduleId)
-      .eq("organization_id", orgId)
-      .eq("status", "approved")
-      .select("id");
+    const client = createClient();
+    const { data, error } = await client.rpc("delete_project_schedule", {
+      p_schedule_id: scheduleId,
+    });
     setSaving(false);
     if (error) return notice(error.message);
-    if (!data?.length) return notice("This production could not be deleted. Refresh and try again.");
-    notice("Production deleted.");
+    const agreementPath = text(data, "");
+    let cleanupWarning = false;
+    if (agreementPath) {
+      const { error: cleanupError } = await client.storage
+        .from("production-agreements")
+        .remove([agreementPath]);
+      cleanupWarning = Boolean(cleanupError);
+    }
+    notice(
+      `Production deleted.${cleanupWarning ? " The agreement file could not be removed." : ""}`,
+    );
     await reload();
   };
   return (
@@ -8295,6 +8503,8 @@ function ProjectCalendar({
             onClick={() => {
               setEditingSchedule(null);
               setValues({ quotation_id: "", start_date: isoToday(), due_date: "" });
+              setAgreementFile(null);
+              setAgreementInputKey((current) => current + 1);
               setOpen(true);
             }}
           >
@@ -8442,12 +8652,14 @@ function ProjectCalendar({
             "Total Lead Time",
             "Project Status",
             "Project Type",
+            "Assigned Box Maker",
+            "Agreement",
             "Percentage",
             "Remark",
             ...(!isProjectOfficerRole(role) ? ["Sales Executive"] : []),
             "Actions",
           ]}
-          minWidth={isProjectOfficerRole(role) ? 1160 : 1340}
+          minWidth={isProjectOfficerRole(role) ? 1320 : 1500}
           className="modern-page-table"
         >
           {filteredTableSchedules.map((schedule) => {
@@ -8462,6 +8674,8 @@ function ProjectCalendar({
               <td className="px-4 py-2 whitespace-nowrap">{totalLeadTime(schedule)}</td>
               <td className="px-4 py-2"><Status value={schedule.completed_at ? "completed" : hasPendingScheduleCompletion(schedule) ? "completion pending" : "active"} /></td>
               <td className="px-4 py-2"><span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full" style={{ backgroundColor: calendarColorForProjectType(scheduleProjectType(schedule)) }} aria-hidden="true" />{scheduleProjectType(schedule)}</span></td>
+              <td className="px-4 py-2 whitespace-nowrap">{text(schedule.assigned_box_maker)}</td>
+              <td className="px-4 py-2"><AgreementAction storagePath={schedule.agreement_storage_path} notice={notice} /></td>
               <td className="px-4 py-2">{isProjectOfficerRole(role) && !schedule.completed_at ? <input aria-label={`Progress percentage for ${text(schedule.project_name, text(schedule.quotation_no))}`} type="number" min="0" max="100" step="0.01" value={projectProgress(schedule).percentage} onChange={(event) => setProgressDrafts((current) => ({ ...current, [text(schedule.id)]: { ...projectProgress(schedule), percentage: event.target.value } }))} className="input mt-0 w-20 text-center" /> : `${n(schedule.progress_percentage)}%`}</td>
               <td className="px-4 py-2 text-center"><NoteAction label={isProjectOfficerRole(role) && !schedule.completed_at ? "Edit project remark" : "View project remark"} onClick={() => openRemark(schedule)} /></td>
               {!isProjectOfficerRole(role) && <td className="px-4 py-2">{officerName(schedule)}</td>}
@@ -8494,6 +8708,8 @@ function ProjectCalendar({
                       confirm={false}
                       onClick={() => {
                         setEditingSchedule(schedule);
+                        setAgreementFile(null);
+                        setAgreementInputKey((current) => current + 1);
                         setValues({
                           start_date: text(schedule.start_date, ""),
                           due_date: text(schedule.due_date, ""),
@@ -8669,12 +8885,52 @@ function ProjectCalendar({
           close={() => {
             setOpen(false);
             setEditingSchedule(null);
+            setAgreementFile(null);
+            setAgreementInputKey((current) => current + 1);
           }}
           saving={saving}
           saveLabel={editingSchedule ? "Submit revision" : "Submit production request"}
           className="max-w-2xl"
           onFieldChange={(key, value, current) => ({ ...current, [key]: value })}
         >
+          {!editingSchedule && (
+            <div className="mt-4 rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4 sm:col-span-2">
+              <p className="text-[12px] font-medium text-[#202938]">Agreement</p>
+              <div className="mt-2 flex flex-wrap items-center gap-3">
+                <label className="flex h-8 cursor-pointer items-center rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium text-[#344054] hover:bg-[#f5f7fa]">
+                  <Plus size={13} className="mr-1" /> Choose file
+                  <input
+                    key={agreementInputKey}
+                    type="file"
+                    accept={agreementFileTypes.join(",")}
+                    className="hidden"
+                    onChange={(event) =>
+                      handleAgreementFileChange(event.target.files?.[0] ?? null)
+                    }
+                  />
+                </label>
+                {agreementFile ? (
+                  <span className="inline-flex max-w-full items-center gap-1.5 truncate rounded-md border border-[#d9e0e9] bg-white px-2.5 py-1 text-[12px] text-[#344054]">
+                    <FileText size={13} className="shrink-0" />
+                    <span className="min-w-0 truncate">{agreementFile.name}</span>
+                  </span>
+                ) : existingAgreementForSelectedQuote ? (
+                  <span className="inline-flex max-w-full items-center gap-1.5 truncate rounded-md border border-[#d9e0e9] bg-white px-2.5 py-1 text-[12px] text-[#344054]">
+                    <FileText size={13} className="shrink-0" />
+                    <span className="min-w-0 truncate">Current: {existingAgreementForSelectedQuote}</span>
+                  </span>
+                ) : (
+                  <span className="text-[12px] text-[#8b92a1]">No agreement selected.</span>
+                )}
+              </div>
+              <p className="mt-2 text-[10px] text-[#8b92a1]">
+                Upload a JPEG, PNG, WebP, or PDF agreement up to 10 MB.
+                {hasExistingAgreementForSelectedQuote
+                  ? " Leave this empty to keep the current agreement when resubmitting."
+                  : ""}
+              </p>
+            </div>
+          )}
         </Dialog>
       )}
     </Panel>
@@ -16334,7 +16590,7 @@ function Submissions({
         </Table>
       ) : <Empty>No Costing Breakdown revisions are awaiting review.</Empty>)}
       {tab === "calendar_projects" && (visiblePendingProjectSchedules.length ? (
-        <Table labels={["Select", "Assigned Sales Executive", "Price Quotation", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1280}>
+        <Table labels={["Select", "Assigned Sales Executive", "Price Quotation", "Client's Name / Company", "Quantity", "Project Type", "Assigned Box Maker", "Agreement", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1500}>
           {visiblePendingProjectSchedules.map((schedule) => {
             const quotation = store.quotations.find((item) => item.id === schedule.quotation_id);
             return (
@@ -16345,6 +16601,8 @@ function Submissions({
               <td className="px-5 py-3">{text(schedule.client_name)}</td>
               <td className="px-5 py-3">{n(schedule.quantity).toLocaleString()}</td>
               <td className="px-5 py-3">{text(schedule.product_name)}</td>
+              <td className="px-5 py-3 whitespace-nowrap">{text(schedule.assigned_box_maker)}</td>
+              <td className="px-5 py-3"><AgreementAction storagePath={schedule.agreement_storage_path} notice={notice} disabled={bulkSaving} /></td>
               <td className="px-5 py-3">{day(schedule.start_date)}</td>
               <td className="px-5 py-3">{day(schedule.due_date)}</td>
               <td className="px-5 py-3"><Status value={schedule.status} /></td>
@@ -16612,12 +16870,14 @@ function Production({
             labels={[
               "Job",
               "Customer / due",
+              "Box Maker",
+              "Agreement",
               "Stage",
               "Payment",
               "Material use",
               "Actions",
             ]}
-            minWidth={800}
+            minWidth={1020}
           >
             {store.production_jobs.map((job) => {
               const used = store.production_material_usage.filter(
@@ -16651,6 +16911,8 @@ function Production({
                       {late ? " · Delayed" : ""}
                     </small>
                   </td>
+                  <td className="px-5 py-3 whitespace-nowrap">{text(job.assigned_box_maker)}</td>
+                  <td className="px-5 py-3"><AgreementAction storagePath={job.agreement_storage_path} notice={notice} /></td>
                   <td className="px-5 py-3">
                     <Status value={job.status} />
                   </td>
