@@ -325,7 +325,7 @@ const pricingMarkupDefinitions: Array<{
   { key: "target_profit_margin", label: "Target Profit Margin", fallback: "75", legacyKeys: ["default_profit_margin"] },
   { key: "overhead_allocation", label: "Overhead Allocation", fallback: "0", legacyKeys: ["default_overhead_rate"] },
   { key: "contingency_allowance", label: "Contingency Allowance", fallback: "20", legacyKeys: ["default_buffer_margin"] },
-  { key: "sales_commission", label: "Sales Commission", fallback: "0", legacyKeys: ["production_commission", "commission_default_rate"] },
+  { key: "sales_commission", label: "Sales Executive Commission", fallback: "0", legacyKeys: ["production_commission", "commission_default_rate"] },
   { key: "va_commission", label: "VA Commission", fallback: "0", legacyKeys: ["va_commission_default_rate"] },
   { key: "incentives", label: "Incentives", fallback: "0", legacyKeys: [] },
   { key: "discounts", label: "Discounts", fallback: "0", legacyKeys: [] },
@@ -359,7 +359,7 @@ const pricingMarkupKeyForLabel = (label: unknown): PricingMarkupKey | "" => {
   if (normalized === "profit margin" || normalized === "target profit margin") return "target_profit_margin";
   if (normalized === "overhead expense" || normalized === "overhead allocation") return "overhead_allocation";
   if (normalized === "buffer margin" || normalized === "contingency allowance") return "contingency_allowance";
-  if (normalized === "commission" || normalized === "production commission" || normalized === "sales commission") return "sales_commission";
+  if (normalized === "commission" || normalized === "production commission" || normalized === "sales commission" || normalized === "sales executive commission") return "sales_commission";
   if (normalized === "va commission" || normalized === "va commission markup") return "va_commission";
   if (normalized === "incentives" || normalized === "discounts" || normalized === "third party markup" || normalized === "third party mark up" || normalized === "additional markup") {
     return normalized === "incentives" ? "incentives" : normalized === "discounts" ? "discounts" : "third_party_markup";
@@ -13908,7 +13908,7 @@ function ProductCostingsSectionWithPricing({
                           </div>
                         </label> : <output aria-label={`Target selling price per piece for ${product ? text(product.description, "finished product") : "product"}`} className="text-[13px] font-semibold text-[#176b40]">{peso.format(totals.unitIncVat)}</output>}
                       </div>
-                      <p className="mt-2 text-[11px] text-[#687386]">Other percentage markups are recalculated to reach this target. Sales Commission and VA Commission remain unchanged; Internal VAT, Discount and customer VAT remain as entered. GM markup percentages may exceed 100%.</p>
+                      <p className="mt-2 text-[11px] text-[#687386]">Other percentage markups are recalculated to reach this target. Sales Executive Commission and VA Commission remain unchanged; Internal VAT, Discount and customer VAT remain as entered. GM markup percentages may exceed 100%.</p>
                       {targetBudgetErrors[costing.key] && <p className="mt-2 text-[11px] font-medium text-[#b42318]">{targetBudgetErrors[costing.key]}</p>}
                     </div>
                   </div>}
@@ -18977,7 +18977,7 @@ function CommissionSummaryView({
         throw new Error("Select a Price Quotation.");
       }
       if (editingSummary && (commissionRate === null || vaCommissionRate === null)) {
-        throw new Error("Sales Commission and VA Commission are required.");
+        throw new Error("Sales Executive Commission and VA Commission are required.");
       }
       if (downpaymentAmount > grandTotal) {
         throw new Error("Downpayment Amount cannot exceed the Grand Total.");
@@ -19034,7 +19034,7 @@ function CommissionSummaryView({
     });
     setPaidId(null);
     if (error) return notice(error.message);
-    notice("Sales Commission and VA Commission marked paid.");
+    notice("Sales Executive Commission and VA Commission marked paid.");
     await refreshSummaryData();
   };
   const openUndo = (summary: Row) => {
@@ -19106,7 +19106,7 @@ function CommissionSummaryView({
   );
   const summaryFields: Field[] = editingSummary
     ? [
-        { key: "commission_rate", label: "Sales Commission %", type: "number", required: true },
+        { key: "commission_rate", label: "Sales Executive Commission %", type: "number", required: true },
         vaCommissionField,
         { key: "downpayment_amount", label: "Downpayment Amount", type: "number", required: true },
         { key: "receivable_balance", label: "Receivable / Due Balance", type: "text", required: true, readOnly: true },
@@ -19114,7 +19114,7 @@ function CommissionSummaryView({
       ]
     : [
         { key: "quotation_id", label: "Price Quotation", type: "select", required: true, options: quotationOptions },
-        { key: "commission_rate", label: "Sales Commission %", type: "number", required: true },
+        { key: "commission_rate", label: "Sales Executive Commission %", type: "number", required: true },
         vaCommissionField,
         { key: "downpayment_amount", label: "Downpayment Amount", type: "number", required: true },
         { key: "receivable_balance", label: "Receivable / Due Balance", type: "text", required: true, readOnly: true },
@@ -19128,7 +19128,7 @@ function CommissionSummaryView({
         title={readOnly ? "My Commission Summary" : "Commission Summary"}
         detail={
           readOnly
-            ? "View Sales Commission and eligible VA Commission for Price Quotations you prepared or endorsed."
+            ? "View Sales Executive Commission and eligible VA Commission for Price Quotations you prepared or endorsed."
             : "Add one summary for each direct Price Quotation with an approved active Project Calendar due date."
         }
         action={
@@ -19145,7 +19145,7 @@ function CommissionSummaryView({
       >
         <div className="grid gap-2 border-b border-[#e4e8ef] p-4 sm:grid-cols-3">
           <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px]">
-            <p className="text-[#687386]">Sales Commission total</p>
+            <p className="text-[#687386]">Sales Executive Commission total</p>
             <p className="mt-1 text-[16px] font-semibold text-[#202938]">{peso.format(commissionTotal)}</p>
           </div>
           <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px]">
@@ -19210,7 +19210,7 @@ function CommissionSummaryView({
               "Quotation",
               "Client / project",
               "Grand total",
-              "Preparator / Sales Commission",
+              "Preparator / Sales Executive Commission",
               "VA endorser / VA Commission",
               "Downpayment",
               "Receivable / due balance",
@@ -19262,7 +19262,7 @@ function CommissionSummaryView({
                               tone="green"
                               compact
                               confirm
-                              confirmationText="Mark both Sales Commission and VA Commission as paid?"
+                              confirmationText="Mark both Sales Executive Commission and VA Commission as paid?"
                               disabled={paidId === text(summary.id, "")}
                               loading={paidId === text(summary.id, "")}
                               onClick={() => void markPaid(summary)}
