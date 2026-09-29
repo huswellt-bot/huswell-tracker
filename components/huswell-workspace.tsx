@@ -302,6 +302,7 @@ type PricingMarkupKey =
   | "overhead_allocation"
   | "contingency_allowance"
   | "sales_commission"
+  | "va_commission"
   | "incentives"
   | "discounts"
   | "third_party_markup"
@@ -324,7 +325,8 @@ const pricingMarkupDefinitions: Array<{
   { key: "target_profit_margin", label: "Target Profit Margin", fallback: "75", legacyKeys: ["default_profit_margin"] },
   { key: "overhead_allocation", label: "Overhead Allocation", fallback: "0", legacyKeys: ["default_overhead_rate"] },
   { key: "contingency_allowance", label: "Contingency Allowance", fallback: "20", legacyKeys: ["default_buffer_margin"] },
-  { key: "sales_commission", label: "Sales Commission", fallback: "0", legacyKeys: ["production_commission"] },
+  { key: "sales_commission", label: "Sales Commission", fallback: "0", legacyKeys: ["production_commission", "commission_default_rate"] },
+  { key: "va_commission", label: "VA Commission", fallback: "0", legacyKeys: ["va_commission_default_rate"] },
   { key: "incentives", label: "Incentives", fallback: "0", legacyKeys: [] },
   { key: "discounts", label: "Discounts", fallback: "0", legacyKeys: [] },
   { key: "third_party_markup", label: "Third Party Mark Up", fallback: "15", legacyKeys: ["default_additional_markup"] },
@@ -358,6 +360,7 @@ const pricingMarkupKeyForLabel = (label: unknown): PricingMarkupKey | "" => {
   if (normalized === "overhead expense" || normalized === "overhead allocation") return "overhead_allocation";
   if (normalized === "buffer margin" || normalized === "contingency allowance") return "contingency_allowance";
   if (normalized === "commission" || normalized === "production commission" || normalized === "sales commission") return "sales_commission";
+  if (normalized === "va commission" || normalized === "va commission markup") return "va_commission";
   if (normalized === "incentives" || normalized === "discounts" || normalized === "third party markup" || normalized === "third party mark up" || normalized === "additional markup") {
     return normalized === "incentives" ? "incentives" : normalized === "discounts" ? "discounts" : "third_party_markup";
   }
@@ -726,9 +729,18 @@ const adjustCostingToTargetBudget = (
     return { costing, error: "The Target Budget is below the unchanged direct cost after the current Discount." };
   }
 
+  const protectedCommissionKeys = new Set(["sales_commission", "va_commission"]);
+  const isProtectedCommission = (markup: ProductCostingDraft["markups"][number]) => {
+    const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
+    return protectedCommissionKeys.has(key);
+  };
+  const protectedCommissionAmount = costing.markups.reduce(
+    (sum, markup) => sum + (isProtectedCommission(markup) ? currentTotals.markupAmounts[markup.key] ?? 0 : 0),
+    0,
+  );
   const adjustableMarkups = costing.markups.filter((markup) => {
     const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
-    return key !== "discounts" && key !== "vat";
+    return key !== "discounts" && key !== "vat" && !isProtectedCommission(markup);
   });
   if (adjustableMarkups.some((markup) => markupCalculationType(markup) === "fixed_amount")) {
     return { costing, error: "Change non-discount markup rows to Percentage before applying a Target Budget." };
@@ -739,22 +751,23 @@ const adjustCostingToTargetBudget = (
     0,
   );
   const unchangedInternalVatAmount = currentTotals.internalVatAmount;
-  const requiredMarkupAmount = requiredMarkupTotal - unchangedInternalVatAmount;
-  if (requiredMarkupAmount < -0.01) {
-    return { costing, error: "The Target Budget is below the unchanged direct cost and Internal VAT after the current Discount." };
+  const requiredAdjustableMarkupAmount = requiredMarkupTotal - unchangedInternalVatAmount - protectedCommissionAmount;
+  if (requiredAdjustableMarkupAmount < -0.01) {
+    return { costing, error: "The Target Budget is below the unchanged direct cost, Internal VAT, and commissions after the current Discount." };
   }
   if (currentAdjustableMarkupTotal <= 0) {
+    if (Math.abs(requiredAdjustableMarkupAmount) <= 0.01) return { costing };
     return { costing, error: "Add at least one percentage markup before applying a Target Budget." };
   }
 
-  const factor = Math.max(0, requiredMarkupAmount) / currentAdjustableMarkupTotal;
+  const factor = Math.max(0, requiredAdjustableMarkupAmount) / currentAdjustableMarkupTotal;
   if (!Number.isFinite(factor) || factor < 0) {
     return { costing, error: "This Target Budget cannot be reached with the current percentage markups." };
   }
   const roundRate = (value: number) => Math.round(value * 10000) / 10000;
   const scaledMarkups = costing.markups.map((markup) => {
     const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
-    if (key === "discounts" || key === "vat") return markup;
+    if (key === "discounts" || key === "vat" || isProtectedCommission(markup)) return markup;
     const nextValue = roundRate(Math.max(0, n(markupValue(markup))) * factor);
     return { ...markup, calculationType: "percentage" as MarkupCalculationType, value: String(nextValue) };
   });
@@ -13895,7 +13908,7 @@ function ProductCostingsSectionWithPricing({
                           </div>
                         </label> : <output aria-label={`Target selling price per piece for ${product ? text(product.description, "finished product") : "product"}`} className="text-[13px] font-semibold text-[#176b40]">{peso.format(totals.unitIncVat)}</output>}
                       </div>
-                      <p className="mt-2 text-[11px] text-[#687386]">The percentage markups are recalculated to reach this target. Internal VAT, Discount and customer VAT remain as entered; GM markup percentages may exceed 100%.</p>
+                      <p className="mt-2 text-[11px] text-[#687386]">Other percentage markups are recalculated to reach this target. Sales Commission and VA Commission remain unchanged; Internal VAT, Discount and customer VAT remain as entered. GM markup percentages may exceed 100%.</p>
                       {targetBudgetErrors[costing.key] && <p className="mt-2 text-[11px] font-medium text-[#b42318]">{targetBudgetErrors[costing.key]}</p>}
                     </div>
                   </div>}
@@ -18904,14 +18917,20 @@ function CommissionSummaryView({
     0,
   );
   const totalCommission = commissionTotal + vaCommissionTotal;
+  const defaultCommissionRate = eligibleQuotations.length
+    ? String(n(eligibleQuotations[0].commission_default_rate))
+    : "";
+  const defaultVaCommissionRate = eligibleQuotations.length
+    ? String(n(eligibleQuotations[0].va_commission_default_rate))
+    : "";
 
   const openCreate = () => {
     setEditingSummary(null);
     setSummaryError("");
     setSummaryValues({
       quotation_id: "",
-      commission_rate: "",
-      va_commission_rate: "",
+      commission_rate: defaultCommissionRate,
+      va_commission_rate: defaultVaCommissionRate,
       downpayment_amount: "",
       receivable_balance: "",
       payment_due_date: "",
@@ -18946,14 +18965,19 @@ function CommissionSummaryView({
     setSummaryError("");
     try {
       const client = createClient();
-      const commissionRate = n(summaryValues.commission_rate);
-      const vaCommissionRate = n(summaryValues.va_commission_rate);
+      const commissionRateInput = text(summaryValues.commission_rate, "").trim();
+      const vaCommissionRateInput = text(summaryValues.va_commission_rate, "").trim();
+      const commissionRate = commissionRateInput === "" ? null : n(commissionRateInput);
+      const vaCommissionRate = vaCommissionRateInput === "" ? null : n(vaCommissionRateInput);
       const downpaymentAmount = n(summaryValues.downpayment_amount);
       const grandTotal = editingSummary
         ? n(editingSummary.grand_total)
         : n(selectedQuotation?.grand_total);
       if (!editingSummary && !selectedQuotation) {
         throw new Error("Select a Price Quotation.");
+      }
+      if (editingSummary && (commissionRate === null || vaCommissionRate === null)) {
+        throw new Error("Sales Commission and VA Commission are required.");
       }
       if (downpaymentAmount > grandTotal) {
         throw new Error("Downpayment Amount cannot exceed the Grand Total.");
@@ -19010,7 +19034,7 @@ function CommissionSummaryView({
     });
     setPaidId(null);
     if (error) return notice(error.message);
-    notice("Commission and VA Commission marked paid.");
+    notice("Sales Commission and VA Commission marked paid.");
     await refreshSummaryData();
   };
   const openUndo = (summary: Row) => {
@@ -19060,22 +19084,38 @@ function CommissionSummaryView({
         receivable_balance: peso.format(calculatedReceivableBalance ?? 0),
       }
     : summaryValues;
+  const vaCommissionEligible = Boolean(
+    editingSummary
+      ? editingSummary.va_endorser_user_id
+      : selectedQuotation?.va_endorser_user_id,
+  );
+  const vaCommissionUnavailable = Boolean(editingSummary || selectedQuotation) && !vaCommissionEligible;
+  const vaCommissionField: Field = {
+    key: "va_commission_rate",
+    label: "VA Commission %",
+    type: "number",
+    required: true,
+    readOnly: vaCommissionUnavailable,
+    hint: vaCommissionUnavailable
+      ? "No eligible VA endorser. VA Commission is set to 0% and cannot be edited."
+      : undefined,
+  };
   const quotationOptions = eligibleQuotations.map(
     (quotation) =>
       `${text(quotation.quotation_id)}|${text(quotation.quotation_no, "Price Quotation")} · ${text(quotation.client_name, "Unnamed client")} · ${peso.format(n(quotation.grand_total))}`,
   );
   const summaryFields: Field[] = editingSummary
     ? [
-        { key: "commission_rate", label: "Commission %", type: "number", required: true },
-        { key: "va_commission_rate", label: "VA Commission %", type: "number", required: true },
+        { key: "commission_rate", label: "Sales Commission %", type: "number", required: true },
+        vaCommissionField,
         { key: "downpayment_amount", label: "Downpayment Amount", type: "number", required: true },
         { key: "receivable_balance", label: "Receivable / Due Balance", type: "text", required: true, readOnly: true },
         { key: "payment_due_date", label: "Payment Due Date", type: "date", required: true },
       ]
     : [
         { key: "quotation_id", label: "Price Quotation", type: "select", required: true, options: quotationOptions },
-        { key: "commission_rate", label: "Commission %", type: "number", required: true },
-        { key: "va_commission_rate", label: "VA Commission %", type: "number", required: true },
+        { key: "commission_rate", label: "Sales Commission %", type: "number", required: true },
+        vaCommissionField,
         { key: "downpayment_amount", label: "Downpayment Amount", type: "number", required: true },
         { key: "receivable_balance", label: "Receivable / Due Balance", type: "text", required: true, readOnly: true },
         { key: "payment_due_date", label: "Payment Due Date", type: "date", required: true },
@@ -19088,7 +19128,7 @@ function CommissionSummaryView({
         title={readOnly ? "My Commission Summary" : "Commission Summary"}
         detail={
           readOnly
-            ? "View Commission and eligible VA Commission for Price Quotations you prepared or endorsed."
+            ? "View Sales Commission and eligible VA Commission for Price Quotations you prepared or endorsed."
             : "Add one summary for each direct Price Quotation with an approved active Project Calendar due date."
         }
         action={
@@ -19105,7 +19145,7 @@ function CommissionSummaryView({
       >
         <div className="grid gap-2 border-b border-[#e4e8ef] p-4 sm:grid-cols-3">
           <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px]">
-            <p className="text-[#687386]">Commission total</p>
+            <p className="text-[#687386]">Sales Commission total</p>
             <p className="mt-1 text-[16px] font-semibold text-[#202938]">{peso.format(commissionTotal)}</p>
           </div>
           <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px]">
@@ -19170,7 +19210,7 @@ function CommissionSummaryView({
               "Quotation",
               "Client / project",
               "Grand total",
-              "Preparator / Commission",
+              "Preparator / Sales Commission",
               "VA endorser / VA Commission",
               "Downpayment",
               "Receivable / due balance",
@@ -19222,7 +19262,7 @@ function CommissionSummaryView({
                               tone="green"
                               compact
                               confirm
-                              confirmationText="Mark both Commission and VA Commission as paid?"
+                              confirmationText="Mark both Sales Commission and VA Commission as paid?"
                               disabled={paidId === text(summary.id, "")}
                               loading={paidId === text(summary.id, "")}
                               onClick={() => void markPaid(summary)}
@@ -19340,9 +19380,6 @@ function SettingsView({
   const [pricingDefaultsOpen, setPricingDefaultsOpen] = useState(false);
   const [pricingDefaults, setPricingDefaults] = useState<Record<string, string>>({});
   const [savingPricingDefaults, setSavingPricingDefaults] = useState(false);
-  const [commissionDefaultsOpen, setCommissionDefaultsOpen] = useState(false);
-  const [commissionDefaults, setCommissionDefaults] = useState<Record<string, string>>({});
-  const [savingCommissionDefaults, setSavingCommissionDefaults] = useState(false);
   const [customMarkupOpen, setCustomMarkupOpen] = useState(false);
   const [customMarkupValues, setCustomMarkupValues] = useState<Record<string, string>>({ label: "", value: "" });
   const [settingsSensitiveValuesHidden, setSettingsSensitiveValuesHidden] = useState(false);
@@ -19543,29 +19580,6 @@ function SettingsView({
     }));
     if (await persistPricingDefaults(defaults)) setPricingDefaultsOpen(false);
   };
-  const saveCommissionDefaults = async () => {
-    const commissionRate = n(commissionDefaults.commission_rate);
-    const vaCommissionRate = n(commissionDefaults.va_commission_rate);
-    if (commissionRate < 0 || commissionRate > 100) {
-      notice("Commission percentage must be between 0 and 100.");
-      return;
-    }
-    if (vaCommissionRate < 0 || vaCommissionRate > 100) {
-      notice("VA Commission percentage must be between 0 and 100.");
-      return;
-    }
-    setSavingCommissionDefaults(true);
-    const { error } = await createClient().rpc("save_commission_defaults", {
-      p_organization_id: orgId,
-      p_commission_rate: commissionRate,
-      p_va_commission_rate: vaCommissionRate,
-    });
-    setSavingCommissionDefaults(false);
-    if (error) return notice(error.message);
-    setCommissionDefaultsOpen(false);
-    notice("Commission defaults saved.");
-    await reload();
-  };
   const addCustomMarkup = async () => {
     const label = text(customMarkupValues.label, "").trim();
     const value = text(customMarkupValues.value, "").trim();
@@ -19593,7 +19607,6 @@ function SettingsView({
         setBankDetailsOpen(false);
         setPricingDefaultsOpen(false);
         setCustomMarkupOpen(false);
-        setCommissionDefaultsOpen(false);
       }
       return next;
     });
@@ -19611,47 +19624,13 @@ function SettingsView({
           {settingsSensitiveValuesHidden ? "Show sensitive values" : "Hide sensitive values"}
         </Button>
       </div>}
-      <Panel title="Pricing defaults - Internal" detail="Applied to new internal product costings as percentages. Existing quotations keep their saved pricing. Sales &amp; Pricing Officers can adjust the VAT percentage per quotation." action={memberRole(role) ? <div className="flex flex-wrap justify-end gap-2"><Button secondary disabled={settingsSensitiveValuesHidden} onClick={() => { setCustomMarkupValues({ label: "", value: "" }); setCustomMarkupOpen(true); }}><Plus size={14} /> Add markup</Button><Button secondary disabled={settingsSensitiveValuesHidden} onClick={() => { setPricingDefaults(Object.fromEntries(pricingDefaultEntries.map((definition) => [`${definition.key}_value`, definition.value]))); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button></div> : undefined}>
+      <Panel title="Pricing defaults - Internal" detail="Applied to new internal product costings and new Commission Summary rates as percentages. Existing quotations and Commission Summary rows keep their saved values. Sales &amp; Pricing Officers can adjust the VAT percentage per quotation." action={memberRole(role) ? <div className="flex flex-wrap justify-end gap-2"><Button secondary disabled={settingsSensitiveValuesHidden} onClick={() => { setCustomMarkupValues({ label: "", value: "" }); setCustomMarkupOpen(true); }}><Plus size={14} /> Add markup</Button><Button secondary disabled={settingsSensitiveValuesHidden} onClick={() => { setPricingDefaults(Object.fromEntries(pricingDefaultEntries.map((definition) => [`${definition.key}_value`, definition.value]))); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button></div> : undefined}>
         <Table labels={["Pricing default", "Default percentage"]}>
           {pricingDefaultEntries.map((definition) => <tr key={definition.key} className={settingsSensitiveValuesHidden ? "bg-[#fafbfc] text-[#8b92a1]" : undefined}><td className="px-4 py-3 font-medium">{settingsSensitiveValuesHidden ? "Hidden markup" : <>{definition.label}{definition.custom && <span className="ml-2 rounded-full bg-[#f1f4f8] px-2 py-0.5 text-[10px] font-medium text-[#687386]">Custom</span>}</>}</td><td className="px-4 py-3 text-right">{settingsSensitiveValuesHidden ? "Hidden" : `${n(definition.value)}%`}</td></tr>)}
         </Table>
       </Panel>
       {pricingDefaultsOpen && <Dialog title="Pricing defaults - Internal" fields={pricingDefaultEntries.map((definition) => ({ key: `${definition.key}_value`, label: definition.label, type: "number" as const, required: true }))} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => { if (!savingPricingDefaults) setPricingDefaultsOpen(false); }} saving={savingPricingDefaults} saveLabel="Save pricing defaults" className="max-w-lg" compact />}
       {customMarkupOpen && <Dialog title="Add custom markup" fields={[{ key: "label", label: "Markup name", required: true }, { key: "value", label: "Percentage", type: "number" as const, required: true }]} values={customMarkupValues} setValues={setCustomMarkupValues} save={() => void addCustomMarkup()} close={() => { if (!savingPricingDefaults) setCustomMarkupOpen(false); }} saving={savingPricingDefaults} saveLabel="Add markup" className="max-w-lg" compact><p className="mt-3 rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3 text-[11px] leading-5 text-[#687386]">This markup is included in computed pricing and used as a default for new quotations. The privacy button only masks this Settings screen; it does not change calculations or quotation workflow.</p></Dialog>}
-      <Panel
-        title="Commission Summary defaults"
-        detail="Defaults for new Commission Summary rows. These are separate from quotation selling-price markups; existing summaries keep their saved rates."
-        action={
-          memberRole(role) ? (
-            <Button
-              secondary
-              disabled={settingsSensitiveValuesHidden}
-              onClick={() => {
-                setCommissionDefaults({
-                  commission_rate: text(setting?.commission_default_rate, "5"),
-                  va_commission_rate: text(setting?.va_commission_default_rate, "0"),
-                });
-                setCommissionDefaultsOpen(true);
-              }}
-            >
-              <Settings size={14} />
-              Edit commission defaults
-            </Button>
-          ) : undefined
-        }
-      >
-        <Table labels={["Commission type", "Default percentage"]}>
-          <tr className={settingsSensitiveValuesHidden ? "bg-[#fafbfc] text-[#8b92a1]" : undefined}>
-            <td className="px-4 py-3 font-medium">Commission · Price Quotation preparator</td>
-            <td className="px-4 py-3 text-right">{settingsSensitiveValuesHidden ? "Hidden" : `${n(setting?.commission_default_rate ?? 5)}%`}</td>
-          </tr>
-          <tr className={settingsSensitiveValuesHidden ? "bg-[#fafbfc] text-[#8b92a1]" : undefined}>
-            <td className="px-4 py-3 font-medium">VA Commission · eligible lead endorser</td>
-            <td className="px-4 py-3 text-right">{settingsSensitiveValuesHidden ? "Hidden" : `${n(setting?.va_commission_default_rate ?? 0)}%`}</td>
-          </tr>
-        </Table>
-      </Panel>
-      {commissionDefaultsOpen && <Dialog title="Commission Summary defaults" fields={[{ key: "commission_rate", label: "Commission %", type: "number", required: true }, { key: "va_commission_rate", label: "VA Commission %", type: "number", required: true }]} values={commissionDefaults} setValues={setCommissionDefaults} save={() => void saveCommissionDefaults()} close={() => { if (!savingCommissionDefaults) setCommissionDefaultsOpen(false); }} saving={savingCommissionDefaults} saveLabel="Save commission defaults" className="max-w-lg" compact><p className="mt-3 rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3 text-[11px] leading-5 text-[#687386]">Commission uses the VAT-inclusive Grand Total. VA Commission is applied only when the active lead endorsement was made by a Sales &amp; Pricing Officer to the officer who prepared the quotation.</p></Dialog>}
       {canManageSupplierCountries && (
         <Panel
           title="Supplier country options"
