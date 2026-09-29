@@ -18984,14 +18984,12 @@ function Approvals({
 
 function CommissionSummaryView({
   store,
-  orgId,
   reload,
   notice,
   role,
   readOnly = false,
 }: {
   store: Store;
-  orgId: string;
   reload: () => Promise<void>;
   notice: (m: string) => void;
   role: string;
@@ -18999,9 +18997,6 @@ function CommissionSummaryView({
 }) {
   const canManage = !readOnly && (memberRole(role) || role === "accountant");
   const canUndoPaid = !readOnly && memberRole(role);
-  const [eligibleQuotations, setEligibleQuotations] = useState<Row[]>([]);
-  const [officerOptions, setOfficerOptions] = useState<Row[]>([]);
-  const [eligibleError, setEligibleError] = useState("");
   const [commissionQuery, setCommissionQuery] = useState("");
   const [officerFilter, setOfficerFilter] = useState("all");
   const [summaryFormOpen, setSummaryFormOpen] = useState(false);
@@ -19014,48 +19009,18 @@ function CommissionSummaryView({
   const [undoError, setUndoError] = useState("");
   const [undoSaving, setUndoSaving] = useState(false);
   const [paidId, setPaidId] = useState<string | null>(null);
-  const summarySignature = store.commission_summaries
-    .map((summary) => `${text(summary.id)}:${text(summary.status)}`)
-    .join(",");
-
-  const loadEligibleQuotations = useCallback(async () => {
-    if (!canManage) return;
-    setEligibleError("");
-    const client = createClient();
-    const [eligibleResponse, officerResponse] = await Promise.all([
-      client.rpc("commission_summary_eligible_quotations", {
-        p_organization_id: orgId,
-      }),
-      client.rpc("commission_summary_officer_options", {
-        p_organization_id: orgId,
-      }),
-    ]);
-    if (eligibleResponse.error) {
-      setEligibleQuotations([]);
-      setEligibleError(eligibleResponse.error.message);
-      return;
-    }
-    if (officerResponse.error) {
-      setOfficerOptions([]);
-      setEligibleError(officerResponse.error.message);
-    } else {
-      setOfficerOptions((officerResponse.data ?? []) as Row[]);
-    }
-    setEligibleQuotations((eligibleResponse.data ?? []) as Row[]);
-  }, [canManage, orgId]);
-
-  useEffect(() => {
-    void loadEligibleQuotations();
-  }, [loadEligibleQuotations, summarySignature]);
 
   const userName = (userId: unknown, fallback = "Sales & Pricing Officer") =>
     text(
       store.profiles.find((profile) => profile.id === userId)?.full_name,
       fallback,
     );
+  const salesCommissionAmount = (summary: Row) =>
+    n(summary.sales_commission_markup_amount ?? summary.commission_amount);
+  const vaCommissionAmount = (summary: Row) =>
+    n(summary.va_commission_markup_amount ?? summary.va_commission_amount);
   const officerIds = Array.from(
     new Set([
-      ...officerOptions.map((officer) => text(officer.user_id, "")),
       ...store.commission_summaries.flatMap((summary) =>
         [summary.preparator_user_id, summary.va_endorser_user_id]
           .map((userId) => text(userId, ""))
@@ -19077,46 +19042,33 @@ function CommissionSummaryView({
       summary.quotation_no,
       summary.project_name,
       summary.client_name,
-      userName(summary.preparator_user_id),
-      summary.va_endorser_user_id
-        ? userName(summary.va_endorser_user_id)
-        : "",
+      readOnly
+        ? summary.my_commission_type
+        : userName(summary.preparator_user_id),
+      readOnly
+        ? summary.my_officer_name
+        : summary.va_endorser_user_id
+          ? userName(summary.va_endorser_user_id)
+          : "",
     ].some((value) => text(value, "").toLowerCase().includes(normalizedQuery));
   });
   const commissionTotal = filteredRows.reduce(
-    (sum, summary) => sum + n(summary.commission_amount),
+    (sum, summary) => sum + salesCommissionAmount(summary),
     0,
   );
   const vaCommissionTotal = filteredRows.reduce(
-    (sum, summary) => sum + n(summary.va_commission_amount),
+    (sum, summary) => sum + vaCommissionAmount(summary),
     0,
   );
   const totalCommission = commissionTotal + vaCommissionTotal;
-  const defaultCommissionRate = eligibleQuotations.length
-    ? String(n(eligibleQuotations[0].commission_default_rate))
-    : "";
-  const defaultVaCommissionRate = eligibleQuotations.length
-    ? String(n(eligibleQuotations[0].va_commission_default_rate))
-    : "";
-
-  const openCreate = () => {
-    setEditingSummary(null);
-    setSummaryError("");
-    setSummaryValues({
-      quotation_id: "",
-      commission_rate: defaultCommissionRate,
-      va_commission_rate: defaultVaCommissionRate,
-      downpayment_amount: "",
-      receivable_balance: "",
-    });
-    setSummaryFormOpen(true);
-  };
+  const myCommissionTotal = filteredRows.reduce(
+    (sum, summary) => sum + n(summary.my_commission_amount),
+    0,
+  );
   const openEdit = (summary: Row) => {
     setEditingSummary(summary);
     setSummaryError("");
     setSummaryValues({
-      commission_rate: String(n(summary.commission_rate)),
-      va_commission_rate: String(n(summary.va_commission_rate)),
       downpayment_amount: String(n(summary.downpayment_amount)),
       receivable_balance: String(n(summary.receivable_balance)),
     });
@@ -19131,27 +19083,15 @@ function CommissionSummaryView({
   };
   const refreshSummaryData = async () => {
     await reload();
-    await loadEligibleQuotations();
   };
   const saveSummary = async () => {
+    if (!editingSummary) return;
     setSummarySaving(true);
     setSummaryError("");
     try {
       const client = createClient();
-      const commissionRateInput = text(summaryValues.commission_rate, "").trim();
-      const vaCommissionRateInput = text(summaryValues.va_commission_rate, "").trim();
-      const commissionRate = commissionRateInput === "" ? null : n(commissionRateInput);
-      const vaCommissionRate = vaCommissionRateInput === "" ? null : n(vaCommissionRateInput);
       const downpaymentAmount = n(summaryValues.downpayment_amount);
-      const grandTotal = editingSummary
-        ? n(editingSummary.grand_total)
-        : n(selectedQuotation?.grand_total);
-      if (!editingSummary && !selectedQuotation) {
-        throw new Error("Select a Price Quotation.");
-      }
-      if (editingSummary && (commissionRate === null || vaCommissionRate === null)) {
-        throw new Error("Sales Executive Commission and VA Commission are required.");
-      }
+      const grandTotal = n(editingSummary.grand_total);
       if (downpaymentAmount > grandTotal) {
         throw new Error("Downpayment Amount cannot exceed the Grand Total.");
       }
@@ -19163,23 +19103,11 @@ function CommissionSummaryView({
           p_summary_id: editingSummary.id,
           p_downpayment_amount: downpaymentAmount,
           p_receivable_balance: receivableBalance,
-          p_commission_rate: commissionRate,
-          p_va_commission_rate: vaCommissionRate,
+          p_commission_rate: n(editingSummary.commission_rate),
+          p_va_commission_rate: n(editingSummary.va_commission_rate),
         });
         if (error) throw error;
         notice("Commission Summary updated.");
-      } else {
-        const quotationId = text(summaryValues.quotation_id, "").split("|")[0];
-        if (!quotationId) throw new Error("Select a Price Quotation.");
-        const { error } = await client.rpc("create_commission_summary", {
-          p_quotation_id: quotationId,
-          p_downpayment_amount: downpaymentAmount,
-          p_receivable_balance: receivableBalance,
-          p_commission_rate: commissionRate,
-          p_va_commission_rate: vaCommissionRate,
-        });
-        if (error) throw error;
-        notice("Commission Summary added.");
       }
       setSummaryFormOpen(false);
       setEditingSummary(null);
@@ -19233,61 +19161,27 @@ function CommissionSummaryView({
     notice("Paid status undone. The Commission Summary can be edited again.");
     await refreshSummaryData();
   };
-  const selectedQuotation = eligibleQuotations.find(
-    (quotation) =>
-      text(quotation.quotation_id, "") ===
-      text(summaryValues.quotation_id, "").split("|")[0],
-  );
-  const formGrandTotal = editingSummary
-    ? n(editingSummary.grand_total)
-    : n(selectedQuotation?.grand_total);
-  const formHasQuotation = Boolean(editingSummary || selectedQuotation);
-  const calculatedReceivableBalance = formHasQuotation
+  const formGrandTotal = n(editingSummary?.grand_total);
+  const calculatedReceivableBalance = editingSummary
     ? roundCurrency(
         Math.max(formGrandTotal - n(summaryValues.downpayment_amount), 0),
       )
     : null;
-  const dialogSummaryValues = formHasQuotation
+  const dialogSummaryValues = editingSummary
     ? {
         ...summaryValues,
         receivable_balance: peso.format(calculatedReceivableBalance ?? 0),
       }
     : summaryValues;
-  const vaCommissionEligible = Boolean(
-    editingSummary
-      ? editingSummary.va_endorser_user_id
-      : selectedQuotation?.va_endorser_user_id,
-  );
-  const vaCommissionUnavailable = Boolean(editingSummary || selectedQuotation) && !vaCommissionEligible;
-  const vaCommissionField: Field = {
-    key: "va_commission_rate",
-    label: "VA Commission %",
-    type: "number",
-    required: true,
-    readOnly: vaCommissionUnavailable,
-    disabled: vaCommissionUnavailable,
-    hint: vaCommissionUnavailable
-      ? "No eligible VA endorser. VA Commission is set to 0% and cannot be edited."
-      : undefined,
-  };
-  const quotationOptions = eligibleQuotations.map(
-    (quotation) =>
+  /* retired quotation picker
+  const quotationOptions = [];
       `${text(quotation.quotation_id)}|${text(quotation.quotation_no, "Price Quotation")} · ${text(quotation.client_name, "Unnamed client")}`,
   );
-  const summaryFields: Field[] = editingSummary
-    ? [
-        { key: "commission_rate", label: "Sales Executive Commission %", type: "number", required: true },
-        vaCommissionField,
-        { key: "downpayment_amount", label: "Downpayment Amount", type: "number", required: true },
-        { key: "receivable_balance", label: "Receivable / Due Balance", type: "text", required: true, readOnly: true },
-      ]
-    : [
-        { key: "quotation_id", label: "Price Quotation", type: "select", required: true, options: quotationOptions },
-        { key: "commission_rate", label: "Sales Executive Commission %", type: "number", required: true },
-        vaCommissionField,
-        { key: "downpayment_amount", label: "Downpayment Amount", type: "number", required: true },
-        { key: "receivable_balance", label: "Receivable / Due Balance", type: "text", required: true, readOnly: true },
-      ];
+  */
+  const summaryFields: Field[] = [
+    { key: "downpayment_amount", label: "Downpayment Amount", type: "number", required: true },
+    { key: "receivable_balance", label: "Receivable / Due Balance", type: "text", required: true, readOnly: true },
+  ];
   const formatStatus = (summary: Row) =>
     summary.status === "paid" ? "Paid" : "Not yet paid";
   return (
@@ -19296,35 +19190,33 @@ function CommissionSummaryView({
         title={readOnly ? "My Commission Summary" : "Commission Summary"}
         detail={
           readOnly
-            ? "View Sales Executive Commission and eligible VA Commission for Price Quotations you prepared or endorsed."
-            : "Add one summary for each approved direct Price Quotation."
-        }
-        action={
-          canManage ? (
-            <Button
-              onClick={openCreate}
-              disabled={!eligibleQuotations.length}
-            >
-              <Plus size={14} />
-              Add commission
-            </Button>
-          ) : undefined
+            ? "Only your allocation from approved Price Quotations is shown."
+            : "Commission allocations are created automatically from approved costing markups."
         }
       >
-        <div className="grid gap-2 border-b border-[#e4e8ef] p-4 sm:grid-cols-3">
-          <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px]">
-            <p className="text-[#687386]">Sales Executive Commission total</p>
-            <p className="mt-1 text-[16px] font-semibold text-[#202938]">{peso.format(commissionTotal)}</p>
+        {readOnly ? (
+          <div className="border-b border-[#e4e8ef] p-4">
+            <div className="rounded-[8px] border border-[#b7dfc5] bg-[#f1fbf4] p-3 text-[12px] sm:max-w-xs">
+              <p className="text-[#687386]">My commission total</p>
+              <p className="mt-1 text-[16px] font-semibold text-[#176b40]">{peso.format(myCommissionTotal)}</p>
+            </div>
           </div>
-          <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px]">
-            <p className="text-[#687386]">VA Commission total</p>
-            <p className="mt-1 text-[16px] font-semibold text-[#202938]">{peso.format(vaCommissionTotal)}</p>
+        ) : (
+          <div className="grid gap-2 border-b border-[#e4e8ef] p-4 sm:grid-cols-3">
+            <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px]">
+              <p className="text-[#687386]">Sales Commission total</p>
+              <p className="mt-1 text-[16px] font-semibold text-[#202938]">{peso.format(commissionTotal)}</p>
+            </div>
+            <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px]">
+              <p className="text-[#687386]">VA Commission total</p>
+              <p className="mt-1 text-[16px] font-semibold text-[#202938]">{peso.format(vaCommissionTotal)}</p>
+            </div>
+            <div className="rounded-[8px] border border-[#b7dfc5] bg-[#f1fbf4] p-3 text-[12px]">
+              <p className="text-[#687386]">Total commission</p>
+              <p className="mt-1 text-[16px] font-semibold text-[#176b40]">{peso.format(totalCommission)}</p>
+            </div>
           </div>
-          <div className="rounded-[8px] border border-[#b7dfc5] bg-[#f1fbf4] p-3 text-[12px]">
-            <p className="text-[#687386]">Total commission</p>
-            <p className="mt-1 text-[16px] font-semibold text-[#176b40]">{peso.format(totalCommission)}</p>
-          </div>
-        </div>
+        )}
         <div className="flex flex-wrap items-end gap-3 border-b border-[#e4e8ef] px-4 py-3 sm:px-5">
           <label className="min-w-56 flex-1 text-[12px] font-medium">
             Search
@@ -19346,10 +19238,7 @@ function CommissionSummaryView({
                 <option value="all">All pricing officers</option>
                 {officerIds.map((userId) => (
                   <option key={userId} value={userId}>
-                    {text(
-                      officerOptions.find((officer) => text(officer.user_id, "") === userId)?.full_name,
-                      userName(userId),
-                    )}
+                    {userName(userId)}
                   </option>
                 ))}
               </select>
@@ -19367,30 +19256,43 @@ function CommissionSummaryView({
             </Button>
           )}
         </div>
-        {canManage && eligibleError && (
-          <p role="alert" className="border-b border-[#f1d0d0] bg-[#fff6f6] px-4 py-3 text-[12px] text-[#b42318] sm:px-5">
-            Eligible quotations could not be loaded: {eligibleError}
-          </p>
-        )}
         {filteredRows.length ? (
           <Table
-            labels={[
-              "Quotation",
-              "Client / project",
-              "Grand total",
-              "Prepared By / Sales Executive Commission",
-              "VA endorser / VA Commission",
-              "Downpayment",
-              "Receivable / due balance",
-              "Total commission",
-              "Status",
-              ...(canManage ? ["Actions"] : []),
-            ]}
-            minWidth={canManage ? 1500 : 1320}
+            labels={readOnly
+              ? ["Quotation", "Client / project", "Grand total", "My commission", "Status"]
+              : [
+                  "Quotation",
+                  "Client / project",
+                  "Grand total",
+                  "Prepared By / Sales Commission",
+                  "VA endorser / VA Commission",
+                  "Downpayment",
+                  "Receivable / due balance",
+                  "Total commission",
+                  "Status",
+                  "Actions",
+                ]}
+            minWidth={canManage ? 1500 : 760}
           >
             {filteredRows.map((summary) => {
               const hasLeadEndorsement = Boolean(summary.lead_endorser_user_id);
-              const rowTotal = n(summary.commission_amount) + n(summary.va_commission_amount);
+              const rowTotal = salesCommissionAmount(summary) + vaCommissionAmount(summary);
+              if (readOnly) {
+                return (
+                  <tr key={text(summary.id)}>
+                    <td className="px-4 py-3">{stackedCell(summary.quotation_no, text(summary.created_at, "").slice(0, 10))}</td>
+                    <td className="px-4 py-3">{stackedCell(summary.client_name, summary.project_name)}</td>
+                    <td className="px-4 py-3 text-right font-medium">{peso.format(n(summary.grand_total))}</td>
+                    <td className="px-4 py-3">
+                      {stackedCell(
+                        text(summary.my_commission_type, "Commission"),
+                        peso.format(n(summary.my_commission_amount)),
+                      )}
+                    </td>
+                    <td className="px-4 py-3"><Status value={formatStatus(summary)} /></td>
+                  </tr>
+                );
+              }
               return (
                 <tr key={text(summary.id)}>
                   <td className="px-4 py-3">{stackedCell(summary.quotation_no, text(summary.created_at, "").slice(0, 10))}</td>
@@ -19457,9 +19359,7 @@ function CommissionSummaryView({
             {store.commission_summaries.length
               ? "No Commission Summaries match the selected filters."
               : canManage
-                ? eligibleQuotations.length
-                  ? "No summaries yet. Select Add commission to record an approved Price Quotation."
-                  : "No approved direct Price Quotations are waiting for a summary."
+                ? "Approved direct Price Quotations will appear here automatically after approval."
                 : "No Commission Summary records are assigned to you yet."}
           </Empty>
         )}
@@ -19467,41 +19367,32 @@ function CommissionSummaryView({
 
       {canManage && summaryFormOpen && (
         <Dialog
-          title={editingSummary ? "Edit Commission Summary" : "Add Commission Summary"}
+          title="Edit Commission Summary"
           fields={summaryFields}
           values={dialogSummaryValues}
           setValues={setSummaryValues}
           save={() => void saveSummary()}
           close={closeSummaryForm}
           saving={summarySaving}
-          saveLabel={editingSummary ? "Save changes" : "Add commission"}
+          saveLabel="Save changes"
           className="max-w-2xl"
-          onFieldChange={(key, value, current) => {
-            if (key !== "quotation_id") return { ...current, [key]: value };
-            const quotation = eligibleQuotations.find(
-              (candidate) => text(candidate.quotation_id, "") === value.split("|")[0],
-            );
-            return {
-              ...current,
-              [key]: value,
-              commission_rate: quotation ? String(n(quotation.commission_default_rate)) : "",
-              va_commission_rate: quotation?.va_endorser_user_id
-                ? String(n(quotation.va_commission_default_rate))
-                : "0",
-            };
-          }}
         >
           {editingSummary ? (
             <p className="mt-3 mb-3 rounded-lg bg-[#fafbfc] p-3 text-[12px] text-[#687386]">
               {text(editingSummary.quotation_no)} · Grand total <b className="text-[13px] font-semibold text-[#176b40]">{peso.format(n(editingSummary.grand_total))}</b>. Paid records cannot be edited.
             </p>
-          ) : selectedQuotation ? (
+          ) : null /* retired manual-create branch
             <p className="mt-3 mb-3 rounded-lg bg-[#fafbfc] p-3 text-[12px] text-[#687386]">
               Prepared By: <b>{text(selectedQuotation.preparator_name, userName(selectedQuotation.preparator_user_id))}</b>
               {Boolean(selectedQuotation.va_endorser_user_id) && <> · VA endorser: <b>{text(selectedQuotation.va_endorser_name, userName(selectedQuotation.va_endorser_user_id))}</b></>}
               <br />Grand total: <b className="text-[13px] font-semibold text-[#176b40]">{peso.format(n(selectedQuotation.grand_total))}</b>
             </p>
-          ) : null}
+          ) : null */}
+          {editingSummary && (
+            <p className="mb-3 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px] text-[#687386]">
+              Commission amounts are read-only and come from the approved costing markup: Sales Commission <b className="text-[#202938]">{peso.format(salesCommissionAmount(editingSummary))}</b> and VA Commission <b className="text-[#202938]">{peso.format(vaCommissionAmount(editingSummary))}</b>.
+            </p>
+          )}
           {summaryError && <p role="alert" className="mb-3 text-sm text-[#b42318]">{summaryError}</p>}
         </Dialog>
       )}
@@ -20133,6 +20024,11 @@ export function HuswellWorkspace({
   }, [defaultWorkspaceView, selectLeadWorkspaceMode]);
   const fetchTable = useCallback(
     async (table: TableName) => {
+      if (table === "commission_summaries") {
+        return client.rpc("commission_summary_rows", {
+          p_organization_id: organizationId,
+        });
+      }
       const childTables: TableName[] = [
         "profiles",
         "quotation_items",
@@ -20785,7 +20681,6 @@ export function HuswellWorkspace({
     ) : active === "Commissions" ? (
       <CommissionSummaryView
         store={store}
-        orgId={organizationId}
         reload={reload}
         notice={setMessage}
         role={role}
