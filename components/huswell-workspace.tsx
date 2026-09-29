@@ -18998,6 +18998,7 @@ function CommissionSummaryView({
   const canManage = !readOnly && (memberRole(role) || role === "accountant");
   const canUndoPaid = !readOnly && memberRole(role);
   const [commissionQuery, setCommissionQuery] = useState("");
+  const [commissionMonth, setCommissionMonth] = useState(currentMonth);
   const [officerFilter, setOfficerFilter] = useState("all");
   const [summaryFormOpen, setSummaryFormOpen] = useState(false);
   const [editingSummary, setEditingSummary] = useState<Row | null>(null);
@@ -19030,6 +19031,11 @@ function CommissionSummaryView({
   );
   const normalizedQuery = commissionQuery.trim().toLowerCase();
   const filteredRows = store.commission_summaries.filter((summary) => {
+    if (
+      commissionMonth &&
+      text(summary.created_at, "").slice(0, 7) !== commissionMonth
+    )
+      return false;
     if (
       officerFilter !== "all" &&
       ![summary.preparator_user_id, summary.va_endorser_user_id].some(
@@ -19193,15 +19199,14 @@ function CommissionSummaryView({
             ? "Only your allocation from approved Price Quotations is shown."
             : "Commission allocations are created automatically from approved costing markups."
         }
-      >
-        {readOnly ? (
-          <div className="border-b border-[#e4e8ef] p-3">
-            <div className="rounded-[8px] border border-[#b7dfc5] bg-[#f1fbf4] p-2.5 text-[11px] sm:max-w-xs">
-              <p className="text-[#687386]">My commission total</p>
-              <p className="mt-0.5 text-[15px] font-semibold text-[#176b40]">{peso.format(myCommissionTotal)}</p>
-            </div>
+        action={readOnly ? (
+          <div className="ml-auto min-w-[180px] rounded-[8px] border border-[#b7dfc5] bg-[#f1fbf4] p-2.5 text-[11px]">
+            <p className="text-[#687386]">My commission total</p>
+            <p className="mt-0.5 text-[15px] font-semibold text-[#176b40]">{peso.format(myCommissionTotal)}</p>
           </div>
-        ) : (
+        ) : undefined}
+      >
+        {!readOnly && (
           <div className="grid gap-2 border-b border-[#e4e8ef] p-3 sm:grid-cols-3">
             <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-2.5 text-[11px]">
               <p className="text-[#687386]">Sales Commission total</p>
@@ -19217,13 +19222,23 @@ function CommissionSummaryView({
             </div>
           </div>
         )}
-        <div className="flex flex-wrap items-end gap-2 border-b border-[#e4e8ef] px-3 py-2 sm:px-4">
+        <div className={`flex flex-wrap items-end gap-2 border-b border-[#e4e8ef] px-3 sm:px-4 ${readOnly ? "-mt-2 pb-2 pt-0" : "py-2"}`}>
           <label className="min-w-48 flex-1 text-[11px] font-medium">
             Search
             <input
               value={commissionQuery}
               onChange={(event) => setCommissionQuery(event.target.value)}
               placeholder="Quotation, client, or officer"
+              className="input mt-1"
+            />
+          </label>
+          <label className="min-w-40 text-[11px] font-medium">
+            Month
+            <input
+              type="month"
+              value={commissionMonth}
+              onClick={(event) => event.currentTarget.showPicker?.()}
+              onChange={(event) => setCommissionMonth(event.target.value)}
               className="input mt-1"
             />
           </label>
@@ -19244,11 +19259,12 @@ function CommissionSummaryView({
               </select>
             </label>
           )}
-          {(commissionQuery || officerFilter !== "all") && (
+          {(commissionQuery || commissionMonth !== currentMonth() || officerFilter !== "all") && (
             <Button
               secondary
               onClick={() => {
                 setCommissionQuery("");
+                setCommissionMonth(currentMonth());
                 setOfficerFilter("all");
               }}
             >
@@ -19272,11 +19288,12 @@ function CommissionSummaryView({
                   "Status",
                   "Actions",
                 ]}
-            minWidth={readOnly ? 680 : 1280}
+            minWidth={readOnly ? 680 : 1360}
             className="commission-summary-table table-fixed"
             columnWidths={readOnly
               ? ["18%", "32%", "17%", "23%", "10%"]
               : ["10%", "13%", "8%", "12%", "13%", "7%", "8%", "8%", "6%", "15%"]}
+            alignRightLabels={readOnly ? ["Grand total", "My commission"] : []}
           >
             {filteredRows.map((summary) => {
               const hasLeadEndorsement = Boolean(summary.lead_endorser_user_id);
