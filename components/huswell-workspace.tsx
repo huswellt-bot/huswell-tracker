@@ -18899,7 +18899,6 @@ function CommissionSummaryView({
       va_commission_rate: defaultVaCommissionRate,
       downpayment_amount: "",
       receivable_balance: "",
-      payment_due_date: "",
     });
     setSummaryFormOpen(true);
   };
@@ -18911,7 +18910,6 @@ function CommissionSummaryView({
       va_commission_rate: String(n(summary.va_commission_rate)),
       downpayment_amount: String(n(summary.downpayment_amount)),
       receivable_balance: String(n(summary.receivable_balance)),
-      payment_due_date: text(summary.payment_due_date, "").slice(0, 10),
     });
     setSummaryFormOpen(true);
   };
@@ -18951,14 +18949,11 @@ function CommissionSummaryView({
       const receivableBalance = roundCurrency(
         Math.max(grandTotal - downpaymentAmount, 0),
       );
-      const paymentDueDate = text(summaryValues.payment_due_date, "").trim();
-      if (!paymentDueDate) throw new Error("Payment Due Date is required.");
       if (editingSummary) {
         const { error } = await client.rpc("update_commission_summary", {
           p_summary_id: editingSummary.id,
           p_downpayment_amount: downpaymentAmount,
           p_receivable_balance: receivableBalance,
-          p_payment_due_date: paymentDueDate,
           p_commission_rate: commissionRate,
           p_va_commission_rate: vaCommissionRate,
         });
@@ -18971,7 +18966,6 @@ function CommissionSummaryView({
           p_quotation_id: quotationId,
           p_downpayment_amount: downpaymentAmount,
           p_receivable_balance: receivableBalance,
-          p_payment_due_date: paymentDueDate,
           p_commission_rate: commissionRate,
           p_va_commission_rate: vaCommissionRate,
         });
@@ -19068,7 +19062,7 @@ function CommissionSummaryView({
   };
   const quotationOptions = eligibleQuotations.map(
     (quotation) =>
-      `${text(quotation.quotation_id)}|${text(quotation.quotation_no, "Price Quotation")} · ${text(quotation.client_name, "Unnamed client")} · ${peso.format(n(quotation.grand_total))}`,
+      `${text(quotation.quotation_id)}|${text(quotation.quotation_no, "Price Quotation")} · ${text(quotation.client_name, "Unnamed client")}`,
   );
   const summaryFields: Field[] = editingSummary
     ? [
@@ -19076,7 +19070,6 @@ function CommissionSummaryView({
         vaCommissionField,
         { key: "downpayment_amount", label: "Downpayment Amount", type: "number", required: true },
         { key: "receivable_balance", label: "Receivable / Due Balance", type: "text", required: true, readOnly: true },
-        { key: "payment_due_date", label: "Payment Due Date", type: "date", required: true },
       ]
     : [
         { key: "quotation_id", label: "Price Quotation", type: "select", required: true, options: quotationOptions },
@@ -19084,7 +19077,6 @@ function CommissionSummaryView({
         vaCommissionField,
         { key: "downpayment_amount", label: "Downpayment Amount", type: "number", required: true },
         { key: "receivable_balance", label: "Receivable / Due Balance", type: "text", required: true, readOnly: true },
-        { key: "payment_due_date", label: "Payment Due Date", type: "date", required: true },
       ];
   const formatStatus = (summary: Row) =>
     summary.status === "paid" ? "Paid" : "Not yet paid";
@@ -19095,7 +19087,7 @@ function CommissionSummaryView({
         detail={
           readOnly
             ? "View Sales Executive Commission and eligible VA Commission for Price Quotations you prepared or endorsed."
-            : "Add one summary for each direct Price Quotation with an approved active Project Calendar due date."
+            : "Add one summary for each approved direct Price Quotation."
         }
         action={
           canManage ? (
@@ -19176,16 +19168,15 @@ function CommissionSummaryView({
               "Quotation",
               "Client / project",
               "Grand total",
-              "Preparator / Sales Executive Commission",
+              "Prepared By / Sales Executive Commission",
               "VA endorser / VA Commission",
               "Downpayment",
               "Receivable / due balance",
-              "Payment due date",
               "Total commission",
               "Status",
               ...(canManage ? ["Actions"] : []),
             ]}
-            minWidth={canManage ? 1660 : 1460}
+            minWidth={canManage ? 1500 : 1320}
           >
             {filteredRows.map((summary) => {
               const hasLeadEndorsement = Boolean(summary.lead_endorser_user_id);
@@ -19212,7 +19203,6 @@ function CommissionSummaryView({
                   </td>
                   <td className="px-4 py-3 text-right">{peso.format(n(summary.downpayment_amount))}</td>
                   <td className="px-4 py-3 text-right">{peso.format(n(summary.receivable_balance))}</td>
-                  <td className="px-4 py-3">{day(summary.payment_due_date)}</td>
                   <td className="px-4 py-3 text-right font-semibold text-[#176b40]">{peso.format(rowTotal)}</td>
                   <td className="px-4 py-3"><Status value={formatStatus(summary)} /></td>
                   {canManage && (
@@ -19258,8 +19248,8 @@ function CommissionSummaryView({
               ? "No Commission Summaries match the selected filters."
               : canManage
                 ? eligibleQuotations.length
-                  ? "No summaries yet. Select Add commission to record an eligible production quotation."
-                  : "No direct approved Price Quotations with an approved active Project Calendar due date are waiting for a summary."
+                  ? "No summaries yet. Select Add commission to record an approved Price Quotation."
+                  : "No approved direct Price Quotations are waiting for a summary."
                 : "No Commission Summary records are assigned to you yet."}
           </Empty>
         )}
@@ -19297,7 +19287,7 @@ function CommissionSummaryView({
             </p>
           ) : selectedQuotation ? (
             <p className="mt-3 mb-3 rounded-lg bg-[#fafbfc] p-3 text-[12px] text-[#687386]">
-              Preparator: <b>{text(selectedQuotation.preparator_name, userName(selectedQuotation.preparator_user_id))}</b>
+              Prepared By: <b>{text(selectedQuotation.preparator_name, userName(selectedQuotation.preparator_user_id))}</b>
               {Boolean(selectedQuotation.va_endorser_user_id) && <> · VA endorser: <b>{text(selectedQuotation.va_endorser_name, userName(selectedQuotation.va_endorser_user_id))}</b></>}
               <br />Grand total: <b className="text-[13px] font-semibold text-[#176b40]">{peso.format(n(selectedQuotation.grand_total))}</b>
             </p>
