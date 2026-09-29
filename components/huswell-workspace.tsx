@@ -131,7 +131,7 @@ type View =
   | "Announcements"
   | "Policy"
   | "Settings"
-  | "My Commission Summary"
+  | "Commissions"
   | "Profile";
 
 const TEMPORARILY_HIDDEN_VIEWS: ReadonlyArray<View> = [
@@ -1820,10 +1820,8 @@ const workspaceViewTables = (
       "customers",
       "suppliers",
       "supplier_payables",
-      "commission_summaries",
-      "profiles",
     ];
-  if (view === "My Commission Summary")
+  if (view === "Commissions")
     return ["commission_summaries", "profiles"];
   if (view === "Payroll & Leave")
     return ["employees", "payroll_periods", "payroll_entries", "leave_requests"];
@@ -17710,7 +17708,6 @@ function FinanceReports({
   notice: (m: string) => void;
   role: string;
 }) {
-  const [financeSection, setFinanceSection] = useState<"overview" | "commission_summary">("overview");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const inRange = (value: unknown) => {
@@ -17781,39 +17778,8 @@ function FinanceReports({
       sum + Math.max(n(payable.amount) - n(payable.amount_paid), 0),
     0,
   );
-  const sectionTabs = (
-    <div className="flex flex-wrap gap-2" role="tablist" aria-label="Finance sections">
-      <Button
-        secondary={financeSection !== "overview"}
-        onClick={() => setFinanceSection("overview")}
-      >
-        Finance overview
-      </Button>
-      <Button
-        secondary={financeSection !== "commission_summary"}
-        onClick={() => setFinanceSection("commission_summary")}
-      >
-        Commission Summary
-      </Button>
-    </div>
-  );
-  if (financeSection === "commission_summary") {
-    return (
-      <div className="space-y-5">
-        {sectionTabs}
-        <CommissionSummaryView
-          store={store}
-          orgId={orgId}
-          reload={reload}
-          notice={notice}
-          role={role}
-        />
-      </div>
-    );
-  }
   return (
     <div className="space-y-5">
-      {sectionTabs}
       <div className="flex flex-wrap items-end gap-3 rounded-[14px] border border-[#d9e0e9] bg-white p-4">
         <label className="text-[12px] font-medium">
           From
@@ -20104,6 +20070,7 @@ export function HuswellWorkspace({
       "Price Quotations",
       "Approvals",
       "Finance",
+      "Commissions",
       "Settings",
     ],
     owner: [
@@ -20115,6 +20082,7 @@ export function HuswellWorkspace({
       "Quotation Costing Overview",
       "Approvals",
       "Finance",
+      "Commissions",
       "Announcements",
       "Policy",
       "Settings",
@@ -20128,6 +20096,7 @@ export function HuswellWorkspace({
       "Quotation Costing Overview",
       "Approvals",
       "Finance",
+      "Commissions",
       "Announcements",
       "Policy",
       "Settings",
@@ -20148,13 +20117,13 @@ export function HuswellWorkspace({
       "Price Quotations",
       "Price Quotation Review",
       "Quotation Costing Overview",
-      "My Commission Summary",
+      "Commissions",
       "Announcements",
       "Policy",
     ],
     sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Announcements", "Policy"],
     warehouse: ["Dashboard", "Catalog", "Inventory", "Production", "Announcements", "Policy"],
-    accountant: ["Finance", "Announcements", "Policy"],
+    accountant: ["Finance", "Commissions", "Announcements", "Policy"],
     payroll: ["Dashboard", "Payroll & Leave", "Directory", "Announcements", "Policy"],
     production: ["Dashboard", "Production", "Inventory", "Announcements", "Policy"],
     viewer: [
@@ -20252,6 +20221,7 @@ export function HuswellWorkspace({
       label: "Business",
       items: [
         { view: "Finance", icon: Wallet },
+        { view: "Commissions", icon: PhilippinePeso },
         { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
         { view: "Settings", icon: Settings },
@@ -20286,7 +20256,7 @@ export function HuswellWorkspace({
       items: [
         { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
-        { view: "My Commission Summary", icon: PhilippinePeso },
+        { view: "Commissions", icon: PhilippinePeso },
       ],
     },
   ] : [
@@ -20303,7 +20273,10 @@ export function HuswellWorkspace({
     },
     {
       label: "Finance",
-      items: [{ view: "Finance", icon: Wallet }],
+      items: [
+        { view: "Finance", icon: Wallet },
+        { view: "Commissions", icon: PhilippinePeso },
+      ],
     },
     {
       label: "Control",
@@ -20452,9 +20425,11 @@ export function HuswellWorkspace({
       title: "Business settings",
       detail: "Manage business defaults, profile details, and staff access.",
     },
-    "My Commission Summary": {
-      title: "My Commission Summary",
-      detail: "View Commission and VA Commission assigned to your Price Quotations.",
+    Commissions: {
+      title: "Commissions",
+      detail: role === "sales_pricing_officer"
+        ? "View Commission and VA Commission assigned to your Price Quotations."
+        : "Manage Sales Executive Commission and VA Commission summaries.",
     },
     Announcements: {
       title: "Announcements",
@@ -20607,14 +20582,14 @@ export function HuswellWorkspace({
         notice={setMessage}
         role={role}
       />
-    ) : active === "My Commission Summary" ? (
+    ) : active === "Commissions" ? (
       <CommissionSummaryView
         store={store}
         orgId={organizationId}
         reload={reload}
         notice={setMessage}
         role={role}
-        readOnly
+        readOnly={role === "sales_pricing_officer"}
       />
     ) : active === "Payroll & Leave" ? (
       <PayrollLeave
@@ -20756,7 +20731,7 @@ export function HuswellWorkspace({
                             : role === "sales_pricing_officer" && view === "Price Quotation Review"
                               ? "Quotation Review Queue"
                             : view === "Quotation Costing Overview"
-                              ? "Costing Breakdown Summary"
+                              ? "Costing"
                             : isManagementRole && view === "Price Quotations"
                               ? "Price Quotations"
                               : view === "Approvals"
