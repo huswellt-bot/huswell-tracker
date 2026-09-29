@@ -789,6 +789,10 @@ html.dark .huswell-brand-logo {
   width: 1950px;
   min-width: 1950px;
 }
+.huswell-workspace .lead-remarks-table {
+  width: 2070px;
+  min-width: 2070px;
+}
 .huswell-workspace .leads-table thead th {
   white-space: nowrap !important;
   overflow-wrap: normal;
@@ -852,6 +856,11 @@ html.dark .huswell-brand-logo {
 .huswell-workspace .leads-table th:nth-child(12),
 .huswell-workspace .leads-table td:nth-child(12) {
   width: 90px;
+}
+.huswell-workspace .lead-remarks-table th:last-child,
+.huswell-workspace .lead-remarks-table td:last-child {
+  width: 105px;
+  text-align: center;
 }
 .huswell-workspace .supplier-list-table {
   table-layout: fixed;

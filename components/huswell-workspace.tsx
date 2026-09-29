@@ -4526,12 +4526,16 @@ function Records({
     context: string;
     note: string;
   } | null>(null);
+  const [leadRemarkLead, setLeadRemarkLead] = useState<Row | null>(null);
+  const [leadRemarkDraft, setLeadRemarkDraft] = useState("");
+  const [leadRemarkSaving, setLeadRemarkSaving] = useState(false);
   const [deletionRequestValues, setDeletionRequestValues] = useState<Record<string, string>>({
     request_note: "",
   });
   const isProjectsPage = module.table === "leads" && leadMode === "projects";
   const isLeadChangeRequestsPage =
     module.table === "leads" && leadMode === "lead_change_requests";
+  const leadRemarksEnabled = module.table === "leads" && leadMode === "leads";
   const isGeneralManager = memberRole(role);
   const canFilterByProjectOfficer = isGeneralManager && !isProjectsPage;
   const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
@@ -4578,6 +4582,32 @@ function Records({
     } finally {
       setExportingBackup(false);
     }
+  };
+  const canEditLeadRemark = (row: Row) =>
+    leadRemarksEnabled &&
+    isProjectOfficerRole(role) &&
+    leadOwnerId(row) === currentUserId;
+  const openLeadRemark = (row: Row) => {
+    setLeadRemarkDraft(text(row.lead_remark, ""));
+    setLeadRemarkLead(row);
+  };
+  const closeLeadRemark = () => {
+    setLeadRemarkLead(null);
+    setLeadRemarkDraft("");
+  };
+  const saveLeadRemark = async () => {
+    const lead = leadRemarkLead;
+    if (!lead?.id || !canEditLeadRemark(lead)) return;
+    setLeadRemarkSaving(true);
+    const { error } = await createClient().rpc("save_lead_remark", {
+      p_lead_id: lead.id,
+      p_lead_remark: leadRemarkDraft,
+    });
+    setLeadRemarkSaving(false);
+    if (error) return notice(error.message);
+    closeLeadRemark();
+    notice("Lead remark saved.");
+    await reload();
   };
   const renderRecordNote = (title: string, context: string, value: unknown) => {
     const note = text(value, "").trim();
@@ -4786,6 +4816,20 @@ function Records({
             ...remainingLeadColumns,
           ]
         : leadColumnsDateFirst;
+  const leadRemarkColumn: Module["columns"][number] = {
+    label: "Remarks",
+    value: (row) => (
+      <div className="flex justify-center">
+        <NoteAction
+          label={canEditLeadRemark(row) ? "Edit lead remark" : "View lead remark"}
+          onClick={() => openLeadRemark(row)}
+        />
+      </div>
+    ),
+  };
+  const displayColumns = leadRemarksEnabled
+    ? [...columns, leadRemarkColumn]
+    : columns;
   const visibleFields =
     module.table === "leads" && isProjectsPage
       ? fields.filter((field) => field.key !== "evaluation_number")
@@ -5939,8 +5983,8 @@ function Records({
           <>
             <div className={isPageLayout ? "modern-table-shell" : undefined}>
               <Table
-                labels={module.table === "leads" ? [...(bulkEndorsementEnabled ? [""] : []), "Actions", ...columns.map((c) => c.label)] : [...columns.map((c) => c.label), "Actions"]}
-                minWidth={module.table === "leads" ? 1950 : 680}
+                labels={module.table === "leads" ? [...(bulkEndorsementEnabled ? [""] : []), "Actions", ...displayColumns.map((c) => c.label)] : [...displayColumns.map((c) => c.label), "Actions"]}
+                minWidth={module.table === "leads" ? (leadRemarksEnabled ? 2070 : 1950) : 680}
                 scrollable={isPageLayout}
                 scrollContainerClassName={module.table === "leads" ? "max-h-[560px]" : undefined}
                 columnWidths={
@@ -5948,7 +5992,7 @@ function Records({
                     ? [
                         ...(bulkEndorsementEnabled ? ["48px"] : []),
                         "112px",
-                        ...columns.map((column) =>
+                        ...displayColumns.map((column) =>
                           column.label === "Email"
                             ? "250px"
                             : column.label === "Date contacted"
@@ -5961,6 +6005,8 @@ function Records({
                                     ? "190px"
                                   : column.label === "Endorse Date"
                                     ? "135px"
+                                    : column.label === "Remarks"
+                                      ? "105px"
                                     : "auto",
                         ),
                       ]
@@ -5968,7 +6014,7 @@ function Records({
                 }
                 className={
                   module.table === "leads"
-                    ? "leads-table modern-page-table"
+                    ? `leads-table${leadRemarksEnabled ? " lead-remarks-table" : ""} modern-page-table`
                     : undefined
                 }
               >
@@ -5994,7 +6040,7 @@ function Records({
                       </td>
                     )}
                     {module.table === "leads" && rowActions(row)}
-                    {columns.map((c) => {
+                    {displayColumns.map((c) => {
                       const value = c.value(row, store);
                       const plainValue =
                         typeof value === "string" || typeof value === "number"
@@ -6216,6 +6262,75 @@ function Records({
         onImported={reload}
         notice={notice}
       />
+      {leadRemarkLead && (
+        <div
+          className="fixed inset-0 z-[70] grid place-items-center bg-[var(--color-overlay)] p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeLeadRemark();
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="lead-remark-title"
+            className="w-full max-w-lg min-w-0 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-none"
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-[var(--color-border)] pb-3">
+              <div className="min-w-0">
+                <h2 id="lead-remark-title" className="text-[16px] font-semibold text-[var(--color-text-primary)]">
+                  Lead remark
+                </h2>
+                <p className="mt-1 text-[12px] text-[var(--color-text-secondary)]">
+                  {text(leadRemarkLead.project_name, text(leadRemarkLead.client_name, text(leadRemarkLead.contact_name, "Lead")))}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeLeadRemark}
+                aria-label="Close lead remark"
+                className="grid size-8 shrink-0 place-items-center rounded-[var(--radius-control)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)]"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            {canEditLeadRemark(leadRemarkLead) ? (
+              <label className="mt-4 block text-[12px] font-medium text-[var(--color-text-primary)]">
+                Remark
+                <textarea
+                  aria-label={`Lead remark for ${text(leadRemarkLead.project_name, text(leadRemarkLead.client_name, "Lead"))}`}
+                  rows={5}
+                  value={leadRemarkDraft}
+                  onChange={(event) => setLeadRemarkDraft(event.target.value)}
+                  placeholder="Add lead remark"
+                  maxLength={1000}
+                  className="input mt-1 min-h-28 resize-y"
+                />
+              </label>
+            ) : (
+              <p className="mt-4 max-h-[50vh] overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[13px] leading-5 text-[var(--color-text-primary)]">
+                {text(leadRemarkLead.lead_remark, "No lead remark was added.")}
+              </p>
+            )}
+            <div className="mt-5 flex justify-end gap-2">
+              <Button secondary onClick={closeLeadRemark} disabled={leadRemarkSaving}>
+                Close
+              </Button>
+              {canEditLeadRemark(leadRemarkLead) && (
+                <Button
+                  tone="green"
+                  loading={leadRemarkSaving}
+                  disabled={leadRemarkSaving}
+                  onClick={() => void saveLeadRemark()}
+                >
+                  <Save size={14} />
+                  Save remark
+                </Button>
+              )}
+            </div>
+          </section>
+        </div>
+      )}
       <NoteDialog
         open={Boolean(recordNote)}
         title={recordNote?.title ?? "Note"}
