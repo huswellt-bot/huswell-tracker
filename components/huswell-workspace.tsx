@@ -4513,6 +4513,14 @@ function Records({
   const [endorsementImagePreview, setEndorsementImagePreview] = useState("");
   const [openingEndorsementImageId, setOpeningEndorsementImageId] = useState<string | null>(null);
   const [endorsing, setEndorsing] = useState(false);
+  const [selectedLeadIds, setSelectedLeadIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [bulkEndorseOpen, setBulkEndorseOpen] = useState(false);
+  const [bulkEndorseValues, setBulkEndorseValues] = useState<Record<string, string>>({
+    recipient_user_id: "",
+  });
+  const [bulkEndorsing, setBulkEndorsing] = useState(false);
   const [recordNote, setRecordNote] = useState<{
     title: string;
     context: string;
@@ -5090,6 +5098,50 @@ function Records({
       setEndorsing(false);
     }
   };
+  const resetBulkEndorsementForm = () => {
+    setBulkEndorseOpen(false);
+    setBulkEndorseValues({ recipient_user_id: "" });
+  };
+  const endorseSelectedLeads = async () => {
+    const leadIds = [...selectedLeadIds].filter(Boolean);
+    const recipientUserId = text(bulkEndorseValues.recipient_user_id, "").split("|")[0];
+    if (!leadIds.length) {
+      notice("Select at least one eligible lead to endorse.");
+      return;
+    }
+    if (!recipientUserId) {
+      notice("Select another Sales & Pricing Officer.");
+      return;
+    }
+
+    setBulkEndorsing(true);
+    try {
+      const { data, error } = await createClient().rpc("endorse_leads_bulk", {
+        p_lead_ids: leadIds,
+        p_recipient_user_id: recipientUserId,
+      });
+      if (error) throw error;
+      const endorsedCount = Number(data) || leadIds.length;
+      setSelectedLeadIds(new Set());
+      resetBulkEndorsementForm();
+      notice(
+        `${endorsedCount} lead${endorsedCount === 1 ? "" : "s"} endorsed to the selected Sales & Pricing Officer.`,
+      );
+      await reload();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : typeof error === "object" && error !== null && "message" in error
+            ? String(error.message)
+            : "The selected leads could not be endorsed. No leads were changed.";
+      notice(
+        message,
+      );
+    } finally {
+      setBulkEndorsing(false);
+    }
+  };
   const viewEndorsementImage = async (attachment: Row) => {
     const path = text(attachment.storage_path, "").trim();
     const attachmentId = text(attachment.id, "");
@@ -5191,6 +5243,73 @@ function Records({
     !text(row.endorsed_by, "") &&
     !text(row.endorsed_to, "") &&
     !text(row.endorsed_at, "");
+  const bulkEndorsementEnabled =
+    module.table === "leads" &&
+    !isProjectsPage &&
+    role === "sales_pricing_officer";
+  const canBulkEndorseLead = useCallback(
+    (row: Row) =>
+      bulkEndorsementEnabled &&
+      Boolean(text(row.id, "")) &&
+      n(row.evaluation_number) !== 7 &&
+      leadOwnerId(row) === currentUserId &&
+      !store.quotations.some(
+        (quotation) =>
+          text(quotation.lead_id, "") === text(row.id, "") &&
+          text(quotation.document_type, "") === "price_quotation" &&
+          !quotation.costing_source_id &&
+          text(quotation.status, "") === "approved",
+      ) &&
+      pricingOfficers.some((officer) => officer.id !== currentUserId) &&
+      !text(row.endorsed_by, "") &&
+      !text(row.endorsed_to, "") &&
+      !text(row.endorsed_at, ""),
+    [
+      bulkEndorsementEnabled,
+      currentUserId,
+      pricingOfficers,
+      store.quotations,
+    ],
+  );
+  const bulkEligibleRows = useMemo(
+    () => rows.filter(canBulkEndorseLead),
+    [canBulkEndorseLead, rows],
+  );
+  const bulkEligibleLeadIds = useMemo(
+    () => new Set(bulkEligibleRows.map((row) => text(row.id, ""))),
+    [bulkEligibleRows],
+  );
+  useEffect(() => {
+    setSelectedLeadIds((current) => {
+      const next = new Set(
+        [...current].filter((leadId) => bulkEligibleLeadIds.has(leadId)),
+      );
+      return next.size === current.size ? current : next;
+    });
+  }, [bulkEligibleLeadIds]);
+  const allBulkEligibleRowsSelected =
+    bulkEligibleRows.length > 0 &&
+    bulkEligibleRows.every((row) => selectedLeadIds.has(text(row.id, "")));
+  const someBulkEligibleRowsSelected =
+    bulkEligibleRows.some((row) => selectedLeadIds.has(text(row.id, ""))) &&
+    !allBulkEligibleRowsSelected;
+  const toggleBulkLeadSelection = (leadId: string) => {
+    setSelectedLeadIds((current) => {
+      const next = new Set(current);
+      if (next.has(leadId)) next.delete(leadId);
+      else next.add(leadId);
+      return next;
+    });
+  };
+  const toggleAllBulkLeadSelection = () => {
+    setSelectedLeadIds((current) => {
+      const next = new Set(current);
+      const eligibleIds = bulkEligibleRows.map((row) => text(row.id, ""));
+      if (allBulkEligibleRowsSelected) eligibleIds.forEach((leadId) => next.delete(leadId));
+      else eligibleIds.forEach((leadId) => next.add(leadId));
+      return next;
+    });
+  };
   const pendingLeadUnendorsement = (row: Row) =>
     store.lead_unendorsement_requests.find(
       (request) =>
@@ -5713,6 +5832,46 @@ function Records({
             </Button>
           )}
         </div>
+        {bulkEndorsementEnabled && bulkEligibleRows.length > 0 && (
+          <div className={`${contentPadding} flex flex-wrap items-center justify-between gap-3 border-t border-[#edf0f5] py-3`}>
+            <div className="flex items-center gap-2 text-[12px] text-[#687386]">
+              <SelectionCheckbox
+                checked={allBulkEligibleRowsSelected}
+                indeterminate={someBulkEligibleRowsSelected}
+                disabled={bulkEndorsing}
+                label="Select all eligible leads currently shown"
+                onChange={toggleAllBulkLeadSelection}
+              />
+              <span>
+                {selectedLeadIds.size
+                  ? `${selectedLeadIds.size} selected`
+                  : `${bulkEligibleRows.length} eligible lead${bulkEligibleRows.length === 1 ? "" : "s"}`}
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {selectedLeadIds.size > 0 && (
+                <Button
+                  secondary
+                  disabled={bulkEndorsing}
+                  onClick={() => setSelectedLeadIds(new Set())}
+                >
+                  <X size={14} />
+                  Unselect all
+                </Button>
+              )}
+              <Button
+                disabled={bulkEndorsing || selectedLeadIds.size === 0}
+                onClick={() => {
+                  setBulkEndorseValues({ recipient_user_id: "" });
+                  setBulkEndorseOpen(true);
+                }}
+              >
+                <ClipboardCheck size={14} />
+                Endorse selected
+              </Button>
+            </div>
+          </div>
+        )}
         {leadDistributionOpen && (
           <div
             className="fixed inset-0 z-50 flex justify-end bg-[var(--color-overlay)]"
@@ -5780,13 +5939,14 @@ function Records({
           <>
             <div className={isPageLayout ? "modern-table-shell" : undefined}>
               <Table
-                labels={module.table === "leads" ? ["Actions", ...columns.map((c) => c.label)] : [...columns.map((c) => c.label), "Actions"]}
+                labels={module.table === "leads" ? [...(bulkEndorsementEnabled ? ["Select"] : []), "Actions", ...columns.map((c) => c.label)] : [...columns.map((c) => c.label), "Actions"]}
                 minWidth={module.table === "leads" ? 1950 : 680}
                 scrollable={isPageLayout}
                 scrollContainerClassName={module.table === "leads" ? "max-h-[560px]" : undefined}
                 columnWidths={
                   module.table === "leads"
                     ? [
+                        ...(bulkEndorsementEnabled ? ["48px"] : []),
                         "112px",
                         ...columns.map((column) =>
                           column.label === "Email"
@@ -5814,6 +5974,25 @@ function Records({
               >
                 {shown.map((row) => (
                   <tr key={text(row.id)} className="hover:bg-[#fbfcff]">
+                    {bulkEndorsementEnabled && (
+                      <td className="px-5 py-3 align-middle">
+                        {canBulkEndorseLead(row) ? (
+                          <SelectionCheckbox
+                            checked={selectedLeadIds.has(text(row.id, ""))}
+                            disabled={bulkEndorsing}
+                            label={`Select lead ${text(row.project_name, text(row.client_name, "lead"))}`}
+                            onChange={() => toggleBulkLeadSelection(text(row.id, ""))}
+                          />
+                        ) : (
+                          <span
+                            className="text-[11px] text-[#8b92a1]"
+                            title="This lead is not eligible for bulk endorsement"
+                          >
+                            â€”
+                          </span>
+                        )}
+                      </td>
+                    )}
                     {module.table === "leads" && rowActions(row)}
                     {columns.map((c) => {
                       const value = c.value(row, store);
@@ -5915,6 +6094,33 @@ function Records({
           <p className="rounded-lg border border-[#fed7d7] bg-[#fff5f5] p-3 text-[12px] leading-5 text-[#9b1c1c]">
             The General Manager must approve this request before the lead and its linked workflow records are permanently deleted.
           </p>
+        </Dialog>
+      )}
+      {bulkEndorseOpen && (
+        <Dialog
+          title="Endorse Selected Leads"
+          fields={[
+            {
+              key: "recipient_user_id",
+              label: "Sales & Pricing Officer",
+              type: "select",
+              required: true,
+              options: pricingOfficers
+                .filter((officer) => officer.id !== currentUserId)
+                .map((officer) => `${officer.id}|${officer.name}`),
+            },
+          ]}
+          values={bulkEndorseValues}
+          setValues={setBulkEndorseValues}
+          save={() => void endorseSelectedLeads()}
+          close={resetBulkEndorsementForm}
+          saving={bulkEndorsing}
+          saveLabel={`Endorse ${selectedLeadIds.size} selected lead${selectedLeadIds.size === 1 ? "" : "s"}`}
+          className="max-w-lg"
+        >
+          <div className="mt-4 rounded-lg border border-[#e1e6ee] bg-[#fafbfe] p-3 text-[12px] leading-5 text-[#687386]">
+            {selectedLeadIds.size} lead{selectedLeadIds.size === 1 ? "" : "s"} will be endorsed to the selected Sales & Pricing Officer. Bulk endorsement does not include an image.
+          </div>
         </Dialog>
       )}
       {endorsementLead && (
