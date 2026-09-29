@@ -5939,7 +5939,7 @@ function Records({
           <>
             <div className={isPageLayout ? "modern-table-shell" : undefined}>
               <Table
-                labels={module.table === "leads" ? [...(bulkEndorsementEnabled ? ["Select"] : []), "Actions", ...columns.map((c) => c.label)] : [...columns.map((c) => c.label), "Actions"]}
+                labels={module.table === "leads" ? [...(bulkEndorsementEnabled ? [""] : []), "Actions", ...columns.map((c) => c.label)] : [...columns.map((c) => c.label), "Actions"]}
                 minWidth={module.table === "leads" ? 1950 : 680}
                 scrollable={isPageLayout}
                 scrollContainerClassName={module.table === "leads" ? "max-h-[560px]" : undefined}
@@ -5988,7 +5988,7 @@ function Records({
                             className="text-[11px] text-[#8b92a1]"
                             title="This lead is not eligible for bulk endorsement"
                           >
-                            â€”
+                            -
                           </span>
                         )}
                       </td>
