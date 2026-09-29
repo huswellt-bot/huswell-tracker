@@ -4586,7 +4586,9 @@ function Records({
   const canEditLeadRemark = (row: Row) =>
     leadRemarksEnabled &&
     isProjectOfficerRole(role) &&
-    leadOwnerId(row) === currentUserId;
+    (leadOwnerId(row) === currentUserId ||
+      (role === "sales_pricing_officer" &&
+        text(row.endorsed_to, "") === currentUserId));
   const openLeadRemark = (row: Row) => {
     setLeadRemarkDraft(text(row.lead_remark, ""));
     setLeadRemarkLead(row);
