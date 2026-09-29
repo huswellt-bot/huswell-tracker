@@ -19185,7 +19185,7 @@ function CommissionSummaryView({
   const formatStatus = (summary: Row) =>
     summary.status === "paid" ? "Paid" : "Not yet paid";
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <Panel
         title={readOnly ? "My Commission Summary" : "Commission Summary"}
         detail={
@@ -19195,30 +19195,30 @@ function CommissionSummaryView({
         }
       >
         {readOnly ? (
-          <div className="border-b border-[#e4e8ef] p-4">
-            <div className="rounded-[8px] border border-[#b7dfc5] bg-[#f1fbf4] p-3 text-[12px] sm:max-w-xs">
+          <div className="border-b border-[#e4e8ef] p-3">
+            <div className="rounded-[8px] border border-[#b7dfc5] bg-[#f1fbf4] p-2.5 text-[11px] sm:max-w-xs">
               <p className="text-[#687386]">My commission total</p>
-              <p className="mt-1 text-[16px] font-semibold text-[#176b40]">{peso.format(myCommissionTotal)}</p>
+              <p className="mt-0.5 text-[15px] font-semibold text-[#176b40]">{peso.format(myCommissionTotal)}</p>
             </div>
           </div>
         ) : (
-          <div className="grid gap-2 border-b border-[#e4e8ef] p-4 sm:grid-cols-3">
-            <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px]">
+          <div className="grid gap-2 border-b border-[#e4e8ef] p-3 sm:grid-cols-3">
+            <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-2.5 text-[11px]">
               <p className="text-[#687386]">Sales Commission total</p>
-              <p className="mt-1 text-[16px] font-semibold text-[#202938]">{peso.format(commissionTotal)}</p>
+              <p className="mt-0.5 text-[15px] font-semibold text-[#202938]">{peso.format(commissionTotal)}</p>
             </div>
-            <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px]">
+            <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-2.5 text-[11px]">
               <p className="text-[#687386]">VA Commission total</p>
-              <p className="mt-1 text-[16px] font-semibold text-[#202938]">{peso.format(vaCommissionTotal)}</p>
+              <p className="mt-0.5 text-[15px] font-semibold text-[#202938]">{peso.format(vaCommissionTotal)}</p>
             </div>
-            <div className="rounded-[8px] border border-[#b7dfc5] bg-[#f1fbf4] p-3 text-[12px]">
+            <div className="rounded-[8px] border border-[#b7dfc5] bg-[#f1fbf4] p-2.5 text-[11px]">
               <p className="text-[#687386]">Total commission</p>
-              <p className="mt-1 text-[16px] font-semibold text-[#176b40]">{peso.format(totalCommission)}</p>
+              <p className="mt-0.5 text-[15px] font-semibold text-[#176b40]">{peso.format(totalCommission)}</p>
             </div>
           </div>
         )}
-        <div className="flex flex-wrap items-end gap-3 border-b border-[#e4e8ef] px-4 py-3 sm:px-5">
-          <label className="min-w-56 flex-1 text-[12px] font-medium">
+        <div className="flex flex-wrap items-end gap-2 border-b border-[#e4e8ef] px-3 py-2 sm:px-4">
+          <label className="min-w-48 flex-1 text-[11px] font-medium">
             Search
             <input
               value={commissionQuery}
@@ -19228,7 +19228,7 @@ function CommissionSummaryView({
             />
           </label>
           {canManage && (
-            <label className="min-w-56 text-[12px] font-medium">
+            <label className="min-w-48 text-[11px] font-medium">
               Pricing officer
               <select
                 value={officerFilter}
@@ -19264,15 +19264,19 @@ function CommissionSummaryView({
                   "Quotation",
                   "Client / project",
                   "Grand total",
-                  "Prepared By / Sales Commission",
-                  "VA endorser / VA Commission",
+                  "Prepared by / Sales",
+                  "VA endorser / VA",
                   "Downpayment",
-                  "Receivable / due balance",
+                  "Receivable",
                   "Total commission",
                   "Status",
                   "Actions",
                 ]}
-            minWidth={canManage ? 1500 : 760}
+            minWidth={readOnly ? 680 : 1280}
+            className="commission-summary-table table-fixed"
+            columnWidths={readOnly
+              ? ["18%", "32%", "17%", "23%", "10%"]
+              : ["10%", "13%", "8%", "12%", "13%", "7%", "8%", "8%", "6%", "15%"]}
           >
             {filteredRows.map((summary) => {
               const hasLeadEndorsement = Boolean(summary.lead_endorser_user_id);
@@ -19283,11 +19287,8 @@ function CommissionSummaryView({
                     <td className="px-4 py-3">{stackedCell(summary.quotation_no, text(summary.created_at, "").slice(0, 10))}</td>
                     <td className="px-4 py-3">{stackedCell(summary.client_name, summary.project_name)}</td>
                     <td className="px-4 py-3 text-right font-medium">{peso.format(n(summary.grand_total))}</td>
-                    <td className="px-4 py-3">
-                      {stackedCell(
-                        text(summary.my_commission_type, "Commission"),
-                        peso.format(n(summary.my_commission_amount)),
-                      )}
+                    <td className="px-4 py-3 text-right font-medium">
+                      {peso.format(n(summary.my_commission_amount))}
                     </td>
                     <td className="px-4 py-3"><Status value={formatStatus(summary)} /></td>
                   </tr>
@@ -19319,7 +19320,7 @@ function CommissionSummaryView({
                   <td className="px-4 py-3"><Status value={formatStatus(summary)} /></td>
                   {canManage && (
                     <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap gap-1">
                         {summary.status !== "paid" ? (
                           <>
                             <Button secondary compact onClick={() => openEdit(summary)}>

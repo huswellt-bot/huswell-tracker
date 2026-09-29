@@ -374,6 +374,26 @@ textarea {
   color: #ffffff !important;
   letter-spacing: 0 !important;
 }
+.huswell-workspace.compact-ui .commission-summary-table {
+  table-layout: fixed;
+  font-size: 11px;
+}
+.huswell-workspace.compact-ui .commission-summary-table thead th,
+.huswell-workspace.compact-ui .commission-summary-table tbody td {
+  padding: 6px 8px !important;
+}
+.huswell-workspace.compact-ui .commission-summary-table thead th {
+  font-size: 11px !important;
+  line-height: 1.2;
+}
+.huswell-workspace.compact-ui .commission-summary-table tbody td {
+  line-height: 1.25;
+}
+.huswell-workspace.compact-ui .commission-summary-table tbody td > small {
+  margin-top: 1px;
+  font-size: 10px;
+  line-height: 1.2;
+}
 .app-table thead,
 .app-table tbody tr,
 .costing-detail-table thead,
