@@ -825,6 +825,7 @@ type Field = {
   hint?: string;
   placeholder?: string;
   readOnly?: boolean;
+  disabled?: boolean;
   shortLabels?: Record<string, ReactNode>;
 };
 type LeadImportDataRow = {
@@ -3971,6 +3972,7 @@ function Dialog({
                     values[f.key] ??
                     ""
                   }
+                  disabled={f.disabled}
                   onChange={(e) =>
                     setValues(
                       onFieldChange
@@ -4121,6 +4123,7 @@ function Dialog({
               ) : (
                 <input
                   required={f.required}
+                  disabled={f.disabled}
                   readOnly={f.readOnly}
                   aria-readonly={f.readOnly || undefined}
                   type={f.type ?? "text"}
@@ -4140,7 +4143,7 @@ function Dialog({
                           : e.target.value,
                     })
                   }
-                  className={`input ${compact ? "min-h-7 px-2 py-1 text-[12px]" : ""} ${f.readOnly ? "bg-[#f6f8fb] text-[#687386]" : ""}`}
+                  className={`input ${compact ? "min-h-7 px-2 py-1 text-[12px]" : ""} ${f.readOnly || f.disabled ? "bg-[#f6f8fb] text-[#687386]" : ""} ${f.disabled ? "disabled:cursor-not-allowed disabled:opacity-60" : ""}`}
                   placeholder={fieldPlaceholder(f)}
                 />
               )}
@@ -19056,6 +19059,7 @@ function CommissionSummaryView({
     type: "number",
     required: true,
     readOnly: vaCommissionUnavailable,
+    disabled: vaCommissionUnavailable,
     hint: vaCommissionUnavailable
       ? "No eligible VA endorser. VA Commission is set to 0% and cannot be edited."
       : undefined,
