@@ -19293,7 +19293,9 @@ function CommissionSummaryView({
             columnWidths={readOnly
               ? ["18%", "32%", "17%", "23%", "10%"]
               : ["10%", "13%", "8%", "12%", "13%", "7%", "8%", "8%", "6%", "15%"]}
-            alignRightLabels={readOnly ? ["Grand total", "My commission"] : []}
+            alignRightLabels={readOnly
+              ? ["Grand total", "My commission"]
+              : ["Grand total", "Downpayment", "Receivable", "Total commission"]}
           >
             {filteredRows.map((summary) => {
               const hasLeadEndorsement = Boolean(summary.lead_endorser_user_id);
@@ -19337,7 +19339,7 @@ function CommissionSummaryView({
                   <td className="px-4 py-3"><Status value={formatStatus(summary)} /></td>
                   {canManage && (
                     <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-wrap justify-center gap-1">
                         {summary.status !== "paid" ? (
                           <>
                             <Button secondary compact onClick={() => openEdit(summary)}>
