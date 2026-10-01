@@ -1052,6 +1052,29 @@ const projectOfficerIdForQuote = (store: Store, quote: Row) => {
     "",
   );
 };
+const quotationAllowsVaCommission = (store: Store, quotation: Row) => {
+  const isDirectPriceQuotation =
+    text(quotation.document_type, "") === "price_quotation" &&
+    !quotation.costing_source_id;
+  if (!isDirectPriceQuotation) return true;
+
+  const organizationId = text(quotation.organization_id, "");
+  const preparatorId = text(quotation.prepared_by_user_id ?? quotation.created_by, "");
+  const leadId = text(quotation.lead_id, "");
+  const lead = store.leads.find(
+    (candidate) => text(candidate.id, "") === leadId && text(candidate.organization_id, "") === organizationId,
+  );
+  const endorserId = text(lead?.endorsed_by, "");
+  if (!organizationId || !preparatorId || !endorserId || text(lead?.endorsed_to, "") !== preparatorId) {
+    return false;
+  }
+  return store.organization_members.some(
+    (member) =>
+      text(member.organization_id, "") === organizationId &&
+      text(member.user_id, "") === endorserId &&
+      text(member.role, "") === "sales_pricing_officer",
+  );
+};
 type WorkspaceListFilterOption = { id: string; name: string };
 function WorkspaceListFilters({
   query,
@@ -13947,6 +13970,7 @@ function PricingMarkupEditor({
   editable,
   visibleMarkupKeys,
   markupDefaults,
+  allowVaCommission,
   update,
   heading,
   showInternalVat = false,
@@ -13958,6 +13982,7 @@ function PricingMarkupEditor({
   editable: boolean;
   visibleMarkupKeys: ReadonlyArray<PricingMarkupKey>;
   markupDefaults: PricingMarkupDefault[];
+  allowVaCommission: boolean;
   update: (next: ProductCostingDraft) => void;
   heading?: string;
   showInternalVat?: boolean;
@@ -13981,14 +14006,23 @@ function PricingMarkupEditor({
   );
   const availableMarkupOptions = [
     ...pricingMarkupDefinitions
-      .filter((definition) => definition.key !== "vat" && !existingMarkupKeys.has(definition.key))
+      .filter((definition) =>
+        definition.key !== "vat" &&
+        (allowVaCommission || definition.key !== "va_commission") &&
+        !existingMarkupKeys.has(definition.key),
+      )
       .map((definition) => ({
         key: definition.key,
         label: definition.label,
         value: markupDefaults.find((markup) => markup.key === definition.key)?.value ?? definition.fallback,
       })),
     ...markupDefaults
-      .filter((markup) => markup.key !== "vat" && markup.custom && !existingMarkupKeys.has(markup.key))
+      .filter((markup) =>
+        markup.key !== "vat" &&
+        (allowVaCommission || markup.key !== "va_commission") &&
+        markup.custom &&
+        !existingMarkupKeys.has(markup.key),
+      )
       .map((markup) => ({ key: markup.key, label: markup.label, value: markup.value })),
   ];
   const selectedMarkup = availableMarkupOptions.find((markup) => markup.key === selectedMarkupKey);
@@ -14156,6 +14190,7 @@ type PriceQuotationReviewContentProps = {
   illustrations: { id: string; description: string; imageUrl: string; fileName?: string; contentType?: string }[];
   productCostings: ProductCostingDraft[];
   pricingDefaults: Row;
+  allowVaCommission: boolean;
   setProductCostings: (next: ProductCostingDraft[] | ((current: ProductCostingDraft[]) => ProductCostingDraft[])) => void;
   prices: Record<string, string>;
   setPrices: (next: Record<string, string> | ((current: Record<string, string>) => Record<string, string>)) => void;
@@ -14313,6 +14348,7 @@ function ProductCostingsSectionWithPricing({
   costings,
   setCostings,
   pricingDefaults,
+  allowVaCommission,
   editableMarkups,
   editableInternalMarkups,
   visibleMarkupKeys,
@@ -14328,6 +14364,7 @@ function ProductCostingsSectionWithPricing({
   costings: ProductCostingDraft[];
   setCostings: (next: ProductCostingDraft[] | ((current: ProductCostingDraft[]) => ProductCostingDraft[])) => void;
   pricingDefaults: Record<string, unknown>;
+  allowVaCommission: boolean;
   editableMarkups: boolean;
   editableInternalMarkups: boolean;
   visibleMarkupKeys: ReadonlyArray<PricingMarkupKey>;
@@ -14337,7 +14374,14 @@ function ProductCostingsSectionWithPricing({
   readOnly?: boolean;
 }) {
   const displayProjectName = projectName.trim() || "Project";
-  const defaults = pricingMarkupDefaults(pricingDefaults.pricing_markup_defaults, pricingDefaults);
+  const defaults = pricingMarkupDefaults(pricingDefaults.pricing_markup_defaults, pricingDefaults)
+    .filter((definition) => allowVaCommission || definition.key !== "va_commission");
+  const hasUnallocatedVaCommission = !allowVaCommission && costings.some((costing) =>
+    costing.markups.some((markup) => {
+      const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
+      return key === "va_commission" && n(markupValue(markup)) > 0;
+    }),
+  );
   const updateCosting = (key: string, update: (costing: ProductCostingDraft) => ProductCostingDraft) =>
     setCostings((current) => current.map((costing) => costing.key === key ? update(costing) : costing));
   const [targetBudgetValues, setTargetBudgetValues] = useState<Record<string, string>>({});
@@ -14385,6 +14429,7 @@ function ProductCostingsSectionWithPricing({
             <Plus size={14} /> Add Costing Breakdown
           </Button>}
       </div>
+      {hasUnallocatedVaCommission && <p role="alert" className="mt-3 rounded-lg border border-[#f1d294] bg-[#fff8e9] px-3 py-2 text-[11px] leading-5 text-[#805b17]">VA Commission requires a valid lead endorsement to the quotation preparator. Remove the VA Commission markup or complete the endorsement before approval.</p>}
 
       {costings.length === 0 ? (
         <p className="mt-4 rounded-lg border border-dashed border-[#ccd5e0] bg-white px-3 py-3 text-[12px] text-[#687386]">No internal costing table has been added. Add one costing table for each finished product before submitting for review.</p>
@@ -14460,7 +14505,7 @@ function ProductCostingsSectionWithPricing({
 
                 <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
                   {editableMarkups && <div className="space-y-4">
-                    <PricingMarkupEditor costing={costing} editable={editableInternalMarkups} visibleMarkupKeys={visibleMarkupKeys} markupDefaults={defaults} update={(next) => updateCosting(costing.key, () => next)} showInternalVat={canEditVat} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
+                    <PricingMarkupEditor costing={costing} editable={editableInternalMarkups} visibleMarkupKeys={visibleMarkupKeys} markupDefaults={defaults} allowVaCommission={allowVaCommission} update={(next) => updateCosting(costing.key, () => next)} showInternalVat={canEditVat} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
                     <div className="rounded-lg border border-[#d9e0e9] bg-white p-3">
                       <div className="flex flex-wrap items-end justify-between gap-3">
                         <div className="min-w-52 flex-1">
@@ -14524,7 +14569,7 @@ function ProductCostingsSectionWithPricing({
 }
 
 function PriceQuotationReviewContent({
-  lines, projectName, projectType, illustrations, productCostings, pricingDefaults, setProductCostings, prices, setPrices, subtotal, vatRate, setVatRate, tax,
+  lines, projectName, projectType, illustrations, productCostings, pricingDefaults, allowVaCommission, setProductCostings, prices, setPrices, subtotal, vatRate, setVatRate, tax,
   total, terms, setTerms, bankDetails, setBankDetails,
   revisionNote, setRevisionNote, submissionNote, setSubmissionNote, close, saving, working, review, finalApproval, showInternalMarkups, sensitiveValuesHidden, toggleSensitiveValues, visibleMarkupKeys, bankVisibility, pricingRevision, readOnly = false,
   documentLabel = "Price Quotation", sourceQuotationNo,
@@ -14549,7 +14594,7 @@ function PriceQuotationReviewContent({
         <p className="mt-2 whitespace-pre-wrap text-[13px] leading-5 text-[#4b5565]">{submissionNote}</p>
       </section>}
       <QuotationReviewSummary lines={lines} prices={prices} subtotal={subtotal} vatRate={vatRate} tax={tax} total={total} productCostings={productCostings} showPrices={showInternalMarkups} />
-      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups={showInternalMarkups} editableInternalMarkups={finalApproval} visibleMarkupKeys={visibleMarkupKeys ?? (showInternalMarkups ? internalPricingMarkupKeys : ["discounts"])} canEditVat={finalApproval} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
+      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} allowVaCommission={allowVaCommission} editableMarkups={showInternalMarkups} editableInternalMarkups={finalApproval} visibleMarkupKeys={visibleMarkupKeys ?? (showInternalMarkups ? internalPricingMarkupKeys : ["discounts"])} canEditVat={finalApproval} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
       <fieldset disabled={readOnly} className="min-w-0 border-0 p-0">
       <section className="rounded-xl border border-[#e1e6ee] p-4">
         <h3 className="text-[14px] font-semibold">Terms and Conditions</h3>
@@ -14605,6 +14650,7 @@ function PriceQuotationReview({
 }) {
   const pricingRevision = !finalApproval && isPricingOfficerRevision(quotation);
   const documentLabel = "Price Quotation";
+  const allowVaCommission = quotationAllowsVaCommission(store, quotation);
   const [sensitiveValuesHidden, setSensitiveValuesHidden] = useState(false);
   const illustrationQuotationId = text(quotation.id, "");
   const pricingDefaultSettings = store.business_settings.find(
@@ -14917,6 +14963,7 @@ function PriceQuotationReview({
           illustrations={illustrations}
           productCostings={productCostings}
           pricingDefaults={activePricingDefaultSettings ?? {}}
+          allowVaCommission={allowVaCommission}
           setProductCostings={setProductCostings}
           prices={prices}
           setPrices={setPrices}
