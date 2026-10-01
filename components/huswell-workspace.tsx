@@ -332,10 +332,11 @@ const pricingMarkupDefinitions: Array<{
   { key: "third_party_markup", label: "Third Party Mark Up", fallback: "15", legacyKeys: ["default_additional_markup"] },
   { key: "vat", label: "VAT", fallback: "12", legacyKeys: ["vat_rate"] },
 ];
-// Discount is set per quotation by the Sales & Pricing Officer. It is not an
-// organization-wide internal pricing default.
+// Every non-VAT pricing adjustment can be enabled or disabled by the General
+// Manager. VAT remains a separate quotation-level field and is not a markup
+// row.
 const pricingMarkupDefaultDefinitions = pricingMarkupDefinitions.filter(
-  (definition) => definition.key !== "discounts",
+  (definition) => definition.key !== "vat",
 );
 const internalPricingMarkupKeys = pricingMarkupDefaultDefinitions
   .filter((definition) => definition.key !== "vat")
@@ -371,7 +372,11 @@ const pricingMarkupDefaults = (
   legacySettings?: Record<string, unknown>,
 ): PricingMarkupDefault[] => {
   const storedDefaults = objectValue(stored);
-  const standardDefaults = pricingMarkupDefaultDefinitions.map((definition) => {
+  const hasStoredConfiguration = stored !== null && stored !== undefined && Object.keys(storedDefaults).length > 0;
+  const configuredDefinitions = pricingMarkupDefaultDefinitions.filter(
+    (definition) => !hasStoredConfiguration || Object.prototype.hasOwnProperty.call(storedDefaults, definition.key),
+  );
+  const standardDefaults = configuredDefinitions.map((definition) => {
     const storedEntry = objectValue(storedDefaults[definition.key]);
     const legacyValue = definition.legacyKeys
       .map((key) => legacySettings?.[key])
@@ -398,7 +403,16 @@ const pricingMarkupDefaults = (
         custom: true,
       };
     });
-  return [...standardDefaults, ...customDefaults];
+  const storedVat = objectValue(storedDefaults.vat);
+  const legacyVat = legacySettings?.vat_rate;
+  const vatDefault: PricingMarkupDefault = {
+    key: "vat",
+    label: "VAT",
+    calculationType: "percentage",
+    value: text(storedVat.value ?? storedVat.rate ?? legacyVat, "12"),
+    visible: storedVat.visible !== false,
+  };
+  return [...standardDefaults, ...customDefaults, vatDefault];
 };
 const pricingMarkupDefaultPayload = (defaults: PricingMarkupDefault[]) =>
   Object.fromEntries(
@@ -466,27 +480,10 @@ const newProductCostingDraft = (
       value: definition.value,
     })),
 });
-const withQuotationDiscount = (costing: ProductCostingDraft): ProductCostingDraft =>
-  costing.markups.some((markup) => (markup.markupKey || pricingMarkupKeyForLabel(markup.label)) === "discounts")
-    ? costing
-    : {
-        ...costing,
-        markups: [
-          ...costing.markups,
-          {
-            key: `markup-${crypto.randomUUID()}`,
-            markupKey: "discounts",
-            label: "Discounts",
-            calculationType: "percentage",
-            value: "0",
-          },
-        ],
-      };
 const productCostingDrafts = (
   costings: Row[],
   costLines: Row[],
   markups: Row[],
-  missingMarkupDefaults?: PricingMarkupDefault[],
 ): ProductCostingDraft[] =>
   costings.map((costing, costingIndex) => {
     const pricingModel = text(costing.pricing_model, "legacy_markup") === "target_margin" ? "target_margin" : "legacy_markup";
@@ -494,7 +491,8 @@ const productCostingDrafts = (
       .filter((markup) => markup.product_costing_id === costing.id)
       .sort((left, right) => n(left.sort_order) - n(right.sort_order))
       .map((markup, markupIndex) => {
-        const markupKey = pricingMarkupKeyForLabel(markup.markup_key ?? markup.label);
+        const knownMarkupKey = pricingMarkupKeyForLabel(markup.markup_key ?? markup.label);
+        const markupKey = knownMarkupKey || `custom_${text(markup.id, crypto.randomUUID())}`;
         const calculationType: MarkupCalculationType = text(markup.calculation_type) === "fixed_amount" ? "fixed_amount" : "percentage";
         return {
           key: text(markup.id, `markup-${markupIndex}`),
@@ -506,28 +504,6 @@ const productCostingDrafts = (
             : text(markup.rate, "0"),
         };
       });
-    const targetMarkups = pricingMarkupDefaultDefinitions
-      .filter((definition) => definition.key !== "vat")
-      .map((definition) => {
-        const savedMarkup = loadedMarkups.find((markup) => markup.markupKey === definition.key);
-        if (savedMarkup) return savedMarkup;
-        const defaultMarkup = missingMarkupDefaults?.find((markup) => markup.key === definition.key);
-        return {
-          key: `markup-${crypto.randomUUID()}`,
-          markupKey: definition.key,
-          label: defaultMarkup?.label ?? definition.label,
-        calculationType: "percentage" as const,
-          value: defaultMarkup?.value ?? "0",
-        };
-      });
-    // `targetMarkups` contains the saved standard categories (or a missing
-    // placeholder for one). Compare categories here, not database row IDs;
-    // otherwise every saved standard markup is appended a second time.
-    const knownMarkupKeys = new Set(
-      targetMarkups
-        .map((markup) => markup.markupKey)
-        .filter((markupKey): markupKey is PricingMarkupKey => Boolean(markupKey)),
-    );
     return {
     key: text(costing.id, `product-costing-${costingIndex}`),
     quotationItemId: text(costing.quotation_item_id),
@@ -544,53 +520,10 @@ const productCostingDrafts = (
         unitCost: text(line.unit_cost, "0"),
         amount: text(line.unit_cost, "0"),
       })),
-    markups: pricingModel === "target_margin"
-      ? [...targetMarkups, ...loadedMarkups.filter((markup) => !knownMarkupKeys.has(markup.markupKey as PricingMarkupKey))]
-      : loadedMarkups,
+    // Saved quotation rows are the quotation's historical snapshot. Do not
+    // recreate a missing row from current Settings while loading a quotation.
+    markups: loadedMarkups,
   };
-  });
-const productCostingsWithLatestDefaultMarkups = (
-  costings: ProductCostingDraft[],
-  defaults: PricingMarkupDefault[],
-): ProductCostingDraft[] =>
-  costings.map((costing) => {
-    // Legacy quotations carry a different pricing formula and must retain
-    // their historical markup snapshot. Settings are authoritative only for
-    // the target-margin model introduced by the pricing workflow.
-    if (costing.pricingModel !== "target_margin") return costing;
-
-    const currentDefaults = defaults.filter(
-      (definition) => definition.key !== "vat" && definition.key !== "discounts",
-    );
-    const refreshedMarkups = currentDefaults.map((definition) => {
-      const savedMarkup = costing.markups.find(
-        (markup) => (markup.markupKey || pricingMarkupKeyForLabel(markup.label)) === definition.key,
-      );
-      return savedMarkup
-        ? {
-            ...savedMarkup,
-            markupKey: definition.key,
-            label: definition.label,
-            calculationType: "percentage" as const,
-            value: definition.value,
-          }
-        : {
-            key: `markup-${crypto.randomUUID()}`,
-            markupKey: definition.key,
-            label: definition.label,
-            calculationType: "percentage" as const,
-            value: definition.value,
-          };
-    });
-    const currentDefaultKeys = new Set(currentDefaults.map((definition) => definition.key));
-    const historicalMarkups = costing.markups.filter((markup) => {
-      const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
-      return Boolean(key) && key !== "vat" && key !== "discounts" && !currentDefaultKeys.has(key);
-    });
-    const discountMarkups = costing.markups.filter(
-      (markup) => (markup.markupKey || pricingMarkupKeyForLabel(markup.label)) === "discounts",
-    );
-    return withQuotationDiscount({ ...costing, markups: [...refreshedMarkups, ...historicalMarkups, ...discountMarkups] });
   });
 const quotationVatRate = (quote: Row) => {
   const storedRate = n(quote.vat_rate);
@@ -3103,24 +3036,12 @@ function InternalCostingBreakdownPdf({
         const productCostings = store.price_quotation_product_costings.filter(
           (costing) => costing.quotation_id === quote.id,
         );
-        const businessSettings = store.business_settings.find(
-          (setting) =>
-            text(setting.organization_id) === text(quote.organization_id),
-        );
-        const pricingDefaults = pricingMarkupDefaults(
-          businessSettings?.pricing_markup_defaults,
-          businessSettings,
-        );
         const loadedCostings = productCostingDrafts(
           productCostings,
           store.price_quotation_costing_lines,
           store.price_quotation_costing_markups,
-          pricingDefaults,
         );
-        const costingDrafts = productCostingsWithLatestDefaultMarkups(
-          loadedCostings,
-          pricingDefaults,
-        );
+        const costingDrafts = loadedCostings;
         const vatRate = quotationVatRate(quote);
         const lead = store.leads.find((item) => item.id === quote.lead_id);
         const customer = store.customers.find(
@@ -14025,6 +13946,7 @@ function PricingMarkupEditor({
   costing,
   editable,
   visibleMarkupKeys,
+  markupDefaults,
   update,
   heading,
   showInternalVat = false,
@@ -14035,6 +13957,7 @@ function PricingMarkupEditor({
   costing: ProductCostingDraft;
   editable: boolean;
   visibleMarkupKeys: ReadonlyArray<PricingMarkupKey>;
+  markupDefaults: PricingMarkupDefault[];
   update: (next: ProductCostingDraft) => void;
   heading?: string;
   showInternalVat?: boolean;
@@ -14043,23 +13966,97 @@ function PricingMarkupEditor({
   readOnly?: boolean;
 }) {
   const totals = productCostingTotals(costing, 1, 0);
+  const [addingMarkup, setAddingMarkup] = useState(false);
+  const [selectedMarkupKey, setSelectedMarkupKey] = useState("");
+  const [newMarkupLabel, setNewMarkupLabel] = useState("");
+  const [newMarkupValue, setNewMarkupValue] = useState("0");
   const visibleMarkups = costing.markups.filter((markup) => {
     const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
     return Boolean(key) && visibleMarkupKeys.includes(key as PricingMarkupKey);
   });
+  const existingMarkupKeys = new Set(
+    costing.markups
+      .map((markup) => markup.markupKey || pricingMarkupKeyForLabel(markup.label))
+      .filter(Boolean),
+  );
+  const availableMarkupOptions = [
+    ...pricingMarkupDefinitions
+      .filter((definition) => definition.key !== "vat" && !existingMarkupKeys.has(definition.key))
+      .map((definition) => ({
+        key: definition.key,
+        label: definition.label,
+        value: markupDefaults.find((markup) => markup.key === definition.key)?.value ?? definition.fallback,
+      })),
+    ...markupDefaults
+      .filter((markup) => markup.key !== "vat" && markup.custom && !existingMarkupKeys.has(markup.key))
+      .map((markup) => ({ key: markup.key, label: markup.label, value: markup.value })),
+  ];
+  const selectedMarkup = availableMarkupOptions.find((markup) => markup.key === selectedMarkupKey);
+  const addMarkup = () => {
+    const isCustom = selectedMarkupKey === "__custom__";
+    const label = isCustom ? newMarkupLabel.trim() : selectedMarkup?.label ?? "";
+    if (!label) return;
+    const markupKey = isCustom ? `custom_${crypto.randomUUID()}` : selectedMarkupKey;
+    if (!markupKey || existingMarkupKeys.has(markupKey)) return;
+    update({
+      ...costing,
+      markups: [
+        ...costing.markups,
+        {
+          key: `markup-${crypto.randomUUID()}`,
+          markupKey,
+          label,
+          calculationType: "percentage",
+          value: isCustom ? newMarkupValue : selectedMarkup?.value ?? "0",
+        },
+      ],
+    });
+    setAddingMarkup(false);
+    setSelectedMarkupKey("");
+    setNewMarkupLabel("");
+    setNewMarkupValue("0");
+  };
   const discountOnly = visibleMarkupKeys.length === 1 && visibleMarkupKeys[0] === "discounts";
   const includesDiscount = visibleMarkupKeys.includes("discounts");
+  const canChangeRows = editable && !readOnly;
   return (
     <div className="rounded-lg border border-[#d9e0e9] bg-white">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#edf0f5] px-3 py-2">
         <h4 className="text-[12px] font-semibold text-[#344054]">{heading ?? (discountOnly ? "Discount" : "Internal pricing adjustments")}</h4>
-        {editable && <Button secondary compact onClick={toggleSensitiveValues}>
-          {sensitiveValuesHidden ? <Eye size={14} /> : <EyeOff size={14} />}
-          {sensitiveValuesHidden ? "View markups" : "Hide markups"}
-        </Button>}
+        {editable && <div className="flex flex-wrap items-center justify-end gap-2">
+          {canChangeRows && <Button secondary compact onClick={() => setAddingMarkup((current) => !current)}>
+            <Plus size={14} /> {addingMarkup ? "Close" : "Add markup"}
+          </Button>}
+          <Button secondary compact onClick={toggleSensitiveValues}>
+            {sensitiveValuesHidden ? <Eye size={14} /> : <EyeOff size={14} />}
+            {sensitiveValuesHidden ? "View markups" : "Hide markups"}
+          </Button>
+        </div>}
       </div>
+      {addingMarkup && canChangeRows && <div className="border-b border-[#edf0f5] bg-[#fafbfc] p-3">
+        <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_7rem_auto] sm:items-end">
+          <label className="text-[11px] font-medium text-[#344054]">
+            Markup to add
+            <select aria-label="Markup to add" value={selectedMarkupKey} onChange={(event) => setSelectedMarkupKey(event.target.value)} className="input mt-1">
+              <option value="">Select markup</option>
+              {availableMarkupOptions.map((markup) => <option key={markup.key} value={markup.key}>{markup.label}</option>)}
+              <option value="__custom__">New custom markup</option>
+            </select>
+          </label>
+          {selectedMarkupKey === "__custom__" ? <label className="text-[11px] font-medium text-[#344054]">
+            Markup name
+            <input aria-label="New markup name" value={newMarkupLabel} onChange={(event) => setNewMarkupLabel(event.target.value)} className="input mt-1" placeholder="e.g. Rush handling" />
+          </label> : <div className="min-h-9 text-[11px] text-[#687386]">{selectedMarkup ? `Default value: ${selectedMarkup.value}%` : "Choose a markup category."}</div>}
+          <label className="text-[11px] font-medium text-[#344054]">
+            Percentage
+            <input aria-label="New markup percentage" type={sensitiveValuesHidden ? "password" : "number"} min="0" max={selectedMarkupKey === "discounts" ? "100" : undefined} step="any" value={selectedMarkupKey === "__custom__" ? newMarkupValue : selectedMarkup?.value ?? "0"} onChange={(event) => { if (selectedMarkupKey === "__custom__") setNewMarkupValue(event.target.value); }} readOnly={selectedMarkupKey !== "__custom__"} className="input mt-1 text-center tabular-nums" />
+          </label>
+          <Button disabled={!selectedMarkupKey || (selectedMarkupKey === "__custom__" && !newMarkupLabel.trim())} onClick={addMarkup}><Plus size={14} /> Add</Button>
+        </div>
+        <p className="mt-2 text-[10px] leading-4 text-[#687386]">The markup will be recalculated from the product&apos;s direct cost when the quotation is saved.</p>
+      </div>}
       <fieldset disabled={readOnly} className="min-w-0 border-0 p-0">
-      <Table labels={includesDiscount ? ["Category", "Basis", "Value", "Calculated amount"] : ["Category", "Percentage", "Calculated amount"]} minWidth={0} compact alignRightLabels={includesDiscount ? ["Value", "Calculated amount"] : ["Percentage", "Calculated amount"]}>
+      <Table labels={includesDiscount ? ["Category", "Basis", "Value", "Calculated amount", ...(canChangeRows ? ["Actions"] : [])] : ["Category", "Percentage", "Calculated amount", ...(canChangeRows ? ["Actions"] : [])]} minWidth={0} compact alignRightLabels={includesDiscount ? ["Value", "Calculated amount"] : ["Percentage", "Calculated amount"]}>
         {visibleMarkups.map((markup) => {
           const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
           const isDiscount = key === "discounts";
@@ -14079,6 +14076,7 @@ function PricingMarkupEditor({
                 {editable ? <div className="flex items-center justify-end gap-1"><input aria-label={`${label} ${rowCalculationType === "fixed_amount" ? "amount" : "percentage"}`} type={sensitiveValuesHidden ? "password" : "number"} min="0" max={isDiscount && rowCalculationType === "percentage" ? "100" : undefined} step="any" value={markupValue(markup)} onChange={(event) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, calculationType: isDiscount ? rowCalculationType : "percentage", value: event.target.value } : item) })} className="input mt-0 px-2 py-1.5 tabular-nums" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /><span className="w-4 text-[11px] text-[#687386]">{sensitiveValuesHidden ? confidentialPricingValue : rowCalculationType === "fixed_amount" ? "₱" : "%"}</span></div> : <span className="block text-right tabular-nums text-[#687386]">{sensitiveValuesHidden ? confidentialPricingValue : rowCalculationType === "fixed_amount" ? peso.format(n(markupValue(markup))) : `${n(markupValue(markup))}%`}</span>}
               </td>
               <td className="px-3 py-2 text-right font-medium tabular-nums">{sensitiveValuesHidden ? confidentialPricingValue : peso.format(amount)}</td>
+              {canChangeRows && <td className="px-1 py-2 text-center"><ActionIcon label={`Remove ${label}`} tone="red" confirmationDescription={`Remove ${label} from this product costing? The quotation price will be recalculated when the quotation is approved.`} onClick={() => update({ ...costing, markups: costing.markups.filter((item) => item.key !== markup.key) })}><Trash2 size={14} /></ActionIcon></td>}
             </tr>
           );
         })}
@@ -14379,9 +14377,7 @@ function ProductCostingsSectionWithPricing({
                 const nextCosting = newProductCostingDraft(text(nextLine.id), defaults);
                 setCostings((current) => [
                   ...current,
-                  visibleMarkupKeys.includes("discounts")
-                    ? withQuotationDiscount(nextCosting)
-                    : nextCosting,
+                  nextCosting,
                 ]);
               }
             }}
@@ -14464,7 +14460,7 @@ function ProductCostingsSectionWithPricing({
 
                 <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
                   {editableMarkups && <div className="space-y-4">
-                    <PricingMarkupEditor costing={costing} editable={editableInternalMarkups} visibleMarkupKeys={visibleMarkupKeys} update={(next) => updateCosting(costing.key, () => next)} showInternalVat={canEditVat} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
+                    <PricingMarkupEditor costing={costing} editable={editableInternalMarkups} visibleMarkupKeys={visibleMarkupKeys} markupDefaults={defaults} update={(next) => updateCosting(costing.key, () => next)} showInternalVat={canEditVat} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
                     <div className="rounded-lg border border-[#d9e0e9] bg-white p-3">
                       <div className="flex flex-wrap items-end justify-between gap-3">
                         <div className="min-w-52 flex-1">
@@ -14684,11 +14680,8 @@ function PriceQuotationReview({
       ),
       store.price_quotation_costing_lines,
       store.price_quotation_costing_markups,
-      finalApproval ? defaultPricingDefaults : undefined,
     );
-    return finalApproval
-      ? productCostingsWithLatestDefaultMarkups(savedCostings, defaultPricingDefaults)
-      : savedCostings;
+    return savedCostings;
   });
   useEffect(() => {
     let active = true;
@@ -14721,11 +14714,8 @@ function PriceQuotationReview({
         costings,
         (costLineResult.data ?? []) as Row[],
         (markupResult.data ?? []) as Row[],
-        finalApproval ? defaultPricingDefaults : undefined,
       );
-      setProductCostings(finalApproval
-        ? productCostingsWithLatestDefaultMarkups(loadedCostings, defaultPricingDefaults)
-        : loadedCostings);
+      setProductCostings(loadedCostings);
     };
     void loadProductCostings();
     return () => {
@@ -14806,7 +14796,7 @@ function PriceQuotationReview({
   // must not hide a configured markup from the final reviewer. Legacy saved
   // keys are included as well so historical markup rows remain visible.
   const gmVisibleMarkupKeys = Array.from(new Set([
-    "discounts",
+    ...internalPricingMarkupKeys,
     ...defaultPricingDefaults
       .filter((definition) => definition.key !== "vat")
       .map((definition) => definition.key),
@@ -19837,13 +19827,20 @@ function SettingsView({
   const [pricingDefaults, setPricingDefaults] = useState<Record<string, string>>({});
   const [savingPricingDefaults, setSavingPricingDefaults] = useState(false);
   const [customMarkupOpen, setCustomMarkupOpen] = useState(false);
-  const [customMarkupValues, setCustomMarkupValues] = useState<Record<string, string>>({ label: "", value: "" });
+  const [customMarkupValues, setCustomMarkupValues] = useState<Record<string, string>>({ markup_key: "__custom__", label: "", value: "" });
   const [settingsSensitiveValuesHidden, setSettingsSensitiveValuesHidden] = useState(false);
   const [supplierCountryDraft, setSupplierCountryDraft] = useState("");
   const [savingSupplierCountries, setSavingSupplierCountries] = useState(false);
   const setting = store.business_settings[0];
   const configuredSupplierCountries = supplierCountryOptions(setting?.supplier_countries);
   const pricingDefaultEntries = pricingMarkupDefaults(setting?.pricing_markup_defaults, setting);
+  const inactiveStandardMarkupDefinitions = pricingMarkupDefaultDefinitions.filter(
+    (definition) => !pricingDefaultEntries.some((entry) => entry.key === definition.key),
+  );
+  const addMarkupOptions = [
+    ...inactiveStandardMarkupDefinitions.map((definition) => `${definition.key}|${definition.label}`),
+    "__custom__|New custom markup",
+  ];
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileValues, setProfileValues] = useState<Record<string, string>>(
     {},
@@ -20008,6 +20005,7 @@ function SettingsView({
       n(definition.value) < 0 ||
       n(definition.value) > 100 ||
       (definition.key === "target_profit_margin" && n(definition.value) >= 100) ||
+      (definition.key === "discounts" && n(definition.value) >= 100) ||
       (definition.custom && !definition.label.trim()),
     );
     if (invalid) {
@@ -20037,24 +20035,42 @@ function SettingsView({
     if (await persistPricingDefaults(defaults)) setPricingDefaultsOpen(false);
   };
   const addCustomMarkup = async () => {
-    const label = text(customMarkupValues.label, "").trim();
-    const value = text(customMarkupValues.value, "").trim();
+    const selectedKey = text(customMarkupValues.markup_key, "__custom__").split("|")[0];
+    const selectedDefinition = pricingMarkupDefinition(selectedKey as PricingMarkupKey);
+    const isCustom = selectedKey === "__custom__";
+    if (!isCustom && (!selectedDefinition || selectedDefinition.key === "vat")) {
+      return notice("Select an available markup category.");
+    }
+    const label = (isCustom ? text(customMarkupValues.label, "") : selectedDefinition?.label ?? "").trim();
+    const value = text(customMarkupValues.value, isCustom ? "" : selectedDefinition?.fallback ?? "0").trim();
     if (!label) return notice("Enter a name for the custom markup.");
-    if (pricingDefaultEntries.some((definition) => definition.label.trim().toLowerCase() === label.toLowerCase())) {
+    if (pricingDefaultEntries.some((definition) =>
+      definition.key === (isCustom ? "" : selectedKey) ||
+      definition.label.trim().toLowerCase() === label.toLowerCase(),
+    )) {
       return notice("A markup with that name already exists.");
     }
-    const customMarkup: PricingMarkupDefault = {
-      key: `custom_${crypto.randomUUID()}`,
+    const markup: PricingMarkupDefault = {
+      key: (isCustom ? `custom_${crypto.randomUUID()}` : selectedKey) as PricingMarkupKey,
       label,
       calculationType: "percentage",
       value,
       visible: true,
-      custom: true,
+      custom: isCustom,
     };
-    if (await persistPricingDefaults([...pricingDefaultEntries, customMarkup], "Custom markup added and included in new quotation computations.")) {
-      setCustomMarkupValues({ label: "", value: "" });
+    if (await persistPricingDefaults([...pricingDefaultEntries.filter((definition) => definition.key !== markup.key), markup], "Markup added and included in new quotation computations.")) {
+      setCustomMarkupValues({ markup_key: "__custom__", label: "", value: "" });
       setCustomMarkupOpen(false);
     }
+  };
+  const removePricingMarkupDefault = async (key: PricingMarkupKey) => {
+    if (key === "vat") return;
+    const definition = pricingDefaultEntries.find((entry) => entry.key === key);
+    if (!definition) return;
+    await persistPricingDefaults(
+      pricingDefaultEntries.filter((entry) => entry.key !== key),
+      `${definition.label} removed from new quotation defaults. Existing quotations keep their saved values.`,
+    );
   };
   const toggleSettingsSensitiveValues = () => {
     setSettingsSensitiveValuesHidden((current) => {
@@ -20080,13 +20096,13 @@ function SettingsView({
           {settingsSensitiveValuesHidden ? "Show sensitive values" : "Hide sensitive values"}
         </Button>
       </div>}
-      <Panel title="Pricing defaults - Internal" detail="Applied to new internal product costings and new Commission Summary rates as percentages. Existing quotations and Commission Summary rows keep their saved values. Sales &amp; Pricing Officers can adjust the VAT percentage per quotation." action={memberRole(role) ? <div className="flex flex-wrap justify-end gap-2"><Button secondary disabled={settingsSensitiveValuesHidden} onClick={() => { setCustomMarkupValues({ label: "", value: "" }); setCustomMarkupOpen(true); }}><Plus size={14} /> Add markup</Button><Button secondary disabled={settingsSensitiveValuesHidden} onClick={() => { setPricingDefaults(Object.fromEntries(pricingDefaultEntries.map((definition) => [`${definition.key}_value`, definition.value]))); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button></div> : undefined}>
-        <Table labels={["Pricing default", "Default percentage"]}>
-          {pricingDefaultEntries.map((definition) => <tr key={definition.key} className={settingsSensitiveValuesHidden ? "bg-[#fafbfc] text-[#8b92a1]" : undefined}><td className="px-4 py-3 font-medium">{settingsSensitiveValuesHidden ? "Hidden markup" : <>{definition.label}{definition.custom && <span className="ml-2 rounded-full bg-[#f1f4f8] px-2 py-0.5 text-[10px] font-medium text-[#687386]">Custom</span>}</>}</td><td className="px-4 py-3 text-right">{settingsSensitiveValuesHidden ? "Hidden" : `${n(definition.value)}%`}</td></tr>)}
+      <Panel title="Pricing defaults - Internal" detail="Active markup rows are applied to new internal product costings and new Commission Summary rates. Existing quotations and Commission Summary rows keep their saved values. VAT remains a separate quotation field." action={memberRole(role) ? <div className="flex flex-wrap justify-end gap-2"><Button secondary disabled={settingsSensitiveValuesHidden} onClick={() => { const first = inactiveStandardMarkupDefinitions[0]; setCustomMarkupValues({ markup_key: first?.key ?? "__custom__", label: first?.label ?? "", value: first?.fallback ?? "" }); setCustomMarkupOpen(true); }}><Plus size={14} /> Add markup</Button><Button secondary disabled={settingsSensitiveValuesHidden} onClick={() => { setPricingDefaults(Object.fromEntries(pricingDefaultEntries.map((definition) => [`${definition.key}_value`, definition.value]))); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button></div> : undefined}>
+        <Table labels={["Pricing default", "Default percentage", "Actions"]}>
+          {pricingDefaultEntries.map((definition) => <tr key={definition.key} className={settingsSensitiveValuesHidden ? "bg-[#fafbfc] text-[#8b92a1]" : undefined}><td className="px-4 py-3 font-medium">{settingsSensitiveValuesHidden ? "Hidden markup" : <>{definition.label}{definition.custom && <span className="ml-2 rounded-full bg-[#f1f4f8] px-2 py-0.5 text-[10px] font-medium text-[#687386]">Custom</span>}</>}</td><td className="px-4 py-3 text-right">{settingsSensitiveValuesHidden ? "Hidden" : `${n(definition.value)}%`}</td><td className="px-2 py-2 text-center">{definition.key === "vat" ? <span className="text-[11px] text-[#8b92a1]">Separate</span> : <ActionIcon label={`Remove ${definition.label}`} tone="red" disabled={settingsSensitiveValuesHidden || savingPricingDefaults} confirmationDescription={`Remove ${definition.label} from new quotation defaults? Existing quotations keep their saved values.`} onClick={() => void removePricingMarkupDefault(definition.key)}><Trash2 size={14} /></ActionIcon>}</td></tr>)}
         </Table>
       </Panel>
       {pricingDefaultsOpen && <Dialog title="Pricing defaults - Internal" fields={pricingDefaultEntries.map((definition) => ({ key: `${definition.key}_value`, label: definition.label, type: "number" as const, required: true }))} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => { if (!savingPricingDefaults) setPricingDefaultsOpen(false); }} saving={savingPricingDefaults} saveLabel="Save pricing defaults" className="max-w-lg" compact />}
-      {customMarkupOpen && <Dialog title="Add custom markup" fields={[{ key: "label", label: "Markup name", required: true }, { key: "value", label: "Percentage", type: "number" as const, required: true }]} values={customMarkupValues} setValues={setCustomMarkupValues} save={() => void addCustomMarkup()} close={() => { if (!savingPricingDefaults) setCustomMarkupOpen(false); }} saving={savingPricingDefaults} saveLabel="Add markup" className="max-w-lg" compact><p className="mt-3 rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3 text-[11px] leading-5 text-[#687386]">This markup is included in computed pricing and used as a default for new quotations. The privacy button only masks this Settings screen; it does not change calculations or quotation workflow.</p></Dialog>}
+      {customMarkupOpen && <Dialog title="Add markup" fields={[{ key: "markup_key", label: "Markup category", type: "select" as const, options: addMarkupOptions, required: true }, { key: "label", label: "Markup name", required: true, readOnly: text(customMarkupValues.markup_key, "").split("|")[0] !== "__custom__" }, { key: "value", label: "Percentage", type: "number" as const, required: true }]} values={customMarkupValues} setValues={setCustomMarkupValues} onFieldChange={(key, value, current) => { if (key !== "markup_key") return { ...current, [key]: value }; const selectedKey = value.split("|")[0]; const definition = pricingMarkupDefinition(selectedKey as PricingMarkupKey); return { ...current, markup_key: value, label: selectedKey === "__custom__" ? "" : definition?.label ?? "", value: selectedKey === "__custom__" ? "" : definition?.fallback ?? "0" }; }} save={() => void addCustomMarkup()} close={() => { if (!savingPricingDefaults) setCustomMarkupOpen(false); }} saving={savingPricingDefaults} saveLabel="Add markup" className="max-w-lg" compact><p className="mt-3 rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3 text-[11px] leading-5 text-[#687386]">Choose an inactive standard category or create a custom markup. It will be included in computed pricing for new quotations. Existing quotations keep their saved markup rows.</p></Dialog>}
       {canManageSupplierCountries && (
         <Panel
           title="Supplier country options"
