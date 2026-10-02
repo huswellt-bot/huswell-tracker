@@ -18860,7 +18860,7 @@ function ProjectOfficerSalesFunnel({
           <div className="flex min-h-[58px] items-center px-4"><StageIdentity stage={stage} /></div>
           <div className="flex min-h-[58px] items-center px-4 text-[12px] leading-snug text-[#687386]">{stage.description}</div>
           <div className="flex min-h-[58px] items-center justify-end px-4 text-[13px] font-semibold tabular-nums text-[#202938]">{stage.total.toLocaleString()}</div>
-          <div className="flex min-h-[52px] flex-col items-center justify-center border-t px-2 text-center" style={{ borderColor: border, color: displayColor(stage) }}><b className="text-[13px] leading-none tabular-nums">{index ? percentage(stage.total, previous.total) : "—"}</b>{index > 0 && <span className="mt-0.5 text-[13px] font-medium leading-none text-black">({stage.total.toLocaleString()} / {previous.total.toLocaleString()})</span>}</div>
+          <div className="flex min-h-[52px] flex-col items-center justify-center border-t px-2 text-center" style={{ borderColor: border, color: displayColor(stage) }}><b className="text-[13px] leading-none tabular-nums">{index ? percentage(stage.total, previous.total) : "—"}</b>{index > 0 && <span className="mt-0.5 text-[13px] font-medium leading-none text-[var(--color-text-primary)]">({stage.total.toLocaleString()} / {previous.total.toLocaleString()})</span>}</div>
         </div>;
       })}
     </div>
@@ -18870,8 +18870,8 @@ function ProjectOfficerSalesFunnel({
         const previous = stages[index - 1];
         return <article className="overflow-hidden rounded-lg border border-[#dfe5ed] bg-white" key={stage.label}>
           <StageIdentity stage={stage} />
-          <p className="border-t px-4 py-3 text-[13px] font-medium leading-snug text-black" style={{ borderColor: border }}>{stage.description}</p>
-          <dl className="grid grid-cols-2 border-t" style={{ borderColor: border }}><div className="border-r p-3 text-center" style={{ borderColor: border }}><dt className="text-[13px] font-black">TOTAL (PROJECTS)</dt><dd className="mt-1 text-[13px] font-black tabular-nums" style={{ color: displayColor(stage) }}>{stage.total.toLocaleString()}</dd></div><div className="p-3 text-center"><dt className="text-[13px] font-black">CONVERSION</dt><dd className="mt-1 text-[13px] font-black tabular-nums" style={{ color: displayColor(stage) }}>{index ? percentage(stage.total, previous.total) : "—"}</dd>{index > 0 && <span className="text-[13px] text-black">({stage.total.toLocaleString()} / {previous.total.toLocaleString()})</span>}</div></dl>
+          <p className="border-t px-4 py-3 text-[13px] font-medium leading-snug text-[var(--color-text-primary)]" style={{ borderColor: border }}>{stage.description}</p>
+          <dl className="grid grid-cols-2 border-t" style={{ borderColor: border }}><div className="border-r p-3 text-center" style={{ borderColor: border }}><dt className="text-[13px] font-black">TOTAL (PROJECTS)</dt><dd className="mt-1 text-[13px] font-black tabular-nums" style={{ color: displayColor(stage) }}>{stage.total.toLocaleString()}</dd></div><div className="p-3 text-center"><dt className="text-[13px] font-black">CONVERSION</dt><dd className="mt-1 text-[13px] font-black tabular-nums" style={{ color: displayColor(stage) }}>{index ? percentage(stage.total, previous.total) : "—"}</dd>{index > 0 && <span className="text-[13px] text-[var(--color-text-primary)]">({stage.total.toLocaleString()} / {previous.total.toLocaleString()})</span>}</div></dl>
         </article>;
       })}
     </div>
