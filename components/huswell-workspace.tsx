@@ -28,6 +28,7 @@ import {
   Boxes,
   CalendarDays,
   Check,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
@@ -1439,6 +1440,21 @@ const Status = ({ value }: { value: unknown }) => (
     {text(value, "draft").replaceAll("_", " ")}
   </span>
 );
+const leadContactStatus = (value: unknown) => {
+  const contacted = Boolean(text(value, "").trim());
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ${contacted ? "bg-[var(--color-success-subtle)] text-[var(--color-success-text)]" : "bg-[var(--color-danger-subtle)] text-[var(--color-danger-text)]"}`}
+      title={contacted ? `Contacted on ${day(value)}` : "Not contacted"}
+    >
+      <span
+        aria-hidden="true"
+        className={`size-1.5 rounded-full ${contacted ? "bg-[var(--color-success-text)]" : "bg-[var(--color-danger-text)]"}`}
+      />
+      {contacted ? `Contacted · ${day(value)}` : "Not contacted"}
+    </span>
+  );
+};
 const leadStatuses = [
   // Keep the existing stored IDs stable: 1, 2, and 3 are already used by
   // saved leads, while 7 is reserved for the separate Done Deal workflow.
@@ -1996,7 +2012,7 @@ const leads: Module = {
         return name.includes("@") ? name.split("@")[0] : name;
       },
     },
-    { label: "Date contacted", value: (r) => day(r.date_contacted) },
+    { label: "Date contacted", value: (r) => leadContactStatus(r.date_contacted) },
     { label: "Outbound method", value: (r) => text(r.contact_method, "—") },
     { label: leadRecordedDateLabel, value: (r) => day(r.date_sent) },
     {
@@ -4546,6 +4562,11 @@ function Records({
   const [deletionRequestValues, setDeletionRequestValues] = useState<Record<string, string>>({
     request_note: "",
   });
+  const [contactDateLead, setContactDateLead] = useState<Row | null>(null);
+  const [contactDateValues, setContactDateValues] = useState<Record<string, string>>({
+    date_contacted: "",
+  });
+  const [contactDateSaving, setContactDateSaving] = useState(false);
   const isProjectsPage = module.table === "leads" && leadMode === "projects";
   const isLeadChangeRequestsPage =
     module.table === "leads" && leadMode === "lead_change_requests";
@@ -4623,6 +4644,34 @@ function Records({
     if (error) return notice(error.message);
     closeLeadRemark();
     notice("Lead remark saved.");
+    await reload();
+  };
+  const closeMarkContacted = () => {
+    setContactDateLead(null);
+    setContactDateValues({ date_contacted: "" });
+  };
+  const openMarkContacted = (row: Row) => {
+    if (!row.id || text(row.date_contacted, "").trim()) return;
+    setContactDateLead(row);
+    setContactDateValues({ date_contacted: isoToday() });
+  };
+  const markLeadContacted = async () => {
+    const lead = contactDateLead;
+    const dateContacted = text(contactDateValues.date_contacted, "").trim();
+    if (!lead?.id) return;
+    if (!dateContacted) {
+      notice("Select a contact date.");
+      return;
+    }
+    setContactDateSaving(true);
+    const { error } = await createClient().rpc("mark_lead_contacted", {
+      p_lead_id: lead.id,
+      p_date_contacted: dateContacted,
+    });
+    setContactDateSaving(false);
+    if (error) return notice(error.message);
+    closeMarkContacted();
+    notice("Lead marked as contacted.");
     await reload();
   };
   const renderRecordNote = (title: string, context: string, value: unknown) => {
@@ -4900,7 +4949,8 @@ function Records({
           ? text(row[f.key], "")
           : f.key === "date_sent" && module.table === "leads"
             ? ""
-            : f.type === "date"
+            : f.type === "date" &&
+                !(module.table === "leads" && f.key === "date_contacted")
               ? isoToday()
               : "",
       ]),
@@ -5396,8 +5446,13 @@ function Records({
     (module.table !== "leads" ||
       memberRole(role) ||
       canActOnLead(row));
+  const canMarkLeadContacted = (row: Row) =>
+    leadRemarksEnabled &&
+    !text(row.date_contacted, "").trim() &&
+    (memberRole(role) || (isProjectOfficerRole(role) && canActOnLead(row)));
   const isPageLayout = module.table === "leads";
   const contentPadding = isPageLayout ? "px-4 sm:px-6 lg:px-7" : "px-4 sm:px-5";
+  const leadActionsAtEnd = leadRemarksEnabled;
   const rowActions = (row: Row) => {
     const unendorsementRequest = pendingLeadUnendorsement(row);
     const leadEndorsementAttachment =
@@ -5409,6 +5464,18 @@ function Records({
     return (
     <td className="whitespace-nowrap px-5 py-3">
       <div className="flex gap-2">
+        {canMarkLeadContacted(row) && (
+          <ActionIcon
+            label="Mark lead as contacted"
+            tone="green"
+            confirm={false}
+            disabled={contactDateSaving}
+            loading={contactDateSaving && contactDateLead?.id === row.id}
+            onClick={() => openMarkContacted(row)}
+          >
+            <CheckCircle2 size={15} />
+          </ActionIcon>
+        )}
         {canEditRow(row) && (
           <ActionIcon
             onClick={() => {
@@ -5999,7 +6066,14 @@ function Records({
           <>
             <div className={isPageLayout ? "modern-table-shell" : undefined}>
               <Table
-                labels={module.table === "leads" ? [...(bulkEndorsementEnabled ? [""] : []), "Actions", ...displayColumns.map((c) => c.label)] : [...displayColumns.map((c) => c.label), "Actions"]}
+                labels={module.table === "leads"
+                  ? [
+                      ...(bulkEndorsementEnabled ? [""] : []),
+                      ...(leadActionsAtEnd ? [] : ["Actions"]),
+                      ...displayColumns.map((c) => c.label),
+                      ...(leadActionsAtEnd ? ["Actions"] : []),
+                    ]
+                  : [...displayColumns.map((c) => c.label), "Actions"]}
                 minWidth={module.table === "leads" ? (leadRemarksEnabled ? 2070 : 1950) : 680}
                 scrollable={isPageLayout}
                 scrollContainerClassName={module.table === "leads" ? "max-h-[560px]" : undefined}
@@ -6007,12 +6081,12 @@ function Records({
                   module.table === "leads"
                     ? [
                         ...(bulkEndorsementEnabled ? ["48px"] : []),
-                        "112px",
+                        ...(leadActionsAtEnd ? [] : ["112px"]),
                         ...displayColumns.map((column) =>
                           column.label === "Email"
                             ? "250px"
                             : column.label === "Date contacted"
-                              ? "135px"
+                              ? "170px"
                               : column.label === "Outbound method"
                                 ? "145px"
                                 : column.label === "Endorse By"
@@ -6025,6 +6099,7 @@ function Records({
                                       ? "105px"
                                     : "auto",
                         ),
+                        ...(leadActionsAtEnd ? ["112px"] : []),
                       ]
                     : undefined
                 }
@@ -6055,7 +6130,7 @@ function Records({
                         )}
                       </td>
                     )}
-                    {module.table === "leads" && rowActions(row)}
+                    {module.table === "leads" && !leadActionsAtEnd && rowActions(row)}
                     {displayColumns.map((c) => {
                       const value = c.value(row, store);
                       const plainValue =
@@ -6070,6 +6145,7 @@ function Records({
                         </td>
                       );
                     })}
+                    {module.table === "leads" && leadActionsAtEnd && rowActions(row)}
                     {module.table !== "leads" && rowActions(row)}
                   </tr>
                 ))}
@@ -6125,6 +6201,30 @@ function Records({
               : undefined
           }
         />
+      )}
+      {contactDateLead && (
+        <Dialog
+          title="Mark Lead as Contacted"
+          fields={[
+            {
+              key: "date_contacted",
+              label: "Date contacted",
+              type: "date",
+              required: true,
+            },
+          ]}
+          values={contactDateValues}
+          setValues={setContactDateValues}
+          save={() => void markLeadContacted()}
+          close={closeMarkContacted}
+          saving={contactDateSaving}
+          saveLabel="Mark contacted"
+          className="max-w-sm"
+        >
+          <p className="mt-3 rounded-lg border border-[#d9e0e9] bg-[#f8faff] p-3 text-[12px] leading-5 text-[#687386]">
+            This will mark the lead as contacted immediately without General Manager approval.
+          </p>
+        </Dialog>
       )}
       {deletionRequestLead && (
         <Dialog
