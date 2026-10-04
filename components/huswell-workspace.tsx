@@ -88,7 +88,15 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { AccountProfileDialog } from "@/components/account-profile-dialog";
 import { FixedIconTooltip } from "@/components/fixed-icon-tooltip";
+import { FileUploadControl } from "@/components/ui/file-upload-control";
+import { NumberInput } from "@/components/ui/number-input";
 import { ThemeToggle } from "@/components/theme-provider";
+import { CostingRequestWorkspace } from "@/components/costing-request-workspace";
+import {
+  DEFAULT_PRINT_COSTING_DEFAULTS,
+  normalizePrintCostingDefaults,
+  type PrintCostingDefaults,
+} from "@/lib/costing-engine";
 import {
   quotationProjectTypeColors,
   quotationProjectTypes,
@@ -111,6 +119,7 @@ type View =
   | "Projects"
   | "Quotation Costing Overview"
   | "Costing Breakdown"
+  | "PDF Costing"
   | "Price Quotations"
   | "Price Quotation Review"
   | "Materials List"
@@ -188,9 +197,14 @@ type TableName =
   | "leads"
   | "supplier_payables"
   | "organization_members"
-  | "commission_summaries";
+  | "commission_summaries"
+  | "costing_requests"
+  | "costing_request_items"
+  | "costing_request_materials"
+  | "costing_request_additional_costs"
+  | "costing_request_events";
 type Row = { id?: string; [key: string]: unknown };
-type Store = Record<TableName, Row[]>;
+export type Store = Record<TableName, Row[]>;
 type ApprovalDecision = "approved" | "rejected";
 type ApprovalQueueTab =
   | "quotations"
@@ -849,6 +863,11 @@ const tables: TableName[] = [
   "supplier_payables",
   "organization_members",
   "commission_summaries",
+  "costing_requests",
+  "costing_request_items",
+  "costing_request_materials",
+  "costing_request_additional_costs",
+  "costing_request_events",
 ];
 const blank = (): Store =>
   Object.fromEntries(tables.map((t) => [t, []])) as unknown as Store;
@@ -1671,6 +1690,11 @@ const roleReadableTables: Record<string, TableName[]> = {
     "lead_unendorsement_requests",
     "lead_endorsement_attachments",
     "commission_summaries",
+    "costing_requests",
+    "costing_request_items",
+    "costing_request_materials",
+    "costing_request_additional_costs",
+    "costing_request_events",
   ],
   sales: [
     "business_settings",
@@ -1787,8 +1811,8 @@ const workspaceViewTables = (
 ): TableName[] => {
   if (view === "Dashboard")
     return isProjectOfficerRole(role)
-      ? ["leads", "quotations", "project_schedules"]
-      : ["invoices", "payments", "target_goals", "quotations", "leads"];
+      ? ["leads", "quotations", "project_schedules", "costing_requests"]
+      : ["invoices", "payments", "target_goals", "quotations", "leads", "costing_requests"];
   if (
     view === "Leads" &&
     (leadMode === "leads" || leadMode === "lead_change_requests")
@@ -1807,6 +1831,17 @@ const workspaceViewTables = (
     ];
   if (view === "Quotation Costing Overview")
     return ["quotations", "quotation_items", "price_quotation_product_costings", "price_quotation_costing_lines", "price_quotation_costing_markups", "price_quotation_illustrations", "quotation_payment_records", "leads", "customers", "business_settings", "profiles", "organization_members", "pricing_officer_project_types"];
+  if (view === "PDF Costing")
+    return [
+      "leads",
+      "business_settings",
+      "costing_requests",
+      "costing_request_items",
+      "costing_request_materials",
+      "costing_request_additional_costs",
+      "costing_request_events",
+      "profiles",
+    ];
   if (
     view === "Price Quotations" ||
     view === "Price Quotation Review" ||
@@ -4150,6 +4185,24 @@ function Dialog({
                     {visiblePasswords[f.key] ? <EyeOff size={17} /> : <Eye size={17} />}
                   </button>
                 </div>
+              ) : f.type === "number" ? (
+                <NumberInput
+                  required={f.required}
+                  disabled={f.disabled}
+                  readOnly={f.readOnly}
+                  aria-readonly={f.readOnly || undefined}
+                  min="0"
+                  step="any"
+                  value={values[f.key] ?? ""}
+                  onChange={(value) =>
+                    setValues({
+                      ...values,
+                      [f.key]: value,
+                    })
+                  }
+                  className={`input ${compact ? "min-h-7 px-2 py-1 text-[12px]" : ""} ${f.readOnly || f.disabled ? "bg-[#f6f8fb] text-[#687386]" : ""} ${f.disabled ? "disabled:cursor-not-allowed disabled:opacity-60" : ""}`}
+                  placeholder={fieldPlaceholder(f)}
+                />
               ) : (
                 <input
                   required={f.required}
@@ -4157,8 +4210,8 @@ function Dialog({
                   readOnly={f.readOnly}
                   aria-readonly={f.readOnly || undefined}
                   type={f.type ?? "text"}
-                  min={f.type === "number" ? "0" : undefined}
-                  step={f.type === "number" ? "any" : undefined}
+                  min={undefined}
+                  step={undefined}
                   value={values[f.key] ?? ""}
                   onClick={(e) => {
                     if (f.type === "date")
@@ -4372,21 +4425,21 @@ function LeadImportDialog({
         </header>
 
         <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-[#d9e0e9] bg-[#fafbfe] p-3">
-          <label className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-[#1F4E79] px-3 text-[12px] font-semibold text-white transition-colors hover:bg-[#173c5e] has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50">
-            <Upload size={14} aria-hidden="true" />
-            {loading ? "Reading Excel..." : "Choose .xlsx file"}
-            <input
-              type="file"
-              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-              className="sr-only"
-              disabled={loading || saving}
-              onChange={(event) => {
-                const file = event.target.files?.[0];
-                event.currentTarget.value = "";
-                if (file) void previewFile(file);
-              }}
-            />
-          </label>
+          <FileUploadControl
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ariaLabel="Choose Excel file for Lead import"
+            busy={loading}
+            busyLabel="Reading Excel..."
+            busyActionLabel="Reading..."
+            className="sm:w-auto"
+            disabled={loading || saving}
+            displayName={fileName}
+            emptyLabel="Choose .xlsx file"
+            onFilesSelected={(files) => {
+              const file = files[0];
+              if (file) void previewFile(file);
+            }}
+          />
           <a
             href="/api/leads/import?template=1"
             download="lead-import-template.xlsx"
@@ -4946,9 +4999,11 @@ function Records({
       module.fields.map((f) => [
         f.key,
         row
-          ? text(row[f.key], "")
+          ? text(row[f.key], f.type === "number" ? "0" : "")
           : f.key === "date_sent" && module.table === "leads"
             ? ""
+            : f.type === "number"
+              ? "0"
             : f.type === "date" &&
                 !(module.table === "leads" && f.key === "date_contacted")
               ? isoToday()
@@ -6319,30 +6374,29 @@ function Records({
                   JPEG, PNG, or WebP up to 10 MB. It will be visible only to the lead owner, endorsed officer, and General Manager.
                 </p>
               </div>
-              <label className="inline-flex min-h-8 cursor-pointer items-center gap-1.5 rounded-lg border border-[#d7deea] bg-white px-2.5 text-[12px] font-semibold text-[#344054] transition-colors hover:bg-[#f4f6f9] has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-50">
-                <ImageIcon size={14} />
-                {endorsementImageFile ? "Replace image" : "Choose image"}
-                <input
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  className="sr-only"
-                  disabled={endorsing}
-                  onChange={(event) => {
-                    const file = event.target.files?.[0] ?? null;
-                    event.currentTarget.value = "";
-                    if (!file) return;
-                    if (
-                      !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
-                      file.size <= 0 ||
-                      file.size > 10 * 1024 * 1024
-                    ) {
-                      setEndorsementImageFile(null);
-                      return notice("Endorsement images must be JPEG, PNG, or WebP files no larger than 10 MB.");
-                    }
-                    setEndorsementImageFile(file);
-                  }}
-                />
-              </label>
+              <FileUploadControl
+                accept="image/jpeg,image/png,image/webp"
+                ariaLabel="Choose endorsement image"
+                className="w-auto max-w-full"
+                disabled={endorsing}
+                emptyLabel="Choose image"
+                files={endorsementImageFile ? [endorsementImageFile] : []}
+                onFilesSelected={(files) => {
+                  const file = files[0] ?? null;
+                  if (!file) return;
+                  if (
+                    !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
+                    file.size <= 0 ||
+                    file.size > 10 * 1024 * 1024
+                  ) {
+                    setEndorsementImageFile(null);
+                    return notice("Endorsement images must be JPEG, PNG, or WebP files no larger than 10 MB.");
+                  }
+                  setEndorsementImageFile(file);
+                }}
+                selectedActionLabel="Replace"
+                size="compact"
+              />
             </div>
             {endorsementImageFile && endorsementImagePreview && (
               <div className="mt-3 flex items-center gap-3 rounded-lg border border-[#e1e6ee] bg-white p-2">
@@ -6851,27 +6905,14 @@ function PolicyView({
               Policy Document
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-3">
-              <label className="flex h-8 cursor-pointer items-center rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium text-[#344054] hover:bg-[#f5f7fa]">
-                <Plus size={13} className="mr-1" /> Choose PDF
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  className="hidden"
-                  onChange={(event) =>
-                    setPdfFile(event.target.files?.[0] ?? null)
-                  }
-                />
-              </label>
-              {pdfFile ? (
-                <span className="inline-flex max-w-full items-center gap-1.5 truncate rounded-md border border-[#d9e0e9] bg-white px-2.5 py-1 text-[12px] text-[#344054]">
-                  <FileText size={13} className="shrink-0" />
-                  <span className="min-w-0 truncate">{pdfFile.name}</span>
-                </span>
-              ) : (
-                <span className="text-[12px] text-[#8b92a1]">
-                  No PDF selected.
-                </span>
-              )}
+              <FileUploadControl
+                accept="application/pdf"
+                ariaLabel="Choose policy PDF"
+                className="sm:max-w-md"
+                emptyLabel="Choose policy PDF"
+                files={pdfFile ? [pdfFile] : []}
+                onFilesSelected={(files) => setPdfFile(files[0] ?? null)}
+              />
             </div>
             <p className="mt-2 text-[10px] text-[#8b92a1]">
               Upload a PDF document up to 10 MB.
@@ -7352,7 +7393,7 @@ function QuotationPaymentDialog({
               <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
                 <div>
                   <h3 className="text-[13px] font-semibold text-[#202938]">Payment terms</h3>
-                  {!editingTerms ? <p className="mt-1 text-[12px] text-[#687386]">{quotationPaymentRequirementLabel(liveQuote)}{summary.downpaymentTarget > 0 ? ` · target ${peso.format(summary.downpaymentTarget)}` : ""}</p> : <div className="mt-2 flex flex-wrap items-center gap-2"><select value={termsValues.requirement} onChange={(event) => setTermsValues((current) => ({ ...current, requirement: event.target.value }))} className="input mt-0 w-auto"><option value="none">No payment requirement</option><option value="downpayment">Downpayment</option><option value="full_payment">Full payment</option></select>{termsValues.requirement === "downpayment" && <label className="flex items-center gap-2 text-[12px] text-[#687386]"><span>Rate</span><input type="number" min="1" max="99" step="1" value={termsValues.rate} onChange={(event) => setTermsValues((current) => ({ ...current, rate: event.target.value }))} className="input mt-0 w-20" /><span>%</span></label>}</div>}
+                  {!editingTerms ? <p className="mt-1 text-[12px] text-[#687386]">{quotationPaymentRequirementLabel(liveQuote)}{summary.downpaymentTarget > 0 ? ` · target ${peso.format(summary.downpaymentTarget)}` : ""}</p> : <div className="mt-2 flex flex-wrap items-center gap-2"><select value={termsValues.requirement} onChange={(event) => setTermsValues((current) => ({ ...current, requirement: event.target.value }))} className="input mt-0 w-auto"><option value="none">No payment requirement</option><option value="downpayment">Downpayment</option><option value="full_payment">Full payment</option></select>{termsValues.requirement === "downpayment" && <label className="flex items-center gap-2 text-[12px] text-[#687386]"><span>Rate</span><NumberInput min="1" max="99" step="1" value={termsValues.rate} onChange={(value) => setTermsValues((current) => ({ ...current, rate: value }))} className="input mt-0 w-20" /><span>%</span></label>}</div>}
                 </div>
                 {(canSubmit || canReviewAsManager) && <div className="flex gap-2">{editingTerms ? <><Button secondary disabled={termsSaving} onClick={() => setEditingTerms(false)}>Cancel</Button><Button loading={termsSaving} disabled={termsSaving} onClick={() => void saveTerms()}><Save size={13} /> Save terms</Button></> : <Button secondary onClick={() => { setFeedback(null); setTermsValues({ requirement: text(liveQuote.payment_requirement, "downpayment"), rate: text(liveQuote.downpayment_rate, "50") }); setEditingTerms(true); }}><Pencil size={13} /> Edit terms</Button>}</div>}
               </div>
@@ -7368,11 +7409,11 @@ function QuotationPaymentDialog({
               </div>
               {formOpen && <div className="grid gap-3 border-t border-[#edf0f5] px-4 py-4 sm:grid-cols-2 lg:grid-cols-4">
                 <label className="text-[12px] font-medium text-[#202938]">Payment type<select value={paymentValues.payment_kind} onChange={(event) => changePaymentKind(event.target.value)} className="input mt-1">{quotationPaymentKinds.map(([key, label]) => <option key={key} value={key} disabled={key === "downpayment" && paymentRequirement !== "downpayment"}>{label}{key === "downpayment" && paymentRequirement !== "downpayment" ? " (set terms first)" : ""}</option>)}</select></label>
-                <label className="text-[12px] font-medium text-[#202938]">Amount<input type="number" min="0.01" max={paymentValues.payment_kind === "partial_payment" ? partialPaymentMax : undefined} step="0.01" readOnly={paymentAmountReadOnly} value={paymentValues.amount} onChange={(event) => setPaymentValues((current) => ({ ...current, amount: event.target.value }))} className={`input mt-1 ${paymentAmountReadOnly ? "bg-[#f6f8fb] text-[#687386]" : ""}`} placeholder="0.00" /><span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">{paymentAmountHint}</span></label>
+                <label className="text-[12px] font-medium text-[#202938]">Amount<NumberInput min="0.01" max={paymentValues.payment_kind === "partial_payment" ? partialPaymentMax : undefined} step="0.01" readOnly={paymentAmountReadOnly} value={paymentValues.amount} onChange={(value) => setPaymentValues((current) => ({ ...current, amount: value }))} className={`input mt-1 ${paymentAmountReadOnly ? "bg-[#f6f8fb] text-[#687386]" : ""}`} placeholder="0.00" /><span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">{paymentAmountHint}</span></label>
                 <label className="text-[12px] font-medium text-[#202938]">Paid date<input type="date" value={paymentValues.paid_at} onChange={(event) => setPaymentValues((current) => ({ ...current, paid_at: event.target.value }))} className="input mt-1" /></label>
                 <label className="text-[12px] font-medium text-[#202938]">Method<select value={paymentValues.method} onChange={(event) => setPaymentValues((current) => ({ ...current, method: event.target.value }))} className="input mt-1">{quotationPaymentMethods.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
                 <label className="text-[12px] font-medium text-[#202938] sm:col-span-2">Reference number (optional)<input value={paymentValues.reference_no} onChange={(event) => setPaymentValues((current) => ({ ...current, reference_no: event.target.value }))} className="input mt-1" placeholder="Receipt or transaction reference" /></label>
-                <label className="text-[12px] font-medium text-[#202938] sm:col-span-2">Receipt image<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setPaymentFile(event.target.files?.[0] ?? null)} className="input mt-1 py-1.5" />{paymentFile && <span className="mt-1 block truncate text-[11px] font-normal text-[#687386]">{paymentFile.name}</span>}</label>
+                <div className="text-[12px] font-medium text-[#202938] sm:col-span-2"><span className="mb-1 block">Receipt image</span><FileUploadControl accept="image/jpeg,image/png,image/webp" ariaLabel="Choose payment receipt image" className="mt-1" emptyLabel="Choose receipt image" files={paymentFile ? [paymentFile] : []} onFilesSelected={(files) => setPaymentFile(files[0] ?? null)} /></div>
                 <div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-3 sm:col-span-2 lg:col-span-4"><Button secondary disabled={saving} onClick={resetPaymentForm}>Cancel</Button><Button loading={saving} disabled={saving} onClick={() => void savePayment()}><Send size={13} /> Submit receipt</Button></div>
               </div>}
             </section>}
@@ -8720,7 +8761,7 @@ function ProjectCalendar({
               <td className="px-4 py-2"><span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full" style={{ backgroundColor: calendarColorForProjectType(scheduleProjectType(schedule)) }} aria-hidden="true" />{scheduleProjectType(schedule)}</span></td>
               <td className="px-4 py-2 whitespace-nowrap">{text(schedule.assigned_box_maker)}</td>
               <td className="px-4 py-2"><AgreementAction storagePath={schedule.agreement_storage_path} notice={notice} /></td>
-              <td className="px-4 py-2">{isProjectOfficerRole(role) && !schedule.completed_at ? <input aria-label={`Progress percentage for ${text(schedule.project_name, text(schedule.quotation_no))}`} type="number" min="0" max="100" step="0.01" value={projectProgress(schedule).percentage} onChange={(event) => setProgressDrafts((current) => ({ ...current, [text(schedule.id)]: { ...projectProgress(schedule), percentage: event.target.value } }))} className="input mt-0 w-20 text-center" /> : `${n(schedule.progress_percentage)}%`}</td>
+              <td className="px-4 py-2">{isProjectOfficerRole(role) && !schedule.completed_at ? <NumberInput aria-label={`Progress percentage for ${text(schedule.project_name, text(schedule.quotation_no))}`} min="0" max="100" step="0.01" value={projectProgress(schedule).percentage} onChange={(value) => setProgressDrafts((current) => ({ ...current, [text(schedule.id)]: { ...projectProgress(schedule), percentage: value } }))} className="input mt-0 w-20 text-center" /> : `${n(schedule.progress_percentage)}%`}</td>
               <td className="px-4 py-2 text-center"><NoteAction label={isProjectOfficerRole(role) && !schedule.completed_at ? "Edit project remark" : "View project remark"} onClick={() => openRemark(schedule)} /></td>
               {!isProjectOfficerRole(role) && <td className="px-4 py-2">{officerName(schedule)}</td>}
               <td className="px-4 py-2">
@@ -8941,31 +8982,17 @@ function ProjectCalendar({
             <div className="mt-4 rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4 sm:col-span-2">
               <p className="text-[12px] font-medium text-[#202938]">Agreement</p>
               <div className="mt-2 flex flex-wrap items-center gap-3">
-                <label className="flex h-8 cursor-pointer items-center rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium text-[#344054] hover:bg-[#f5f7fa]">
-                  <Plus size={13} className="mr-1" /> Choose file
-                  <input
-                    key={agreementInputKey}
-                    type="file"
-                    accept={agreementFileTypes.join(",")}
-                    className="hidden"
-                    onChange={(event) =>
-                      handleAgreementFileChange(event.target.files?.[0] ?? null)
-                    }
-                  />
-                </label>
-                {agreementFile ? (
-                  <span className="inline-flex max-w-full items-center gap-1.5 truncate rounded-md border border-[#d9e0e9] bg-white px-2.5 py-1 text-[12px] text-[#344054]">
-                    <FileText size={13} className="shrink-0" />
-                    <span className="min-w-0 truncate">{agreementFile.name}</span>
-                  </span>
-                ) : existingAgreementForSelectedQuote ? (
-                  <span className="inline-flex max-w-full items-center gap-1.5 truncate rounded-md border border-[#d9e0e9] bg-white px-2.5 py-1 text-[12px] text-[#344054]">
-                    <FileText size={13} className="shrink-0" />
-                    <span className="min-w-0 truncate">Current: {existingAgreementForSelectedQuote}</span>
-                  </span>
-                ) : (
-                  <span className="text-[12px] text-[#8b92a1]">No agreement selected.</span>
-                )}
+                <FileUploadControl
+                  accept={agreementFileTypes.join(",")}
+                  ariaLabel="Choose production agreement file"
+                  className="sm:max-w-md"
+                  displayName={agreementFile ? null : existingAgreementForSelectedQuote ? `Current: ${existingAgreementForSelectedQuote}` : null}
+                  emptyLabel="Choose agreement file"
+                  files={agreementFile ? [agreementFile] : []}
+                  inputKey={agreementInputKey}
+                  onFilesSelected={(files) => handleAgreementFileChange(files[0] ?? null)}
+                  selectedActionLabel="Replace file"
+                />
               </div>
               <p className="mt-2 text-[10px] text-[#8b92a1]">
                 Upload a JPEG, PNG, WebP, or PDF agreement up to 10 MB.
@@ -9260,7 +9287,7 @@ function MaterialsList({
           />
         </td>
         <td className="px-3 py-3 align-middle">
-          <input type="number" min="0" step="any" value={materialDraft.quantity_on_hand} onChange={(event) => update({ quantity_on_hand: event.target.value })} placeholder="0" className="input mt-0 min-w-[92px]" />
+          <NumberInput min="0" step="any" value={materialDraft.quantity_on_hand} onChange={(value) => update({ quantity_on_hand: value })} placeholder="0" className="input mt-0 min-w-[92px]" />
         </td>
         <td className="px-3 py-3 align-middle">
           <input value={materialDraft.unit} onChange={(event) => update({ unit: titleCaseEntry(event.target.value, "unit") })} placeholder="piece" className="input mt-0 min-w-[92px]" />
@@ -9304,12 +9331,11 @@ function MaterialsList({
           />
         </td>
         <td className="px-3 py-3 align-middle">
-          <input
-            type="number"
+          <NumberInput
             min="0"
             step="any"
             value={materialDraft.standard_cost}
-            onChange={(event) => update({ standard_cost: event.target.value })}
+            onChange={(value) => update({ standard_cost: value })}
             placeholder="0.00"
             className="input mt-0 min-w-[120px]"
           />
@@ -12505,15 +12531,14 @@ function Quotations({
                     </label>
                     <label className="text-[12px] font-medium text-[#202938]">
                       Quantity
-                      <input
-                        type="number"
+                      <NumberInput
                         min="0"
                         step="any"
                         value={costingValues.quantity}
-                        onChange={(event) =>
+                        onChange={(value) =>
                           setCostingValues((current) => ({
                             ...current,
-                            quantity: event.target.value,
+                            quantity: value,
                           }))
                         }
                         className="mt-1 w-full rounded-md border border-[#d9e0e9] bg-white px-3 py-2 text-sm"
@@ -12521,15 +12546,14 @@ function Quotations({
                     </label>
                     <label className="text-[12px] font-medium text-[#202938]">
                       Unit cost
-                      <input
-                        type="number"
+                      <NumberInput
                         min="0"
                         step="any"
                         value={costingValues.unit_cost}
-                        onChange={(event) =>
+                        onChange={(value) =>
                           setCostingValues((current) => ({
                             ...current,
-                            unit_cost: event.target.value,
+                            unit_cost: value,
                           }))
                         }
                         className="mt-1 w-full rounded-md border border-[#d9e0e9] bg-white px-3 py-2 text-sm"
@@ -12705,15 +12729,14 @@ function Quotations({
                         </label>
                         <label className="text-[12px] font-medium text-[#202938]">
                           Quantity
-                          <input
-                            type="number"
+                          <NumberInput
                             min="0"
                             step="any"
                             value={costingValues.quantity}
-                            onChange={(event) =>
+                            onChange={(value) =>
                               setCostingValues((current) => ({
                                 ...current,
-                                quantity: event.target.value,
+                                quantity: value,
                               }))
                             }
                             className="input"
@@ -12721,15 +12744,14 @@ function Quotations({
                         </label>
                         <label className="text-[12px] font-medium text-[#202938]">
                           Unit cost
-                          <input
-                            type="number"
+                          <NumberInput
                             min="0"
                             step="any"
                             value={costingValues.unit_cost}
-                            onChange={(event) =>
+                            onChange={(value) =>
                               setCostingValues((current) => ({
                                 ...current,
-                                unit_cost: event.target.value,
+                                unit_cost: value,
                               }))
                             }
                             className="input"
@@ -12962,27 +12984,18 @@ function Quotations({
                         </p>
                       </div>
                       <div className="flex shrink-0 items-center gap-1">
-                        <label
-                          className={`rounded-md px-2 py-1.5 text-[12px] font-medium ${
-                            isManualCostingLine
-                              ? "cursor-pointer text-[#b5323a] transition hover:bg-[#fff0f1]"
-                              : "cursor-not-allowed text-[#9aa5b5]"
-                          }`}
-                        >
-                          Replace
-                          <input
-                            key={imageInputKey}
-                            type="file"
-                            accept="image/png,image/jpeg,image/webp"
-                            disabled={!isManualCostingLine}
-                            onChange={(event) =>
-                              void selectCostingImage(
-                                event.target.files?.[0] ?? null,
-                              )
-                            }
-                            className="sr-only"
-                          />
-                        </label>
+                        <FileUploadControl
+                          accept="image/png,image/jpeg,image/webp"
+                          ariaLabel="Replace quotation product image"
+                          className="w-auto max-w-[220px]"
+                          disabled={!isManualCostingLine}
+                          displayName={costingImage ? null : "Image from Materials List"}
+                          files={costingImage ? [costingImage] : []}
+                          inputKey={imageInputKey}
+                          onFilesSelected={(files) => void selectCostingImage(files[0] ?? null)}
+                          selectedActionLabel="Replace"
+                          size="compact"
+                        />
                         <button
                           type="button"
                           onClick={() => {
@@ -13004,40 +13017,18 @@ function Quotations({
                       </div>
                     </div>
                   ) : (
-                    <label
-                      className={`mt-1 flex min-h-[72px] items-center justify-center gap-2 rounded-lg border border-dashed px-4 text-center ${
-                        isManualCostingLine
-                          ? "cursor-pointer border-[#c7d0de] bg-[#fafbfe] transition hover:border-[#c43b43] hover:bg-[#fff8f8]"
-                          : "cursor-not-allowed border-[#d7deea] bg-[#f6f8fb]"
-                      }`}
-                    >
-                      <ImageIcon size={17} className="text-[#c43b43]" />
-                      <span>
-                        <span className="block text-[13px] font-medium text-[#313b4b]">
-                          {isManualCostingLine ? "Upload Product Image" : "Image managed by Materials List"}
-                        </span>
-                        <span className={`block text-[11px] font-normal text-[#7d8797] ${isManualCostingLine ? "" : "hidden"}`}>
-                          PNG, JPG or WebP · Images are optimized automatically
-                        </span>
-                      </span>
-                      {!isManualCostingLine && (
-                        <span className="text-[11px] font-normal text-[#7d8797]">
-                          Choose Others / Manual Material to upload an image
-                        </span>
-                      )}
-                      <input
-                        key={imageInputKey}
-                        type="file"
+                    <div className="mt-1 space-y-2">
+                      <FileUploadControl
                         accept="image/png,image/jpeg,image/webp"
+                        ariaLabel="Upload quotation product image"
                         disabled={!isManualCostingLine}
-                        onChange={(event) =>
-                          void selectCostingImage(
-                            event.target.files?.[0] ?? null,
-                          )
-                        }
-                        className="sr-only"
+                        emptyLabel={isManualCostingLine ? "Upload product image" : "Image managed by Materials List"}
+                        onFilesSelected={(files) => void selectCostingImage(files[0] ?? null)}
                       />
-                    </label>
+                      <p className={`text-[11px] ${isManualCostingLine ? "text-[#7d8797]" : "text-[#7d8797]"}`}>
+                        {isManualCostingLine ? "PNG, JPG or WebP · Images are optimized automatically" : "Choose Others / Manual Material to upload an image"}
+                      </p>
+                    </div>
                   )}
                 </div>
                 <label className="text-[12px] font-medium text-[#202938]">
@@ -13080,15 +13071,14 @@ function Quotations({
                 </label>
                 <label className="text-[12px] font-medium text-[#202938]">
                   Quantity
-                  <input
-                    type="number"
+                  <NumberInput
                     min="0"
                     step="any"
                     value={costingValues.quantity}
-                    onChange={(event) =>
+                    onChange={(value) =>
                       setCostingValues((current) => ({
                         ...current,
-                        quantity: event.target.value,
+                        quantity: value,
                       }))
                     }
                     className="input"
@@ -13112,16 +13102,15 @@ function Quotations({
                 )}
                 <label className="text-[12px] font-medium text-[#202938]">
                   Unit Cost
-                  <input
-                    type="number"
+                  <NumberInput
                     min="0"
                     step="any"
                     value={costingValues.unit_cost}
                     readOnly={!isManualCostingLine}
-                    onChange={(event) =>
+                    onChange={(value) =>
                       setCostingValues((current) => ({
                         ...current,
-                        unit_cost: event.target.value,
+                        unit_cost: value,
                       }))
                     }
                     className={`input ${isManualCostingLine ? "" : "bg-[#f6f8fb] text-[#687386]"}`}
@@ -13527,6 +13516,7 @@ function PriceQuotationWorkspace({
   const quotations = store.quotations.filter(
     (quote) =>
       text(quote.document_type) === "price_quotation" &&
+      (!isGeneralManager || text(quote.status) !== "draft") &&
       (!isCombinedRole ||
         [quote.created_by, quote.prepared_by_user_id, quote.submitted_by].some(
           (userId) => text(userId, "") === currentUserId,
@@ -13842,7 +13832,10 @@ function PriceQuotationWorkspace({
       <div className="px-4 py-4 sm:px-5 lg:px-6">
       <div className="mb-4">
         <nav aria-label="Price quotation sections" className="app-tabs">
-          {(["draft", "pending", "needs_revision", "approved"] as const).map((tab) => {
+          {(isGeneralManager
+            ? (["pending", "needs_revision", "approved"] as const)
+            : (["draft", "pending", "needs_revision", "approved"] as const)
+          ).map((tab) => {
             const labels = { draft: "Draft", pending: "Pending Review", needs_revision: "Needs Revision", approved: "Approved" };
             return <button key={tab} type="button" onClick={() => setQuotationTab(tab)} aria-current={quotationTab === tab ? "page" : undefined} className="app-tab">{labels[tab]} ({quotations.filter((quote) => text(quote.status) === tab).length})</button>;
           })}
@@ -13950,7 +13943,17 @@ function PriceQuotationWorkspace({
             <section className="mt-5 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div><h3 className="text-[14px] font-semibold text-[#202938]">Illustrations</h3><p className="mt-1 text-[12px] text-[#687386]">Upload up to five pictures or PDF reference files (5 MB each). They are public, view-only, and are not included in the PDF.</p></div>
-                <label className={`inline-flex min-h-9 cursor-pointer items-center rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium text-[#344054] hover:bg-[#f7f9fc] ${quotationIllustrations.length >= 5 ? "pointer-events-none opacity-50" : ""}`}><input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" multiple className="sr-only" disabled={quotationIllustrations.length >= 5} onChange={(event) => { addQuotationIllustrations(event.target.files ?? undefined); event.currentTarget.value = ""; }} />Add files ({quotationIllustrations.length}/5)</label>
+                <FileUploadControl
+                  accept="image/jpeg,image/png,image/webp,application/pdf"
+                  ariaLabel="Add quotation illustration files"
+                  className="w-auto max-w-full"
+                  displayName={quotationIllustrations.length ? `${quotationIllustrations.length}/5 files selected` : null}
+                  disabled={quotationIllustrations.length >= 5}
+                  emptyLabel="Add files"
+                  multiple
+                  onFilesSelected={addQuotationIllustrations}
+                  selectedActionLabel="Add more"
+                />
               </div>
               {quotationIllustrations.length > 0 && <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">{quotationIllustrations.map((illustration, index) => <div key={illustration.key} className="relative overflow-hidden rounded-lg border border-[#d9e0e9] bg-white"><a href={illustration.imagePreview || illustration.imageUrl} target="_blank" rel="noreferrer" className="block aspect-square"><AttachmentPreview url={illustration.imagePreview || illustration.imageUrl} contentType={illustration.contentType} fileName={illustration.fileName} alt={`Quotation illustration ${index + 1}`} className="size-full object-cover" /></a><button type="button" aria-label={`Remove illustration ${index + 1}`} onClick={() => setQuotationIllustrations((current) => current.filter((item) => item.key !== illustration.key))} className="absolute right-1 top-1 grid size-7 place-items-center rounded-md bg-white/90 text-[#8b92a1] shadow-sm hover:bg-[#fff1f1] hover:text-[#b42318]"><X size={14} /></button><span className="absolute bottom-1 left-1 rounded bg-[#151922]/75 px-1.5 py-0.5 text-[10px] font-medium text-white">{index + 1}</span></div>)}</div>}
             </section>
@@ -13960,7 +13963,7 @@ function PriceQuotationWorkspace({
                 {items.map((item, index) => <tr key={item.key}>
                   <td className="px-3 py-2 text-center font-medium">{index + 1}</td>
                   <td className="px-3 py-2"><textarea rows={2} aria-label={`Item ${index + 1} description`} value={item.description} onChange={(event) => setItems((current) => current.map((value) => value.key === item.key ? { ...value, description: titleCase(event.target.value) } : value))} className="input mt-0 min-h-[58px] resize-y" placeholder="Finished product description" /></td>
-                  <td className="px-3 py-2"><input aria-label={`Item ${index + 1} quantity`} type="number" min="0.001" step="any" value={item.quantity} onChange={(event) => setItems((current) => current.map((value) => value.key === item.key ? { ...value, quantity: event.target.value } : value))} className="input mt-0 text-center" style={{ width: "6rem", marginInline: "auto" }} /></td>
+                  <td className="px-3 py-2"><NumberInput aria-label={`Item ${index + 1} quantity`} min="0.001" step="any" value={item.quantity} onChange={(value) => setItems((current) => current.map((itemValue) => itemValue.key === item.key ? { ...itemValue, quantity: value } : itemValue))} className="input mt-0 text-center" style={{ width: "6rem", marginInline: "auto" }} /></td>
                   <td className="px-3 py-2 text-center"><ActionIcon label={`Remove item ${index + 1}`} tone="red" disabled={items.length === 1} onClick={() => setItems((current) => current.filter((value) => value.key !== item.key))}><Trash2 size={15} /></ActionIcon></td>
                 </tr>)}
               </Table>
@@ -14616,13 +14619,12 @@ function ProductCostingsSectionWithPricing({
                           Target Selling Price / Piece
                           <div className="mt-1 flex items-center gap-1">
                             <span className="text-[12px] text-[#687386]">₱</span>
-                            <input
+                            <NumberInput
                               aria-label={`Target selling price per piece for ${product ? text(product.description, "finished product") : "product"}`}
-                              type="number"
                               min="0.01"
                               step="0.01"
                               value={targetBudgetValues[costing.key] ?? totals.unitIncVat.toFixed(2)}
-                              onChange={(event) => applyTargetBudget(costing, event.target.value, n(product?.quantity))}
+                              onChange={(value) => applyTargetBudget(costing, value, n(product?.quantity))}
                               disabled={readOnly}
                               className="input mt-0 w-36 px-2 py-1.5 text-center tabular-nums"
                             />
@@ -14659,7 +14661,7 @@ function ProductCostingsSectionWithPricing({
           <div className="grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-3 border-b border-[#edf0f5] pb-2 text-[10px] font-medium text-[#687386]"><span>Category</span><span>Percentage</span><span className="text-right">Calculated Amount</span></div>
           <div className="mt-2 grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-3">
             <span className="text-[11px] font-medium text-[#344054]">VAT</span>
-            <div className="flex items-center gap-1"><input aria-label="VAT percentage" type="number" min="0" max="100" step="any" value={vatValue} onChange={(event) => setVatValue(event.target.value)} disabled={readOnly} className="input mt-0 px-2 py-1.5" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /><span className="text-[11px] text-[#687386]">%</span></div>
+            <div className="flex items-center gap-1"><NumberInput aria-label="VAT percentage" min="0" max="100" step="any" value={vatValue} onChange={(value) => setVatValue(value)} disabled={readOnly} className="input mt-0 px-2 py-1.5" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /><span className="text-[11px] text-[#687386]">%</span></div>
             <output aria-label="VAT total" className="min-w-20 text-right text-[12px] font-semibold text-[#344054]">{peso.format(vatTotal)}</output>
           </div>
         </div>
@@ -15267,16 +15269,15 @@ function GeneralManagerCostingReview({
                     </td>
                     <td className="px-4 py-2">
                       <div className="flex items-center gap-1">
-                        <input
+                        <NumberInput
                           aria-label={`${row.label} rate`}
-                          type="number"
                           min="0"
                           step="any"
                           value={rates[row.key]}
-                          onChange={(event) =>
+                          onChange={(value) =>
                             setRates((current) => ({
                               ...current,
-                              [row.key]: event.target.value,
+                              [row.key]: value,
                             }))
                           }
                           className="input mt-0 min-w-0 px-2 py-1.5 text-right tabular-nums"
@@ -15303,16 +15304,15 @@ function GeneralManagerCostingReview({
                     </td>
                     <td className="px-4 py-2">
                       <div className="flex items-center gap-1">
-                        <input
+                        <NumberInput
                           aria-label={`${row.label} rate`}
-                          type="number"
                           min="0"
                           step="any"
                           value={rates[row.key]}
-                          onChange={(event) =>
+                          onChange={(value) =>
                             setRates((current) => ({
                               ...current,
-                              [row.key]: event.target.value,
+                              [row.key]: value,
                             }))
                           }
                           className="input mt-0 min-w-0 px-2 py-1.5 text-right tabular-nums"
@@ -19954,6 +19954,51 @@ function CommissionSummaryView({
   );
 }
 
+const printCostingDefaultsForm = (value: unknown): Record<string, string> => {
+  const defaults = normalizePrintCostingDefaults(value);
+  return {
+    hp_latex_rate: String(defaults.hp_latex_rate),
+    waste_allowance: String(defaults.waste_allowance),
+    formula_version: defaults.formula_version,
+    pp_white_roll_width_m: String(defaults.materials["PP White"].roll_width_m),
+    pp_white_roll_length_m: String(defaults.materials["PP White"].roll_length_m),
+    pp_white_roll_cost: String(defaults.materials["PP White"].roll_cost),
+    vinyl_glossy_roll_width_m: String(defaults.materials["Vinyl Glossy"].roll_width_m),
+    vinyl_glossy_roll_length_m: String(defaults.materials["Vinyl Glossy"].roll_length_m),
+    vinyl_glossy_roll_cost: String(defaults.materials["Vinyl Glossy"].roll_cost),
+    vinyl_matte_roll_width_m: String(defaults.materials["Vinyl Matte"].roll_width_m),
+    vinyl_matte_roll_length_m: String(defaults.materials["Vinyl Matte"].roll_length_m),
+    vinyl_matte_roll_cost: String(defaults.materials["Vinyl Matte"].roll_cost),
+  };
+};
+
+const printCostingDefaultsFromForm = (values: Record<string, string>): PrintCostingDefaults =>
+  normalizePrintCostingDefaults({
+    hp_latex_rate: values.hp_latex_rate,
+    waste_allowance: values.waste_allowance,
+    formula_version: values.formula_version,
+    materials: {
+      "PP White": {
+        display_name: DEFAULT_PRINT_COSTING_DEFAULTS.materials["PP White"].display_name,
+        roll_width_m: values.pp_white_roll_width_m,
+        roll_length_m: values.pp_white_roll_length_m,
+        roll_cost: values.pp_white_roll_cost,
+      },
+      "Vinyl Glossy": {
+        display_name: DEFAULT_PRINT_COSTING_DEFAULTS.materials["Vinyl Glossy"].display_name,
+        roll_width_m: values.vinyl_glossy_roll_width_m,
+        roll_length_m: values.vinyl_glossy_roll_length_m,
+        roll_cost: values.vinyl_glossy_roll_cost,
+      },
+      "Vinyl Matte": {
+        display_name: DEFAULT_PRINT_COSTING_DEFAULTS.materials["Vinyl Matte"].display_name,
+        roll_width_m: values.vinyl_matte_roll_width_m,
+        roll_length_m: values.vinyl_matte_roll_length_m,
+        roll_cost: values.vinyl_matte_roll_cost,
+      },
+    },
+  });
+
 function SettingsView({
   store,
   orgId,
@@ -19973,12 +20018,16 @@ function SettingsView({
   const [pricingDefaultsOpen, setPricingDefaultsOpen] = useState(false);
   const [pricingDefaults, setPricingDefaults] = useState<Record<string, string>>({});
   const [savingPricingDefaults, setSavingPricingDefaults] = useState(false);
+  const [printCostingDefaultsOpen, setPrintCostingDefaultsOpen] = useState(false);
+  const [printCostingDefaults, setPrintCostingDefaults] = useState<Record<string, string>>({});
+  const [savingPrintCostingDefaults, setSavingPrintCostingDefaults] = useState(false);
   const [customMarkupOpen, setCustomMarkupOpen] = useState(false);
   const [customMarkupValues, setCustomMarkupValues] = useState<Record<string, string>>({ markup_key: "__custom__", label: "", value: "" });
   const [settingsSensitiveValuesHidden, setSettingsSensitiveValuesHidden] = useState(false);
   const [supplierCountryDraft, setSupplierCountryDraft] = useState("");
   const [savingSupplierCountries, setSavingSupplierCountries] = useState(false);
   const setting = store.business_settings[0];
+  const configuredPrintCostingDefaults = normalizePrintCostingDefaults(setting?.print_costing_defaults);
   const configuredSupplierCountries = supplierCountryOptions(setting?.supplier_countries);
   const pricingDefaultEntries = pricingMarkupDefaults(setting?.pricing_markup_defaults, setting);
   const inactiveStandardMarkupDefinitions = pricingMarkupDefaultDefinitions.filter(
@@ -20181,6 +20230,44 @@ function SettingsView({
     }));
     if (await persistPricingDefaults(defaults)) setPricingDefaultsOpen(false);
   };
+  const openPrintCostingDefaults = () => {
+    setPrintCostingDefaults(printCostingDefaultsForm(setting?.print_costing_defaults));
+    setPrintCostingDefaultsOpen(true);
+  };
+  const savePrintCostingDefaults = async () => {
+    const numericFields = [
+      "hp_latex_rate",
+      "pp_white_roll_width_m",
+      "pp_white_roll_length_m",
+      "pp_white_roll_cost",
+      "vinyl_glossy_roll_width_m",
+      "vinyl_glossy_roll_length_m",
+      "vinyl_glossy_roll_cost",
+      "vinyl_matte_roll_width_m",
+      "vinyl_matte_roll_length_m",
+      "vinyl_matte_roll_cost",
+    ];
+    const invalidNumber = numericFields.find((key) => {
+      const value = Number(printCostingDefaults[key]);
+      return !Number.isFinite(value) || value <= 0;
+    });
+    const waste = Number(printCostingDefaults.waste_allowance);
+    if (invalidNumber) return notice("Enter positive values for the Print Costing defaults.");
+    if (!Number.isFinite(waste) || waste < 0 || waste > 1) return notice("Waste allowance must be between 0 and 1. Enter 5% as 0.05.");
+    if (!printCostingDefaults.formula_version?.trim()) return notice("Enter a formula version.");
+    setSavingPrintCostingDefaults(true);
+    const { error } = await createClient()
+      .from("business_settings")
+      .upsert(
+        { organization_id: orgId, print_costing_defaults: printCostingDefaultsFromForm(printCostingDefaults) },
+        { onConflict: "organization_id" },
+      );
+    setSavingPrintCostingDefaults(false);
+    if (error) return notice(error.message);
+    setPrintCostingDefaultsOpen(false);
+    notice("Print Costing defaults saved. New costings will use these values.");
+    await reload();
+  };
   const addCustomMarkup = async () => {
     const selectedKey = text(customMarkupValues.markup_key, "__custom__").split("|")[0];
     const selectedDefinition = pricingMarkupDefinition(selectedKey as PricingMarkupKey);
@@ -20226,6 +20313,7 @@ function SettingsView({
         setBankDetailsOpen(false);
         setPricingDefaultsOpen(false);
         setCustomMarkupOpen(false);
+        setPrintCostingDefaultsOpen(false);
       }
       return next;
     });
@@ -20248,7 +20336,16 @@ function SettingsView({
           {pricingDefaultEntries.map((definition) => <tr key={definition.key} className={settingsSensitiveValuesHidden ? "bg-[#fafbfc] text-[#8b92a1]" : undefined}><td className="px-4 py-3 font-medium">{settingsSensitiveValuesHidden ? "Hidden markup" : <>{definition.label}{definition.custom && <span className="ml-2 rounded-full bg-[#f1f4f8] px-2 py-0.5 text-[10px] font-medium text-[#687386]">Custom</span>}</>}</td><td className="px-4 py-3 text-right">{settingsSensitiveValuesHidden ? "Hidden" : `${n(definition.value)}%`}</td><td className="px-2 py-2 text-center">{definition.key === "vat" ? <span className="text-[11px] text-[#8b92a1]">Separate</span> : <ActionIcon label={`Remove ${definition.label}`} tone="red" disabled={settingsSensitiveValuesHidden || savingPricingDefaults} confirmationDescription={`Remove ${definition.label} from new quotation defaults? Existing quotations keep their saved values.`} onClick={() => void removePricingMarkupDefault(definition.key)}><Trash2 size={14} /></ActionIcon>}</td></tr>)}
         </Table>
       </Panel>
+      <Panel title="Print Costing defaults" detail="These Excel-compatible values are copied into new Print Costings. Existing costings keep the saved values used when they were created." action={memberRole(role) ? <Button secondary disabled={settingsSensitiveValuesHidden} onClick={openPrintCostingDefaults}><Settings size={14} /> Edit Print Costing defaults</Button> : undefined}>
+        <Table labels={["Setting", "Default value"]}>
+          <tr><td className="px-4 py-3 font-medium">HP Latex rate</td><td className="px-4 py-3 text-right">{settingsSensitiveValuesHidden ? "Hidden" : `${peso.format(configuredPrintCostingDefaults.hp_latex_rate)} / sq. m.`}</td></tr>
+          <tr><td className="px-4 py-3 font-medium">Waste allowance</td><td className="px-4 py-3 text-right">{settingsSensitiveValuesHidden ? "Hidden" : `${(configuredPrintCostingDefaults.waste_allowance * 100).toFixed(2)}%`}</td></tr>
+          {(["PP White", "Vinyl Glossy", "Vinyl Matte"] as const).map((category) => { const material = configuredPrintCostingDefaults.materials[category]; return <tr key={category}><td className="px-4 py-3 font-medium">{material.display_name}</td><td className="px-4 py-3 text-right">{settingsSensitiveValuesHidden ? "Hidden" : `${material.roll_width_m.toFixed(2)}m × ${material.roll_length_m.toFixed(2)}m · ${peso.format(material.roll_cost)}`}</td></tr>; })}
+          <tr><td className="px-4 py-3 font-medium">Formula version</td><td className="px-4 py-3 text-right">{settingsSensitiveValuesHidden ? "Hidden" : configuredPrintCostingDefaults.formula_version}</td></tr>
+        </Table>
+      </Panel>
       {pricingDefaultsOpen && <Dialog title="Pricing defaults - Internal" fields={pricingDefaultEntries.map((definition) => ({ key: `${definition.key}_value`, label: definition.label, type: "number" as const, required: true }))} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => { if (!savingPricingDefaults) setPricingDefaultsOpen(false); }} saving={savingPricingDefaults} saveLabel="Save pricing defaults" className="max-w-lg" compact />}
+      {printCostingDefaultsOpen && <Dialog title="Print Costing defaults" fields={[{ key: "hp_latex_rate", label: "HP Latex rate / sq. m.", type: "number" as const, required: true }, { key: "waste_allowance", label: "Waste allowance", type: "number" as const, required: true, hint: "Enter 5% as 0.05." }, { key: "formula_version", label: "Formula version", readOnly: true, required: true }, { key: "pp_white_roll_width_m", label: "PP White roll width (m)", type: "number" as const, required: true }, { key: "pp_white_roll_length_m", label: "PP White roll length (m)", type: "number" as const, required: true }, { key: "pp_white_roll_cost", label: "PP White roll cost", type: "number" as const, required: true }, { key: "vinyl_glossy_roll_width_m", label: "Vinyl Glossy roll width (m)", type: "number" as const, required: true }, { key: "vinyl_glossy_roll_length_m", label: "Vinyl Glossy roll length (m)", type: "number" as const, required: true }, { key: "vinyl_glossy_roll_cost", label: "Vinyl Glossy roll cost", type: "number" as const, required: true }, { key: "vinyl_matte_roll_width_m", label: "Vinyl Matte roll width (m)", type: "number" as const, required: true }, { key: "vinyl_matte_roll_length_m", label: "Vinyl Matte roll length (m)", type: "number" as const, required: true }, { key: "vinyl_matte_roll_cost", label: "Vinyl Matte roll cost", type: "number" as const, required: true }]} values={printCostingDefaults} setValues={setPrintCostingDefaults} save={() => void savePrintCostingDefaults()} close={() => { if (!savingPrintCostingDefaults) setPrintCostingDefaultsOpen(false); }} saving={savingPrintCostingDefaults} saveLabel="Save Print Costing defaults" className="max-w-2xl" compact />}
       {customMarkupOpen && <Dialog title="Add markup" fields={[{ key: "markup_key", label: "Markup category", type: "select" as const, options: addMarkupOptions, required: true }, { key: "label", label: "Markup name", required: true, readOnly: text(customMarkupValues.markup_key, "").split("|")[0] !== "__custom__" }, { key: "value", label: "Percentage", type: "number" as const, required: true }]} values={customMarkupValues} setValues={setCustomMarkupValues} onFieldChange={(key, value, current) => { if (key !== "markup_key") return { ...current, [key]: value }; const selectedKey = value.split("|")[0]; const definition = pricingMarkupDefinition(selectedKey as PricingMarkupKey); return { ...current, markup_key: value, label: selectedKey === "__custom__" ? "" : definition?.label ?? "", value: selectedKey === "__custom__" ? "" : definition?.fallback ?? "0" }; }} save={() => void addCustomMarkup()} close={() => { if (!savingPricingDefaults) setCustomMarkupOpen(false); }} saving={savingPricingDefaults} saveLabel="Add markup" className="max-w-lg" compact><p className="mt-3 rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3 text-[11px] leading-5 text-[#687386]">Choose an inactive standard category or create a custom markup. It will be included in computed pricing for new quotations. Existing quotations keep their saved markup rows.</p></Dialog>}
       {canManageSupplierCountries && (
         <Panel
@@ -20557,6 +20654,27 @@ export function HuswellWorkspace({
   const canEditOwnProfile = ["owner", "admin", "project_manager", "sales_pricing_officer"].includes(
     role,
   );
+  useEffect(() => {
+    const selectZeroNumberInput = (event: FocusEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement) || target.type !== "number" || target.disabled || target.readOnly) return;
+      const value = target.value.trim();
+      if (value !== "" && Number.isFinite(Number(value)) && Number(value) === 0) target.select();
+    };
+    const restoreEmptyNumberInput = (event: FocusEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement) || target.type !== "number" || target.disabled || target.readOnly || target.value !== "") return;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      setter?.call(target, "0");
+      target.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    document.addEventListener("focusin", selectZeroNumberInput);
+    document.addEventListener("focusout", restoreEmptyNumberInput);
+    return () => {
+      document.removeEventListener("focusin", selectZeroNumberInput);
+      document.removeEventListener("focusout", restoreEmptyNumberInput);
+    };
+  }, []);
   const selectLeadWorkspaceMode = useCallback((mode: LeadWorkspaceMode) => {
     setLeadMode(mode);
     setActive(mode === "quotation" ? "Price Quotations" : "Leads");
@@ -20726,6 +20844,7 @@ export function HuswellWorkspace({
       "Supplier's List",
       "Projects",
       "Price Quotations",
+      "PDF Costing",
       "Approvals",
       "Finance",
       "Commissions",
@@ -20738,6 +20857,7 @@ export function HuswellWorkspace({
       "Projects",
       "Price Quotations",
       "Quotation Costing Overview",
+      "PDF Costing",
       "Approvals",
       "Finance",
       "Commissions",
@@ -20752,6 +20872,7 @@ export function HuswellWorkspace({
       "Projects",
       "Price Quotations",
       "Quotation Costing Overview",
+      "PDF Costing",
       "Approvals",
       "Finance",
       "Commissions",
@@ -20775,6 +20896,7 @@ export function HuswellWorkspace({
       "Price Quotations",
       "Price Quotation Review",
       "Quotation Costing Overview",
+      "PDF Costing",
       "Commissions",
       "Announcements",
       "Policy",
@@ -20826,6 +20948,9 @@ export function HuswellWorkspace({
       + store.lead_unendorsement_requests.filter((request) => text(request.status) === "pending").length
       + store.approval_requests.filter((request) => text(request.status) === "pending" && text(request.resource_type) !== "quotation").length
     : 0;
+  const pendingPdfCostingCount = isManagementRole
+    ? store.costing_requests.filter((request) => text(request.status) === "pending").length
+    : 0;
   const pendingProductionApprovalCount = productionApprovalOnly
     ? store.project_schedules.filter((schedule) => text(schedule.status) === "pending").length
       + store.project_schedule_revision_requests.filter((request) => text(request.status) === "pending").length
@@ -20872,6 +20997,7 @@ export function HuswellWorkspace({
       items: [
         { view: "Price Quotations", icon: FileText },
         { view: "Quotation Costing Overview", icon: ReceiptText },
+        { view: "PDF Costing", icon: FileSpreadsheet, badge: pendingPdfCostingCount },
         { view: "Projects", icon: ClipboardCheck },
       ],
     },
@@ -20899,6 +21025,7 @@ export function HuswellWorkspace({
         { view: "Supplier's List", icon: UsersRound },
         { view: "Price Quotations", icon: FileText },
         { view: "Quotation Costing Overview", icon: ReceiptText },
+        { view: "PDF Costing", icon: FileSpreadsheet },
         { view: "Price Quotation Review", icon: ClipboardCheck, badge: pendingPricingReviewCount },
       ],
     },
@@ -20987,6 +21114,12 @@ export function HuswellWorkspace({
       detail: isManagementRole
         ? "Review all costed Price Quotations and their current statuses."
         : "Review Price Quotations that you have costed and their current statuses.",
+    },
+    "PDF Costing": {
+      title: "Print Costing",
+      detail: isManagementRole
+        ? "Review submitted workbook-compatible costings, approve them, or return them for revision."
+        : "Select a Lead, upload a client PDF or Word file, verify the extracted details, and submit the costing for General Manager approval.",
     },
     "Costing Breakdown": {
       title: "Costing Breakdown",
@@ -21115,17 +21248,17 @@ export function HuswellWorkspace({
     ) : loading ? (
       <Panel
         title={
-          active === "Leads" ? leads.title : active === "Projects" ? projects.title : active === "Price Quotation Review" ? "Price Quotation Review" : active === "Approvals" || active === "Submissions" ? (productionApprovalOnly ? "Production Approval Center" : "Management Approval Center") : active === "Payment Monitoring" ? "Payment Monitoring" : active === "Payment Reviews" ? "Payment Reviews" : "Loading workspace"
+          active === "Leads" ? leads.title : active === "Projects" ? projects.title : active === "Price Quotation Review" ? "Price Quotation Review" : active === "PDF Costing" ? "Print Costing" : active === "Approvals" || active === "Submissions" ? (productionApprovalOnly ? "Production Approval Center" : "Management Approval Center") : active === "Payment Monitoring" ? "Payment Monitoring" : active === "Payment Reviews" ? "Payment Reviews" : "Loading workspace"
         }
         detail={
-          active === "Leads" || active === "Projects" || active === "Price Quotation Review" || active === "Approvals" || active === "Submissions" || active === "Payment Monitoring" || active === "Payment Reviews"
-            ? (active === "Projects" ? projects.detail : active === "Price Quotation Review" ? "Loading Price Quotation review queue." : active === "Approvals" || active === "Submissions" ? (productionApprovalOnly ? "Loading production approval queue." : "Loading management approval queue.") : active === "Payment Monitoring" ? "Loading payment monitoring." : active === "Payment Reviews" ? "Loading assigned payment reviews." : leads.detail)
+          active === "Leads" || active === "Projects" || active === "Price Quotation Review" || active === "PDF Costing" || active === "Approvals" || active === "Submissions" || active === "Payment Monitoring" || active === "Payment Reviews"
+            ? (active === "Projects" ? projects.detail : active === "Price Quotation Review" ? "Loading Price Quotation review queue." : active === "PDF Costing" ? "Loading Print Costing requests." : active === "Approvals" || active === "Submissions" ? (productionApprovalOnly ? "Loading production approval queue." : "Loading management approval queue.") : active === "Payment Monitoring" ? "Loading payment monitoring." : active === "Payment Reviews" ? "Loading assigned payment reviews." : leads.detail)
             : "Loading business data."
         }
       >
         <div
           className={
-            active === "Leads" || active === "Projects" || active === "Price Quotation Review" || active === "Approvals" || active === "Submissions" || active === "Payment Monitoring" || active === "Payment Reviews" ? "min-h-[280px]" : undefined
+            active === "Leads" || active === "Projects" || active === "Price Quotation Review" || active === "PDF Costing" || active === "Approvals" || active === "Submissions" || active === "Payment Monitoring" || active === "Payment Reviews" ? "min-h-[280px]" : undefined
           }
         >
           <Empty>Loading records…</Empty>
@@ -21147,6 +21280,15 @@ export function HuswellWorkspace({
         reload={reload}
         notice={setMessage}
         role={role}
+      />
+    ) : active === "PDF Costing" ? (
+      <CostingRequestWorkspace
+        store={store}
+        orgId={organizationId}
+        role={role}
+        currentUserId={currentUserId}
+        reload={reload}
+        notice={setMessage}
       />
     ) : active === "Price Quotation Review" ? (
       <PriceQuotationSubmissions
@@ -21389,6 +21531,8 @@ export function HuswellWorkspace({
                               ? "Quotation Review Queue"
                             : view === "Quotation Costing Overview"
                               ? "Costing"
+                            : view === "PDF Costing"
+                              ? "Print Costing"
                             : isManagementRole && view === "Price Quotations"
                               ? "Price Quotations"
                               : view === "Approvals"

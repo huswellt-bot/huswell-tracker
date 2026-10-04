@@ -22,6 +22,7 @@ import { useRouter } from "next/navigation";
 import { AccountProfileDialog } from "@/components/account-profile-dialog";
 import { FixedIconTooltip } from "@/components/fixed-icon-tooltip";
 import { ThemeToggle } from "@/components/theme-provider";
+import { FileUploadControl } from "@/components/ui/file-upload-control";
 import { createClient } from "@/lib/supabase/client";
 import { quotationProjectTypes } from "@/lib/quotation-project-types";
 import { workspaceAccountLabel, workspaceRoleLabel } from "@/lib/role-labels";
@@ -637,19 +638,15 @@ export function SuperAdminConsole({
               {["project_manager", "sales_pricing_officer", "admin"].includes(editValues.role) && (
                 <label className="block text-[14px] font-semibold">
                   Signature image
-                  <input
-                    type="file"
+                  <FileUploadControl
                     accept="image/png,image/jpeg,image/webp"
-                    onChange={(event) =>
-                      setEditSignatureFile(event.target.files?.[0] ?? null)
-                    }
-                    className="mt-1.5 block w-full text-[13px] font-normal text-[#475467] file:mr-3 file:rounded-md file:border-0 file:bg-[#f0f3f7] file:px-3 file:py-2 file:text-[13px] file:font-semibold file:text-[#344054] hover:file:bg-[#e6ebf1]"
+                    ariaLabel="Choose replacement signature image"
+                    className="mt-1.5"
+                    emptyLabel="Choose signature image"
+                    files={editSignatureFile ? [editSignatureFile] : []}
+                    onFilesSelected={(files) => setEditSignatureFile(files[0] ?? null)}
                   />
-                  {editSignatureFile ? (
-                    <span className="mt-2 block truncate rounded-md border border-[#cce8d9] bg-[#f0fbf5] px-3 py-2 text-[12px] font-normal text-[#127543]" title={editSignatureFile.name}>
-                      New image selected: {editSignatureFile.name}
-                    </span>
-                  ) : editingUser.signature_url ? (
+                  {!editSignatureFile && editingUser.signature_url ? (
                     <span className="mt-2 flex items-center gap-3 rounded-md border border-[#dfe5ed] bg-[#f8faff] p-2 font-normal">
                       {/* Supabase Storage signature URLs are dynamic. */}
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -846,19 +843,14 @@ export function SuperAdminConsole({
               {["project_manager", "sales_pricing_officer", "admin"].includes(values.role) && (
                 <label className="block text-[14px] font-semibold">
                   Signature image
-                  <input
-                    type="file"
+                  <FileUploadControl
                     accept="image/png,image/jpeg,image/webp"
-                    onChange={(event) =>
-                      setSignatureFile(event.target.files?.[0] ?? null)
-                    }
-                    className="mt-1.5 block w-full text-[13px] font-normal text-[#475467] file:mr-3 file:rounded-md file:border-0 file:bg-[#f0f3f7] file:px-3 file:py-2 file:text-[13px] file:font-semibold file:text-[#344054] hover:file:bg-[#e6ebf1]"
+                    ariaLabel="Choose signature image"
+                    className="mt-1.5"
+                    emptyLabel="Choose signature image"
+                    files={signatureFile ? [signatureFile] : []}
+                    onFilesSelected={(files) => setSignatureFile(files[0] ?? null)}
                   />
-                  {signatureFile && (
-                    <span className="mt-2 block truncate rounded-md border border-[#cce8d9] bg-[#f0fbf5] px-3 py-2 text-[12px] font-normal text-[#127543]" title={signatureFile.name}>
-                      Image selected: {signatureFile.name}
-                    </span>
-                  )}
                   <span className="mt-1 block text-[12px] font-normal text-[#7d8797]">
                     Optional. PNG, JPG, or WebP, up to 2 MB. It will be used automatically {values.role === "admin" ? "when this General Manager approves a PDF." : "on this officer&apos;s PDFs."}
                   </span>
