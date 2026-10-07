@@ -4075,6 +4075,11 @@ function Dialog({
   const [visiblePasswords, setVisiblePasswords] = useState<
     Record<string, boolean>
   >({});
+  const normalizeValue = (key: string) => {
+    const current = values[key] ?? "";
+    const normalized = titleCaseEntry(current, key);
+    if (normalized !== current) setValues({ ...values, [key]: normalized });
+  };
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-[#151922]/30 p-4">
       <form
@@ -4131,9 +4136,10 @@ function Dialog({
                     onChange={(e) =>
                       setValues({
                         ...values,
-                        [f.key]: titleCaseEntry(e.target.value, f.key),
+                        [f.key]: e.target.value,
                       })
                     }
+                    onBlur={() => normalizeValue(f.key)}
                     className="input mt-0 min-w-0"
                     style={{ flex: "1 1 0%", width: "auto" }}
                     placeholder="e.g. 2 X 5 X 6"
@@ -4254,8 +4260,17 @@ function Dialog({
                           onChange={(e) => {
                             const nextTerms = [...terms];
                             while (nextTerms.length < 7) nextTerms.push("");
+                            nextTerms[index] = e.target.value;
+                            setValues({
+                              ...values,
+                              [f.key]: nextTerms.join("\n"),
+                            });
+                          }}
+                          onBlur={() => {
+                            const nextTerms = [...terms];
+                            while (nextTerms.length < 7) nextTerms.push("");
                             nextTerms[index] = titleCaseEntry(
-                              e.target.value,
+                              nextTerms[index] ?? "",
                               f.key,
                             );
                             setValues({
@@ -4277,9 +4292,10 @@ function Dialog({
                   onChange={(e) =>
                     setValues({
                       ...values,
-                      [f.key]: titleCaseEntry(e.target.value, f.key),
+                      [f.key]: e.target.value,
                     })
                   }
+                  onBlur={() => normalizeValue(f.key)}
                   className="input min-h-20"
                   placeholder={fieldPlaceholder(f)}
                 />
@@ -4346,12 +4362,12 @@ function Dialog({
                   onChange={(e) =>
                     setValues({
                       ...values,
-                      [f.key]:
-                        (!f.type || f.type === "text")
-                          ? titleCaseEntry(e.target.value, f.key)
-                          : e.target.value,
+                      [f.key]: e.target.value,
                     })
                   }
+                  onBlur={() => {
+                    if (!f.type || f.type === "text") normalizeValue(f.key);
+                  }}
                   className={`input ${compact ? "min-h-7 px-2 py-1 text-[12px]" : ""} ${f.readOnly || f.disabled ? "bg-[#f6f8fb] text-[#687386]" : ""} ${f.disabled ? "disabled:cursor-not-allowed disabled:opacity-60" : ""}`}
                   placeholder={fieldPlaceholder(f)}
                 />
@@ -4392,6 +4408,60 @@ function Dialog({
         }}
       />
     </div>
+  );
+}
+
+function RecordDialog({
+  title,
+  fields,
+  initialValues,
+  save,
+  close,
+  saving,
+  children,
+  saveLabel,
+  className,
+  compact,
+  dynamicKeys = [],
+  onDynamicValuesChange,
+}: {
+  title: string;
+  fields: Field[];
+  initialValues: Record<string, string>;
+  save: (values: Record<string, string>) => void;
+  close: () => void;
+  saving: boolean;
+  children?: ReactNode;
+  saveLabel?: string;
+  className?: string;
+  compact?: boolean;
+  dynamicKeys?: string[];
+  onDynamicValuesChange?: (values: Record<string, string>) => void;
+}) {
+  const [draftValues, setDraftValues] = useState(initialValues);
+  const updateDraftValues = (next: Record<string, string>) => {
+    const dynamicValueChanged = dynamicKeys.some(
+      (key) => draftValues[key] !== next[key],
+    );
+    setDraftValues(next);
+    if (dynamicValueChanged) onDynamicValuesChange?.(next);
+  };
+
+  return (
+    <Dialog
+      title={title}
+      fields={fields}
+      values={draftValues}
+      setValues={updateDraftValues}
+      save={() => save(draftValues)}
+      close={close}
+      saving={saving}
+      saveLabel={saveLabel}
+      className={className}
+      compact={compact}
+    >
+      {children}
+    </Dialog>
   );
 }
 
@@ -5136,11 +5206,11 @@ function Records({
               : "",
       ]),
     );
-  const save = async () => {
+  const save = async (nextValues = values) => {
     setSaving(true);
     const client = createClient();
-    const requestNote = text(values.request_note, "").trim();
-    const payload: Record<string, unknown> = { ...values };
+    const requestNote = text(nextValues.request_note, "").trim();
+    const payload: Record<string, unknown> = { ...nextValues };
     delete payload.request_note;
     module.fields
       .filter((f) => f.type === "number")
@@ -6365,12 +6435,13 @@ function Records({
         )}
       </Panel>
       {open && (
-        <Dialog
+        <RecordDialog
           title={editing ? `Edit ${module.title}` : module.add}
           fields={dialogFields}
-          values={values}
-          setValues={setValues}
-          save={() => void save()}
+          initialValues={values}
+          dynamicKeys={module.table === "leads" ? ["evaluation_number"] : []}
+          onDynamicValuesChange={(nextValues) => setValues(nextValues)}
+          save={(nextValues) => void save(nextValues)}
           close={() => {
             setOpen(false);
             setEditing(null);
