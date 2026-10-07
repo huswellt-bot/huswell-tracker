@@ -3,9 +3,12 @@
 
 import {
   Dispatch,
+  type InputHTMLAttributes,
   ReactNode,
   SetStateAction,
+  type TextareaHTMLAttributes,
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -4040,6 +4043,66 @@ function Table({
   );
 }
 
+type DraftTextInputProps = Omit<
+  InputHTMLAttributes<HTMLInputElement>,
+  "value" | "onChange" | "onBlur"
+> & {
+  value: string;
+  onCommit: (value: string) => void;
+};
+
+function DraftTextInput({ value, onCommit, ...props }: DraftTextInputProps) {
+  const draftRef = useRef(value);
+  const [draftValue, setDraftValue] = useState(value);
+  useEffect(() => {
+    if (value === draftRef.current) return;
+    draftRef.current = value;
+    setDraftValue(value);
+  }, [value]);
+  return (
+    <input
+      {...props}
+      value={draftValue}
+      onChange={(event) => {
+        const nextValue = event.currentTarget.value;
+        draftRef.current = nextValue;
+        setDraftValue(nextValue);
+      }}
+      onBlur={() => onCommit(draftRef.current)}
+    />
+  );
+}
+
+type DraftTextAreaProps = Omit<
+  TextareaHTMLAttributes<HTMLTextAreaElement>,
+  "value" | "onChange" | "onBlur"
+> & {
+  value: string;
+  onCommit: (value: string) => void;
+};
+
+function DraftTextArea({ value, onCommit, ...props }: DraftTextAreaProps) {
+  const draftRef = useRef(value);
+  const [draftValue, setDraftValue] = useState(value);
+  useEffect(() => {
+    if (value === draftRef.current) return;
+    draftRef.current = value;
+    setDraftValue(value);
+  }, [value]);
+  return (
+    <textarea
+      {...props}
+      value={draftValue}
+      onChange={(event) => {
+        const nextValue = event.currentTarget.value;
+        draftRef.current = nextValue;
+        setDraftValue(nextValue);
+      }}
+      onBlur={() => onCommit(draftRef.current)}
+    />
+  );
+}
+
 function Dialog({
   title,
   fields,
@@ -4075,11 +4138,6 @@ function Dialog({
   const [visiblePasswords, setVisiblePasswords] = useState<
     Record<string, boolean>
   >({});
-  const normalizeValue = (key: string) => {
-    const current = values[key] ?? "";
-    const normalized = titleCaseEntry(current, key);
-    if (normalized !== current) setValues({ ...values, [key]: normalized });
-  };
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-[#151922]/30 p-4">
       <form
@@ -4131,15 +4189,14 @@ function Dialog({
                 </div>
               ) : f.type === "size" ? (
                 <div className="mt-1 flex gap-2">
-                  <input
+                  <DraftTextInput
                     value={values[f.key] ?? ""}
-                    onChange={(e) =>
+                    onCommit={(value) =>
                       setValues({
                         ...values,
-                        [f.key]: e.target.value,
+                        [f.key]: titleCaseEntry(value, f.key),
                       })
                     }
-                    onBlur={() => normalizeValue(f.key)}
                     className="input mt-0 min-w-0"
                     style={{ flex: "1 1 0%", width: "auto" }}
                     placeholder="e.g. 2 X 5 X 6"
@@ -4254,25 +4311,13 @@ function Dialog({
                         <span className="grid size-7 place-items-center rounded-full bg-[#eef4ff] text-[11px] font-semibold text-[#2168d6]">
                           {index + 1}
                         </span>
-                        <input
+                        <DraftTextInput
                           required={f.required}
                           value={terms[index] ?? ""}
-                          onChange={(e) => {
+                          onCommit={(value) => {
                             const nextTerms = [...terms];
                             while (nextTerms.length < 7) nextTerms.push("");
-                            nextTerms[index] = e.target.value;
-                            setValues({
-                              ...values,
-                              [f.key]: nextTerms.join("\n"),
-                            });
-                          }}
-                          onBlur={() => {
-                            const nextTerms = [...terms];
-                            while (nextTerms.length < 7) nextTerms.push("");
-                            nextTerms[index] = titleCaseEntry(
-                              nextTerms[index] ?? "",
-                              f.key,
-                            );
+                            nextTerms[index] = titleCaseEntry(value, f.key);
                             setValues({
                               ...values,
                               [f.key]: nextTerms.join("\n"),
@@ -4286,29 +4331,26 @@ function Dialog({
                   })}
                 </div>
               ) : f.type === "textarea" ? (
-                <textarea
+                <DraftTextArea
                   required={f.required}
                   value={values[f.key] ?? ""}
-                  onChange={(e) =>
+                  onCommit={(value) =>
                     setValues({
                       ...values,
-                      [f.key]: e.target.value,
+                      [f.key]: titleCaseEntry(value, f.key),
                     })
                   }
-                  onBlur={() => normalizeValue(f.key)}
                   className="input min-h-20"
                   placeholder={fieldPlaceholder(f)}
                 />
               ) : f.type === "password" ? (
                 <div className="relative mt-1">
-                  <input
+                  <DraftTextInput
                     required={f.required}
                     type={visiblePasswords[f.key] ? "text" : "password"}
                     autoComplete="new-password"
                     value={values[f.key] ?? ""}
-                    onChange={(e) =>
-                      setValues({ ...values, [f.key]: e.target.value })
-                    }
+                    onCommit={(value) => setValues({ ...values, [f.key]: value })}
                     className="input mt-0 pr-10"
                     placeholder={fieldPlaceholder(f)}
                   />
@@ -4346,7 +4388,7 @@ function Dialog({
                   placeholder={fieldPlaceholder(f)}
                 />
               ) : (
-                <input
+                f.type === "date" ? <input
                   required={f.required}
                   disabled={f.disabled}
                   readOnly={f.readOnly}
@@ -4365,9 +4407,25 @@ function Dialog({
                       [f.key]: e.target.value,
                     })
                   }
-                  onBlur={() => {
-                    if (!f.type || f.type === "text") normalizeValue(f.key);
+                  className={`input ${compact ? "min-h-7 px-2 py-1 text-[12px]" : ""} ${f.readOnly || f.disabled ? "bg-[#f6f8fb] text-[#687386]" : ""} ${f.disabled ? "disabled:cursor-not-allowed disabled:opacity-60" : ""}`}
+                  placeholder={fieldPlaceholder(f)}
+                /> : <DraftTextInput
+                  required={f.required}
+                  disabled={f.disabled}
+                  readOnly={f.readOnly}
+                  aria-readonly={f.readOnly || undefined}
+                  type={f.type ?? "text"}
+                  value={values[f.key] ?? ""}
+                  onClick={(e) => {
+                    if (f.type === "date")
+                      openNativeDatePicker(e.currentTarget);
                   }}
+                  onCommit={(value) =>
+                    setValues({
+                      ...values,
+                      [f.key]: !f.type || f.type === "text" ? titleCaseEntry(value, f.key) : value,
+                    })
+                  }
                   className={`input ${compact ? "min-h-7 px-2 py-1 text-[12px]" : ""} ${f.readOnly || f.disabled ? "bg-[#f6f8fb] text-[#687386]" : ""} ${f.disabled ? "disabled:cursor-not-allowed disabled:opacity-60" : ""}`}
                   placeholder={fieldPlaceholder(f)}
                 />
@@ -4955,12 +5013,23 @@ function Records({
     setEndorsementImagePreview(previewUrl);
     return () => URL.revokeObjectURL(previewUrl);
   }, [endorsementImageFile]);
+  const deferredQuery = useDeferredValue(query);
+  const normalizedQuery = deferredQuery.trim().toLowerCase();
+  const searchableRows = useMemo(
+    () =>
+      store[module.table].map((row) => ({
+        row,
+        searchText: JSON.stringify(row).toLowerCase(),
+      })),
+    [module.table, store],
+  );
   const rows = useMemo(
     () =>
-      store[module.table]
-        .filter((r) =>
-          JSON.stringify(r).toLowerCase().includes(query.toLowerCase()),
+      searchableRows
+        .filter(({ row, searchText }) =>
+          !normalizedQuery || searchText.includes(normalizedQuery),
         )
+        .map(({ row }) => row)
         .filter(
           (r) =>
             !["expenses", "quotations"].includes(module.table) ||
@@ -5013,9 +5082,9 @@ function Records({
           return rawDate.slice(0, 7) === monthFilter;
         }),
     [
-      store,
+      searchableRows,
+      normalizedQuery,
       module.table,
-      query,
       currentUserId,
       role,
       isProjectsPage,
@@ -7750,6 +7819,7 @@ function PaymentMonitoring({
   const [paymentOfficerFilter, setPaymentOfficerFilter] = useState("all");
   const isGeneralManager = memberRole(role);
   const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
+  const deferredPaymentQuery = useDeferredValue(paymentQuery);
   useEffect(() => {
     let active = true;
     void createClient().auth.getUser().then(({ data }) => {
@@ -7759,7 +7829,7 @@ function PaymentMonitoring({
       active = false;
     };
   }, []);
-  const approvedQuotes = store.quotations
+  const approvedQuotes = useMemo(() => store.quotations
     .filter(
       (quote) =>
         text(quote.document_type) === "price_quotation" &&
@@ -7780,7 +7850,7 @@ function PaymentMonitoring({
         store.profiles.find((profile) => profile.id === preparedById)?.full_name,
         text(quote.representative, "Sales Executive"),
       );
-      const normalizedQuery = paymentQuery.trim().toLowerCase();
+      const normalizedQuery = deferredPaymentQuery.trim().toLowerCase();
       const matchesSearch = !normalizedQuery || [
         quote.quotation_no,
         quote.project_name,
@@ -7815,7 +7885,9 @@ function PaymentMonitoring({
         matchesOfficer,
       };
     })
-    .filter(({ matchesSearch, matchesOfficer, matchingRecords }) => matchesSearch && matchesOfficer && (!paymentMonth || matchingRecords.length > 0));
+    .filter(({ matchesSearch, matchesOfficer, matchingRecords }) => matchesSearch && matchesOfficer && (!paymentMonth || matchingRecords.length > 0)),
+    [currentUserId, deferredPaymentQuery, paymentMonth, paymentOfficerFilter, store],
+  );
   const rows = approvedQuotes.filter(({ summary, pendingForReview }) => assignedOnly ? pendingForReview.length > 0 : scope === "all" || summary.pending > 0);
   const pendingCount = assignedOnly
     ? approvedQuotes.reduce((count, { pendingForReview }) => count + pendingForReview.length, 0)
@@ -7929,50 +8001,69 @@ function QuotationCostingOverview({
       active = false;
     };
   }, []);
-  const costedQuotationIds = new Set(
-    store.price_quotation_product_costings
-      .filter((costing) => text(costing.created_by, "") === currentUserId)
-      .map((costing) => text(costing.quotation_id, "")),
+  const deferredCostedQuery = useDeferredValue(costedQuery);
+  const costedQuotationIds = useMemo(
+    () => new Set(
+      store.price_quotation_product_costings
+        .filter((costing) => text(costing.created_by, "") === currentUserId)
+        .map((costing) => text(costing.quotation_id, "")),
+    ),
+    [currentUserId, store.price_quotation_product_costings],
   );
-  const allCostedQuotationIds = new Set(
-    store.price_quotation_product_costings.map((costing) => text(costing.quotation_id, "")),
+  const allCostedQuotationIds = useMemo(
+    () => new Set(
+      store.price_quotation_product_costings.map((costing) => text(costing.quotation_id, "")),
+    ),
+    [store.price_quotation_product_costings],
   );
-  const isCostedQuote = (quote: Row) =>
-    isGeneralManager
-      ? Boolean(text(quote.pricing_reviewed_by, "")) || allCostedQuotationIds.has(text(quote.id, ""))
-      : text(quote.pricing_reviewed_by, "") === currentUserId || costedQuotationIds.has(text(quote.id, ""));
-  const costedQuotations = store.quotations
-    .filter(
-      (quote) =>
-        text(quote.document_type) === "price_quotation" &&
-        isCostedQuote(quote),
-    )
-    .sort(newestActivityFirst);
-  const costedOfficerId = (quote: Row) =>
-    projectOfficerIdForQuote(store, quote);
-  const costedOfficerName = (quote: Row) =>
-    text(
+  const isCostedQuote = useCallback(
+    (quote: Row) =>
+      isGeneralManager
+        ? Boolean(text(quote.pricing_reviewed_by, "")) || allCostedQuotationIds.has(text(quote.id, ""))
+        : text(quote.pricing_reviewed_by, "") === currentUserId || costedQuotationIds.has(text(quote.id, "")),
+    [allCostedQuotationIds, costedQuotationIds, currentUserId, isGeneralManager],
+  );
+  const costedQuotations = useMemo(
+    () => store.quotations
+      .filter(
+        (quote) =>
+          text(quote.document_type) === "price_quotation" &&
+          isCostedQuote(quote),
+      )
+      .sort(newestActivityFirst),
+    [isCostedQuote, store.quotations],
+  );
+  const costedOfficerId = useCallback(
+    (quote: Row) => projectOfficerIdForQuote(store, quote),
+    [store],
+  );
+  const costedOfficerName = useCallback(
+    (quote: Row) => text(
       store.profiles.find((profile) => profile.id === costedOfficerId(quote))?.full_name,
       text(quote.representative, "Sales Executive"),
-    );
-  const normalizedCostedQuery = costedQuery.trim().toLowerCase();
-  const filteredCostedQuotations = costedQuotations.filter((quote) => {
-    const party = quotationParty(quote, store);
-    const costedDate = text(quote.pricing_reviewed_at ?? quote.updated_at);
-    if (costedMonth && costedDate.slice(0, 7) !== costedMonth) return false;
-    if (costedStatus !== "all" && text(quote.status) !== costedStatus) return false;
-    if (costedOfficerFilter !== "all" && costedOfficerId(quote) !== costedOfficerFilter) return false;
-    if (!normalizedCostedQuery) return true;
-    return [
-      quote.quotation_no,
-      party.clientName,
-      party.companyName,
-      quote.project_name,
-      quote.project_types,
-      quote.status,
-      costedOfficerName(quote),
-    ].some((value) => text(value).toLowerCase().includes(normalizedCostedQuery));
-  });
+    ),
+    [costedOfficerId, store],
+  );
+  const filteredCostedQuotations = useMemo(() => {
+    const normalizedCostedQuery = deferredCostedQuery.trim().toLowerCase();
+    return costedQuotations.filter((quote) => {
+      const party = quotationParty(quote, store);
+      const costedDate = text(quote.pricing_reviewed_at ?? quote.updated_at);
+      if (costedMonth && costedDate.slice(0, 7) !== costedMonth) return false;
+      if (costedStatus !== "all" && text(quote.status) !== costedStatus) return false;
+      if (costedOfficerFilter !== "all" && costedOfficerId(quote) !== costedOfficerFilter) return false;
+      if (!normalizedCostedQuery) return true;
+      return [
+        quote.quotation_no,
+        party.clientName,
+        party.companyName,
+        quote.project_name,
+        quote.project_types,
+        quote.status,
+        costedOfficerName(quote),
+      ].some((value) => text(value).toLowerCase().includes(normalizedCostedQuery));
+    });
+  }, [costedOfficerFilter, costedOfficerId, costedOfficerName, costedMonth, costedStatus, costedQuotations, deferredCostedQuery, store]);
   const selectedCostedQuotations = filteredCostedQuotations.filter((quote) =>
     selectedCostingIds.has(text(quote.id, "")),
   );
@@ -13710,52 +13801,70 @@ function PriceQuotationWorkspace({
     return () => { active = false; };
   }, []);
   const isCombinedRole = role === "sales_pricing_officer";
-  const quotations = store.quotations.filter(
-    (quote) =>
-      text(quote.document_type) === "price_quotation" &&
-      (!isGeneralManager || text(quote.status) !== "draft") &&
-      (!isCombinedRole ||
-        [quote.created_by, quote.prepared_by_user_id, quote.submitted_by].some(
-          (userId) => text(userId, "") === currentUserId,
-        ) || text(quote.pricing_reviewed_by, "") === currentUserId),
+  const quotations = useMemo(
+    () =>
+      store.quotations.filter(
+        (quote) =>
+          text(quote.document_type) === "price_quotation" &&
+          (!isGeneralManager || text(quote.status) !== "draft") &&
+          (!isCombinedRole ||
+            [quote.created_by, quote.prepared_by_user_id, quote.submitted_by].some(
+              (userId) => text(userId, "") === currentUserId,
+            ) || text(quote.pricing_reviewed_by, "") === currentUserId),
+      ),
+    [currentUserId, isCombinedRole, isGeneralManager, store.quotations],
   );
-  const preparedByKey = (quote: Row) =>
-    projectOfficerIdForQuote(store, quote) || text(quote.representative, "");
-  const preparedByName = (quote: Row) =>
-    text(
-      store.profiles.find(
-        (profile) => profile.id === preparedByKey(quote),
-      )?.full_name,
+  const preparedByKey = useCallback(
+    (quote: Row) => projectOfficerIdForQuote(store, quote) || text(quote.representative, ""),
+    [store],
+  );
+  const preparedByName = useCallback(
+    (quote: Row) => text(
+      store.profiles.find((profile) => profile.id === preparedByKey(quote))?.full_name,
       text(quote.representative, "Sales Executive"),
-    );
-  const quotationPreparers = Array.from(
-    new Map(quotations.map((quote) => [preparedByKey(quote), preparedByName(quote)])).entries(),
-  ).map(([id, name]) => ({ id, name })).filter((officer) => officer.id);
-  const filteredQuotations = quotations.filter((quote) => {
-    if (text(quote.status) !== quotationTab) return false;
-    if (preparedByFilter !== "all" && preparedByKey(quote) !== preparedByFilter) return false;
-    const quotationDate = text(
-      text(quote.status) === "approved"
-        ? quote.approved_at ?? quote.issue_date ?? quote.created_at
-        : quote.issue_date ?? quote.created_at,
-    );
-    if (quotationMonth && quotationDate.slice(0, 7) !== quotationMonth) return false;
-    const searchable = [
-      quote.quotation_no,
-      quote.client_name,
-      quote.project_name,
-      quote.representative,
-      preparedByName(quote),
-    ].map((value) => text(value).toLowerCase()).join(" ");
-    return searchable.includes(quotationQuery.trim().toLowerCase());
-  }).sort(newestActivityFirst);
-  const availableLeads = store.leads.filter(
-    (lead) =>
-      !["won", "lost"].includes(text(lead.status)) &&
-      (!isProjectOfficerRole(role) || Boolean(currentUserId) && (
-        leadOwnerId(lead) === currentUserId ||
-        (role === "sales_pricing_officer" && text(lead.endorsed_to, "") === currentUserId)
-      )),
+    ),
+    [preparedByKey, store.profiles],
+  );
+  const quotationPreparers = useMemo(
+    () => Array.from(
+      new Map(quotations.map((quote) => [preparedByKey(quote), preparedByName(quote)])).entries(),
+    ).map(([id, name]) => ({ id, name })).filter((officer) => officer.id),
+    [preparedByKey, preparedByName, quotations],
+  );
+  const deferredQuotationQuery = useDeferredValue(quotationQuery);
+  const filteredQuotations = useMemo(() => {
+    if (editorOpen) return [];
+    const search = deferredQuotationQuery.trim().toLowerCase();
+    return quotations.filter((quote) => {
+      if (text(quote.status) !== quotationTab) return false;
+      if (preparedByFilter !== "all" && preparedByKey(quote) !== preparedByFilter) return false;
+      const quotationDate = text(
+        text(quote.status) === "approved"
+          ? quote.approved_at ?? quote.issue_date ?? quote.created_at
+          : quote.issue_date ?? quote.created_at,
+      );
+      if (quotationMonth && quotationDate.slice(0, 7) !== quotationMonth) return false;
+      const searchable = [
+        quote.quotation_no,
+        quote.client_name,
+        quote.project_name,
+        quote.representative,
+        preparedByName(quote),
+      ].map((value) => text(value).toLowerCase()).join(" ");
+      return searchable.includes(search);
+    }).sort(newestActivityFirst);
+  }, [deferredQuotationQuery, editorOpen, preparedByFilter, preparedByKey, preparedByName, quotationMonth, quotationTab, quotations]);
+  const availableLeads = useMemo(
+    () =>
+      store.leads.filter(
+        (lead) =>
+          !["won", "lost"].includes(text(lead.status)) &&
+          (!isProjectOfficerRole(role) || Boolean(currentUserId) && (
+            leadOwnerId(lead) === currentUserId ||
+            (role === "sales_pricing_officer" && text(lead.endorsed_to, "") === currentUserId)
+          )),
+      ),
+    [currentUserId, role, store.leads],
   );
   const resetEditor = () => {
     setEditorOpen(false);
@@ -14026,7 +14135,7 @@ function PriceQuotationWorkspace({
         ) : undefined
       }
     >
-      <div className="px-4 py-4 sm:px-5 lg:px-6">
+      {!editorOpen && <div className="px-4 py-4 sm:px-5 lg:px-6">
       <div className="mb-4">
         <nav aria-label="Price quotation sections" className="app-tabs">
           {(isGeneralManager
@@ -14130,7 +14239,7 @@ function PriceQuotationWorkspace({
         </Table>
         </div>
       ) : <Empty>{quotations.length ? "No Price Quotations match the selected filters." : "No Price Quotations yet. Create one from a lead to begin."}</Empty>}
-      </div>
+      </div>}
       {editorOpen && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/30 p-4">
           <section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
@@ -14159,7 +14268,7 @@ function PriceQuotationWorkspace({
               <Table labels={["#", "Description", "Qty", ""]} minWidth={0} className="table-fixed" columnWidths={["8%", "64%", "18%", "10%"]}>
                 {items.map((item, index) => <tr key={item.key}>
                   <td className="px-3 py-2 text-center font-medium">{index + 1}</td>
-                  <td className="px-3 py-2"><textarea rows={2} aria-label={`Item ${index + 1} description`} value={item.description} onChange={(event) => setItems((current) => current.map((value) => value.key === item.key ? { ...value, description: titleCase(event.target.value) } : value))} className="input mt-0 min-h-[58px] resize-y" placeholder="Finished product description" /></td>
+                  <td className="px-3 py-2"><textarea rows={2} aria-label={`Item ${index + 1} description`} value={item.description} onChange={(event) => setItems((current) => current.map((value) => value.key === item.key ? { ...value, description: event.target.value } : value))} onBlur={(event) => setItems((current) => current.map((value) => value.key === item.key ? { ...value, description: titleCase(event.currentTarget.value) } : value))} className="input mt-0 min-h-[58px] resize-y" placeholder="Finished product description" /></td>
                   <td className="px-3 py-2"><NumberInput aria-label={`Item ${index + 1} quantity`} min="0.001" step="any" value={item.quantity} onChange={(value) => setItems((current) => current.map((itemValue) => itemValue.key === item.key ? { ...itemValue, quantity: value } : itemValue))} className="input mt-0 text-center" style={{ width: "6rem", marginInline: "auto" }} /></td>
                   <td className="px-3 py-2 text-center"><ActionIcon label={`Remove item ${index + 1}`} tone="red" disabled={items.length === 1} onClick={() => setItems((current) => current.filter((value) => value.key !== item.key))}><Trash2 size={15} /></ActionIcon></td>
                 </tr>)}
@@ -19783,11 +19892,14 @@ function CommissionSummaryView({
   const [undoSaving, setUndoSaving] = useState(false);
   const [paidId, setPaidId] = useState<string | null>(null);
 
-  const userName = (userId: unknown, fallback = "Sales & Pricing Officer") =>
-    text(
-      store.profiles.find((profile) => profile.id === userId)?.full_name,
-      fallback,
-    );
+  const userName = useCallback(
+    (userId: unknown, fallback = "Sales & Pricing Officer") =>
+      text(
+        store.profiles.find((profile) => profile.id === userId)?.full_name,
+        fallback,
+      ),
+    [store.profiles],
+  );
   const salesCommissionAmount = (summary: Row) =>
     n(summary.sales_commission_markup_amount ?? summary.commission_amount);
   const vaCommissionAmount = (summary: Row) =>
@@ -19801,35 +19913,38 @@ function CommissionSummaryView({
       ),
     ]),
   );
-  const normalizedQuery = commissionQuery.trim().toLowerCase();
-  const filteredRows = store.commission_summaries.filter((summary) => {
-    if (
-      commissionMonth &&
-      text(summary.created_at, "").slice(0, 7) !== commissionMonth
-    )
-      return false;
-    if (
-      officerFilter !== "all" &&
-      ![summary.preparator_user_id, summary.va_endorser_user_id].some(
-        (userId) => text(userId, "") === officerFilter,
+  const deferredCommissionQuery = useDeferredValue(commissionQuery);
+  const filteredRows = useMemo(() => {
+    const normalizedQuery = deferredCommissionQuery.trim().toLowerCase();
+    return store.commission_summaries.filter((summary) => {
+      if (
+        commissionMonth &&
+        text(summary.created_at, "").slice(0, 7) !== commissionMonth
       )
-    )
-      return false;
-    if (!normalizedQuery) return true;
-    return [
-      summary.quotation_no,
-      summary.project_name,
-      summary.client_name,
-      readOnly
-        ? summary.my_commission_type
-        : userName(summary.preparator_user_id),
-      readOnly
-        ? summary.my_officer_name
-        : summary.va_endorser_user_id
-          ? userName(summary.va_endorser_user_id)
-          : "",
-    ].some((value) => text(value, "").toLowerCase().includes(normalizedQuery));
-  });
+        return false;
+      if (
+        officerFilter !== "all" &&
+        ![summary.preparator_user_id, summary.va_endorser_user_id].some(
+          (userId) => text(userId, "") === officerFilter,
+        )
+      )
+        return false;
+      if (!normalizedQuery) return true;
+      return [
+        summary.quotation_no,
+        summary.project_name,
+        summary.client_name,
+        readOnly
+          ? summary.my_commission_type
+          : userName(summary.preparator_user_id),
+        readOnly
+          ? summary.my_officer_name
+          : summary.va_endorser_user_id
+            ? userName(summary.va_endorser_user_id)
+            : "",
+      ].some((value) => text(value, "").toLowerCase().includes(normalizedQuery));
+    });
+  }, [commissionMonth, deferredCommissionQuery, officerFilter, readOnly, store.commission_summaries, userName]);
   const commissionTotal = filteredRows.reduce(
     (sum, summary) => sum + salesCommissionAmount(summary),
     0,
