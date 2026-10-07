@@ -124,10 +124,10 @@ const leadOwnerId = (lead: AnyRow) =>
   stringValue(lead.assigned_to) || stringValue(lead.created_by);
 
 const leadClientLabel = (lead: AnyRow) => {
+  const companyName = stringValue(lead.client_name).trim();
   const contactName = stringValue(lead.contact_name).trim();
-  const clientName = stringValue(lead.client_name).trim();
-  if (contactName && clientName) return `${contactName} - ${clientName}`;
-  return contactName || clientName || "Client";
+  if (companyName && contactName) return `${companyName} - ${contactName}`;
+  return companyName || contactName || "Client";
 };
 
 const leadSnapshot = (lead: AnyRow): Pick<CostingDraft, "lead_id" | "client_name" | "client_contact_name" | "client_phone" | "client_email" | "project_name"> => ({

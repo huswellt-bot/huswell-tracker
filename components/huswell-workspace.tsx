@@ -92,6 +92,7 @@ import { FileUploadControl } from "@/components/ui/file-upload-control";
 import { NumberInput } from "@/components/ui/number-input";
 import { ThemeToggle } from "@/components/theme-provider";
 import { CostingRequestWorkspace } from "@/components/costing-request-workspace";
+import { LetterRequestWorkspace } from "@/components/letter-request-workspace";
 import {
   DEFAULT_PRINT_COSTING_DEFAULTS,
   normalizePrintCostingDefaults,
@@ -132,6 +133,7 @@ type View =
   | "Expenses"
   | "Finance"
   | "Payroll & Leave"
+  | "Letter Request"
   | "Directory"
   | "Targets"
   | "Approvals"
@@ -182,6 +184,8 @@ type TableName =
   | "payroll_periods"
   | "payroll_entries"
   | "leave_requests"
+  | "employee_requests"
+  | "employee_request_events"
   | "target_goals"
   | "approval_requests"
   | "project_edit_requests"
@@ -847,6 +851,8 @@ const tables: TableName[] = [
   "payroll_periods",
   "payroll_entries",
   "leave_requests",
+  "employee_requests",
+  "employee_request_events",
   "target_goals",
   "approval_requests",
   "project_edit_requests",
@@ -1184,10 +1190,10 @@ const titleCaseEntry = (value: string, key = "") =>
     ? value
     : titleCase(value);
 const leadClientLabel = (lead: Row) => {
-  const clientName = text(lead.contact_name, "").trim();
   const companyName = text(lead.client_name, "").trim();
-  if (clientName && companyName) return `${clientName} - ${companyName}`;
-  return clientName || companyName || "Client";
+  const contactName = text(lead.contact_name, "").trim();
+  if (companyName && contactName) return `${companyName} - ${contactName}`;
+  return companyName || contactName || "Client";
 };
 const quotationParty = (quote: Row, store: Store) => {
   const lead = store.leads.find((item) => item.id === quote.lead_id);
@@ -1695,6 +1701,8 @@ const roleReadableTables: Record<string, TableName[]> = {
     "costing_request_materials",
     "costing_request_additional_costs",
     "costing_request_events",
+    "employee_requests",
+    "employee_request_events",
   ],
   sales: [
     "business_settings",
@@ -1746,6 +1754,8 @@ const roleReadableTables: Record<string, TableName[]> = {
     "payroll_periods",
     "payroll_entries",
     "leave_requests",
+    "employee_requests",
+    "employee_request_events",
     "announcements",
     "policies",
   ],
@@ -1903,6 +1913,8 @@ const workspaceViewTables = (
     return ["commission_summaries", "profiles"];
   if (view === "Payroll & Leave")
     return ["employees", "payroll_periods", "payroll_entries", "leave_requests"];
+  if (view === "Letter Request")
+    return ["employee_requests", "employee_request_events"];
   if (view === "Directory") return ["customers", "suppliers", "employees"];
   if (view === "Targets") return ["target_goals"];
   if (view === "Payment Monitoring" || view === "Payment Reviews")
@@ -3673,6 +3685,103 @@ type MonthlyPerformancePoint = {
   expense: number;
 };
 
+type MonthlyKpiActivityPoint = {
+  label: string;
+  month: string;
+  leads_generated: number;
+  leads_contacted: number;
+  price_quotations: number;
+  paid_clients: number;
+  completed_projects: number;
+};
+
+type MonthlyBarSeries = {
+  key: string;
+  label: string;
+  color: string;
+};
+
+const monthlyPerformancePoints = (value: unknown): MonthlyPerformancePoint[] =>
+  Array.isArray(value)
+    ? value.map((point) => {
+        const row = point && typeof point === "object" ? point as Row : {};
+        return {
+          label: text(row.label),
+          revenue: n(row.revenue),
+          expense: n(row.collections ?? row.expense),
+        };
+      })
+    : [];
+
+const monthlyKpiActivityPoints = (value: unknown): MonthlyKpiActivityPoint[] =>
+  Array.isArray(value)
+    ? value.map((point) => {
+        const row = point && typeof point === "object" ? point as Row : {};
+        return {
+          label: text(row.label),
+          month: text(row.month),
+          leads_generated: n(row.leads_generated),
+          leads_contacted: n(row.leads_contacted),
+          price_quotations: n(row.price_quotations),
+          paid_clients: n(row.paid_clients),
+          completed_projects: n(row.completed_projects),
+        };
+      })
+    : [];
+
+function MonthlyBarChart<T extends { label: string }>({
+  data,
+  series,
+  valueKind,
+  ariaLabel,
+}: {
+  data: T[];
+  series: MonthlyBarSeries[];
+  valueKind: "currency" | "count";
+  ariaLabel: string;
+}) {
+  const compact = new Intl.NumberFormat("en-PH", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  });
+  const axisFormat = (value: number) =>
+    valueKind === "currency" ? compact.format(value) : value.toLocaleString();
+  const tooltipFormat = (value: unknown) =>
+    valueKind === "currency" ? peso.format(Number(value)) : Number(value).toLocaleString();
+
+  return (
+    <div className="px-4 pb-4 pt-1 sm:px-5">
+      <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] text-[var(--color-chart-tooltip-muted)]">
+        {series.map((metric) => (
+          <span className="inline-flex items-center gap-2" key={metric.key}>
+            <i className="size-2 rounded-full" style={{ backgroundColor: metric.color }} />
+            {metric.label}
+          </span>
+        ))}
+      </div>
+      <div className="h-60" role="img" aria-label={ariaLabel}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data} margin={{ top: 8, right: 6, left: -12, bottom: 0 }} barGap={4}>
+            <CartesianGrid vertical={false} stroke="var(--color-chart-grid)" strokeDasharray="3 5" />
+            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "var(--color-chart-axis)", fontSize: 10 }} dy={8} />
+            <YAxis axisLine={false} tickLine={false} tick={{ fill: "var(--color-chart-axis)", fontSize: 10 }} tickFormatter={axisFormat} width={42} />
+            <Tooltip
+              cursor={{ fill: "var(--color-chart-cursor)", opacity: 0.08 }}
+              contentStyle={{ borderRadius: 10, border: "1px solid var(--color-chart-tooltip-border)", backgroundColor: "var(--color-chart-tooltip-bg)", boxShadow: "none", padding: "9px 11px" }}
+              labelStyle={{ color: "var(--color-chart-tooltip-text)", fontSize: 12, fontWeight: 600, marginBottom: 5 }}
+              itemStyle={{ color: "var(--color-chart-tooltip-muted)", fontSize: 11, padding: 0 }}
+              formatter={(value, name) => [tooltipFormat(value), series.find((metric) => metric.key === String(name))?.label ?? String(name)]}
+            />
+            {series.map((metric) => (
+              <Bar key={metric.key} dataKey={metric.key} name={metric.key} fill={metric.color} radius={[3, 3, 0, 0]} maxBarSize={26} />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
 function MonthlyPerformanceChart({
   data,
   primaryLabel = "Invoiced revenue",
@@ -3686,49 +3795,66 @@ function MonthlyPerformanceChart({
   primaryColor?: string;
   secondaryColor?: string;
 }) {
-  const compact = new Intl.NumberFormat("en-PH", {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  });
+  return (
+    <MonthlyBarChart
+      data={data}
+      valueKind="currency"
+      ariaLabel={`Monthly ${primaryLabel.toLowerCase()} and ${secondaryLabel.toLowerCase()}`}
+      series={[
+        { key: "revenue", label: primaryLabel, color: primaryColor },
+        { key: "expense", label: secondaryLabel, color: secondaryColor },
+      ]}
+    />
+  );
+}
+
+function MonthlyKpiActivityGraphs({
+  data,
+}: {
+  data: MonthlyKpiActivityPoint[] | null;
+}) {
+  const chart = (
+    title: string,
+    detail: string,
+    ariaLabel: string,
+    series: MonthlyBarSeries[],
+  ) => (
+    <section className="overflow-hidden rounded-lg border border-[#e7ebf0] bg-white shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
+      <div className="px-4 pb-2 pt-4">
+        <h2 className="text-[13px] font-semibold text-[#151922]">{title}</h2>
+        <p className="mt-1 text-[11px] text-[#8b92a1]">{detail}</p>
+      </div>
+      {data?.length ? (
+        <MonthlyBarChart data={data} valueKind="count" ariaLabel={ariaLabel} series={series} />
+      ) : data ? (
+        <div className="flex h-60 items-center justify-center px-5 text-center text-[12px] text-[#8b92a1]">Monthly KPI activity is unavailable.</div>
+      ) : (
+        <div className="flex h-60 items-center justify-center px-5 text-center text-[12px] text-[#8b92a1]">Loading monthly KPI activity…</div>
+      )}
+    </section>
+  );
 
   return (
-    <div className="px-4 pb-4 pt-1 sm:px-5">
-      <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] text-[var(--color-chart-tooltip-muted)]">
-        <span className="inline-flex items-center gap-2">
-          <i className="size-2 rounded-full" style={{ backgroundColor: primaryColor }} /> {primaryLabel}
-        </span>
-        <span className="inline-flex items-center gap-2">
-          <i className="size-2 rounded-full" style={{ backgroundColor: secondaryColor }} /> {secondaryLabel}
-        </span>
-      </div>
-      <div className="h-60" role="img" aria-label={`Monthly ${primaryLabel.toLowerCase()} and ${secondaryLabel.toLowerCase()}`}>
-        <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={data} margin={{ top: 8, right: 6, left: -12, bottom: 0 }}>
-            <defs>
-              <linearGradient id="dashboard-primary-area" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor={primaryColor} stopOpacity={0.28} />
-                <stop offset="95%" stopColor={primaryColor} stopOpacity={0.01} />
-              </linearGradient>
-              <linearGradient id="dashboard-secondary-area" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor={secondaryColor} stopOpacity={0.14} />
-                <stop offset="95%" stopColor={secondaryColor} stopOpacity={0.01} />
-              </linearGradient>
-            </defs>
-            <CartesianGrid vertical={false} stroke="var(--color-chart-grid)" strokeDasharray="3 5" />
-            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "var(--color-chart-axis)", fontSize: 10 }} dy={8} />
-            <YAxis axisLine={false} tickLine={false} tick={{ fill: "var(--color-chart-axis)", fontSize: 10 }} tickFormatter={(value) => compact.format(value)} width={42} />
-            <Tooltip
-              cursor={{ stroke: "var(--color-chart-cursor)", strokeDasharray: "3 3" }}
-              contentStyle={{ borderRadius: 10, border: "1px solid var(--color-chart-tooltip-border)", backgroundColor: "var(--color-chart-tooltip-bg)", boxShadow: "none", padding: "9px 11px" }}
-              labelStyle={{ color: "var(--color-chart-tooltip-text)", fontSize: 12, fontWeight: 600, marginBottom: 5 }}
-              itemStyle={{ color: "var(--color-chart-tooltip-muted)", fontSize: 11, padding: 0 }}
-              formatter={(value, name) => [peso.format(Number(value)), name === "revenue" ? primaryLabel : secondaryLabel]}
-            />
-            <Area type="monotone" dataKey="expense" name="expense" stroke={secondaryColor} strokeWidth={2.25} fill="url(#dashboard-secondary-area)" activeDot={{ r: 4, fill: secondaryColor, stroke: "var(--color-surface)", strokeWidth: 2 }} />
-            <Area type="monotone" dataKey="revenue" name="revenue" stroke={primaryColor} strokeWidth={2.75} fill="url(#dashboard-primary-area)" activeDot={{ r: 4, fill: primaryColor, stroke: "var(--color-surface)", strokeWidth: 2 }} />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
+    <div className="grid gap-4 lg:grid-cols-2">
+      {chart(
+        "Monthly lead activity",
+        "Leads generated and contacted in each month.",
+        "Monthly leads generated and leads contacted",
+        [
+          { key: "leads_generated", label: "Leads generated", color: "#7043ca" },
+          { key: "leads_contacted", label: "Leads contacted", color: "#08aabd" },
+        ],
+      )}
+      {chart(
+        "Monthly conversion activity",
+        "Quotations, paid clients, and completed projects in each month.",
+        "Monthly quotations, paid clients, and completed projects",
+        [
+          { key: "price_quotations", label: "Price quotations", color: "#1769e8" },
+          { key: "paid_clients", label: "Paid clients", color: "#16854f" },
+          { key: "completed_projects", label: "Completed projects", color: "#f38300" },
+        ],
+      )}
     </div>
   );
 }
@@ -11721,7 +11847,7 @@ function Quotations({
         .filter((lead) => !["won", "lost"].includes(text(lead.status)))
         .map(
           (lead) =>
-            `${lead.id}|${text(lead.contact_name) || text(lead.client_name)} — ${text(lead.project_name)}`,
+            `${lead.id}|${leadClientLabel(lead)} — ${text(lead.project_name)}`,
         ),
     },
     { key: "representative", label: "Sales Executive" },
@@ -11740,7 +11866,7 @@ function Quotations({
   const officerCostingFields: Field[] = [
     {
       key: "lead_id",
-      label: "Client Name - Company Name",
+      label: "Company Name - Contact Name",
       type: "select",
       required: true,
       options: store.leads.map((lead) => `${lead.id}|${leadClientLabel(lead)}`),
@@ -11781,7 +11907,7 @@ function Quotations({
     if (!lead) {
       setSaving(false);
       return notice(
-        "Select a Client Name - Company Name from Leads before creating a Costing Breakdown.",
+        "Select a Company Name - Contact Name from Leads before creating a Costing Breakdown.",
       );
     }
     if (pendingCostLines.length === 0) {
@@ -13938,7 +14064,7 @@ function PriceQuotationWorkspace({
         <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/30 p-4">
           <section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
             <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">{editing ? "Edit Price Quotation" : "Request Price Quotation"}</h2><p className="mt-1 text-[12px] text-[#687386]">Add the requested materials and quantities. Selling prices are entered by the assigned Sales & Pricing Officer.</p></div><button type="button" onClick={resetEditor} aria-label="Close" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div>
-            <label className="mt-5 block text-[12px] font-medium text-[#202938]">Client&apos;s Name - Company Name<select value={leadId} onChange={(event) => setLeadId(event.target.value)} className="input mt-1" required><option value="">Select a lead</option>{availableLeads.map((lead) => <option key={text(lead.id)} value={text(lead.id)}>{leadClientLabel(lead)}</option>)}</select></label>
+            <label className="mt-5 block text-[12px] font-medium text-[#202938]">Company Name - Contact Name<select value={leadId} onChange={(event) => setLeadId(event.target.value)} className="input mt-1" required><option value="">Select a lead</option>{availableLeads.map((lead) => <option key={text(lead.id)} value={text(lead.id)}>{leadClientLabel(lead)}</option>)}</select></label>
             <label className="mt-4 block text-[12px] font-medium text-[#202938]">Project Type<select value={projectType} onChange={(event) => setProjectType(event.target.value)} className={`input mt-1 ${projectType ? "text-[#151922]" : "text-[#8b92a1]"}`} required><option value="">Select project type</option>{quotationProjectTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
             <section className="mt-5 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -18758,6 +18884,42 @@ function useSharedKpiDashboard(orgId: string, month = currentMonth()) {
   return sharedKpis;
 }
 
+function useSharedMonthlyKpiActivity(
+  orgId: string,
+  month = currentMonth(),
+  enabled = true,
+) {
+  const [activity, setActivity] = useState<MonthlyKpiActivityPoint[] | null>(null);
+
+  useEffect(() => {
+    if (!enabled) {
+      setActivity(null);
+      return;
+    }
+    let active = true;
+    setActivity(null);
+    void Promise.resolve(createClient()
+      .rpc("shared_kpi_monthly_activity", {
+        p_organization_id: orgId,
+        p_month: `${month}-01`,
+      }))
+      .then(({ data }) => {
+        const rows = data && typeof data === "object"
+          ? monthlyKpiActivityPoints((data as Row).monthly_activity)
+          : [];
+        if (active) setActivity(rows);
+      })
+      .catch(() => {
+        if (active) setActivity([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [enabled, month, orgId]);
+
+  return activity;
+}
+
 function useSharedSalesPipeline(
   orgId: string,
   month = currentMonth(),
@@ -18885,6 +19047,7 @@ function ProjectOfficerSalesFunnel({
 
 function GeneralManagerKpiDashboard({ store, orgId }: { store: Store; orgId: string }) {
   const sharedKpis = useSharedKpiDashboard(orgId);
+  const monthlyActivity = useSharedMonthlyKpiActivity(orgId);
   const now = new Date();
   const manilaToday = manilaIsoDate(now);
   const currentMonth = Number(manilaToday.slice(5, 7)) - 1;
@@ -18976,6 +19139,23 @@ function GeneralManagerKpiDashboard({ store, orgId }: { store: Store; orgId: str
         </div>
       </section>
     </section>
+    <section className="overflow-hidden rounded-lg border border-[#e7ebf0] bg-white shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
+      <div className="flex flex-wrap items-start justify-between gap-3 px-4 pb-2 pt-4">
+        <div>
+          <h2 className="text-[13px] font-semibold text-[#151922]">Monthly sales vs. collections</h2>
+          <p className="mt-1 text-[11px] text-[#8b92a1]">Monthly financial comparison for {currentYear}.</p>
+        </div>
+        <span className="text-[11px] font-semibold text-[#202124]">{monthLabel}</span>
+      </div>
+      <MonthlyPerformanceChart
+        data={monthlyPerformancePoints(sharedKpis?.monthly_performance)}
+        primaryLabel="Sales"
+        secondaryLabel="Collections"
+        primaryColor="var(--color-chart-primary)"
+        secondaryColor="var(--color-chart-secondary)"
+      />
+    </section>
+    <MonthlyKpiActivityGraphs data={monthlyActivity} />
     <ProjectOfficerSalesFunnel store={store} orgId={orgId} />
   </div>;
 }
@@ -19001,6 +19181,11 @@ function Dashboard({
   }).format(monthDate);
   const isProjectOfficer = isProjectOfficerRole(role);
   const sharedPipeline = useSharedSalesPipeline(
+    orgId,
+    selectedMonth,
+    !isProjectOfficer && role !== "admin",
+  );
+  const monthlyActivity = useSharedMonthlyKpiActivity(
     orgId,
     selectedMonth,
     !isProjectOfficer && role !== "admin",
@@ -19076,9 +19261,8 @@ function Dashboard({
   });
   const quarter = Math.floor((selectedMonthIndex - 1) / 3) + 1;
   const quarterLabel = `Q${quarter} ${selectedYear}`;
-  const sharedPerformance = Array.isArray(sharedKpis?.monthly_performance)
-    ? (sharedKpis.monthly_performance as Row[]).map((point) => ({ label: text(point.label), revenue: n(point.revenue), expense: n(point.collections ?? point.expense) }))
-    : monthlyPerformance;
+  const serverPerformance = monthlyPerformancePoints(sharedKpis?.monthly_performance);
+  const sharedPerformance = serverPerformance.length ? serverPerformance : monthlyPerformance;
   const dashboardSales = sharedKpis ? n(sharedKpis.total_sales) : totalSales;
   const dashboardCollections = sharedKpis ? n(sharedKpis.collections) : collections;
   const dashboardReceivables = sharedKpis ? n(sharedKpis.receivables) : receivables;
@@ -19222,8 +19406,8 @@ function Dashboard({
         <section className="overflow-hidden rounded-lg border border-[#e7ebf0] bg-white shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
           <div className="flex flex-wrap items-start justify-between gap-3 px-4 pb-2 pt-4">
             <div>
-              <h2 className="text-[13px] font-semibold text-[#151922]">Sales trend</h2>
-              <p className="mt-1 text-[11px] text-[#8b92a1]">Invoiced sales and collections in {selectedYear}.</p>
+              <h2 className="text-[13px] font-semibold text-[#151922]">Monthly sales vs. collections</h2>
+              <p className="mt-1 text-[11px] text-[#8b92a1]">Monthly financial comparison for {selectedYear}.</p>
             </div>
             <span className="text-[11px] font-semibold text-[#202124]">{peso.format(dashboardSales)}</span>
           </div>
@@ -19236,6 +19420,7 @@ function Dashboard({
           />
         </section>
       </div>
+      <MonthlyKpiActivityGraphs data={monthlyActivity} />
       <section className="rounded-lg border border-[#e7ebf0] bg-white p-4 shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -20861,6 +21046,7 @@ export function HuswellWorkspace({
       "Approvals",
       "Finance",
       "Commissions",
+      "Letter Request",
       "Announcements",
       "Policy",
       "Settings",
@@ -20876,6 +21062,7 @@ export function HuswellWorkspace({
       "Approvals",
       "Finance",
       "Commissions",
+      "Letter Request",
       "Announcements",
       "Policy",
       "Settings",
@@ -20898,13 +21085,14 @@ export function HuswellWorkspace({
       "Quotation Costing Overview",
       "PDF Costing",
       "Commissions",
+      "Letter Request",
       "Announcements",
       "Policy",
     ],
     sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Announcements", "Policy"],
     warehouse: ["Dashboard", "Catalog", "Inventory", "Production", "Announcements", "Policy"],
     accountant: ["Finance", "Commissions", "Announcements", "Policy"],
-    payroll: ["Dashboard", "Payroll & Leave", "Directory", "Announcements", "Policy"],
+    payroll: ["Dashboard", "Payroll & Leave", "Letter Request", "Directory", "Announcements", "Policy"],
     production: ["Dashboard", "Production", "Inventory", "Announcements", "Policy"],
     viewer: [
       "Dashboard",
@@ -21009,6 +21197,7 @@ export function HuswellWorkspace({
         { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
         { view: "Settings", icon: Settings },
+        { view: "Letter Request", icon: FileText },
       ],
     },
   ] : role === "sales_pricing_officer" ? [
@@ -21042,6 +21231,7 @@ export function HuswellWorkspace({
         { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
         { view: "Commissions", icon: PhilippinePeso },
+        { view: "Letter Request", icon: FileText },
       ],
     },
   ] : [
@@ -21075,6 +21265,7 @@ export function HuswellWorkspace({
       items: [
         { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
+        { view: "Letter Request", icon: FileText },
       ],
     },
   ];
@@ -21184,6 +21375,13 @@ export function HuswellWorkspace({
       title: "Payroll & Leave",
       detail: "Manage payroll periods, employee entries, and leave requests.",
     },
+    "Letter Request": {
+      title: "Letter Request",
+      detail:
+        role === "sales_pricing_officer"
+          ? "Request permission to work from home or take a leave of absence, then track the decision here."
+          : "Review Work From Home and Leave of Absence requests from Sales & Pricing Officers.",
+    },
     Directory: {
       title: "Directory",
       detail: "Maintain your customer, supplier, and staff records.",
@@ -21287,6 +21485,16 @@ export function HuswellWorkspace({
         orgId={organizationId}
         role={role}
         currentUserId={currentUserId}
+        reload={reload}
+        notice={setMessage}
+      />
+    ) : active === "Letter Request" ? (
+      <LetterRequestWorkspace
+        store={store}
+        organizationId={organizationId}
+        role={role}
+        currentUserId={currentUserId}
+        loading={loading}
         reload={reload}
         notice={setMessage}
       />
@@ -21532,7 +21740,7 @@ export function HuswellWorkspace({
                             : view === "Quotation Costing Overview"
                               ? "Costing"
                             : view === "PDF Costing"
-                              ? "Print Costing"
+                              ? "HP Latex 700W"
                             : isManagementRole && view === "Price Quotations"
                               ? "Price Quotations"
                               : view === "Approvals"
