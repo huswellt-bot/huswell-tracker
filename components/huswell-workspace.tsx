@@ -5451,6 +5451,7 @@ function Records({
       <div className="flex justify-center">
         <NoteAction
           label={canEditLeadRemark(row) ? "Edit lead remark" : "View lead remark"}
+          tone={text(row.lead_remark, "").trim() ? "amber" : "primary"}
           onClick={() => openLeadRemark(row)}
         />
       </div>
@@ -21253,6 +21254,14 @@ export function HuswellWorkspace({
         "invoice_items",
         "payroll_entries",
       ];
+      if (table === "leads") {
+        return client
+          .from(table)
+          .select("*")
+          .eq("organization_id", organizationId)
+          .order("created_at", { ascending: false })
+          .order("id", { ascending: false });
+      }
       return childTables.includes(table)
         ? client.from(table).select("*").order("created_at", { ascending: false })
         : client
