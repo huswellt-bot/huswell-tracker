@@ -2759,6 +2759,122 @@ function NoteDialog({
   );
 }
 
+function LeadRemarkDialog({
+  lead,
+  canEdit,
+  saving,
+  onClose,
+  onSave,
+}: {
+  lead: Row | null;
+  canEdit: boolean;
+  saving: boolean;
+  onClose: () => void;
+  onSave: (leadId: string, draft: string) => void;
+}) {
+  const leadId = text(lead?.id, "");
+  const leadRemark = lead?.lead_remark;
+  const [draft, setDraft] = useState(() =>
+    leadRemark === null || leadRemark === undefined ? "" : String(leadRemark),
+  );
+
+  useEffect(() => {
+    if (!leadId) {
+      setDraft("");
+      return;
+    }
+    setDraft(
+      leadRemark === null || leadRemark === undefined
+        ? ""
+        : String(leadRemark),
+    );
+  }, [leadId, leadRemark]);
+
+  if (!lead) return null;
+
+  const leadLabel = text(
+    lead.project_name,
+    text(lead.client_name, text(lead.contact_name, "Lead")),
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] grid place-items-center bg-[var(--color-overlay)] p-4"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="lead-remark-title"
+        className="w-full max-w-lg min-w-0 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-none"
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-[var(--color-border)] pb-3">
+          <div className="min-w-0">
+            <h2 id="lead-remark-title" className="text-[16px] font-semibold text-[var(--color-text-primary)]">
+              Lead remark
+            </h2>
+            <p className="mt-1 text-[12px] text-[var(--color-text-secondary)]">{leadLabel}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close lead remark"
+            className="grid size-8 shrink-0 place-items-center rounded-[var(--radius-control)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)]"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        {canEdit ? (
+          <label className="mt-4 block text-[12px] font-medium text-[var(--color-text-primary)]">
+            Remark
+            <textarea
+              aria-label={`Lead remark for ${text(lead.project_name, text(lead.client_name, "Lead"))}`}
+              rows={5}
+              value={draft}
+              onChange={(event) => setDraft(event.currentTarget.value)}
+              placeholder="Add lead remark"
+              maxLength={1000}
+              className="input mt-1 min-h-28 resize-y"
+            />
+          </label>
+        ) : (
+          <div className="mt-4 space-y-3">
+            <p className="max-h-[50vh] overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[13px] leading-5 text-[var(--color-text-primary)]">
+              {lead.lead_remark === null ||
+              lead.lead_remark === undefined ||
+              String(lead.lead_remark) === ""
+                ? "No lead remark was added."
+                : String(lead.lead_remark)}
+            </p>
+            <p className="text-[11px] leading-4 text-[var(--color-text-secondary)]">
+              Only the lead owner or active endorsed Sales &amp; Pricing Officer can edit this remark.
+            </p>
+          </div>
+        )}
+        <div className="mt-5 flex justify-end gap-2">
+          <Button secondary onClick={onClose} disabled={saving}>
+            Close
+          </Button>
+          {canEdit && (
+            <Button
+              tone="green"
+              loading={saving}
+              disabled={saving}
+              onClick={() => onSave(leadId, draft)}
+            >
+              <Save size={14} />
+              Save remark
+            </Button>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function SelectionCheckbox({
   checked,
   indeterminate = false,
@@ -4073,6 +4189,51 @@ function DraftTextInput({ value, onCommit, ...props }: DraftTextInputProps) {
   );
 }
 
+type DebouncedSearchInputProps = Omit<
+  InputHTMLAttributes<HTMLInputElement>,
+  "value" | "onChange"
+> & {
+  value: string;
+  onCommit: (value: string) => void;
+  delayMs?: number;
+};
+
+function DebouncedSearchInput({
+  value,
+  onCommit,
+  delayMs = 120,
+  ...props
+}: DebouncedSearchInputProps) {
+  const [draftValue, setDraftValue] = useState(value);
+  const draftRef = useRef(value);
+
+  useEffect(() => {
+    if (value === draftRef.current) return;
+    draftRef.current = value;
+    setDraftValue(value);
+  }, [value]);
+
+  useEffect(() => {
+    if (draftValue === value) return;
+    const timeoutId = window.setTimeout(() => {
+      if (draftRef.current === draftValue) onCommit(draftValue);
+    }, delayMs);
+    return () => window.clearTimeout(timeoutId);
+  }, [delayMs, draftValue, onCommit, value]);
+
+  return (
+    <input
+      {...props}
+      value={draftValue}
+      onChange={(event) => {
+        const nextValue = event.currentTarget.value;
+        draftRef.current = nextValue;
+        setDraftValue(nextValue);
+      }}
+    />
+  );
+}
+
 type DraftTextAreaProps = Omit<
   TextareaHTMLAttributes<HTMLTextAreaElement>,
   "value" | "onChange" | "onBlur"
@@ -4816,6 +4977,7 @@ function Records({
   onPrint,
   leadMode = "leads",
   onLeadModeChange,
+  onLeadRemarkSaved,
 }: {
   module: Module;
   store: Store;
@@ -4826,6 +4988,7 @@ function Records({
   onPrint?: (r: Row) => void;
   leadMode?: LeadWorkspaceMode;
   onLeadModeChange?: (mode: LeadWorkspaceMode) => void;
+  onLeadRemarkSaved?: (leadId: string, leadRemark: string | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Row | null>(null);
@@ -4864,7 +5027,6 @@ function Records({
     note: string;
   } | null>(null);
   const [leadRemarkLead, setLeadRemarkLead] = useState<Row | null>(null);
-  const [leadRemarkDraft, setLeadRemarkDraft] = useState("");
   const [leadRemarkSaving, setLeadRemarkSaving] = useState(false);
   const [deletionRequestValues, setDeletionRequestValues] = useState<Record<string, string>>({
     request_note: "",
@@ -4880,6 +5042,52 @@ function Records({
   const leadRemarksEnabled = module.table === "leads" && leadMode === "leads";
   const isGeneralManager = memberRole(role);
   const canFilterByProjectOfficer = isGeneralManager && !isProjectsPage;
+  const profileNameById = useMemo(() => {
+    const names = new Map<string, string>();
+    store.profiles.forEach((profile) => {
+      const id = text(profile.id, "");
+      if (id) names.set(id, text(profile.full_name, ""));
+    });
+    return names;
+  }, [store.profiles]);
+  const approvedPriceQuotationLeadIds = useMemo(() => {
+    const leadIds = new Set<string>();
+    store.quotations.forEach((quotation) => {
+      if (
+        text(quotation.lead_id, "") &&
+        text(quotation.document_type, "") === "price_quotation" &&
+        !quotation.costing_source_id &&
+        text(quotation.status, "") === "approved"
+      ) {
+        leadIds.add(text(quotation.lead_id, ""));
+      }
+    });
+    return leadIds;
+  }, [store.quotations]);
+  const pendingLeadUnendorsementByLeadId = useMemo(() => {
+    const requests = new Map<string, Row>();
+    store.lead_unendorsement_requests.forEach((request) => {
+      const leadId = text(request.lead_id, "");
+      if (
+        leadId &&
+        text(request.status, "") === "pending" &&
+        !requests.has(leadId)
+      ) {
+        requests.set(leadId, request);
+      }
+    });
+    return requests;
+  }, [store.lead_unendorsement_requests]);
+  const leadEndorsementAttachmentByLeadId = useMemo(() => {
+    const attachments = new Map<string, Row>();
+    store.lead_endorsement_attachments.forEach((attachment) => {
+      const leadId = text(attachment.lead_id, "");
+      if (leadId && !attachments.has(leadId)) {
+        attachments.set(leadId, attachment);
+      }
+    });
+    return attachments;
+  }, [store.lead_endorsement_attachments]);
   const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
   const pricingOfficers = useMemo(() => pricingOfficerOptions(store), [store]);
   const canCreate =
@@ -4931,27 +5139,56 @@ function Records({
     (leadOwnerId(row) === currentUserId ||
       (role === "sales_pricing_officer" &&
         text(row.endorsed_to, "") === currentUserId));
-  const openLeadRemark = (row: Row) => {
-    setLeadRemarkDraft(text(row.lead_remark, ""));
-    setLeadRemarkLead(row);
-  };
+  const openLeadRemark = (row: Row) => setLeadRemarkLead(row);
   const closeLeadRemark = () => {
     setLeadRemarkLead(null);
-    setLeadRemarkDraft("");
   };
-  const saveLeadRemark = async () => {
+  const saveLeadRemark = async (leadId: string, draft: string) => {
     const lead = leadRemarkLead;
-    if (!lead?.id || !canEditLeadRemark(lead)) return;
+    if (
+      !lead ||
+      !leadId ||
+      text(lead.id, "") !== leadId ||
+      !canEditLeadRemark(lead)
+    )
+      return;
+    const normalizedRemark = draft.trim() || null;
     setLeadRemarkSaving(true);
-    const { error } = await createClient().rpc("save_lead_remark", {
-      p_lead_id: lead.id,
-      p_lead_remark: leadRemarkDraft,
-    });
-    setLeadRemarkSaving(false);
-    if (error) return notice(error.message);
-    closeLeadRemark();
-    notice("Lead remark saved.");
-    await reload();
+    try {
+      const client = createClient();
+      const { error } = await client.rpc("save_lead_remark", {
+        p_lead_id: leadId,
+        p_lead_remark: normalizedRemark,
+      });
+      if (error) return notice(error.message);
+
+      const { data: savedLead, error: readError } = await client
+        .from("leads")
+        .select("id, lead_remark")
+        .eq("organization_id", orgId)
+        .eq("id", leadId)
+        .maybeSingle();
+      if (readError)
+        return notice(
+          `Lead remark was saved, but could not be verified: ${readError.message}`,
+        );
+
+      const savedRemark =
+        savedLead?.lead_remark === null || savedLead?.lead_remark === undefined
+          ? null
+          : String(savedLead.lead_remark);
+      if (!savedLead || savedRemark !== normalizedRemark)
+        return notice(
+          "Lead remark could not be verified after saving. Please try again.",
+        );
+
+      if (onLeadRemarkSaved) onLeadRemarkSaved(leadId, savedRemark);
+      else await reload();
+      closeLeadRemark();
+      notice("Lead remark saved.");
+    } finally {
+      setLeadRemarkSaving(false);
+    }
   };
   const closeMarkContacted = () => {
     setContactDateLead(null);
@@ -5119,10 +5356,9 @@ function Records({
         existing.count += 1;
         return;
       }
-      const profile = store.profiles.find((item) => item.id === ownerId);
       totals.set(ownerId, {
         id: ownerId,
-        name: text(profile?.full_name, "Sales Executive"),
+        name: text(profileNameById.get(ownerId), "Sales Executive"),
         count: 1,
       });
     });
@@ -5140,8 +5376,8 @@ function Records({
     canFilterByProjectOfficer,
     projectOfficerFilter,
     projectOfficers,
+    profileNameById,
     rows,
-    store.profiles,
   ]);
   const fields = module.fields.map((field) => {
     if (field.key === "supplier_id")
@@ -5155,22 +5391,32 @@ function Records({
   });
   const leadColumns =
     module.table === "leads"
-      ? module.columns.filter(
-          (column) =>
-            column.label !== "Outbound caller" &&
-            (isProjectsPage || column.label !== "Lead / project") &&
-            (!isProjectsPage ||
-              !["Endorse By", "Endorse To", "Endorse Date"].includes(column.label)),
-        )
+      ? module.columns
+          .filter(
+            (column) =>
+              column.label !== "Outbound caller" &&
+              (isProjectsPage || column.label !== "Lead / project") &&
+              (!isProjectsPage ||
+                !["Endorse By", "Endorse To", "Endorse Date"].includes(column.label)),
+          )
+          .map((column) => {
+            if (column.label === "Endorse By" || column.label === "Endorse To") {
+              const field = column.label === "Endorse By" ? "endorsed_by" : "endorsed_to";
+              return {
+                ...column,
+                value: (row: Row) => {
+                  const name = text(profileNameById.get(text(row[field], "")), "-");
+                  return name.includes("@") ? name.split("@")[0] : name;
+                },
+              };
+            }
+            return column;
+          })
       : module.columns;
   const assignmentColumn = {
     label: "Sales Officer",
     value: (row: Row) =>
-      text(
-        store.profiles.find((profile) => profile.id === row.assigned_to)
-          ?.full_name,
-        "Unassigned",
-      ),
+      text(profileNameById.get(text(row.assigned_to, "")), "Unassigned"),
   };
   const leadRecordedDateColumns = leadColumns.filter(
     (column) => column.label === leadRecordedDateLabel,
@@ -5656,13 +5902,7 @@ function Records({
     canActOnLead(row);
   const leadHasApprovedPriceQuotation = (row: Row) =>
     module.table === "leads" &&
-    store.quotations.some(
-      (quotation) =>
-        text(quotation.lead_id, "") === text(row.id, "") &&
-        text(quotation.document_type, "") === "price_quotation" &&
-        !quotation.costing_source_id &&
-        text(quotation.status, "") === "approved",
-    );
+    approvedPriceQuotationLeadIds.has(text(row.id, ""));
   const canEndorseLead = (row: Row) =>
     module.table === "leads" &&
     !isProjectsPage &&
@@ -5683,13 +5923,7 @@ function Records({
       Boolean(text(row.id, "")) &&
       n(row.evaluation_number) !== 7 &&
       leadOwnerId(row) === currentUserId &&
-      !store.quotations.some(
-        (quotation) =>
-          text(quotation.lead_id, "") === text(row.id, "") &&
-          text(quotation.document_type, "") === "price_quotation" &&
-          !quotation.costing_source_id &&
-          text(quotation.status, "") === "approved",
-      ) &&
+      !approvedPriceQuotationLeadIds.has(text(row.id, "")) &&
       pricingOfficers.some((officer) => officer.id !== currentUserId) &&
       !text(row.endorsed_by, "") &&
       !text(row.endorsed_to, "") &&
@@ -5698,7 +5932,7 @@ function Records({
       bulkEndorsementEnabled,
       currentUserId,
       pricingOfficers,
-      store.quotations,
+      approvedPriceQuotationLeadIds,
     ],
   );
   const bulkEligibleRows = useMemo(
@@ -5741,11 +5975,7 @@ function Records({
     });
   };
   const pendingLeadUnendorsement = (row: Row) =>
-    store.lead_unendorsement_requests.find(
-      (request) =>
-        text(request.lead_id, "") === text(row.id, "") &&
-        text(request.status, "") === "pending",
-    );
+    pendingLeadUnendorsementByLeadId.get(text(row.id, ""));
   const canRequestLeadUnendorsement = (row: Row) =>
     module.table === "leads" &&
     !isProjectsPage &&
@@ -5777,9 +6007,7 @@ function Records({
     const unendorsementRequest = pendingLeadUnendorsement(row);
     const leadEndorsementAttachment =
       module.table === "leads"
-        ? store.lead_endorsement_attachments.find(
-            (attachment) => text(attachment.lead_id, "") === text(row.id, ""),
-          )
+        ? leadEndorsementAttachmentByLeadId.get(text(row.id, ""))
         : null;
     return (
     <td className="whitespace-nowrap px-5 py-3">
@@ -6169,10 +6397,10 @@ function Records({
               className="absolute left-3 top-2.5 text-[#8b92a1]"
               size={15}
             />
-            <input
+            <DebouncedSearchInput
               value={query}
-              onChange={(e) => {
-                setQuery(e.target.value);
+              onCommit={(value) => {
+                setQuery(value);
                 setPage(0);
               }}
               className="w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
@@ -6698,75 +6926,14 @@ function Records({
         onImported={reload}
         notice={notice}
       />
-      {leadRemarkLead && (
-        <div
-          className="fixed inset-0 z-[70] grid place-items-center bg-[var(--color-overlay)] p-4"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeLeadRemark();
-          }}
-        >
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="lead-remark-title"
-            className="w-full max-w-lg min-w-0 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-none"
-          >
-            <div className="flex items-start justify-between gap-4 border-b border-[var(--color-border)] pb-3">
-              <div className="min-w-0">
-                <h2 id="lead-remark-title" className="text-[16px] font-semibold text-[var(--color-text-primary)]">
-                  Lead remark
-                </h2>
-                <p className="mt-1 text-[12px] text-[var(--color-text-secondary)]">
-                  {text(leadRemarkLead.project_name, text(leadRemarkLead.client_name, text(leadRemarkLead.contact_name, "Lead")))}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={closeLeadRemark}
-                aria-label="Close lead remark"
-                className="grid size-8 shrink-0 place-items-center rounded-[var(--radius-control)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)]"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            {canEditLeadRemark(leadRemarkLead) ? (
-              <label className="mt-4 block text-[12px] font-medium text-[var(--color-text-primary)]">
-                Remark
-                <textarea
-                  aria-label={`Lead remark for ${text(leadRemarkLead.project_name, text(leadRemarkLead.client_name, "Lead"))}`}
-                  rows={5}
-                  value={leadRemarkDraft}
-                  onChange={(event) => setLeadRemarkDraft(event.target.value)}
-                  placeholder="Add lead remark"
-                  maxLength={1000}
-                  className="input mt-1 min-h-28 resize-y"
-                />
-              </label>
-            ) : (
-              <p className="mt-4 max-h-[50vh] overflow-y-auto whitespace-pre-wrap break-words [overflow-wrap:anywhere] text-[13px] leading-5 text-[var(--color-text-primary)]">
-                {text(leadRemarkLead.lead_remark, "No lead remark was added.")}
-              </p>
-            )}
-            <div className="mt-5 flex justify-end gap-2">
-              <Button secondary onClick={closeLeadRemark} disabled={leadRemarkSaving}>
-                Close
-              </Button>
-              {canEditLeadRemark(leadRemarkLead) && (
-                <Button
-                  tone="green"
-                  loading={leadRemarkSaving}
-                  disabled={leadRemarkSaving}
-                  onClick={() => void saveLeadRemark()}
-                >
-                  <Save size={14} />
-                  Save remark
-                </Button>
-              )}
-            </div>
-          </section>
-        </div>
-      )}
+      <LeadRemarkDialog
+        key={text(leadRemarkLead?.id, "closed")}
+        lead={leadRemarkLead}
+        canEdit={leadRemarkLead ? canEditLeadRemark(leadRemarkLead) : false}
+        saving={leadRemarkSaving}
+        onClose={closeLeadRemark}
+        onSave={(leadId, draft) => void saveLeadRemark(leadId, draft)}
+      />
       <NoteDialog
         open={Boolean(recordNote)}
         title={recordNote?.title ?? "Note"}
@@ -14899,7 +15066,7 @@ function ProductCostingsSectionWithPricing({
                               }}
                             />
                           </td>
-                          <td className="min-w-0 !whitespace-normal break-words px-2 py-2"><input aria-label={`Cost ${lineIndex + 1} description`} value={line.description} onChange={(event) => updateLine({ description: titleCaseEntry(event.target.value, "description") })} className="input mt-0 min-w-0 max-w-full px-2" placeholder="Material, labor, logistics" /></td>
+                          <td className="min-w-0 !whitespace-normal break-words px-2 py-2"><DraftTextInput aria-label={`Cost ${lineIndex + 1} description`} value={line.description} onCommit={(value) => updateLine({ description: titleCaseEntry(value, "description") })} className="input mt-0 min-w-0 max-w-full px-2" placeholder="Material, labor, logistics" /></td>
                           <td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-end text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} quantity`} type="number" min="0.001" step="any" value={line.quantity} onChange={(event) => updateLine({ quantity: event.target.value })} className="input mt-0 px-1" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} />}</td>
                           <td className="min-w-0 px-2 py-2">{isFixedAmount ? <span className="flex min-h-9 items-center justify-end text-[#8b92a1]">—</span> : <input aria-label={`Cost ${lineIndex + 1} unit cost`} type="number" min="0" step="any" value={line.unitCost} onChange={(event) => updateLine({ unitCost: event.target.value })} className="input mt-0 px-1" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} />}</td>
                           <td className="min-w-0 px-2 py-2">{isFixedAmount ? <input aria-label={`Cost ${lineIndex + 1} fixed amount`} type="number" min="0" step="any" value={line.amount} onChange={(event) => updateLine({ amount: event.target.value })} className="input mt-0 px-1" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /> : <span className="flex min-h-9 items-center justify-end whitespace-nowrap font-medium">{peso.format(lineAmount)}</span>}</td>
@@ -15006,7 +15173,7 @@ function PriceQuotationReviewContent({
       <fieldset disabled={readOnly} className="min-w-0 border-0 p-0">
       <section className="rounded-xl border border-[#e1e6ee] p-4">
         <h3 className="text-[14px] font-semibold">Terms and Conditions</h3>
-        <div className="mt-3 space-y-2">{terms.map((term, index) => <div key={index} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
+        <div className="mt-3 space-y-2">{terms.map((term, index) => <div key={index} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><DraftTextInput value={term} onCommit={(value) => setTerms((current) => current.map((currentTerm, itemIndex) => itemIndex === index ? titleCaseEntry(value, "term") : currentTerm))} className="input mt-0 flex-1" /><button type="button" aria-label={`Remove term ${index + 1}`} onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
         <div className="mt-3 flex justify-end"><Button onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div>
       </section>
       <section className="rounded-xl border border-[#e1e6ee] p-4">
@@ -21151,6 +21318,19 @@ export function HuswellWorkspace({
     [refreshTables],
   );
   const reload = useCallback(() => load(false), [load]);
+  const updateLeadRemark = useCallback(
+    (leadId: string, leadRemark: string | null) => {
+      setStore((current) => ({
+        ...current,
+        leads: current.leads.map((lead) =>
+          text(lead.id, "") === leadId
+            ? { ...lead, lead_remark: leadRemark }
+            : lead,
+        ),
+      }));
+    },
+    [],
+  );
   useEffect(() => {
     const neededTables = workspaceViewTables(active, leadMode, role).filter(
       (table) => !loadedTables.current.has(table),
@@ -21710,6 +21890,7 @@ export function HuswellWorkspace({
           role={role}
           leadMode={activeLeadWorkspaceMode}
           onLeadModeChange={selectLeadWorkspaceMode}
+          onLeadRemarkSaved={updateLeadRemark}
         />
     ) : active === "Supplier's List" ? (
       <SupplierList
