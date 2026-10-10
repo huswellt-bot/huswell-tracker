@@ -865,6 +865,10 @@ html.dark .huswell-brand-logo {
   width: 2070px;
   min-width: 2070px;
 }
+.huswell-workspace .lead-coordinator-table {
+  width: 1500px;
+  min-width: 1500px;
+}
 .huswell-workspace .leads-table thead th {
   white-space: nowrap !important;
   overflow-wrap: normal;

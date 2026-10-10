@@ -98,7 +98,6 @@ import { SearchableLeadSelect, type SearchableLeadOption } from "@/components/ui
 import { ThemeToggle } from "@/components/theme-provider";
 import { CostingRequestWorkspace } from "@/components/costing-request-workspace";
 import { FinanceWorkspace } from "@/components/finance-workspace";
-import { LeadCoordinatorWorkspace } from "@/components/lead-coordinator-workspace";
 import { LetterRequestWorkspace } from "@/components/letter-request-workspace";
 import {
   DEFAULT_PRINT_COSTING_DEFAULTS,
@@ -4934,6 +4933,11 @@ function Records({
   const [leadImportOpen, setLeadImportOpen] = useState(false);
   const [exportingBackup, setExportingBackup] = useState(false);
   const [deletionRequestLead, setDeletionRequestLead] = useState<Row | null>(null);
+  const [transferLead, setTransferLead] = useState<Row | null>(null);
+  const [transferValues, setTransferValues] = useState<Record<string, string>>({
+    recipient_user_id: "",
+  });
+  const [transferring, setTransferring] = useState(false);
   const [endorsementLead, setEndorsementLead] = useState<Row | null>(null);
   const [endorsementValues, setEndorsementValues] = useState<Record<string, string>>({
     recipient_user_id: "",
@@ -4969,6 +4973,7 @@ function Records({
   const isLeadChangeRequestsPage =
     module.table === "leads" && leadMode === "lead_change_requests";
   const leadRemarksEnabled = module.table === "leads" && leadMode === "leads";
+  const isLeadCoordinator = module.table === "leads" && role === "lead_coordinator";
   const isGeneralManager = memberRole(role);
   const canFilterByProjectOfficer = isGeneralManager && !isProjectsPage;
   const profileNameById = useMemo(() => {
@@ -5325,7 +5330,7 @@ function Records({
             (column) =>
               column.label !== "Outbound caller" &&
               (isProjectsPage || column.label !== "Lead / project") &&
-              (!isProjectsPage ||
+              (!(isProjectsPage || isLeadCoordinator) ||
                 !["Endorse By", "Endorse To", "Endorse Date"].includes(column.label)),
           )
           .map((column) => {
@@ -5483,6 +5488,8 @@ function Records({
       payload.done_deal_status = null;
     if (module.table === "leads" && typeof payload.client_name === "string")
       payload.client_name = payload.client_name.trim() || null;
+    if (module.table === "leads" && typeof payload.contact_method === "string")
+      payload.contact_method = payload.contact_method.trim() || null;
     if (module.table === "leads" && typeof payload.address === "string")
       payload.address = payload.address.trim() || null;
     if (!editing) {
@@ -5621,6 +5628,35 @@ function Records({
     setDeletionRequestValues({ request_note: "" });
     notice("Lead deletion submitted for General Manager approval.");
     await reload();
+  };
+  const resetLeadTransfer = () => {
+    setTransferLead(null);
+    setTransferValues({ recipient_user_id: "" });
+  };
+  const transferLeadOwnership = async () => {
+    const lead = transferLead;
+    const recipientUserId = text(transferValues.recipient_user_id, "").split("|")[0];
+    if (!lead?.id) return;
+    if (!recipientUserId) {
+      notice("Select a Sales & Pricing Officer.");
+      return;
+    }
+    setTransferring(true);
+    try {
+      const { error } = await createClient().rpc("transfer_lead_to_pricing_officer", {
+        p_lead_id: lead.id,
+        p_recipient_user_id: recipientUserId,
+        p_note: null,
+      });
+      if (error) throw error;
+      resetLeadTransfer();
+      notice("Lead transferred. The selected Sales & Pricing Officer is now the owner.");
+      await reload();
+    } catch (error) {
+      notice(error instanceof Error ? error.message : "Lead transfer could not be saved.");
+    } finally {
+      setTransferring(false);
+    }
   };
   const resetEndorsementForm = () => {
     setEndorsementLead(null);
@@ -5833,6 +5869,16 @@ function Records({
   const leadHasApprovedPriceQuotation = (row: Row) =>
     module.table === "leads" &&
     approvedPriceQuotationLeadIds.has(text(row.id, ""));
+  const canTransferLead = (row: Row) =>
+    isLeadCoordinator &&
+    !isProjectsPage &&
+    Boolean(text(row.id, "")) &&
+    leadOwnerId(row) === currentUserId &&
+    n(row.evaluation_number) !== 7 &&
+    !leadHasApprovedPriceQuotation(row) &&
+    !text(row.endorsed_by, "") &&
+    !text(row.endorsed_to, "") &&
+    !text(row.endorsed_at, "");
   const canEndorseLead = (row: Row) =>
     module.table === "leads" &&
     !isProjectsPage &&
@@ -5969,6 +6015,20 @@ function Records({
             label="Edit record"
           >
             <Pencil size={15} />
+          </ActionIcon>
+        )}
+        {canTransferLead(row) && (
+          <ActionIcon
+            label="Transfer lead to Sales & Pricing Officer"
+            confirm={false}
+            disabled={saving || transferring}
+            loading={transferring && transferLead?.id === row.id}
+            onClick={() => {
+              setTransferLead(row);
+              setTransferValues({ recipient_user_id: "" });
+            }}
+          >
+            <Send size={15} />
           </ActionIcon>
         )}
         {canEndorseLead(row) && (
@@ -6238,9 +6298,11 @@ function Records({
         detail={
           module.table === "leads" &&
           !isProjectsPage &&
-          role === "sales_pricing_officer"
-            ? "View and work on leads assigned or endorsed to you."
-            : module.detail
+          role === "lead_coordinator"
+            ? "Receive leads, add new leads, and transfer ownership to a Sales & Pricing Officer."
+            : module.table === "leads" && !isProjectsPage && role === "sales_pricing_officer"
+              ? "View and work on leads assigned or endorsed to you."
+              : module.detail
         }
         variant={isPageLayout ? "page" : "card"}
         hideHeading={isPageLayout}
@@ -6308,6 +6370,13 @@ function Records({
           <div className={`${contentPadding} border-t border-[#edf0f5] py-3`}>
             <p className="text-[12px] text-[#687386]">
               View and work on leads assigned or endorsed to you.
+            </p>
+          </div>
+        )}
+        {module.table === "leads" && role === "lead_coordinator" && !isProjectsPage && (
+          <div className={`${contentPadding} border-t border-[#edf0f5] py-3`}>
+            <p className="text-[12px] text-[#687386]">
+              Use the shared Leads form to add or receive leads. Transfer a lead to a Sales &amp; Pricing Officer when it is ready for quotation work; ownership then moves to that officer.
             </p>
           </div>
         )}
@@ -6552,7 +6621,15 @@ function Records({
                       ...(leadActionsAtEnd ? ["Actions"] : []),
                     ]
                   : [...displayColumns.map((c) => c.label), "Actions"]}
-                minWidth={module.table === "leads" ? (leadRemarksEnabled ? 2070 : 1950) : 680}
+                minWidth={
+                  module.table === "leads"
+                    ? isLeadCoordinator
+                      ? 1500
+                      : leadRemarksEnabled
+                        ? 2070
+                        : 1950
+                    : 680
+                }
                 scrollable={isPageLayout}
                 scrollContainerClassName={module.table === "leads" ? "max-h-[560px]" : undefined}
                 columnWidths={
@@ -6564,7 +6641,9 @@ function Records({
                           column.label === "Email"
                             ? "250px"
                             : column.label === "Date contacted"
-                              ? "170px"
+                              ? isLeadCoordinator
+                                ? "205px"
+                                : "170px"
                               : column.label === "Outbound method"
                                 ? "145px"
                                 : column.label === "Endorse By"
@@ -6583,7 +6662,7 @@ function Records({
                 }
                 className={
                   module.table === "leads"
-                    ? `leads-table${leadRemarksEnabled ? " lead-remarks-table" : ""} modern-page-table`
+                     ? `leads-table${leadRemarksEnabled ? " lead-remarks-table" : ""}${isLeadCoordinator ? " lead-coordinator-table" : ""} modern-page-table`
                     : undefined
                 }
               >
@@ -6734,6 +6813,31 @@ function Records({
         >
           <p className="rounded-lg border border-[#fed7d7] bg-[#fff5f5] p-3 text-[12px] leading-5 text-[#9b1c1c]">
             The General Manager must approve this request before the lead and its linked workflow records are permanently deleted.
+          </p>
+        </Dialog>
+      )}
+      {transferLead && (
+        <Dialog
+          title="Transfer Lead"
+          fields={[
+            {
+              key: "recipient_user_id",
+              label: "Sales & Pricing Officer",
+              type: "select",
+              required: true,
+              options: pricingOfficers.map((officer) => `${officer.id}|${officer.name}`),
+            },
+          ]}
+          values={transferValues}
+          setValues={setTransferValues}
+          save={() => void transferLeadOwnership()}
+          close={resetLeadTransfer}
+          saving={transferring}
+          saveLabel="Transfer lead"
+          className="max-w-lg"
+        >
+          <p className="mt-3 rounded-lg border border-[#d9e0e9] bg-[#f8faff] p-3 text-[12px] leading-5 text-[#687386]">
+            Ownership will move to the selected Sales &amp; Pricing Officer. The lead will leave your list and become available in that officer&apos;s Leads and quotation workflow.
           </p>
         </Dialog>
       )}
@@ -21069,11 +21173,13 @@ export function HuswellWorkspace({
     Leads: {
       title: isManagementRole ? "Lead management" : leads.title,
       detail:
-        role === "sales_pricing_officer"
-          ? "View and work on leads assigned or endorsed to you."
-          : isManagementRole
-            ? "Add and assign leads, then review officer-submitted lead changes from the Approval Center."
-            : leads.detail,
+        role === "lead_coordinator"
+          ? "Receive leads, add new leads, and transfer ownership to a Sales & Pricing Officer."
+          : role === "sales_pricing_officer"
+            ? "View and work on leads assigned or endorsed to you."
+            : isManagementRole
+              ? "Add and assign leads, then review officer-submitted lead changes from the Approval Center."
+              : leads.detail,
     },
     Projects: {
       title: isManagementRole ? "Project oversight" : projects.title,
@@ -21296,21 +21402,17 @@ export function HuswellWorkspace({
           profileName={profileName}
         />
     ) : active === "Leads" ? (
-        role === "lead_coordinator" ? (
-          <LeadCoordinatorWorkspace organizationId={organizationId} />
-        ) : (
-          <Records
-            module={leads}
-            store={store}
-            orgId={organizationId}
-            reload={reload}
-            notice={setMessage}
-            role={role}
-            leadMode={activeLeadWorkspaceMode}
-            onLeadModeChange={selectLeadWorkspaceMode}
-            onLeadRemarkSaved={updateLeadRemark}
-          />
-        )
+        <Records
+          module={leads}
+          store={store}
+          orgId={organizationId}
+          reload={reload}
+          notice={setMessage}
+          role={role}
+          leadMode={activeLeadWorkspaceMode}
+          onLeadModeChange={selectLeadWorkspaceMode}
+          onLeadRemarkSaved={updateLeadRemark}
+        />
     ) : active === "Supplier's List" ? (
       <SupplierList
         store={store}
