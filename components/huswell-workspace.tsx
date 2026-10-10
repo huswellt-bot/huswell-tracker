@@ -3985,11 +3985,11 @@ function CumulativePerformanceChart({
   const values = data.reduce<number[]>(
     (totals, point) => [
       ...totals,
-      (totals.at(-1) ?? 0) + point.revenue - point.expense,
+      (totals[totals.length - 1] ?? 0) + point.revenue - point.expense,
     ],
     [],
   );
-  const runningTotal = values.at(-1) ?? 0;
+  const runningTotal = values[values.length - 1] ?? 0;
   const min = Math.min(0, ...values);
   const max = Math.max(0, ...values);
   const range = max - min || 1;
@@ -19334,7 +19334,7 @@ function ProjectOfficerSalesFunnel({
     { label: "5. Completed Projects", description: "General Manager-approved finished projects", total: kpiTotal("funnel_completed_projects", completedProjects), color: "#075fc3", Icon: Check },
   ];
   const percentage = (current: number, previous: number) => previous ? `${((current / previous) * 100).toFixed(2)}%` : "—";
-  const overallPercentage = percentage(stages.at(-1)?.total ?? 0, stages[0].total);
+  const overallPercentage = percentage(stages[stages.length - 1]?.total ?? 0, stages[0].total);
   const todayLabel = new Intl.DateTimeFormat("en-PH", {
     month: "long",
     year: "numeric",
@@ -19388,7 +19388,7 @@ function ProjectOfficerSalesFunnel({
 
     <footer className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[#dfe5ed] bg-[#f7f8fa] px-4 py-3">
       <div className="flex items-center gap-2"><span className="grid size-8 place-items-center rounded-md bg-[#16386d] text-white"><Goal aria-hidden="true" size={16} /></span><p className="text-[12px] font-medium text-[#687386]">Lead-to-project conversion</p></div>
-      <p className="text-[16px] font-semibold tabular-nums text-[#202938]">{overallPercentage}<span className="ml-2 text-[11px] font-normal text-[#687386]">({stages.at(-1)?.total.toLocaleString()} / {stages[0].total.toLocaleString()})</span></p>
+      <p className="text-[16px] font-semibold tabular-nums text-[#202938]">{overallPercentage}<span className="ml-2 text-[11px] font-normal text-[#687386]">({stages[stages.length - 1]?.total.toLocaleString()} / {stages[0].total.toLocaleString()})</span></p>
     </footer>
   </section>;
 }
