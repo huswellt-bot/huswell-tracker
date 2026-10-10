@@ -1848,7 +1848,9 @@ const workspaceViewTables = (
       : ["invoices", "payments", "target_goals", "quotations", "leads", "costing_requests"];
   if (
     view === "Leads" &&
-    (leadMode === "leads" || leadMode === "lead_change_requests")
+    (leadMode === "leads" ||
+      leadMode === "lead_change_requests" ||
+      leadMode === "endorsed_leads")
   )
     return ["leads", "quotations", "profiles", "organization_members", "lead_change_requests", "lead_unendorsement_requests", "lead_endorsement_attachments", "lead_transfer_history"];
   if (view === "Projects")
@@ -2016,6 +2018,26 @@ const directory: Module = {
 const leadRecordedDateLabel = "Date recorded";
 const leadChangeFieldLabel = (key: string) =>
   key === "address" ? "Company Address" : key.replaceAll("_", " ");
+const leadChangeSnapshot = (request: Row): Row =>
+  request.lead_snapshot && typeof request.lead_snapshot === "object"
+    ? (request.lead_snapshot as Row)
+    : {};
+const leadChangeDisplay = (request: Row, leads: Row[]) => {
+  const lead = leads.find((item) => item.id === request.lead_id);
+  const snapshot = leadChangeSnapshot(request);
+  const deleted = !text(request.lead_id, "") && !lead;
+  return {
+    lead,
+    projectName: text(
+      lead?.project_name,
+      text(snapshot.project_name, deleted ? "Deleted lead" : "Lead record unavailable"),
+    ),
+    clientName: text(lead?.client_name, text(snapshot.client_name, "")),
+    contactName: text(lead?.contact_name, text(snapshot.contact_name, "")),
+    leadNo: text(lead?.lead_no, text(snapshot.lead_no, "")),
+    deleted,
+  };
+};
 const leads: Module = {
   table: "leads",
   title: "Leads",
@@ -3627,6 +3649,7 @@ function Panel({
 type LeadWorkspaceMode =
   | "leads"
   | "transferred_leads"
+  | "endorsed_leads"
   | "projects"
   | "lead_change_requests"
   | "quotation";
@@ -3636,17 +3659,22 @@ function LeadWorkspaceTabs({
   className = "",
   showLeadChangeRequests = false,
   showTransferredLeads = false,
+  showEndorsedLeads = false,
 }: {
   active: LeadWorkspaceMode;
   onChange: (mode: LeadWorkspaceMode) => void;
   className?: string;
   showLeadChangeRequests?: boolean;
   showTransferredLeads?: boolean;
+  showEndorsedLeads?: boolean;
 }) {
   const tabs: { mode: LeadWorkspaceMode; label: string }[] = [
     { mode: "leads", label: "Leads" },
     ...(showTransferredLeads
       ? [{ mode: "transferred_leads" as const, label: "Transferred Leads" }]
+      : []),
+    ...(showEndorsedLeads
+      ? [{ mode: "endorsed_leads" as const, label: "My Endorsements" }]
       : []),
     ...(showLeadChangeRequests
       ? [{ mode: "lead_change_requests" as const, label: "My Lead Change Requests" }]
@@ -3850,6 +3878,189 @@ function LeadCoordinatorTransferredLeads({
             {rows.length
               ? "No transferred leads match the current filters."
               : "No leads have been transferred by you yet."}
+          </Empty>
+        )}
+      </Panel>
+    </div>
+  );
+}
+function PricingOfficerActiveEndorsements({
+  organizationId,
+  onLeadModeChange,
+}: {
+  organizationId: string;
+  onLeadModeChange: (mode: LeadWorkspaceMode) => void;
+}) {
+  const [rows, setRows] = useState<Row[]>([]);
+  const [query, setQuery] = useState("");
+  const [monthFilter, setMonthFilter] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError("");
+    void (async () => {
+      try {
+        const { data, error: requestError } = await createClient().rpc(
+          "sales_pricing_officer_active_endorsements",
+          { p_organization_id: organizationId },
+        );
+        if (!active) return;
+        if (requestError) {
+          setRows([]);
+          setError(requestError.message);
+          return;
+        }
+        setRows((data ?? []) as Row[]);
+      } catch (requestError) {
+        if (!active) return;
+        setRows([]);
+        setError(
+          requestError instanceof Error
+            ? requestError.message
+            : "Active endorsements could not load.",
+        );
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [organizationId]);
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredRows = useMemo(
+    () =>
+      rows.filter((row) => {
+        if (
+          normalizedQuery &&
+          ![
+            row.lead_no,
+            row.contact_name,
+            row.client_name,
+            row.project_name,
+            row.endorsed_to_name,
+            evaluationLabel(row.evaluation_number),
+          ]
+            .map((value) => text(value, ""))
+            .join(" ")
+            .toLowerCase()
+            .includes(normalizedQuery)
+        ) {
+          return false;
+        }
+        return (
+          !monthFilter ||
+          text(row.endorsed_at, "").slice(0, 7) === monthFilter
+        );
+      }),
+    [monthFilter, normalizedQuery, rows],
+  );
+
+  return (
+    <div className="-m-3 min-h-[calc(100vh-76px)] bg-white sm:-m-4 sm:min-h-[calc(100vh-84px)] lg:-m-5">
+      <Panel
+        title="Leads"
+        detail="Review the leads you endorsed to another Sales & Pricing Officer."
+        variant="page"
+        hideHeading
+      >
+        <LeadWorkspaceTabs
+          active="endorsed_leads"
+          onChange={onLeadModeChange}
+          className="px-4 sm:px-6 lg:px-7"
+          showLeadChangeRequests
+          showEndorsedLeads
+        />
+        <header className="border-t border-[#edf0f5] px-4 py-4 sm:px-6 lg:px-7">
+          <h2 className="text-[15px] font-semibold text-[#202938]">My Endorsements</h2>
+          <p className="mt-1 text-[12px] text-[#8b92a1]">
+            These are active endorsements made by you. Ownership and quotation work now belong to the selected officer.
+          </p>
+        </header>
+        <div className="flex flex-wrap gap-2 border-t border-[#edf0f5] px-4 py-2 sm:px-6 lg:px-7">
+          <label className="relative min-w-0 flex-1 sm:min-w-56">
+            <Search
+              className="absolute left-3 top-2.5 text-[#8b92a1]"
+              size={15}
+            />
+            <DebouncedSearchInput
+              value={query}
+              onCommit={setQuery}
+              className="w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
+              placeholder="Search name, company, project, or officer"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-[12px] text-[#687386]">
+            <span className="whitespace-nowrap">Month</span>
+            <input
+              type="month"
+              value={monthFilter}
+              onClick={(event) => event.currentTarget.showPicker?.()}
+              onChange={(event) => setMonthFilter(event.target.value)}
+              className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px] text-[#202938] outline-none focus:border-[#c43b43]"
+            />
+          </label>
+          {monthFilter && (
+            <Button secondary onClick={() => setMonthFilter("")}>
+              All months
+            </Button>
+          )}
+        </div>
+        {loading ? (
+          <Empty>Loading active endorsements…</Empty>
+        ) : error ? (
+          <div className="border-t border-[#edf0f5] px-4 py-8 text-center text-[12px] text-[#9b1c1c]">
+            Active endorsements could not load: {error}
+          </div>
+        ) : filteredRows.length ? (
+          <>
+            <div className="modern-table-shell">
+              <Table
+                labels={[
+                  "Date endorsed",
+                  "Name / Company",
+                  "Project",
+                  "Endorsed to",
+                  "Lead status",
+                ]}
+                minWidth={980}
+                scrollable
+                scrollContainerClassName="max-h-[560px]"
+                columnWidths={["145px", "260px", "240px", "240px", "150px"]}
+                className="lead-coordinator-table modern-page-table"
+              >
+                {filteredRows.map((row) => (
+                  <tr key={text(row.lead_id)} className="hover:bg-[#fbfcff]">
+                    <td className="px-5 py-3 align-middle">{day(row.endorsed_at)}</td>
+                    <td className="px-5 py-3 align-middle">
+                      {stackedCell(row.contact_name, row.client_name)}
+                    </td>
+                    <td className="px-5 py-3 align-middle">
+                      {text(row.project_name, "-")}
+                    </td>
+                    <td className="px-5 py-3 align-middle">
+                      {text(row.endorsed_to_name, "Sales & Pricing Officer")}
+                    </td>
+                    <td className="px-5 py-3 align-middle">
+                      <Status value={evaluationLabel(row.evaluation_number)} />
+                    </td>
+                  </tr>
+                ))}
+              </Table>
+            </div>
+            <div className="border-t border-[#edf0f5] px-4 py-3 text-[12px] text-[#626b7a] sm:px-6 lg:px-7">
+              {filteredRows.length} record{filteredRows.length === 1 ? "" : "s"}
+            </div>
+          </>
+        ) : (
+          <Empty>
+            {rows.length
+              ? "No active endorsements match the current filters."
+              : "You have not endorsed any active leads yet."}
           </Empty>
         )}
       </Panel>
@@ -5113,6 +5324,8 @@ function Records({
   const [editing, setEditing] = useState<Row | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [query, setQuery] = useState("");
+  const [leadChangeQuery, setLeadChangeQuery] = useState("");
+  const [leadChangeStatus, setLeadChangeStatus] = useState("all");
   const [page, setPage] = useState(0);
   const [saving, setSaving] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -5256,12 +5469,53 @@ function Records({
           (request) => text(request.submitted_by, "") === currentUserId,
         )
       : [];
-  const ownLeadChangeRequests =
-    isLeadChangeRequestsPage && isProjectOfficerRole(role)
-      ? store.lead_change_requests.filter(
-          (request) => text(request.submitted_by, "") === currentUserId,
-        )
-      : [];
+  const ownLeadChangeRequests = useMemo(
+    () =>
+      isLeadChangeRequestsPage && isProjectOfficerRole(role)
+        ? store.lead_change_requests.filter(
+            (request) => text(request.submitted_by, "") === currentUserId,
+          )
+        : [],
+    [
+      currentUserId,
+      isLeadChangeRequestsPage,
+      role,
+      store.lead_change_requests,
+    ],
+  );
+  const visibleOwnLeadChangeRequests = useMemo(() => {
+    const normalizedRequestQuery = leadChangeQuery.trim().toLowerCase();
+    return [...ownLeadChangeRequests]
+      .filter(
+        (request) =>
+          leadChangeStatus === "all" ||
+          text(request.status, "") === leadChangeStatus,
+      )
+      .filter((request) => {
+        if (!normalizedRequestQuery) return true;
+        const display = leadChangeDisplay(request, store.leads);
+        const changes =
+          request.proposed_changes && typeof request.proposed_changes === "object"
+            ? Object.keys(request.proposed_changes as Record<string, unknown>)
+            : [];
+        return [
+          display.leadNo,
+          display.projectName,
+          display.clientName,
+          display.contactName,
+          text(request.change_type, ""),
+          changes.map(leadChangeFieldLabel).join(" "),
+        ]
+          .map((value) => text(value, ""))
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedRequestQuery);
+      })
+      .sort(
+        (left, right) =>
+          text(right.submitted_at, "").localeCompare(text(left.submitted_at, "")),
+      );
+  }, [leadChangeQuery, leadChangeStatus, ownLeadChangeRequests, store.leads]);
   const exportLeadsBackup = async () => {
     if (!canExportLeadsBackup || exportingBackup) return;
     setExportingBackup(true);
@@ -5667,6 +5921,20 @@ function Records({
               : "",
       ]),
     );
+  const editLeadChangeRequest = (request: Row) => {
+    const display = leadChangeDisplay(request, store.leads);
+    if (!display.lead) {
+      notice("This Lead is no longer available for editing.");
+      return;
+    }
+    onLeadModeChange?.("leads");
+    setEditing(display.lead);
+    setValues({
+      ...initial(display.lead),
+      assigned_to: text(display.lead.assigned_to, ""),
+    });
+    setOpen(true);
+  };
   const save = async (nextValues = values) => {
     setSaving(true);
     const client = createClient();
@@ -6485,6 +6753,7 @@ function Records({
             className={contentPadding}
             showLeadChangeRequests={isProjectOfficerRole(role)}
             showTransferredLeads={isLeadCoordinator}
+            showEndorsedLeads={isPricingOfficerRole(role)}
           />
           <header className={`${contentPadding} border-t border-[#edf0f5] py-4`}>
             <h2 className="text-[15px] font-semibold text-[#202938]">My Lead Change Requests</h2>
@@ -6493,50 +6762,107 @@ function Records({
             </p>
           </header>
           {ownLeadChangeRequests.length ? (
-            <div className="lead-change-request-shell">
-              <Table
-                labels={["Lead", "Requested changes", "Review", "Note", "Actions"]}
-                minWidth={820}
-                scrollable
-                columnWidths={["25%", "28%", "20%", "15%", "12%"]}
-                className="lead-change-request-table modern-page-table"
-              >
-                {ownLeadChangeRequests.map((request) => {
-                  const lead = store.leads.find((item) => item.id === request.lead_id);
-                  const changes = request.proposed_changes && typeof request.proposed_changes === "object"
-                    ? Object.keys(request.proposed_changes as Record<string, unknown>)
-                    : [];
-                  const labels = changes.map(leadChangeFieldLabel);
-                  const changeSummary = text(request.change_type, "") === "delete"
-                    ? "Deletion request"
-                    : labels.length <= 2
-                      ? labels.join(", ")
-                      : `${labels.slice(0, 2).join(", ")} +${labels.length - 2} more`;
-                  return (
-                    <tr key={text(request.id)} className="hover:bg-[#fbfcff]">
-                      <td className="px-5 py-3">{stackedCell(lead?.project_name, [lead?.client_name, lead?.contact_name])}</td>
-                      <td className="px-5 py-3"><span>{changeSummary || "-"}</span><small>Submitted {day(request.submitted_at)}</small></td>
-                      <td className="px-5 py-3"><Status value={request.status} /></td>
-                      <td className="px-5 py-3">{renderRecordNote("General Manager note", text(lead?.project_name, "Lead change"), request.decision_note)}</td>
-                      <td className="px-5 py-3">
-                        {text(request.status) === "pending" && (
-                          <ActionIcon
-                            label="Unsubmit lead change"
-                            tone="amber"
-                            loading={saving}
-                            disabled={saving}
-                            confirm
-                            onClick={() => void unsubmitRequest(request, "unsubmit_lead_change", "Lead change")}
-                          >
-                            <RotateCcw size={15} />
-                          </ActionIcon>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </Table>
-            </div>
+            <>
+              <div className="flex flex-wrap gap-2 border-t border-[#edf0f5] px-4 py-2 sm:px-6 lg:px-7">
+                <label className="relative min-w-0 flex-1 sm:min-w-56">
+                  <Search
+                    className="absolute left-3 top-2.5 text-[#8b92a1]"
+                    size={15}
+                  />
+                  <DebouncedSearchInput
+                    value={leadChangeQuery}
+                    onCommit={setLeadChangeQuery}
+                    className="w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
+                    placeholder="Search name, company, project, or request"
+                  />
+                </label>
+                <select
+                  value={leadChangeStatus}
+                  onChange={(event) => setLeadChangeStatus(event.target.value)}
+                  aria-label="Filter lead change requests by status"
+                  className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] text-[#202938] outline-none focus:border-[#c43b43]"
+                >
+                  <option value="all">All statuses</option>
+                  <option value="pending">Pending</option>
+                  <option value="needs_revision">Needs revision</option>
+                  <option value="approved">Approved</option>
+                  <option value="rejected">Rejected</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
+                {(leadChangeQuery || leadChangeStatus !== "all") && (
+                  <Button
+                    secondary
+                    onClick={() => {
+                      setLeadChangeQuery("");
+                      setLeadChangeStatus("all");
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                )}
+              </div>
+              {visibleOwnLeadChangeRequests.length ? (
+                <div className="lead-change-request-shell">
+                  <Table
+                    labels={["Name / Company", "Request", "Submitted", "Status", "Your note", "GM note", "Actions"]}
+                    minWidth={1120}
+                    scrollable
+                    columnWidths={["24%", "21%", "11%", "12%", "11%", "11%", "10%"]}
+                    className="lead-change-request-table modern-page-table"
+                  >
+                    {visibleOwnLeadChangeRequests.map((request) => {
+                      const display = leadChangeDisplay(request, store.leads);
+                      const changes = request.proposed_changes && typeof request.proposed_changes === "object"
+                        ? Object.keys(request.proposed_changes as Record<string, unknown>)
+                        : [];
+                      const labels = changes.map(leadChangeFieldLabel);
+                      const changeSummary = text(request.change_type, "") === "delete"
+                        ? "Deletion request"
+                        : labels.length <= 2
+                          ? labels.join(", ")
+                          : `${labels.slice(0, 2).join(", ")} +${labels.length - 2} more`;
+                      const name = display.contactName || display.clientName || (display.deleted ? "Deleted lead" : "Lead record unavailable");
+                      return (
+                        <tr key={text(request.id)} className="hover:bg-[#fbfcff]">
+                          <td className="px-5 py-3">{stackedCell(name, [display.clientName, display.projectName, display.deleted ? "Deleted lead" : ""])}</td>
+                          <td className="px-5 py-3">{changeSummary || "-"}</td>
+                          <td className="px-5 py-3">{day(request.submitted_at)}</td>
+                          <td className="px-5 py-3"><Status value={request.status} /></td>
+                          <td className="px-5 py-3">{renderRecordNote("Your note", display.projectName, request.request_note)}</td>
+                          <td className="px-5 py-3">{renderRecordNote("General Manager note", display.projectName, request.decision_note)}</td>
+                          <td className="px-5 py-3">
+                            {text(request.status) === "pending" && (
+                              <ActionIcon
+                                label="Unsubmit lead change"
+                                tone="amber"
+                                loading={saving}
+                                disabled={saving}
+                                confirm
+                                onClick={() => void unsubmitRequest(request, "unsubmit_lead_change", "Lead change")}
+                              >
+                                <RotateCcw size={15} />
+                              </ActionIcon>
+                            )}
+                            {text(request.status) === "needs_revision" && display.lead && (
+                              <ActionIcon
+                                label="Edit and resubmit lead"
+                                tone="amber"
+                                disabled={saving}
+                                onClick={() => editLeadChangeRequest(request)}
+                              >
+                                <Pencil size={15} />
+                              </ActionIcon>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </Table>
+                </div>
+              ) : (
+                <Empty>No lead change requests match the current filters.</Empty>
+              )}
+            </>
           ) : (
             <Empty>No lead change requests yet.</Empty>
           )}
@@ -6591,25 +6917,24 @@ function Records({
           </Table>
         </Panel>
       )}
-      {!isProjectsPage && isProjectOfficerRole(role) && ownLeadChangeRequests.length > 0 && (
-        <Panel title="My Lead Change Requests" detail="Edit the lead, submit it for review, and use Edit again if the General Manager returns it for revision.">
-          <Table labels={["Lead", "Requested", "Change", "Status", "Note"]} minWidth={720}>
-            {ownLeadChangeRequests.map((request) => {
-              const lead = store.leads.find((item) => item.id === request.lead_id);
-              const changes = request.proposed_changes && typeof request.proposed_changes === "object" ? Object.keys(request.proposed_changes as Record<string, unknown>) : [];
-              return (
-                <tr key={text(request.id)}>
-                  <td className="px-4 py-3">{stackedCell(lead?.project_name, [lead?.client_name, lead?.contact_name], " · ")}</td>
-                  <td className="px-4 py-3">{day(request.submitted_at)}</td>
-                  <td className="px-4 py-3">{text(request.change_type, "") === "delete" ? "Deletion request" : changes.map(leadChangeFieldLabel).join(", ")}</td>
-                  <td className="px-4 py-3"><Status value={request.status} /></td>
-                  <td className="px-4 py-3">{renderRecordNote("General Manager note", text(lead?.project_name, "Lead change"), request.decision_note)}</td>
-                </tr>
-              );
-            })}
-          </Table>
-        </Panel>
-      )}
+      {!isProjectsPage &&
+        isProjectOfficerRole(role) &&
+        ownLeadChangeRequests.length > 0 &&
+        onLeadModeChange && (
+          <Panel
+            title="My Lead Change Requests"
+            detail="Review request status and General Manager notes in the dedicated tab."
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5">
+              <p className="text-[12px] text-[#687386]">
+                {ownLeadChangeRequests.length} request{ownLeadChangeRequests.length === 1 ? "" : "s"} · {ownLeadChangeRequests.filter((request) => text(request.status, "") === "pending").length} pending
+              </p>
+              <Button secondary onClick={() => onLeadModeChange("lead_change_requests")}>
+                View change requests
+              </Button>
+            </div>
+          </Panel>
+        )}
       <Panel
         title={module.title}
         detail={
@@ -6675,6 +7000,7 @@ function Records({
             className={contentPadding}
             showLeadChangeRequests={isProjectOfficerRole(role)}
             showTransferredLeads={isLeadCoordinator}
+            showEndorsedLeads={isPricingOfficerRole(role)}
           />
         )}
         {module.table === "leads" && isGeneralManager && !isProjectsPage && (
@@ -16528,7 +16854,9 @@ function LeadChangeRequestReview({
   decide: (decision: "approved" | "needs_revision" | "rejected", note: string) => void;
 }) {
   const [note, setNote] = useState("");
-  const lead = store.leads.find((item) => item.id === request.lead_id);
+  const display = leadChangeDisplay(request, store.leads);
+  const lead = display.lead;
+  const snapshot = leadChangeSnapshot(request);
   const isDeletion = text(request.change_type, "") === "delete";
   const changes =
     request.proposed_changes && typeof request.proposed_changes === "object"
@@ -16562,7 +16890,7 @@ function LeadChangeRequestReview({
               {isDeletion ? "Review Lead Deletion" : "Review Lead Edit"}
             </h2>
             <p className="mt-1 text-[12px] text-[#687386]">
-              {text(lead?.project_name)} · {text(lead?.lead_no)}
+              {display.projectName} · {display.leadNo}
             </p>
           </div>
           <button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938]">
@@ -16591,7 +16919,7 @@ function LeadChangeRequestReview({
                   {labels[key] ?? key}
                 </td>
                 <td className="px-4 py-3 text-[#687386]">
-                  {valueFor(key, lead?.[key])}
+                  {valueFor(key, lead ? lead[key] : snapshot[key])}
                 </td>
                 <td className="px-4 py-3 font-medium">
                   {valueFor(key, value)}
@@ -21804,6 +22132,13 @@ export function HuswellWorkspace({
           notice={setMessage}
           role={role}
           profileName={profileName}
+        />
+    ) : active === "Leads" &&
+      activeLeadWorkspaceMode === "endorsed_leads" &&
+      role === "sales_pricing_officer" ? (
+        <PricingOfficerActiveEndorsements
+          organizationId={organizationId}
+          onLeadModeChange={selectLeadWorkspaceMode}
         />
     ) : active === "Leads" &&
       activeLeadWorkspaceMode === "transferred_leads" &&
