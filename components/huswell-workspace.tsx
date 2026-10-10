@@ -205,6 +205,7 @@ type TableName =
   | "project_schedules"
   | "activity_log"
   | "leads"
+  | "lead_transfer_history"
   | "supplier_payables"
   | "organization_members"
   | "commission_summaries"
@@ -871,6 +872,7 @@ const tables: TableName[] = [
   "project_schedules",
   "activity_log",
   "leads",
+  "lead_transfer_history",
   "supplier_payables",
   "organization_members",
   "commission_summaries",
@@ -1792,7 +1794,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "announcements",
     "policies",
   ],
-  lead_coordinator: ["profiles", "organization_members", "leads", "announcements", "policies"],
+  lead_coordinator: ["profiles", "organization_members", "leads", "lead_transfer_history", "announcements", "policies"],
   viewer: [
     "customers",
     "suppliers",
@@ -1848,7 +1850,7 @@ const workspaceViewTables = (
     view === "Leads" &&
     (leadMode === "leads" || leadMode === "lead_change_requests")
   )
-    return ["leads", "quotations", "profiles", "organization_members", "lead_change_requests", "lead_unendorsement_requests", "lead_endorsement_attachments"];
+    return ["leads", "quotations", "profiles", "organization_members", "lead_change_requests", "lead_unendorsement_requests", "lead_endorsement_attachments", "lead_transfer_history"];
   if (view === "Projects")
     return [
       "project_schedules",
@@ -3624,6 +3626,7 @@ function Panel({
 }
 type LeadWorkspaceMode =
   | "leads"
+  | "transferred_leads"
   | "projects"
   | "lead_change_requests"
   | "quotation";
@@ -3632,14 +3635,19 @@ function LeadWorkspaceTabs({
   onChange,
   className = "",
   showLeadChangeRequests = false,
+  showTransferredLeads = false,
 }: {
   active: LeadWorkspaceMode;
   onChange: (mode: LeadWorkspaceMode) => void;
   className?: string;
   showLeadChangeRequests?: boolean;
+  showTransferredLeads?: boolean;
 }) {
   const tabs: { mode: LeadWorkspaceMode; label: string }[] = [
     { mode: "leads", label: "Leads" },
+    ...(showTransferredLeads
+      ? [{ mode: "transferred_leads" as const, label: "Transferred Leads" }]
+      : []),
     ...(showLeadChangeRequests
       ? [{ mode: "lead_change_requests" as const, label: "My Lead Change Requests" }]
       : []),
@@ -3663,6 +3671,189 @@ function LeadWorkspaceTabs({
         </button>
       ))}
     </nav>
+  );
+}
+function LeadCoordinatorTransferredLeads({
+  organizationId,
+  onLeadModeChange,
+}: {
+  organizationId: string;
+  onLeadModeChange: (mode: LeadWorkspaceMode) => void;
+}) {
+  const [rows, setRows] = useState<Row[]>([]);
+  const [query, setQuery] = useState("");
+  const [monthFilter, setMonthFilter] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError("");
+    void (async () => {
+      try {
+        const { data, error: requestError } = await createClient().rpc(
+          "lead_coordinator_transferred_leads",
+          { p_organization_id: organizationId },
+        );
+        if (!active) return;
+        if (requestError) {
+          setRows([]);
+          setError(requestError.message);
+          return;
+        }
+        setRows((data ?? []) as Row[]);
+      } catch (requestError) {
+        if (!active) return;
+        setRows([]);
+        setError(
+          requestError instanceof Error
+            ? requestError.message
+            : "Transferred leads could not load.",
+        );
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [organizationId]);
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const filteredRows = useMemo(
+    () =>
+      rows.filter((row) => {
+        if (
+          normalizedQuery &&
+          ![
+            row.contact_name,
+            row.client_name,
+            row.project_name,
+            row.transferred_to_name,
+            evaluationLabel(row.evaluation_number),
+          ]
+            .map((value) => text(value, ""))
+            .join(" ")
+            .toLowerCase()
+            .includes(normalizedQuery)
+        ) {
+          return false;
+        }
+        return (
+          !monthFilter ||
+          text(row.transferred_at, "").slice(0, 7) === monthFilter
+        );
+      }),
+    [monthFilter, normalizedQuery, rows],
+  );
+
+  return (
+    <div className="-m-3 min-h-[calc(100vh-76px)] bg-white sm:-m-4 sm:min-h-[calc(100vh-84px)] lg:-m-5">
+      <Panel
+        title="Leads"
+        detail="Review leads transferred to Sales & Pricing Officers."
+        variant="page"
+        hideHeading
+      >
+        <LeadWorkspaceTabs
+          active="transferred_leads"
+          onChange={onLeadModeChange}
+          className="px-4 sm:px-6 lg:px-7"
+          showTransferredLeads
+        />
+        <header className="border-t border-[#edf0f5] px-4 py-4 sm:px-6 lg:px-7">
+          <h2 className="text-[15px] font-semibold text-[#202938]">
+            Transferred Leads
+          </h2>
+          <p className="mt-1 text-[12px] text-[#8b92a1]">
+            These leads have left your active Leads list because ownership moved to the selected Sales &amp; Pricing Officer.
+          </p>
+        </header>
+        <div className="flex flex-wrap gap-2 border-t border-[#edf0f5] px-4 py-2 sm:px-6 lg:px-7">
+          <label className="relative min-w-0 flex-1 sm:min-w-56">
+            <Search
+              className="absolute left-3 top-2.5 text-[#8b92a1]"
+              size={15}
+            />
+            <DebouncedSearchInput
+              value={query}
+              onCommit={setQuery}
+              className="w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
+              placeholder="Search name, company, project, or officer"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-[12px] text-[#687386]">
+            <span className="whitespace-nowrap">Month</span>
+            <input
+              type="month"
+              value={monthFilter}
+              onClick={(event) => event.currentTarget.showPicker?.()}
+              onChange={(event) => setMonthFilter(event.target.value)}
+              className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px] text-[#202938] outline-none focus:border-[#c43b43]"
+            />
+          </label>
+          {monthFilter && (
+            <Button secondary onClick={() => setMonthFilter("")}>
+              All months
+            </Button>
+          )}
+        </div>
+        {loading ? (
+          <Empty>Loading transferred leads…</Empty>
+        ) : error ? (
+          <div className="border-t border-[#edf0f5] px-4 py-8 text-center text-[12px] text-[#9b1c1c]">
+            Transferred leads could not load: {error}
+          </div>
+        ) : filteredRows.length ? (
+          <>
+            <div className="modern-table-shell">
+              <Table
+                labels={[
+                  "Date transferred",
+                  "Name / Company",
+                  "Project",
+                  "Transferred to",
+                  "Lead status",
+                ]}
+                minWidth={980}
+                scrollable
+                scrollContainerClassName="max-h-[560px]"
+                columnWidths={["145px", "260px", "240px", "240px", "150px"]}
+                className="lead-coordinator-table modern-page-table"
+              >
+                {filteredRows.map((row) => (
+                  <tr key={text(row.transfer_id, text(row.lead_id))} className="hover:bg-[#fbfcff]">
+                    <td className="px-5 py-3 align-middle">{day(row.transferred_at)}</td>
+                    <td className="px-5 py-3 align-middle">
+                      {stackedCell(row.contact_name, row.client_name)}
+                    </td>
+                    <td className="px-5 py-3 align-middle">
+                      {text(row.project_name, "-")}
+                    </td>
+                    <td className="px-5 py-3 align-middle">
+                      {text(row.transferred_to_name, "Sales & Pricing Officer")}
+                    </td>
+                    <td className="px-5 py-3 align-middle">
+                      <Status value={evaluationLabel(row.evaluation_number)} />
+                    </td>
+                  </tr>
+                ))}
+              </Table>
+            </div>
+            <div className="border-t border-[#edf0f5] px-4 py-3 text-[12px] text-[#626b7a] sm:px-6 lg:px-7">
+              {filteredRows.length} record{filteredRows.length === 1 ? "" : "s"}
+            </div>
+          </>
+        ) : (
+          <Empty>
+            {rows.length
+              ? "No transferred leads match the current filters."
+              : "No leads have been transferred by you yet."}
+          </Empty>
+        )}
+      </Panel>
+    </div>
   );
 }
 function Empty({ children }: { children: ReactNode }) {
@@ -4954,6 +5145,14 @@ function Records({
     recipient_user_id: "",
   });
   const [bulkEndorsing, setBulkEndorsing] = useState(false);
+  const [selectedTransferLeadIds, setSelectedTransferLeadIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [bulkTransferOpen, setBulkTransferOpen] = useState(false);
+  const [bulkTransferValues, setBulkTransferValues] = useState<Record<string, string>>({
+    recipient_user_id: "",
+  });
+  const [bulkTransferring, setBulkTransferring] = useState(false);
   const [recordNote, setRecordNote] = useState<{
     title: string;
     context: string;
@@ -4998,6 +5197,18 @@ function Records({
     });
     return leadIds;
   }, [store.quotations]);
+  const transferredLeadIds = useMemo(() => {
+    const leadIds = new Set<string>();
+    store.lead_transfer_history.forEach((history) => {
+      if (
+        text(history.previous_owner_id, "") === currentUserId &&
+        text(history.lead_id, "")
+      ) {
+        leadIds.add(text(history.lead_id, ""));
+      }
+    });
+    return leadIds;
+  }, [currentUserId, store.lead_transfer_history]);
   const pendingLeadUnendorsementByLeadId = useMemo(() => {
     const requests = new Map<string, Row>();
     store.lead_unendorsement_requests.forEach((request) => {
@@ -5032,7 +5243,7 @@ function Records({
     module.table === "leads" &&
     !isProjectsPage &&
     !isLeadChangeRequestsPage &&
-    (isProjectOfficerRole(role) || isGeneralManager);
+    (isProjectOfficerRole(role) || isGeneralManager || role === "lead_coordinator");
   const canExportLeadsBackup =
     module.table === "leads" &&
     leadMode === "leads" &&
@@ -5604,10 +5815,10 @@ function Records({
   const deleteLead = async (row: Row) => {
     if (!row.id) return;
     setSaving(true);
-    const { error } = await createClient().rpc(
-      "delete_lead_as_general_manager",
-      { p_lead_id: row.id },
-    );
+    const rpc = role === "lead_coordinator"
+      ? "delete_lead_as_lead_coordinator"
+      : "delete_lead_as_general_manager";
+    const { error } = await createClient().rpc(rpc, { p_lead_id: row.id });
     setSaving(false);
     if (error) return notice(error.message);
     notice("Lead / project deleted.");
@@ -5784,6 +5995,52 @@ function Records({
       setBulkEndorsing(false);
     }
   };
+  const resetBulkTransferForm = () => {
+    setBulkTransferOpen(false);
+    setBulkTransferValues({ recipient_user_id: "" });
+  };
+  const transferSelectedLeads = async () => {
+    const leadIds = [...selectedTransferLeadIds].filter(Boolean);
+    const recipientUserId = text(bulkTransferValues.recipient_user_id, "").split("|")[0];
+    if (!leadIds.length) {
+      notice("Select at least one eligible lead to transfer.");
+      return;
+    }
+    if (!recipientUserId) {
+      notice("Select a Sales & Pricing Officer.");
+      return;
+    }
+
+    setBulkTransferring(true);
+    try {
+      const { data, error } = await createClient().rpc(
+        "transfer_leads_to_pricing_officer",
+        {
+          p_lead_ids: leadIds,
+          p_recipient_user_id: recipientUserId,
+          p_note: null,
+        },
+      );
+      if (error) throw error;
+      const transferredCount = Number(data) || leadIds.length;
+      setSelectedTransferLeadIds(new Set());
+      resetBulkTransferForm();
+      notice(
+        `${transferredCount} lead${transferredCount === 1 ? "" : "s"} transferred to the selected Sales & Pricing Officer.`,
+      );
+      await reload();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : typeof error === "object" && error !== null && "message" in error
+            ? String(error.message)
+            : "The selected leads could not be transferred. No leads were changed.";
+      notice(message);
+    } finally {
+      setBulkTransferring(false);
+    }
+  };
   const viewEndorsementImage = async (attachment: Row) => {
     const path = text(attachment.storage_path, "").trim();
     const attachmentId = text(attachment.id, "");
@@ -5856,7 +6113,12 @@ function Records({
   };
   const canDeleteLead = (row: Row) =>
     module.table === "leads" &&
-    memberRole(role);
+    (memberRole(role) ||
+      (!isProjectsPage &&
+        role === "lead_coordinator" &&
+        text(row.created_by, "") === currentUserId &&
+        text(row.assigned_to, "") === currentUserId &&
+        !transferredLeadIds.has(text(row.id, ""))));
   const canActOnLead = (row: Row) =>
     leadOwnerId(row) === currentUserId ||
     (role === "sales_pricing_officer" &&
@@ -5869,16 +6131,24 @@ function Records({
   const leadHasApprovedPriceQuotation = (row: Row) =>
     module.table === "leads" &&
     approvedPriceQuotationLeadIds.has(text(row.id, ""));
-  const canTransferLead = (row: Row) =>
-    isLeadCoordinator &&
-    !isProjectsPage &&
-    Boolean(text(row.id, "")) &&
-    leadOwnerId(row) === currentUserId &&
-    n(row.evaluation_number) !== 7 &&
-    !leadHasApprovedPriceQuotation(row) &&
-    !text(row.endorsed_by, "") &&
-    !text(row.endorsed_to, "") &&
-    !text(row.endorsed_at, "");
+  const canTransferLead = useCallback(
+    (row: Row) =>
+      isLeadCoordinator &&
+      !isProjectsPage &&
+      Boolean(text(row.id, "")) &&
+      leadOwnerId(row) === currentUserId &&
+      n(row.evaluation_number) !== 7 &&
+      !approvedPriceQuotationLeadIds.has(text(row.id, "")) &&
+      !text(row.endorsed_by, "") &&
+      !text(row.endorsed_to, "") &&
+      !text(row.endorsed_at, ""),
+    [
+      approvedPriceQuotationLeadIds,
+      currentUserId,
+      isLeadCoordinator,
+      isProjectsPage,
+    ],
+  );
   const canEndorseLead = (row: Row) =>
     module.table === "leads" &&
     !isProjectsPage &&
@@ -5946,6 +6216,52 @@ function Records({
       const next = new Set(current);
       const eligibleIds = bulkEligibleRows.map((row) => text(row.id, ""));
       if (allBulkEligibleRowsSelected) eligibleIds.forEach((leadId) => next.delete(leadId));
+      else eligibleIds.forEach((leadId) => next.add(leadId));
+      return next;
+    });
+  };
+  const bulkTransferEnabled =
+    module.table === "leads" &&
+    !isProjectsPage &&
+    role === "lead_coordinator";
+  const bulkTransferEligibleRows = useMemo(
+    () => rows.filter(canTransferLead),
+    [canTransferLead, rows],
+  );
+  const bulkTransferEligibleLeadIds = useMemo(
+    () => new Set(bulkTransferEligibleRows.map((row) => text(row.id, ""))),
+    [bulkTransferEligibleRows],
+  );
+  useEffect(() => {
+    setSelectedTransferLeadIds((current) => {
+      const next = new Set(
+        [...current].filter((leadId) => bulkTransferEligibleLeadIds.has(leadId)),
+      );
+      return next.size === current.size ? current : next;
+    });
+  }, [bulkTransferEligibleLeadIds]);
+  const allBulkTransferEligibleRowsSelected =
+    bulkTransferEligibleRows.length > 0 &&
+    bulkTransferEligibleRows.every((row) =>
+      selectedTransferLeadIds.has(text(row.id, "")),
+    );
+  const someBulkTransferEligibleRowsSelected =
+    bulkTransferEligibleRows.some((row) =>
+      selectedTransferLeadIds.has(text(row.id, "")),
+    ) && !allBulkTransferEligibleRowsSelected;
+  const toggleBulkTransferLeadSelection = (leadId: string) => {
+    setSelectedTransferLeadIds((current) => {
+      const next = new Set(current);
+      if (next.has(leadId)) next.delete(leadId);
+      else next.add(leadId);
+      return next;
+    });
+  };
+  const toggleAllBulkTransferLeadSelection = () => {
+    setSelectedTransferLeadIds((current) => {
+      const next = new Set(current);
+      const eligibleIds = bulkTransferEligibleRows.map((row) => text(row.id, ""));
+      if (allBulkTransferEligibleRowsSelected) eligibleIds.forEach((leadId) => next.delete(leadId));
       else eligibleIds.forEach((leadId) => next.add(leadId));
       return next;
     });
@@ -6168,6 +6484,7 @@ function Records({
             onChange={onLeadModeChange}
             className={contentPadding}
             showLeadChangeRequests={isProjectOfficerRole(role)}
+            showTransferredLeads={isLeadCoordinator}
           />
           <header className={`${contentPadding} border-t border-[#edf0f5] py-4`}>
             <h2 className="text-[15px] font-semibold text-[#202938]">My Lead Change Requests</h2>
@@ -6357,6 +6674,7 @@ function Records({
             onChange={onLeadModeChange}
             className={contentPadding}
             showLeadChangeRequests={isProjectOfficerRole(role)}
+            showTransferredLeads={isLeadCoordinator}
           />
         )}
         {module.table === "leads" && isGeneralManager && !isProjectsPage && (
@@ -6376,7 +6694,7 @@ function Records({
         {module.table === "leads" && role === "lead_coordinator" && !isProjectsPage && (
           <div className={`${contentPadding} border-t border-[#edf0f5] py-3`}>
             <p className="text-[12px] text-[#687386]">
-              Use the shared Leads form to add or receive leads. Transfer a lead to a Sales &amp; Pricing Officer when it is ready for quotation work; ownership then moves to that officer.
+              Use the shared Leads form to add or receive leads. You can delete leads you added before transfer. Transfer a lead to a Sales &amp; Pricing Officer when it is ready for quotation work, then review completed handoffs in Transferred Leads.
             </p>
           </div>
         )}
@@ -6546,6 +6864,46 @@ function Records({
             </div>
           </div>
         )}
+        {bulkTransferEnabled && bulkTransferEligibleRows.length > 0 && (
+          <div className={`${contentPadding} flex flex-wrap items-center justify-between gap-3 border-t border-[#edf0f5] py-3`}>
+            <div className="flex items-center gap-2 text-[12px] text-[#687386]">
+              <SelectionCheckbox
+                checked={allBulkTransferEligibleRowsSelected}
+                indeterminate={someBulkTransferEligibleRowsSelected}
+                disabled={bulkTransferring}
+                label="Select all eligible leads currently shown"
+                onChange={toggleAllBulkTransferLeadSelection}
+              />
+              <span>
+                {selectedTransferLeadIds.size
+                  ? `${selectedTransferLeadIds.size} selected`
+                  : `${bulkTransferEligibleRows.length} eligible lead${bulkTransferEligibleRows.length === 1 ? "" : "s"}`}
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {selectedTransferLeadIds.size > 0 && (
+                <Button
+                  secondary
+                  disabled={bulkTransferring}
+                  onClick={() => setSelectedTransferLeadIds(new Set())}
+                >
+                  <X size={14} />
+                  Unselect all
+                </Button>
+              )}
+              <Button
+                disabled={bulkTransferring || selectedTransferLeadIds.size === 0}
+                onClick={() => {
+                  setBulkTransferValues({ recipient_user_id: "" });
+                  setBulkTransferOpen(true);
+                }}
+              >
+                <Send size={14} />
+                Transfer selected
+              </Button>
+            </div>
+          </div>
+        )}
         {leadDistributionOpen && (
           <div
             className="fixed inset-0 z-50 flex justify-end bg-[var(--color-overlay)]"
@@ -6616,6 +6974,7 @@ function Records({
                 labels={module.table === "leads"
                   ? [
                       ...(bulkEndorsementEnabled ? [""] : []),
+                      ...(bulkTransferEnabled ? [""] : []),
                       ...(leadActionsAtEnd ? [] : ["Actions"]),
                       ...displayColumns.map((c) => c.label),
                       ...(leadActionsAtEnd ? ["Actions"] : []),
@@ -6636,6 +6995,7 @@ function Records({
                   module.table === "leads"
                     ? [
                         ...(bulkEndorsementEnabled ? ["48px"] : []),
+                        ...(bulkTransferEnabled ? ["48px"] : []),
                         ...(leadActionsAtEnd ? [] : ["112px"]),
                         ...displayColumns.map((column) =>
                           column.label === "Email"
@@ -6681,6 +7041,25 @@ function Records({
                           <span
                             className="text-[11px] text-[#8b92a1]"
                             title="This lead is not eligible for bulk endorsement"
+                          >
+                            -
+                          </span>
+                        )}
+                      </td>
+                    )}
+                    {bulkTransferEnabled && (
+                      <td className="px-5 py-3 align-middle">
+                        {canTransferLead(row) ? (
+                          <SelectionCheckbox
+                            checked={selectedTransferLeadIds.has(text(row.id, ""))}
+                            disabled={bulkTransferring}
+                            label={`Select lead ${text(row.project_name, text(row.client_name, "lead"))} for transfer`}
+                            onChange={() => toggleBulkTransferLeadSelection(text(row.id, ""))}
+                          />
+                        ) : (
+                          <span
+                            className="text-[11px] text-[#8b92a1]"
+                            title="This lead is not eligible for bulk transfer"
                           >
                             -
                           </span>
@@ -6865,6 +7244,31 @@ function Records({
         >
           <div className="mt-4 rounded-lg border border-[#e1e6ee] bg-[#fafbfe] p-3 text-[12px] leading-5 text-[#687386]">
             {selectedLeadIds.size} lead{selectedLeadIds.size === 1 ? "" : "s"} will be endorsed to the selected Sales & Pricing Officer. Bulk endorsement does not include an image.
+          </div>
+        </Dialog>
+      )}
+      {bulkTransferOpen && (
+        <Dialog
+          title="Transfer Selected Leads"
+          fields={[
+            {
+              key: "recipient_user_id",
+              label: "Sales & Pricing Officer",
+              type: "select",
+              required: true,
+              options: pricingOfficers.map((officer) => `${officer.id}|${officer.name}`),
+            },
+          ]}
+          values={bulkTransferValues}
+          setValues={setBulkTransferValues}
+          save={() => void transferSelectedLeads()}
+          close={resetBulkTransferForm}
+          saving={bulkTransferring}
+          saveLabel={`Transfer ${selectedTransferLeadIds.size} selected lead${selectedTransferLeadIds.size === 1 ? "" : "s"}`}
+          className="max-w-lg"
+        >
+          <div className="mt-4 rounded-lg border border-[#e1e6ee] bg-[#fafbfe] p-3 text-[12px] leading-5 text-[#687386]">
+            Ownership of all selected leads will move to the selected Sales &amp; Pricing Officer. If any selected lead fails the server-side transfer checks, no selected leads will be changed.
           </div>
         </Dialog>
       )}
@@ -21400,6 +21804,13 @@ export function HuswellWorkspace({
           notice={setMessage}
           role={role}
           profileName={profileName}
+        />
+    ) : active === "Leads" &&
+      activeLeadWorkspaceMode === "transferred_leads" &&
+      role === "lead_coordinator" ? (
+        <LeadCoordinatorTransferredLeads
+          organizationId={organizationId}
+          onLeadModeChange={selectLeadWorkspaceMode}
         />
     ) : active === "Leads" ? (
         <Records
