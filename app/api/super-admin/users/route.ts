@@ -229,7 +229,10 @@ export async function POST(request: Request) {
   const role =
     body?.role === "admin" ||
     body?.role === "project_manager" ||
-    body?.role === "sales_pricing_officer"
+    body?.role === "sales_pricing_officer" ||
+    body?.role === "internal_finance" ||
+    body?.role === "external_finance" ||
+    body?.role === "lead_coordinator"
       ? body.role
       : null;
   const productionApprovalEnabled = body?.production_approval_enabled === true;
@@ -375,7 +378,10 @@ export async function PATCH(request: Request) {
   const role =
     body?.role === "admin" ||
     body?.role === "project_manager" ||
-    body?.role === "sales_pricing_officer"
+    body?.role === "sales_pricing_officer" ||
+    body?.role === "internal_finance" ||
+    body?.role === "external_finance" ||
+    body?.role === "lead_coordinator"
       ? body.role
       : null;
   const productionApprovalRequested =

@@ -10,6 +10,13 @@ export const workspaceRoleLabel = (role: string) => {
       return "Sales Executive";
     case "sales_pricing_officer":
       return "Sales & Pricing Officer";
+    case "accountant":
+    case "internal_finance":
+      return "Internal Finance";
+    case "external_finance":
+      return "External Finance";
+    case "lead_coordinator":
+      return "Lead Coordinator";
     default:
       return role.replaceAll("_", " ");
   }

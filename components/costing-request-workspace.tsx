@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { FileUploadControl } from "@/components/ui/file-upload-control";
 import { NumberInput } from "@/components/ui/number-input";
+import { SearchableLeadSelect } from "@/components/ui/searchable-lead-select";
 
 type AnyRow = Record<string, unknown>;
 type RequestStatus = "draft" | "pending" | "needs_revision" | "approved";
@@ -668,6 +669,21 @@ export function CostingRequestWorkspace({
     () => availableLeads.find((lead) => stringValue(lead.id) === selectedLeadId) ?? null,
     [availableLeads, selectedLeadId],
   );
+  const leadOptions = useMemo(
+    () => availableLeads.map((lead) => ({
+      value: stringValue(lead.id),
+      label: leadClientLabel(lead),
+      searchText: [
+        stringValue(lead.lead_no),
+        stringValue(lead.client_name),
+        stringValue(lead.contact_name),
+        stringValue(lead.project_name),
+        stringValue(lead.phone),
+        stringValue(lead.email),
+      ].join(" "),
+    })),
+    [availableLeads],
+  );
   const linkedLeadId = draft?.lead_id;
   const linkedLead = useMemo(
     () => linkedLeadId
@@ -1058,7 +1074,7 @@ export function CostingRequestWorkspace({
       <Card>
         <CardHeader><h3 className="text-[14px] font-semibold">Client and source details</h3><p className="mt-0.5 text-[12px] text-[var(--color-text-secondary)]">The selected Lead is the authoritative client record. Information extracted from the document does not replace the Lead information.</p></CardHeader>
         <CardContent className="grid gap-3 border-t border-[var(--color-border)] sm:grid-cols-2 lg:grid-cols-4">
-          <Field label="Lead / client" hint={draft.lead_id ? "Linked from Leads" : "Select a Lead before submitting this costing."}>{draft.lead_id ? <input className="input mt-0" disabled value={linkedLead ? leadClientLabel(linkedLead) : draft.lead_id} /> : <select className="input mt-0" disabled={!editable} value="" onChange={(event) => { const lead = availableLeads.find((candidate) => stringValue(candidate.id) === event.target.value); if (lead) setDraftValue(leadSnapshot(lead)); }}><option value="">Select a lead</option>{availableLeads.map((lead) => <option key={stringValue(lead.id)} value={stringValue(lead.id)}>{leadClientLabel(lead)}</option>)}</select>}</Field>
+        <Field label="Lead / client" hint={draft.lead_id ? "Linked from Leads" : "Select a Lead before submitting this costing."}>{draft.lead_id ? <input className="input mt-0" disabled value={linkedLead ? leadClientLabel(linkedLead) : draft.lead_id} /> : <SearchableLeadSelect options={leadOptions} value="" onChange={(value) => { const lead = availableLeads.find((candidate) => stringValue(candidate.id) === value); if (lead) setDraftValue(leadSnapshot(lead)); }} disabled={!editable} clearable={false} placeholder="Select a lead" searchPlaceholder="Search name, contact, project, or lead number" ariaLabel="Lead / client" className="mt-0" />}</Field>
           <Field label="Client / company"><input className="input mt-0" disabled={!editable || Boolean(draft.lead_id)} value={draft.client_name} onChange={(event) => setDraftValue({ client_name: event.target.value })} /></Field>
           <Field label="Contact person"><input className="input mt-0" disabled={!editable || Boolean(draft.lead_id)} value={draft.client_contact_name} onChange={(event) => setDraftValue({ client_contact_name: event.target.value })} /></Field>
           <Field label="Phone"><input className="input mt-0" disabled={!editable || Boolean(draft.lead_id)} value={draft.client_phone} onChange={(event) => setDraftValue({ client_phone: event.target.value })} /></Field>
@@ -1234,10 +1250,7 @@ export function CostingRequestWorkspace({
             </div>
             <div className="space-y-4 p-4 sm:p-5">
               <Field label="Lead / client" hint={availableLeads.length ? "Only Leads assigned to or endorsed to you are available." : "No eligible Leads are available for costing."}>
-                <select className="input mt-0" value={selectedLeadId} onChange={(event) => { setSelectedLeadId(event.target.value); setSourceFile(null); }} disabled={analyzing || !availableLeads.length}>
-                  <option value="">Select a lead</option>
-                  {availableLeads.map((lead) => <option key={stringValue(lead.id)} value={stringValue(lead.id)}>{leadClientLabel(lead)}</option>)}
-                </select>
+                <SearchableLeadSelect options={leadOptions} value={selectedLeadId} onChange={(value) => { setSelectedLeadId(value); setSourceFile(null); }} disabled={analyzing || !availableLeads.length} clearable={false} placeholder="Select a lead" searchPlaceholder="Search name, contact, project, or lead number" ariaLabel="Lead / client" className="mt-0" />
               </Field>
               {selectedLead ? <div className="grid gap-3 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] p-3 sm:grid-cols-2 lg:grid-cols-4"><div><div className="text-[11px] text-[var(--color-text-tertiary)]">Client / company</div><div className="mt-1 text-[12px] font-medium">{stringValue(selectedLead.client_name, "—")}</div></div><div><div className="text-[11px] text-[var(--color-text-tertiary)]">Contact person</div><div className="mt-1 text-[12px] font-medium">{stringValue(selectedLead.contact_name, "—")}</div></div><div><div className="text-[11px] text-[var(--color-text-tertiary)]">Phone / email</div><div className="mt-1 text-[12px] font-medium">{stringValue(selectedLead.phone) || stringValue(selectedLead.email) || "—"}</div></div><div><div className="text-[11px] text-[var(--color-text-tertiary)]">Project</div><div className="mt-1 text-[12px] font-medium">{stringValue(selectedLead.project_name, "—")}</div></div></div> : null}
               <Field label="Source document (optional)" hint={analyzing ? "Scanning the selected document. Please wait." : sourceFile ? `${(sourceFile.size / 1024 / 1024).toFixed(2)} MB selected. Click the field to change the file.` : "Optional: PDF or Word (.docx), maximum 15 MB. Choose Enter manually if no source document is available."}>

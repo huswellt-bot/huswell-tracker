@@ -586,6 +586,9 @@ export function SuperAdminConsole({
                   <option value="project_manager">Sales Executive</option>
                   <option value="admin">General Manager</option>
                   <option value="sales_pricing_officer">Sales &amp; Pricing Officer</option>
+                  <option value="internal_finance">Internal Finance</option>
+                  <option value="external_finance">External Finance</option>
+                  <option value="lead_coordinator">Lead Coordinator</option>
                 </select>
               </label>
               {isPricingRole(editValues.role) && (
@@ -730,7 +733,7 @@ export function SuperAdminConsole({
               <div>
                 <h2 className="text-[17px] font-semibold">Add User</h2>
                 <p className="mt-1 text-[14px] text-[#7d8797]">
-                  Create a Sales Executive, General Manager, or Sales &amp; Pricing Officer login.
+                  Create a Sales Executive, General Manager, Sales &amp; Pricing Officer, Finance, or Lead Coordinator login.
                 </p>
               </div>
               <button
@@ -791,6 +794,9 @@ export function SuperAdminConsole({
                   <option value="project_manager">Sales Executive</option>
                   <option value="admin">General Manager</option>
                   <option value="sales_pricing_officer">Sales &amp; Pricing Officer</option>
+                  <option value="internal_finance">Internal Finance</option>
+                  <option value="external_finance">External Finance</option>
+                  <option value="lead_coordinator">Lead Coordinator</option>
                 </select>
               </label>
               {isPricingRole(values.role) && (

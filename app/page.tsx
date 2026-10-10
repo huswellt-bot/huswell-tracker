@@ -10,7 +10,8 @@ export default async function Home() {
   if (["owner", "admin"].includes(role)) redirect("/admin");
   if (role === "project_manager") redirect("/project-manager");
   if (role === "sales_pricing_officer") redirect("/project-manager");
-  if (role === "accountant") redirect("/accountant");
+  if (["accountant", "internal_finance", "external_finance"].includes(role)) redirect("/finance");
+  if (role === "lead_coordinator") redirect("/lead-coordinator");
 
   return <HuswellWorkspace {...access} />;
 }

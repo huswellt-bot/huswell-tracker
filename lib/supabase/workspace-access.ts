@@ -11,6 +11,9 @@ export const workspaceRoles = [
   "production",
   "warehouse",
   "accountant",
+  "internal_finance",
+  "external_finance",
+  "lead_coordinator",
   "payroll",
   "viewer",
 ] as const;

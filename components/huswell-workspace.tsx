@@ -92,9 +92,13 @@ import { createClient } from "@/lib/supabase/client";
 import { AccountProfileDialog } from "@/components/account-profile-dialog";
 import { FixedIconTooltip } from "@/components/fixed-icon-tooltip";
 import { FileUploadControl } from "@/components/ui/file-upload-control";
+import { MultiSelect, parseMultiSelectValue } from "@/components/ui/multi-select";
 import { NumberInput } from "@/components/ui/number-input";
+import { SearchableLeadSelect, type SearchableLeadOption } from "@/components/ui/searchable-lead-select";
 import { ThemeToggle } from "@/components/theme-provider";
 import { CostingRequestWorkspace } from "@/components/costing-request-workspace";
+import { FinanceWorkspace } from "@/components/finance-workspace";
+import { LeadCoordinatorWorkspace } from "@/components/lead-coordinator-workspace";
 import { LetterRequestWorkspace } from "@/components/letter-request-workspace";
 import {
   DEFAULT_PRINT_COSTING_DEFAULTS,
@@ -324,7 +328,6 @@ type PricingMarkupKey =
   | "overhead_allocation"
   | "contingency_allowance"
   | "sales_commission"
-  | "va_commission"
   | "incentives"
   | "discounts"
   | "third_party_markup"
@@ -348,7 +351,6 @@ const pricingMarkupDefinitions: Array<{
   { key: "overhead_allocation", label: "Overhead Allocation", fallback: "0", legacyKeys: ["default_overhead_rate"] },
   { key: "contingency_allowance", label: "Contingency Allowance", fallback: "20", legacyKeys: ["default_buffer_margin"] },
   { key: "sales_commission", label: "Sales Executive Commission", fallback: "0", legacyKeys: ["production_commission", "commission_default_rate"] },
-  { key: "va_commission", label: "VA Commission", fallback: "0", legacyKeys: ["va_commission_default_rate"] },
   { key: "incentives", label: "Incentives", fallback: "0", legacyKeys: [] },
   { key: "discounts", label: "Discounts", fallback: "0", legacyKeys: [] },
   { key: "third_party_markup", label: "Third Party Mark Up", fallback: "15", legacyKeys: ["default_additional_markup"] },
@@ -383,7 +385,6 @@ const pricingMarkupKeyForLabel = (label: unknown): PricingMarkupKey | "" => {
   if (normalized === "overhead expense" || normalized === "overhead allocation") return "overhead_allocation";
   if (normalized === "buffer margin" || normalized === "contingency allowance") return "contingency_allowance";
   if (normalized === "commission" || normalized === "production commission" || normalized === "sales commission" || normalized === "sales executive commission") return "sales_commission";
-  if (normalized === "va commission" || normalized === "va commission markup") return "va_commission";
   if (normalized === "incentives" || normalized === "discounts" || normalized === "third party markup" || normalized === "third party mark up" || normalized === "additional markup") {
     return normalized === "incentives" ? "incentives" : normalized === "discounts" ? "discounts" : "third_party_markup";
   }
@@ -684,7 +685,7 @@ const adjustCostingToTargetBudget = (
     return { costing, error: "The Target Budget is below the unchanged direct cost after the current Discount." };
   }
 
-  const protectedCommissionKeys = new Set(["sales_commission", "va_commission"]);
+  const protectedCommissionKeys = new Set(["sales_commission"]);
   const isProtectedCommission = (markup: ProductCostingDraft["markups"][number]) => {
     const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
     return protectedCommissionKeys.has(key);
@@ -769,6 +770,7 @@ type Field = {
     | "number"
     | "date"
     | "select"
+    | "multi_select"
     | "toggle"
     | "checkbox_group"
     | "contact_toggle"
@@ -777,6 +779,7 @@ type Field = {
     | "terms";
   required?: boolean;
   options?: string[];
+  searchable?: boolean;
   hint?: string;
   placeholder?: string;
   readOnly?: boolean;
@@ -921,6 +924,23 @@ const productionBoxMakers = [
   "Kuya Aries",
   "Kuya Archie",
 ] as const;
+const assignedBoxMakerValues = (row: Row) => {
+  const storedValues = Array.isArray(row.assigned_box_makers)
+    ? row.assigned_box_makers
+    : text(row.assigned_box_makers, "")
+        .split(/\r?\n/)
+        .filter(Boolean);
+  const legacyValue = text(row.assigned_box_maker, "");
+  return Array.from(
+    new Set(
+      (storedValues.length ? storedValues : legacyValue ? [legacyValue] : [])
+        .map((value) => text(value, "").trim())
+        .filter(Boolean),
+    ),
+  );
+};
+const assignedBoxMakerLabel = (row: Row) =>
+  assignedBoxMakerValues(row).join(", ") || "Not assigned";
 const agreementFileTypes = [
   "image/jpeg",
   "image/png",
@@ -1081,29 +1101,6 @@ const projectOfficerIdForQuote = (store: Store, quote: Row) => {
     "",
   );
 };
-const quotationAllowsVaCommission = (store: Store, quotation: Row) => {
-  const isDirectPriceQuotation =
-    text(quotation.document_type, "") === "price_quotation" &&
-    !quotation.costing_source_id;
-  if (!isDirectPriceQuotation) return true;
-
-  const organizationId = text(quotation.organization_id, "");
-  const preparatorId = text(quotation.prepared_by_user_id ?? quotation.created_by, "");
-  const leadId = text(quotation.lead_id, "");
-  const lead = store.leads.find(
-    (candidate) => text(candidate.id, "") === leadId && text(candidate.organization_id, "") === organizationId,
-  );
-  const endorserId = text(lead?.endorsed_by, "");
-  if (!organizationId || !preparatorId || !endorserId || text(lead?.endorsed_to, "") !== preparatorId) {
-    return false;
-  }
-  return store.organization_members.some(
-    (member) =>
-      text(member.organization_id, "") === organizationId &&
-      text(member.user_id, "") === endorserId &&
-      text(member.role, "") === "sales_pricing_officer",
-  );
-};
 type WorkspaceListFilterOption = { id: string; name: string };
 function WorkspaceListFilters({
   query,
@@ -1224,7 +1221,7 @@ const costingSizeDetails = (dimensions: string, unit: string) => {
 };
 const fieldPlaceholder = (field: Field) => {
   if (field.placeholder) return field.placeholder;
-  if (field.type === "date" || field.type === "select") return undefined;
+  if (field.type === "date" || field.type === "select" || field.type === "multi_select") return undefined;
   if (field.type === "email") return "name@example.com";
   if (field.type === "tel") return "Enter phone number";
   if (field.type === "url") return "https://";
@@ -1637,6 +1634,9 @@ const rolePermissions: Record<
     ],
     update: ["production_jobs", "finished_product_stock_ins"],
   },
+  lead_coordinator: {
+    create: ["leads"],
+  },
   pricing: {
     update: [
       "leads",
@@ -1775,6 +1775,25 @@ const roleReadableTables: Record<string, TableName[]> = {
     "announcements",
     "policies",
   ],
+  internal_finance: [
+    "profiles",
+    "customers",
+    "suppliers",
+    "leads",
+    "commission_summaries",
+    "quotation_payment_records",
+    "announcements",
+    "policies",
+  ],
+  external_finance: [
+    "profiles",
+    "leads",
+    "commission_summaries",
+    "quotation_payment_records",
+    "announcements",
+    "policies",
+  ],
+  lead_coordinator: ["profiles", "organization_members", "leads", "announcements", "policies"],
   viewer: [
     "customers",
     "suppliers",
@@ -1901,17 +1920,6 @@ const workspaceViewTables = (
   if (view === "Sales")
     return ["invoices", "invoice_items", "payments", "quotation_payment_records", "customers", "inventory_items"];
   if (view === "Expenses") return ["expenses", "suppliers"];
-  if (view === "Finance")
-    return [
-      "invoices",
-      "payments",
-      "quotation_payment_records",
-      "expenses",
-      "cash_flow_entries",
-      "customers",
-      "suppliers",
-      "supplier_payables",
-    ];
   if (view === "Commissions")
     return ["commission_summaries", "profiles"];
   if (view === "Payroll & Leave")
@@ -2120,44 +2128,6 @@ const supplierDirectory: Module = {
     },
   ],
 };
-const supplierPayables: Module = {
-  table: "supplier_payables",
-  title: "Supplier payables",
-  detail: "Track supplier balances, due dates, and payments still owed.",
-  add: "Add supplier payable",
-  fields: [
-    { key: "payable_no", label: "Payable reference", required: true },
-    { key: "supplier_id", label: "Supplier", type: "select", required: true },
-    { key: "description", label: "Description", required: true },
-    { key: "amount", label: "Amount due", type: "number", required: true },
-    { key: "amount_paid", label: "Amount paid", type: "number" },
-    { key: "due_date", label: "Due date", type: "date" },
-    {
-      key: "status",
-      label: "Status",
-      type: "select",
-      required: true,
-      options: ["open", "partial", "paid", "overdue", "cancelled"],
-    },
-  ],
-  columns: [
-    {
-      label: "Payable",
-      value: (r, s) =>
-        stackedCell(
-          r.payable_no,
-          s.suppliers.find((supplier) => supplier.id === r.supplier_id)
-            ?.company_name,
-        ),
-    },
-    { label: "Due date", value: (r) => day(r.due_date) },
-    {
-      label: "Balance",
-      value: (r) => peso.format(Math.max(n(r.amount) - n(r.amount_paid), 0)),
-    },
-    { label: "Status", value: (r) => <Status value={r.status} /> },
-  ],
-};
 const projects: Module = {
   ...leads,
   title: "Projects",
@@ -2360,87 +2330,6 @@ const expenses: Module = {
     { label: "Description", value: (r) => text(r.description) },
     { label: "Amount", value: (r) => peso.format(n(r.amount)) },
     { label: "Status", value: (r) => <Status value={r.status} /> },
-  ],
-};
-const finance: Module = {
-  table: "cash_flow_entries",
-  title: "Cash flow",
-  detail:
-    "Record capital, loans, withdrawals, reimbursements, and other cash movements.",
-  add: "Add cash flow",
-  fields: [
-    { key: "occurred_on", label: "Date", type: "date", required: true },
-    {
-      key: "entry_type",
-      label: "Cash movement",
-      type: "select",
-      required: true,
-      options: [
-        "starting_capital",
-        "additional_capital",
-        "loan_received",
-        "loan_payment",
-        "owner_withdrawal",
-        "reimbursement",
-        "payment_received",
-        "expense_paid",
-        "adjustment",
-      ],
-    },
-    { key: "description", label: "Description", required: true },
-    { key: "amount", label: "Amount", type: "number", required: true },
-    {
-      key: "finance_category",
-      label: "Finance category",
-      type: "select",
-      required: true,
-      options: [
-        "general",
-        "loan",
-        "credit_card",
-        "tax",
-        "income_tax_reserve",
-        "owner_withdrawal",
-        "dividend",
-        "cash_advance",
-        "benefits",
-        "payroll",
-        "salary",
-        "bills",
-        "transportation",
-        "commission",
-      ],
-    },
-  ],
-  columns: [
-    { label: "Date", value: (r) => day(r.occurred_on) },
-    {
-      label: "Description",
-      value: (r) => stackedCell(r.description, text(r.entry_type).replaceAll("_", " ")),
-    },
-    {
-      label: "Cash in",
-      value: (r) =>
-        [
-          "starting_capital",
-          "additional_capital",
-          "loan_received",
-          "reimbursement",
-          "payment_received",
-        ].includes(text(r.entry_type))
-          ? peso.format(n(r.amount))
-          : "—",
-    },
-    {
-      label: "Cash out",
-      value: (r) =>
-        ["loan_payment", "owner_withdrawal", "expense_paid"].includes(
-          text(r.entry_type),
-        )
-          ? peso.format(n(r.amount))
-          : "—",
-    },
-    { label: "Approval", value: (r) => <Status value={r.status} /> },
   ],
 };
 const payroll: Module = {
@@ -4375,6 +4264,46 @@ function Dialog({
                     <option value="Cm">Cm</option>
                   </select>
                 </div>
+              ) : f.type === "select" && f.searchable ? (
+                <SearchableLeadSelect
+                  options={(f.options ?? []).map((option): SearchableLeadOption => {
+                    const separator = option.indexOf("|");
+                    const label = separator >= 0 ? option.slice(separator + 1) : option.replaceAll("_", " ");
+                    return { value: option, label, searchText: label };
+                  })}
+                  value={values[f.key] ?? ""}
+                  required={f.required}
+                  clearable={!f.required}
+                  placeholder={`Select ${titleCase(f.label)}`}
+                  searchPlaceholder="Search lead, client, contact, or project"
+                  ariaLabel={f.label}
+                  disabled={f.disabled}
+                  className="mt-0"
+                  onChange={(value) =>
+                    setValues(
+                      onFieldChange
+                        ? onFieldChange(f.key, value, values)
+                        : { ...values, [f.key]: value },
+                    )
+                  }
+                />
+              ) : f.type === "multi_select" ? (
+                <MultiSelect
+                  options={f.options ?? []}
+                  value={values[f.key] ?? ""}
+                  required={f.required}
+                  placeholder={`Select ${titleCase(f.label)}`}
+                  ariaLabel={f.label}
+                  disabled={f.disabled}
+                  className="mt-1"
+                  onChange={(value) =>
+                    setValues(
+                      onFieldChange
+                        ? onFieldChange(f.key, value, values)
+                        : { ...values, [f.key]: value },
+                    )
+                  }
+                />
               ) : f.type === "select" ? (
                 <select
                   required={f.required}
@@ -8538,6 +8467,7 @@ function ProjectCalendar({
       schedule.project_name,
       schedule.product_name,
       schedule.progress_remark,
+      assignedBoxMakerLabel(schedule),
     ].map((value) => text(value).toLowerCase()).join(" ");
     return query.includes(projectQuery.trim().toLowerCase());
   });
@@ -8628,8 +8558,8 @@ function ProjectCalendar({
     { key: "due_date", label: "Due Date", type: "date", required: true, hint: "Each Project Type can use a due date once." },
     {
       key: "assigned_box_maker",
-      label: "Assigned Box Maker",
-      type: "select",
+      label: "Assigned Box Makers",
+      type: "multi_select",
       required: true,
       options: [...productionBoxMakers],
     },
@@ -8684,6 +8614,7 @@ function ProjectCalendar({
     setAgreementFile(file);
   };
   const save = async () => {
+    const selectedBoxMakers = parseMultiSelectValue(values.assigned_box_maker);
     if (editingSchedule?.id) {
       if (!values.start_date || !values.due_date)
         return notice("Enter the revised start and due dates.");
@@ -8722,10 +8653,10 @@ function ProjectCalendar({
       !quotationId ||
       !values.start_date ||
       !values.due_date ||
-      !values.assigned_box_maker
+      !selectedBoxMakers.length
     )
       return notice(
-        "Select an approved Price Quotation, the production dates, and an assigned box maker.",
+        "Select an approved Price Quotation, the production dates, and at least one assigned box maker.",
       );
     if (values.due_date < values.start_date)
       return notice("The deadline cannot be before the start date.");
@@ -8798,7 +8729,7 @@ function ProjectCalendar({
         : existingAgreement;
       if (!agreement) throw new Error("Upload the agreement before submitting the production request.");
       const { error } = rejectedSchedule?.id
-        ? await client.rpc("resubmit_project_schedule_with_agreement", {
+        ? await client.rpc("resubmit_project_schedule_with_box_makers", {
             p_schedule_id: rejectedSchedule.id,
             p_project_name: payload.project_name,
             p_client_name: payload.client_name,
@@ -8806,13 +8737,13 @@ function ProjectCalendar({
             p_quantity: payload.quantity,
             p_start_date: payload.start_date,
             p_due_date: payload.due_date,
-            p_assigned_box_maker: values.assigned_box_maker,
+            p_assigned_box_makers: selectedBoxMakers,
             p_agreement_storage_path: agreement.storagePath,
             p_agreement_file_name: agreement.fileName,
             p_agreement_content_type: agreement.contentType,
             p_agreement_file_size: agreement.fileSize,
           })
-        : await client.rpc("submit_project_schedule", {
+        : await client.rpc("submit_project_schedule_with_box_makers", {
             p_schedule_id: scheduleId,
             p_quotation_id: quotationId,
             p_project_name: payload.project_name,
@@ -8821,7 +8752,7 @@ function ProjectCalendar({
             p_quantity: payload.quantity,
             p_start_date: payload.start_date,
             p_due_date: payload.due_date,
-            p_assigned_box_maker: values.assigned_box_maker,
+            p_assigned_box_makers: selectedBoxMakers,
             p_agreement_storage_path: agreement.storagePath,
             p_agreement_file_name: agreement.fileName,
             p_agreement_content_type: agreement.contentType,
@@ -9033,7 +8964,7 @@ function ProjectCalendar({
       detail={
         isGeneralManager
           ? "Monitor all scheduled projects. Review new schedules, revisions, and completion requests from the Approval Center."
-          : "Select an approved Price Quotation and request production with the start and due dates."
+          : "Select an approved Price Quotation, one or more box makers, and the production dates."
       }
       variant="page"
       hideHeading
@@ -9193,7 +9124,7 @@ function ProjectCalendar({
             "Total Lead Time",
             "Project Status",
             "Project Type",
-            "Assigned Box Maker",
+            "Assigned Box Makers",
             "Agreement",
             "Percentage",
             "Remark",
@@ -9215,7 +9146,7 @@ function ProjectCalendar({
               <td className="px-4 py-2 whitespace-nowrap">{totalLeadTime(schedule)}</td>
               <td className="px-4 py-2"><Status value={schedule.completed_at ? "completed" : hasPendingScheduleCompletion(schedule) ? "completion pending" : "active"} /></td>
               <td className="px-4 py-2"><span className="inline-flex items-center gap-1.5"><span className="size-2.5 rounded-full" style={{ backgroundColor: calendarColorForProjectType(scheduleProjectType(schedule)) }} aria-hidden="true" />{scheduleProjectType(schedule)}</span></td>
-              <td className="px-4 py-2 whitespace-nowrap">{text(schedule.assigned_box_maker)}</td>
+              <td className="px-4 py-2 whitespace-normal">{assignedBoxMakerLabel(schedule)}</td>
               <td className="px-4 py-2"><AgreementAction storagePath={schedule.agreement_storage_path} notice={notice} /></td>
               <td className="px-4 py-2">{isProjectOfficerRole(role) && !schedule.completed_at ? <NumberInput aria-label={`Progress percentage for ${text(schedule.project_name, text(schedule.quotation_no))}`} min="0" max="100" step="0.01" value={projectProgress(schedule).percentage} onChange={(value) => setProgressDrafts((current) => ({ ...current, [text(schedule.id)]: { ...projectProgress(schedule), percentage: value } }))} className="input mt-0 w-20 text-center" /> : `${n(schedule.progress_percentage)}%`}</td>
               <td className="px-4 py-2 text-center"><NoteAction label={isProjectOfficerRole(role) && !schedule.completed_at ? "Edit project remark" : "View project remark"} onClick={() => openRemark(schedule)} /></td>
@@ -12172,6 +12103,7 @@ function Quotations({
       key: "lead_id",
       label: "Lead / project",
       type: "select",
+      searchable: true,
       required: true,
       options: store.leads
         .filter((lead) => !["won", "lost"].includes(text(lead.status)))
@@ -12198,6 +12130,7 @@ function Quotations({
       key: "lead_id",
       label: "Company Name - Contact Name",
       type: "select",
+      searchable: true,
       required: true,
       options: store.leads.map((lead) => `${lead.id}|${leadClientLabel(lead)}`),
     },
@@ -13761,11 +13694,18 @@ function PriceQuotationSubmissions({
       .filter((assignment) => text(assignment.pricing_officer_user_id, "") === currentUserId)
       .map((assignment) => pricingProjectTypeKey(assignment.project_type)),
   );
+  const isOwnQuotation = (quotation: Row) =>
+    role !== "sales_pricing_officer" || (
+      Boolean(currentUserId) &&
+      [quotation.created_by, quotation.prepared_by_user_id, quotation.submitted_by]
+        .some((userId) => text(userId, "") === currentUserId)
+    );
   const pendingPriceQuotations = store.quotations.filter(
     (quotation) =>
       text(quotation.status) === "pending" &&
       text(quotation.document_type) === "price_quotation" &&
       !quotation.costing_source_id &&
+      isOwnQuotation(quotation) &&
       assignedProjectTypes.has(pricingProjectTypeKey(quotation.project_types)),
   ).sort(newestActivityFirst);
   const gmRevisionPriceQuotations = store.quotations.filter(
@@ -13773,6 +13713,7 @@ function PriceQuotationSubmissions({
       isPricingOfficerRevision(quotation) &&
       text(quotation.document_type) === "price_quotation" &&
       !quotation.costing_source_id &&
+      isOwnQuotation(quotation) &&
       assignedProjectTypes.has(pricingProjectTypeKey(quotation.project_types)),
   ).sort(newestActivityFirst);
   const normalizedSearch = search.trim().toLowerCase();
@@ -13978,7 +13919,7 @@ function PriceQuotationWorkspace({
           (!isCombinedRole ||
             [quote.created_by, quote.prepared_by_user_id, quote.submitted_by].some(
               (userId) => text(userId, "") === currentUserId,
-            ) || text(quote.pricing_reviewed_by, "") === currentUserId),
+            )),
       ),
     [currentUserId, isCombinedRole, isGeneralManager, store.quotations],
   );
@@ -14027,12 +13968,24 @@ function PriceQuotationWorkspace({
       store.leads.filter(
         (lead) =>
           !["won", "lost"].includes(text(lead.status)) &&
-          (!isProjectOfficerRole(role) || Boolean(currentUserId) && (
-            leadOwnerId(lead) === currentUserId ||
-            (role === "sales_pricing_officer" && text(lead.endorsed_to, "") === currentUserId)
-          )),
+          (!isProjectOfficerRole(role) || Boolean(currentUserId) && leadOwnerId(lead) === currentUserId),
       ),
     [currentUserId, role, store.leads],
+  );
+  const leadOptions = useMemo(
+    () => availableLeads.map((lead) => ({
+      value: text(lead.id),
+      label: leadClientLabel(lead),
+      searchText: [
+        text(lead.lead_no),
+        text(lead.client_name),
+        text(lead.contact_name),
+        text(lead.project_name),
+        text(lead.phone),
+        text(lead.email),
+      ].join(" "),
+    })),
+    [availableLeads],
   );
   const resetEditor = () => {
     setEditorOpen(false);
@@ -14412,7 +14365,7 @@ function PriceQuotationWorkspace({
         <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/30 p-4">
           <section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
             <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">{editing ? "Edit Price Quotation" : "Request Price Quotation"}</h2><p className="mt-1 text-[12px] text-[#687386]">Add the requested materials and quantities. Selling prices are entered by the assigned Sales & Pricing Officer.</p></div><button type="button" onClick={resetEditor} aria-label="Close" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div>
-            <label className="mt-5 block text-[12px] font-medium text-[#202938]">Company Name - Contact Name<select value={leadId} onChange={(event) => setLeadId(event.target.value)} className="input mt-1" required><option value="">Select a lead</option>{availableLeads.map((lead) => <option key={text(lead.id)} value={text(lead.id)}>{leadClientLabel(lead)}</option>)}</select></label>
+            <label className="mt-5 block text-[12px] font-medium text-[#202938]">Company Name - Contact Name<SearchableLeadSelect options={leadOptions} value={leadId} onChange={setLeadId} required clearable={false} placeholder="Select a lead" searchPlaceholder="Search name, contact, project, or lead number" ariaLabel="Company Name - Contact Name" className="mt-1" /></label>
             <label className="mt-4 block text-[12px] font-medium text-[#202938]">Project Type<select value={projectType} onChange={(event) => setProjectType(event.target.value)} className={`input mt-1 ${projectType ? "text-[#151922]" : "text-[#8b92a1]"}`} required><option value="">Select project type</option>{quotationProjectTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
             <section className="mt-5 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -14547,7 +14500,6 @@ function PricingMarkupEditor({
   editable,
   visibleMarkupKeys,
   markupDefaults,
-  allowVaCommission,
   update,
   heading,
   showInternalVat = false,
@@ -14559,7 +14511,6 @@ function PricingMarkupEditor({
   editable: boolean;
   visibleMarkupKeys: ReadonlyArray<PricingMarkupKey>;
   markupDefaults: PricingMarkupDefault[];
-  allowVaCommission: boolean;
   update: (next: ProductCostingDraft) => void;
   heading?: string;
   showInternalVat?: boolean;
@@ -14585,7 +14536,6 @@ function PricingMarkupEditor({
     ...pricingMarkupDefinitions
       .filter((definition) =>
         definition.key !== "vat" &&
-        (allowVaCommission || definition.key !== "va_commission") &&
         !existingMarkupKeys.has(definition.key),
       )
       .map((definition) => ({
@@ -14596,7 +14546,6 @@ function PricingMarkupEditor({
     ...markupDefaults
       .filter((markup) =>
         markup.key !== "vat" &&
-        (allowVaCommission || markup.key !== "va_commission") &&
         markup.custom &&
         !existingMarkupKeys.has(markup.key),
       )
@@ -14767,7 +14716,6 @@ type PriceQuotationReviewContentProps = {
   illustrations: { id: string; description: string; imageUrl: string; fileName?: string; contentType?: string }[];
   productCostings: ProductCostingDraft[];
   pricingDefaults: Row;
-  allowVaCommission: boolean;
   setProductCostings: (next: ProductCostingDraft[] | ((current: ProductCostingDraft[]) => ProductCostingDraft[])) => void;
   prices: Record<string, string>;
   setPrices: (next: Record<string, string> | ((current: Record<string, string>) => Record<string, string>)) => void;
@@ -14925,7 +14873,6 @@ function ProductCostingsSectionWithPricing({
   costings,
   setCostings,
   pricingDefaults,
-  allowVaCommission,
   editableMarkups,
   editableInternalMarkups,
   visibleMarkupKeys,
@@ -14941,7 +14888,6 @@ function ProductCostingsSectionWithPricing({
   costings: ProductCostingDraft[];
   setCostings: (next: ProductCostingDraft[] | ((current: ProductCostingDraft[]) => ProductCostingDraft[])) => void;
   pricingDefaults: Record<string, unknown>;
-  allowVaCommission: boolean;
   editableMarkups: boolean;
   editableInternalMarkups: boolean;
   visibleMarkupKeys: ReadonlyArray<PricingMarkupKey>;
@@ -14951,14 +14897,7 @@ function ProductCostingsSectionWithPricing({
   readOnly?: boolean;
 }) {
   const displayProjectName = projectName.trim() || "Project";
-  const defaults = pricingMarkupDefaults(pricingDefaults.pricing_markup_defaults, pricingDefaults)
-    .filter((definition) => allowVaCommission || definition.key !== "va_commission");
-  const hasUnallocatedVaCommission = !allowVaCommission && costings.some((costing) =>
-    costing.markups.some((markup) => {
-      const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
-      return key === "va_commission" && n(markupValue(markup)) > 0;
-    }),
-  );
+  const defaults = pricingMarkupDefaults(pricingDefaults.pricing_markup_defaults, pricingDefaults);
   const updateCosting = (key: string, update: (costing: ProductCostingDraft) => ProductCostingDraft) =>
     setCostings((current) => current.map((costing) => costing.key === key ? update(costing) : costing));
   const [targetBudgetValues, setTargetBudgetValues] = useState<Record<string, string>>({});
@@ -15006,8 +14945,6 @@ function ProductCostingsSectionWithPricing({
             <Plus size={14} /> Add Costing Breakdown
           </Button>}
       </div>
-      {hasUnallocatedVaCommission && <p role="alert" className="mt-3 rounded-lg border border-[#f1d294] bg-[#fff8e9] px-3 py-2 text-[11px] leading-5 text-[#805b17]">VA Commission requires a valid lead endorsement to the quotation preparator. Remove the VA Commission markup or complete the endorsement before approval.</p>}
-
       {costings.length === 0 ? (
         <p className="mt-4 rounded-lg border border-dashed border-[#ccd5e0] bg-white px-3 py-3 text-[12px] text-[#687386]">No internal costing table has been added. Add one costing table for each finished product before submitting for review.</p>
       ) : (
@@ -15082,7 +15019,7 @@ function ProductCostingsSectionWithPricing({
 
                 <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
                   {editableMarkups && <div className="space-y-4">
-                    <PricingMarkupEditor costing={costing} editable={editableInternalMarkups} visibleMarkupKeys={visibleMarkupKeys} markupDefaults={defaults} allowVaCommission={allowVaCommission} update={(next) => updateCosting(costing.key, () => next)} showInternalVat={canEditVat} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
+                    <PricingMarkupEditor costing={costing} editable={editableInternalMarkups} visibleMarkupKeys={visibleMarkupKeys} markupDefaults={defaults} update={(next) => updateCosting(costing.key, () => next)} showInternalVat={canEditVat} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
                     <div className="rounded-lg border border-[#d9e0e9] bg-white p-3">
                       <div className="flex flex-wrap items-end justify-between gap-3">
                         <div className="min-w-52 flex-1">
@@ -15105,7 +15042,7 @@ function ProductCostingsSectionWithPricing({
                           </div>
                         </label> : <output aria-label={`Target selling price per piece for ${product ? text(product.description, "finished product") : "product"}`} className="text-[13px] font-semibold text-[#176b40]">{peso.format(totals.unitIncVat)}</output>}
                       </div>
-                      <p className="mt-2 text-[11px] text-[#687386]">Other percentage markups are recalculated to reach this target. Sales Executive Commission and VA Commission remain unchanged; Internal VAT, Discount and customer VAT remain as entered. GM markup percentages may exceed 100%.</p>
+                    <p className="mt-2 text-[11px] text-[#687386]">Other percentage markups are recalculated to reach this target. Sales Executive Commission, Internal VAT, Discount and customer VAT remain as entered. GM markup percentages may exceed 100%.</p>
                       {targetBudgetErrors[costing.key] && <p className="mt-2 text-[11px] font-medium text-[#b42318]">{targetBudgetErrors[costing.key]}</p>}
                     </div>
                   </div>}
@@ -15145,7 +15082,7 @@ function ProductCostingsSectionWithPricing({
 }
 
 function PriceQuotationReviewContent({
-  lines, projectName, projectType, illustrations, productCostings, pricingDefaults, allowVaCommission, setProductCostings, prices, setPrices, subtotal, vatRate, setVatRate, tax,
+  lines, projectName, projectType, illustrations, productCostings, pricingDefaults, setProductCostings, prices, setPrices, subtotal, vatRate, setVatRate, tax,
   total, terms, setTerms, bankDetails, setBankDetails,
   revisionNote, setRevisionNote, submissionNote, setSubmissionNote, close, saving, working, review, finalApproval, showInternalMarkups, sensitiveValuesHidden, toggleSensitiveValues, visibleMarkupKeys, bankVisibility, pricingRevision, readOnly = false,
   documentLabel = "Price Quotation", sourceQuotationNo,
@@ -15170,7 +15107,7 @@ function PriceQuotationReviewContent({
         <p className="mt-2 whitespace-pre-wrap text-[13px] leading-5 text-[#4b5565]">{submissionNote}</p>
       </section>}
       <QuotationReviewSummary lines={lines} prices={prices} subtotal={subtotal} vatRate={vatRate} tax={tax} total={total} productCostings={productCostings} showPrices={showInternalMarkups} />
-      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} allowVaCommission={allowVaCommission} editableMarkups={showInternalMarkups} editableInternalMarkups={finalApproval} visibleMarkupKeys={visibleMarkupKeys ?? (showInternalMarkups ? internalPricingMarkupKeys : ["discounts"])} canEditVat={finalApproval} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
+      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups={showInternalMarkups} editableInternalMarkups={finalApproval} visibleMarkupKeys={visibleMarkupKeys ?? (showInternalMarkups ? internalPricingMarkupKeys : ["discounts"])} canEditVat={finalApproval} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
       <fieldset disabled={readOnly} className="min-w-0 border-0 p-0">
       <section className="rounded-xl border border-[#e1e6ee] p-4">
         <h3 className="text-[14px] font-semibold">Terms and Conditions</h3>
@@ -15226,7 +15163,6 @@ function PriceQuotationReview({
 }) {
   const pricingRevision = !finalApproval && isPricingOfficerRevision(quotation);
   const documentLabel = "Price Quotation";
-  const allowVaCommission = quotationAllowsVaCommission(store, quotation);
   const [sensitiveValuesHidden, setSensitiveValuesHidden] = useState(false);
   const illustrationQuotationId = text(quotation.id, "");
   const pricingDefaultSettings = store.business_settings.find(
@@ -15539,7 +15475,6 @@ function PriceQuotationReview({
           illustrations={illustrations}
           productCostings={productCostings}
           pricingDefaults={activePricingDefaultSettings ?? {}}
-          allowVaCommission={allowVaCommission}
           setProductCostings={setProductCostings}
           prices={prices}
           setPrices={setPrices}
@@ -17201,7 +17136,7 @@ function Submissions({
         </Table>
       ) : <Empty>No Costing Breakdown revisions are awaiting review.</Empty>)}
       {tab === "calendar_projects" && (visiblePendingProjectSchedules.length ? (
-        <Table labels={["Select", "Assigned Sales Executive", "Price Quotation", "Client's Name / Company", "Quantity", "Project Type", "Assigned Box Maker", "Agreement", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1500}>
+        <Table labels={["Select", "Assigned Sales Executive", "Price Quotation", "Client's Name / Company", "Quantity", "Project Type", "Assigned Box Makers", "Agreement", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1500}>
           {visiblePendingProjectSchedules.map((schedule) => {
             const quotation = store.quotations.find((item) => item.id === schedule.quotation_id);
             return (
@@ -17212,7 +17147,7 @@ function Submissions({
               <td className="px-5 py-3">{text(schedule.client_name)}</td>
               <td className="px-5 py-3">{n(schedule.quantity).toLocaleString()}</td>
               <td className="px-5 py-3">{text(schedule.product_name)}</td>
-              <td className="px-5 py-3 whitespace-nowrap">{text(schedule.assigned_box_maker)}</td>
+              <td className="px-5 py-3 whitespace-normal">{assignedBoxMakerLabel(schedule)}</td>
               <td className="px-5 py-3"><AgreementAction storagePath={schedule.agreement_storage_path} notice={notice} disabled={bulkSaving} /></td>
               <td className="px-5 py-3">{day(schedule.start_date)}</td>
               <td className="px-5 py-3">{day(schedule.due_date)}</td>
@@ -17481,7 +17416,7 @@ function Production({
             labels={[
               "Job",
               "Customer / due",
-              "Box Maker",
+              "Box Makers",
               "Agreement",
               "Stage",
               "Payment",
@@ -17522,7 +17457,7 @@ function Production({
                       {late ? " · Delayed" : ""}
                     </small>
                   </td>
-                  <td className="px-5 py-3 whitespace-nowrap">{text(job.assigned_box_maker)}</td>
+              <td className="px-5 py-3 whitespace-normal">{assignedBoxMakerLabel(job)}</td>
                   <td className="px-5 py-3"><AgreementAction storagePath={job.agreement_storage_path} notice={notice} /></td>
                   <td className="px-5 py-3">
                     <Status value={job.status} />
@@ -18894,319 +18829,6 @@ function PayrollLeave({
   );
 }
 
-function FinanceReports({
-  store,
-  orgId,
-  reload,
-  notice,
-  role,
-}: {
-  store: Store;
-  orgId: string;
-  reload: () => Promise<void>;
-  notice: (m: string) => void;
-  role: string;
-}) {
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
-  const inRange = (value: unknown) => {
-    const d = String(value ?? "").slice(0, 10);
-    return (!from || d >= from) && (!to || d <= to);
-  };
-  const revenue = store.invoices
-    .filter((i) => i.status !== "void" && inRange(i.issue_date))
-    .reduce((sum, i) => sum + n(i.total_amount), 0);
-  const expensesTotal = store.expenses
-    .filter(
-      (e) =>
-        !e.archived_at &&
-        !["cancelled", "rejected"].includes(text(e.status)) &&
-        inRange(e.expense_date),
-    )
-    .reduce((sum, e) => sum + n(e.amount), 0);
-  const cashIn =
-    store.payments
-      .filter((p) => inRange(p.paid_at))
-      .reduce((sum, p) => sum + n(p.amount), 0) +
-    store.cash_flow_entries
-      .filter(
-        (e) =>
-          [
-            "starting_capital",
-            "additional_capital",
-            "loan_received",
-            "reimbursement",
-          ].includes(text(e.entry_type)) && inRange(e.occurred_on),
-      )
-      .reduce((sum, e) => sum + n(e.amount), 0);
-  const cashOut =
-    expensesTotal +
-    store.cash_flow_entries
-      .filter(
-        (e) =>
-          ["loan_payment", "owner_withdrawal", "expense_paid"].includes(
-            text(e.entry_type),
-          ) && inRange(e.occurred_on),
-      )
-      .reduce((sum, e) => sum + n(e.amount), 0);
-  const receivables = store.invoices
-    .filter(
-      (invoice) => invoice.status !== "void" && inRange(invoice.issue_date),
-    )
-    .map((invoice) => {
-      const paid = store.payments
-        .filter(
-          (payment) =>
-            payment.invoice_id === invoice.id && !payment.reversed_at,
-        )
-        .reduce((sum, payment) => sum + n(payment.amount), 0);
-      return { invoice, balance: Math.max(n(invoice.total_amount) - paid, 0) };
-    })
-    .filter(({ balance }) => balance > 0);
-  const receivableTotal = receivables.reduce(
-    (sum, item) => sum + item.balance,
-    0,
-  );
-  const payables = store.supplier_payables.filter(
-    (payable) =>
-      !["paid", "cancelled"].includes(text(payable.status)) &&
-      inRange(payable.due_date),
-  );
-  const payableTotal = payables.reduce(
-    (sum, payable) =>
-      sum + Math.max(n(payable.amount) - n(payable.amount_paid), 0),
-    0,
-  );
-  return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-end gap-3 rounded-[14px] border border-[#d9e0e9] bg-white p-4">
-        <label className="text-[12px] font-medium">
-          From
-          <input
-            type="date"
-            value={from}
-            onClick={(e) => openNativeDatePicker(e.currentTarget)}
-            onChange={(e) => setFrom(e.target.value)}
-            className="input"
-          />
-        </label>
-        <label className="text-[12px] font-medium">
-          To
-          <input
-            type="date"
-            value={to}
-            onClick={(e) => openNativeDatePicker(e.currentTarget)}
-            onChange={(e) => setTo(e.target.value)}
-            className="input"
-          />
-        </label>
-        <Button
-          secondary
-          onClick={() => {
-            const csv = `Metric,Amount\nRevenue,${revenue}\nExpenses,${expensesTotal}\nProfit / loss,${revenue - expensesTotal}\nCash in,${cashIn}\nCash out,${cashOut}`;
-            const url = URL.createObjectURL(
-              new Blob([csv], { type: "text/csv" }),
-            );
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = "huswell-financial-report.csv";
-            link.click();
-            URL.revokeObjectURL(url);
-          }}
-        >
-          Export CSV
-        </Button>
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {[
-          ["Sales / cash in", cashIn],
-          ["Client receivables", receivableTotal],
-          ["Business cash out", cashOut],
-          ["Supplier payables", payableTotal],
-        ].map(([label, value]) => (
-          <div
-            key={String(label)}
-            className="rounded-[14px] border border-[#d9e0e9] bg-white p-5"
-          >
-            <p className="text-[11px] font-semibold uppercase tracking-[.1em] text-[#8b92a1]">
-              {label}
-            </p>
-            <p className="mt-2 text-xl font-semibold">
-              {peso.format(Number(value))}
-            </p>
-          </div>
-        ))}
-      </div>
-      <div className="grid gap-5 xl:grid-cols-2">
-        <Panel
-          title="Receivables"
-          detail="Client balances still due for collection."
-        >
-          {receivables.length ? (
-            <Table
-              labels={["Client / invoice", "Due date", "Balance", "Status"]}
-            >
-              {receivables.map(({ invoice, balance }) => (
-                <tr key={text(invoice.id)}>
-                  <td className="px-5 py-3">
-                    {stackedCell(
-                      store.customers.find(
-                        (customer) => customer.id === invoice.customer_id,
-                      )?.company_name,
-                      invoice.invoice_no,
-                    )}
-                  </td>
-                  <td className="px-5 py-3">{day(invoice.due_date)}</td>
-                  <td className="px-5 py-3 font-semibold">
-                    {peso.format(balance)}
-                  </td>
-                  <td className="px-5 py-3">
-                    <Status value={invoice.status} />
-                  </td>
-                </tr>
-              ))}
-            </Table>
-          ) : (
-            <Empty>No client balances awaiting collection.</Empty>
-          )}
-        </Panel>
-        <Panel
-          title="Supplier payables"
-          detail="Supplier balances and upcoming payment obligations."
-        >
-          {payables.length ? (
-            <Table labels={["Supplier", "Due date", "Balance", "Status"]}>
-              {payables.map((payable) => (
-                <tr key={text(payable.id)}>
-                  <td className="px-5 py-3">
-                    {stackedCell(
-                      store.suppliers.find(
-                        (supplier) => supplier.id === payable.supplier_id,
-                      )?.company_name,
-                      payable.payable_no,
-                    )}
-                  </td>
-                  <td className="px-5 py-3">{day(payable.due_date)}</td>
-                  <td className="px-5 py-3 font-semibold">
-                    {peso.format(
-                      Math.max(n(payable.amount) - n(payable.amount_paid), 0),
-                    )}
-                  </td>
-                  <td className="px-5 py-3">
-                    <Status value={payable.status} />
-                  </td>
-                </tr>
-              ))}
-            </Table>
-          ) : (
-            <Empty>No supplier balances awaiting payment.</Empty>
-          )}
-        </Panel>
-      </div>
-      <Records
-        module={finance}
-        store={store}
-        orgId={orgId}
-        reload={reload}
-        notice={notice}
-        role={role}
-      />
-      <Records
-        module={expenses}
-        store={store}
-        orgId={orgId}
-        reload={reload}
-        notice={notice}
-        role={role}
-      />
-      <Records
-        module={supplierPayables}
-        store={store}
-        orgId={orgId}
-        reload={reload}
-        notice={notice}
-        role={role}
-      />
-      <Panel
-        title="Financial statement"
-        detail="Income, expenses, and cash movements for the selected period."
-        action={
-          <Button secondary onClick={() => window.print()}>
-            <Printer size={14} />
-            Print report
-          </Button>
-        }
-      >
-        <Table labels={["Statement", "Amount"]}>
-          <tr>
-            <td className="px-5 py-3">Sales revenue</td>
-            <td className="px-5 py-3">{peso.format(revenue)}</td>
-          </tr>
-          <tr>
-            <td className="px-5 py-3">Operating expenses</td>
-            <td className="px-5 py-3">{peso.format(expensesTotal)}</td>
-          </tr>
-          <tr>
-            <td className="px-5 py-3 font-semibold">Net profit / loss</td>
-            <td className="px-5 py-3 font-semibold">
-              {peso.format(revenue - expensesTotal)}
-            </td>
-          </tr>
-          <tr>
-            <td className="px-5 py-3">Cash in</td>
-            <td className="px-5 py-3">{peso.format(cashIn)}</td>
-          </tr>
-          <tr>
-            <td className="px-5 py-3">Cash out</td>
-            <td className="px-5 py-3">{peso.format(cashOut)}</td>
-          </tr>
-          <tr>
-            <td className="px-5 py-3 font-semibold">Available funds</td>
-            <td className="px-5 py-3 font-semibold">
-              {peso.format(cashIn - cashOut)}
-            </td>
-          </tr>
-        </Table>
-      </Panel>
-      <Panel
-        title="Expense category breakdown"
-        detail="Operating expenses by category for the selected period."
-      >
-        <Table labels={["Category", "Amount", "Coverage"]}>
-          {Object.entries(
-            store.expenses
-              .filter(
-                (expense) =>
-                  !expense.archived_at &&
-                  !["cancelled", "rejected"].includes(text(expense.status)) &&
-                  inRange(expense.expense_date),
-              )
-              .reduce<Record<string, number>>(
-                (groups, expense) => ({
-                  ...groups,
-                  [text(expense.category, "Uncategorized")]:
-                    (groups[text(expense.category, "Uncategorized")] ?? 0) +
-                    n(expense.amount),
-                }),
-                {},
-              ),
-          ).map(([category, amount]) => (
-            <tr key={category}>
-              <td className="px-5 py-3">
-                <b>{category}</b>
-              </td>
-              <td className="px-5 py-3">{peso.format(amount)}</td>
-              <td className="px-5 py-3">
-                <Progress value={amount} total={expensesTotal} />
-              </td>
-            </tr>
-          ))}
-        </Table>
-      </Panel>
-    </div>
-  );
-}
-
 function useSharedKpiDashboard(orgId: string, month = currentMonth()) {
   const [sharedKpis, setSharedKpis] = useState<Row | null>(null);
 
@@ -20033,32 +19655,17 @@ function Approvals({
 
 function CommissionSummaryView({
   store,
-  reload,
-  notice,
   role,
   readOnly = false,
 }: {
   store: Store;
-  reload: () => Promise<void>;
-  notice: (m: string) => void;
   role: string;
   readOnly?: boolean;
 }) {
-  const canManage = !readOnly && (memberRole(role) || role === "accountant");
-  const canUndoPaid = !readOnly && memberRole(role);
+  const canManage = !readOnly && memberRole(role);
   const [commissionQuery, setCommissionQuery] = useState("");
   const [commissionMonth, setCommissionMonth] = useState(currentMonth);
   const [officerFilter, setOfficerFilter] = useState("all");
-  const [summaryFormOpen, setSummaryFormOpen] = useState(false);
-  const [editingSummary, setEditingSummary] = useState<Row | null>(null);
-  const [summaryValues, setSummaryValues] = useState<Record<string, string>>({});
-  const [summaryError, setSummaryError] = useState("");
-  const [summarySaving, setSummarySaving] = useState(false);
-  const [undoRow, setUndoRow] = useState<Row | null>(null);
-  const [undoValues, setUndoValues] = useState<Record<string, string>>({ reason: "" });
-  const [undoError, setUndoError] = useState("");
-  const [undoSaving, setUndoSaving] = useState(false);
-  const [paidId, setPaidId] = useState<string | null>(null);
 
   const userName = useCallback(
     (userId: unknown, fallback = "Sales & Pricing Officer") =>
@@ -20068,183 +19675,77 @@ function CommissionSummaryView({
       ),
     [store.profiles],
   );
-  const salesCommissionAmount = (summary: Row) =>
-    n(summary.sales_commission_markup_amount ?? summary.commission_amount);
-  const vaCommissionAmount = (summary: Row) =>
-    n(summary.va_commission_markup_amount ?? summary.va_commission_amount);
+  const allocationRowsFor = useCallback(
+    (summary: Row): Row[] => (Array.isArray(summary.allocations) ? summary.allocations : []) as Row[],
+    [],
+  );
+  const totalCommissionAmount = (summary: Row) =>
+    allocationRowsFor(summary).reduce((sum, allocation) => sum + n(allocation.amount), 0);
   const officerIds = Array.from(
-    new Set([
-      ...store.commission_summaries.flatMap((summary) =>
-        [summary.preparator_user_id, summary.va_endorser_user_id]
-          .map((userId) => text(userId, ""))
+    new Set(
+      store.commission_summaries.flatMap((summary) =>
+        allocationRowsFor(summary)
+          .map((allocation) => text(allocation.recipient_user_id, ""))
           .filter(Boolean),
       ),
-    ]),
+    ),
   );
   const deferredCommissionQuery = useDeferredValue(commissionQuery);
   const filteredRows = useMemo(() => {
     const normalizedQuery = deferredCommissionQuery.trim().toLowerCase();
     return store.commission_summaries.filter((summary) => {
+      const allocations = allocationRowsFor(summary);
+      if (!allocations.length) return false;
       if (
         commissionMonth &&
         text(summary.created_at, "").slice(0, 7) !== commissionMonth
-      )
+      ) {
         return false;
-      if (
-        officerFilter !== "all" &&
-        ![summary.preparator_user_id, summary.va_endorser_user_id].some(
-          (userId) => text(userId, "") === officerFilter,
-        )
-      )
-        return false;
+      }
+      const people = allocations.map((allocation) => text(allocation.recipient_user_id, ""));
+      if (officerFilter !== "all" && !people.includes(officerFilter)) return false;
       if (!normalizedQuery) return true;
       return [
         summary.quotation_no,
         summary.project_name,
         summary.client_name,
-        readOnly
-          ? summary.my_commission_type
-          : userName(summary.preparator_user_id),
-        readOnly
-          ? summary.my_officer_name
-          : summary.va_endorser_user_id
-            ? userName(summary.va_endorser_user_id)
-            : "",
+        summary.my_commission_type,
+        summary.my_officer_name,
+        ...allocations.flatMap((allocation) => [
+          allocation.recipient_name,
+          userName(allocation.recipient_user_id),
+        ]),
       ].some((value) => text(value, "").toLowerCase().includes(normalizedQuery));
     });
-  }, [commissionMonth, deferredCommissionQuery, officerFilter, readOnly, store.commission_summaries, userName]);
+  }, [
+    allocationRowsFor,
+    deferredCommissionQuery,
+    commissionMonth,
+    officerFilter,
+    store.commission_summaries,
+    userName,
+  ]);
   const commissionTotal = filteredRows.reduce(
-    (sum, summary) => sum + salesCommissionAmount(summary),
+    (sum, summary) => sum + totalCommissionAmount(summary),
     0,
   );
-  const vaCommissionTotal = filteredRows.reduce(
-    (sum, summary) => sum + vaCommissionAmount(summary),
-    0,
-  );
-  const totalCommission = commissionTotal + vaCommissionTotal;
   const myCommissionTotal = filteredRows.reduce(
     (sum, summary) => sum + n(summary.my_commission_amount),
     0,
   );
-  const openEdit = (summary: Row) => {
-    setEditingSummary(summary);
-    setSummaryError("");
-    setSummaryValues({
-      downpayment_amount: String(n(summary.downpayment_amount)),
-      receivable_balance: String(n(summary.receivable_balance)),
-    });
-    setSummaryFormOpen(true);
+
+  const formatStatus = (summary: Row) => {
+    const allocations = allocationRowsFor(summary);
+    const hasOutstanding = allocations.some(
+      (allocation) => !["paid", "not_applicable"].includes(text(allocation.status)),
+    );
+    if (hasOutstanding && allocations.some((allocation) => text(allocation.status) === "paid")) return "Partially paid";
+    if (hasOutstanding) return "Not yet paid";
+    return allocations.every((allocation) => text(allocation.status) === "not_applicable")
+      ? "No payout required"
+      : "Paid";
   };
-  const closeSummaryForm = () => {
-    if (!summarySaving) {
-      setSummaryError("");
-      setSummaryFormOpen(false);
-      setEditingSummary(null);
-    }
-  };
-  const refreshSummaryData = async () => {
-    await reload();
-  };
-  const saveSummary = async () => {
-    if (!editingSummary) return;
-    setSummarySaving(true);
-    setSummaryError("");
-    try {
-      const client = createClient();
-      const downpaymentAmount = n(summaryValues.downpayment_amount);
-      const grandTotal = n(editingSummary.grand_total);
-      if (downpaymentAmount > grandTotal) {
-        throw new Error("Downpayment Amount cannot exceed the Grand Total.");
-      }
-      const receivableBalance = roundCurrency(
-        Math.max(grandTotal - downpaymentAmount, 0),
-      );
-      if (editingSummary) {
-        const { error } = await client.rpc("update_commission_summary", {
-          p_summary_id: editingSummary.id,
-          p_downpayment_amount: downpaymentAmount,
-          p_receivable_balance: receivableBalance,
-          p_commission_rate: n(editingSummary.commission_rate),
-          p_va_commission_rate: n(editingSummary.va_commission_rate),
-        });
-        if (error) throw error;
-        notice("Commission Summary updated.");
-      }
-      setSummaryFormOpen(false);
-      setEditingSummary(null);
-      await refreshSummaryData();
-    } catch (error) {
-      setSummaryError(
-        error instanceof Error
-          ? error.message
-          : "Commission Summary could not be saved.",
-      );
-    } finally {
-      setSummarySaving(false);
-    }
-  };
-  const markPaid = async (summary: Row) => {
-    const summaryId = text(summary.id, "");
-    if (!summaryId) return;
-    setPaidId(summaryId);
-    const { error } = await createClient().rpc("mark_commission_summary_paid", {
-      p_summary_id: summaryId,
-    });
-    setPaidId(null);
-    if (error) return notice(error.message);
-    notice("Sales Executive Commission and VA Commission marked paid.");
-    await refreshSummaryData();
-  };
-  const openUndo = (summary: Row) => {
-    setUndoRow(summary);
-    setUndoValues({ reason: "" });
-    setUndoError("");
-  };
-  const undoPaid = async () => {
-    if (!undoRow) return;
-    const reason = text(undoValues.reason, "").trim();
-    if (reason.length < 3) {
-      setUndoError("Enter a reason before undoing Paid status.");
-      return;
-    }
-    setUndoSaving(true);
-    setUndoError("");
-    const { error } = await createClient().rpc("undo_commission_summary_paid", {
-      p_summary_id: undoRow.id,
-      p_reason: reason,
-    });
-    setUndoSaving(false);
-    if (error) {
-      setUndoError(error.message);
-      return;
-    }
-    setUndoRow(null);
-    notice("Paid status undone. The Commission Summary can be edited again.");
-    await refreshSummaryData();
-  };
-  const formGrandTotal = n(editingSummary?.grand_total);
-  const calculatedReceivableBalance = editingSummary
-    ? roundCurrency(
-        Math.max(formGrandTotal - n(summaryValues.downpayment_amount), 0),
-      )
-    : null;
-  const dialogSummaryValues = editingSummary
-    ? {
-        ...summaryValues,
-        receivable_balance: peso.format(calculatedReceivableBalance ?? 0),
-      }
-    : summaryValues;
-  /* retired quotation picker
-  const quotationOptions = [];
-      `${text(quotation.quotation_id)}|${text(quotation.quotation_no, "Price Quotation")} · ${text(quotation.client_name, "Unnamed client")}`,
-  );
-  */
-  const summaryFields: Field[] = [
-    { key: "downpayment_amount", label: "Downpayment Amount", type: "number", required: true },
-    { key: "receivable_balance", label: "Receivable / Due Balance", type: "text", required: true, readOnly: true },
-  ];
-  const formatStatus = (summary: Row) =>
-    summary.status === "paid" ? "Paid" : "Not yet paid";
+
   return (
     <div className="space-y-4">
       <Panel
@@ -20254,30 +19755,28 @@ function CommissionSummaryView({
             ? "Only your allocation from approved Price Quotations is shown."
             : "Commission allocations are created automatically from approved costing markups."
         }
-        action={readOnly ? (
-          <div className="ml-auto min-w-[180px] rounded-[8px] border border-[#b7dfc5] bg-[#f1fbf4] p-2.5 text-[11px]">
-            <p className="text-[#687386]">My commission total</p>
-            <p className="mt-0.5 text-[15px] font-semibold text-[#176b40]">{peso.format(myCommissionTotal)}</p>
-          </div>
-        ) : undefined}
+        action={
+          readOnly ? (
+            <div className="ml-auto min-w-[180px] rounded-[8px] border border-[#b7dfc5] bg-[#f1fbf4] p-2.5 text-[11px]">
+              <p className="text-[#687386]">My commission total</p>
+              <p className="mt-0.5 text-[15px] font-semibold text-[#176b40]">{peso.format(myCommissionTotal)}</p>
+            </div>
+          ) : undefined
+        }
       >
         {!readOnly && (
-          <div className="grid gap-2 border-b border-[#e4e8ef] p-3 sm:grid-cols-3">
+          <div className="grid gap-2 border-b border-[#e4e8ef] p-3 sm:grid-cols-2">
             <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-2.5 text-[11px]">
-              <p className="text-[#687386]">Sales Commission total</p>
+              <p className="text-[#687386]">Commission total</p>
               <p className="mt-0.5 text-[15px] font-semibold text-[#202938]">{peso.format(commissionTotal)}</p>
             </div>
-            <div className="rounded-[8px] border border-[#d9e0e9] bg-[#fafbfc] p-2.5 text-[11px]">
-              <p className="text-[#687386]">VA Commission total</p>
-              <p className="mt-0.5 text-[15px] font-semibold text-[#202938]">{peso.format(vaCommissionTotal)}</p>
-            </div>
             <div className="rounded-[8px] border border-[#b7dfc5] bg-[#f1fbf4] p-2.5 text-[11px]">
-              <p className="text-[#687386]">Total commission</p>
-              <p className="mt-0.5 text-[15px] font-semibold text-[#176b40]">{peso.format(totalCommission)}</p>
+              <p className="text-[#687386]">Payout model</p>
+              <p className="mt-0.5 text-[12px] font-semibold text-[#176b40]">Self-handled 100% - Endorsed 60/40</p>
             </div>
           </div>
         )}
-        <div className={`flex flex-wrap items-end gap-2 border-b border-[#e4e8ef] px-3 sm:px-4 ${readOnly ? "-mt-2 pb-2 pt-0" : "py-2"}`}>
+        <div className={"flex flex-wrap items-end gap-2 border-b border-[#e4e8ef] px-3 sm:px-4 " + (readOnly ? "-mt-2 pb-2 pt-0" : "py-2")}>
           <label className="min-w-48 flex-1 text-[11px] font-medium">
             Search
             <input
@@ -20329,102 +19828,45 @@ function CommissionSummaryView({
         </div>
         {filteredRows.length ? (
           <Table
-            labels={readOnly
-              ? ["Quotation", "Client / project", "Grand total", "My commission", "Status"]
-              : [
-                  "Quotation",
-                  "Client / project",
-                  "Grand total",
-                  "Prepared by / Sales",
-                  "VA endorser / VA",
-                  "Downpayment",
-                  "Receivable",
-                  "Total commission",
-                  "Status",
-                  "Actions",
-                ]}
-            minWidth={readOnly ? 680 : 1360}
+            labels={["Quotation", "Name / Company", "S.E. Origin", "Co-Worker", "Grand Total", "Commission"]}
+            minWidth={920}
             className="commission-summary-table table-fixed"
-            columnWidths={readOnly
-              ? ["18%", "32%", "17%", "23%", "10%"]
-              : ["10%", "13%", "8%", "12%", "13%", "7%", "8%", "8%", "6%", "15%"]}
-            alignRightLabels={readOnly
-              ? ["Grand total", "My commission"]
-              : ["Grand total", "Downpayment", "Receivable", "Total commission"]}
+            columnWidths={["15%", "23%", "18%", "18%", "12%", "14%"]}
+            alignRightLabels={["Grand Total", "Commission"]}
           >
             {filteredRows.map((summary) => {
-              const hasLeadEndorsement = Boolean(summary.lead_endorser_user_id);
-              const rowTotal = salesCommissionAmount(summary) + vaCommissionAmount(summary);
-              if (readOnly) {
-                return (
-                  <tr key={text(summary.id)}>
-                    <td className="px-4 py-3">{stackedCell(summary.quotation_no, text(summary.created_at, "").slice(0, 10))}</td>
-                    <td className="px-4 py-3">{stackedCell(summary.client_name, summary.project_name)}</td>
-                    <td className="px-4 py-3 text-right font-medium">{peso.format(n(summary.grand_total))}</td>
-                    <td className="px-4 py-3 text-right font-medium">
-                      {peso.format(n(summary.my_commission_amount))}
-                    </td>
-                    <td className="px-4 py-3"><Status value={formatStatus(summary)} /></td>
-                  </tr>
-                );
-              }
+              const allocations = allocationRowsFor(summary);
+              const originAllocation = allocations.find((allocation) =>
+                ["originating_se", "self_handled_se"].includes(text(allocation.allocation_role)),
+              );
+              const coworkerAllocation = allocations.find(
+                (allocation) => text(allocation.allocation_role) === "costing_se",
+              );
+              const originName = originAllocation
+                ? text(originAllocation.recipient_name, userName(originAllocation.recipient_user_id))
+                : "—";
+              const originDetail = originAllocation
+                ? `${n(originAllocation.share_rate)}% - ${peso.format(n(originAllocation.amount))}`
+                : "—";
+              const selfHandled = text(originAllocation?.allocation_role) === "self_handled_se";
+              const coworkerName = selfHandled
+                ? "Self-handled"
+                : coworkerAllocation
+                  ? text(coworkerAllocation.recipient_name, userName(coworkerAllocation.recipient_user_id))
+                  : "—";
+              const coworkerDetail = selfHandled
+                ? "No co-worker"
+                : coworkerAllocation
+                  ? `${n(coworkerAllocation.share_rate)}% - ${peso.format(n(coworkerAllocation.amount))}`
+                  : "—";
               return (
                 <tr key={text(summary.id)}>
                   <td className="px-4 py-3">{stackedCell(summary.quotation_no, text(summary.created_at, "").slice(0, 10))}</td>
                   <td className="px-4 py-3">{stackedCell(summary.client_name, summary.project_name)}</td>
+                  <td className="px-4 py-3">{stackedCell(originName, originDetail)}</td>
+                  <td className="px-4 py-3">{stackedCell(coworkerName, coworkerDetail)}</td>
                   <td className="px-4 py-3 text-right font-medium">{peso.format(n(summary.grand_total))}</td>
-                  <td className="px-4 py-3">
-                    {stackedCell(userName(summary.preparator_user_id), `${n(summary.commission_rate)}% · ${peso.format(n(summary.commission_amount))}`)}
-                  </td>
-                  <td className="px-4 py-3">
-                    {stackedCell(
-                      summary.va_endorser_user_id
-                        ? userName(summary.va_endorser_user_id)
-                        : hasLeadEndorsement
-                          ? "No eligible VA recipient"
-                          : "—",
-                      summary.va_endorser_user_id
-                        ? `${n(summary.va_commission_rate)}% · ${peso.format(n(summary.va_commission_amount))}`
-                        : "No VA Commission",
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right">{peso.format(n(summary.downpayment_amount))}</td>
-                  <td className="px-4 py-3 text-right">{peso.format(n(summary.receivable_balance))}</td>
-                  <td className="px-4 py-3 text-right font-semibold text-[#176b40]">{peso.format(rowTotal)}</td>
-                  <td className="px-4 py-3"><Status value={formatStatus(summary)} /></td>
-                  {canManage && (
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap justify-center gap-1">
-                        {summary.status !== "paid" ? (
-                          <>
-                            <Button secondary compact onClick={() => openEdit(summary)}>
-                              <Pencil size={13} />
-                              Edit
-                            </Button>
-                            <Button
-                              tone="green"
-                              compact
-                              confirm
-                              confirmationText="Mark both Sales Executive Commission and VA Commission as paid?"
-                              disabled={paidId === text(summary.id, "")}
-                              loading={paidId === text(summary.id, "")}
-                              onClick={() => void markPaid(summary)}
-                            >
-                              <Check size={13} />
-                              Paid
-                            </Button>
-                          </>
-                        ) : canUndoPaid ? (
-                          <Button secondary compact onClick={() => openUndo(summary)}>
-                            <RotateCcw size={13} />
-                            Undo paid
-                          </Button>
-                        ) : (
-                          <span className="self-center text-[11px] text-[#687386]">Read-only after paid</span>
-                        )}
-                      </div>
-                    </td>
-                  )}
+                  <td className="px-4 py-3 text-right font-semibold text-[#176b40]">{stackedCell(peso.format(totalCommissionAmount(summary)), formatStatus(summary))}</td>
                 </tr>
               );
             })}
@@ -20440,55 +19882,6 @@ function CommissionSummaryView({
         )}
       </Panel>
 
-      {canManage && summaryFormOpen && (
-        <Dialog
-          title="Edit Commission Summary"
-          fields={summaryFields}
-          values={dialogSummaryValues}
-          setValues={setSummaryValues}
-          save={() => void saveSummary()}
-          close={closeSummaryForm}
-          saving={summarySaving}
-          saveLabel="Save changes"
-          className="max-w-2xl"
-        >
-          {editingSummary ? (
-            <p className="mt-3 mb-3 rounded-lg bg-[#fafbfc] p-3 text-[12px] text-[#687386]">
-              {text(editingSummary.quotation_no)} · Grand total <b className="text-[13px] font-semibold text-[#176b40]">{peso.format(n(editingSummary.grand_total))}</b>. Paid records cannot be edited.
-            </p>
-          ) : null /* retired manual-create branch
-            <p className="mt-3 mb-3 rounded-lg bg-[#fafbfc] p-3 text-[12px] text-[#687386]">
-              Prepared By: <b>{text(selectedQuotation.preparator_name, userName(selectedQuotation.preparator_user_id))}</b>
-              {Boolean(selectedQuotation.va_endorser_user_id) && <> · VA endorser: <b>{text(selectedQuotation.va_endorser_name, userName(selectedQuotation.va_endorser_user_id))}</b></>}
-              <br />Grand total: <b className="text-[13px] font-semibold text-[#176b40]">{peso.format(n(selectedQuotation.grand_total))}</b>
-            </p>
-          ) : null */}
-          {editingSummary && (
-            <p className="mb-3 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[12px] text-[#687386]">
-              Commission amounts are read-only and come from the approved costing markup: Sales Commission <b className="text-[#202938]">{peso.format(salesCommissionAmount(editingSummary))}</b> and VA Commission <b className="text-[#202938]">{peso.format(vaCommissionAmount(editingSummary))}</b>.
-            </p>
-          )}
-          {summaryError && <p role="alert" className="mb-3 text-sm text-[#b42318]">{summaryError}</p>}
-        </Dialog>
-      )}
-
-      {canUndoPaid && undoRow && (
-        <Dialog
-          title="Undo paid Commission Summary"
-          fields={[{ key: "reason", label: "Reason", type: "textarea", required: true, placeholder: "Explain why this paid record must be reopened." }]}
-          values={undoValues}
-          setValues={setUndoValues}
-          save={() => void undoPaid()}
-          close={() => { if (!undoSaving) setUndoRow(null); }}
-          saving={undoSaving}
-          saveLabel="Undo paid status"
-        >
-          <p className="mb-3 rounded-lg border border-[#f1d294] bg-[#fff8e9] p-3 text-[12px] text-[#805b17]">
-            This returns the row to Not yet paid and makes its fields editable again. The reason is retained in the activity history.
-          </p>
-          {undoError && <p role="alert" className="mb-3 text-sm text-[#b42318]">{undoError}</p>}
-        </Dialog>
-      )}
     </div>
   );
 }
@@ -21161,7 +20554,11 @@ export function HuswellWorkspace({
   productionApprovalEnabled?: boolean;
   initialView?: View;
 }) {
-  const defaultWorkspaceView: View = role === "accountant" ? "Finance" : "Dashboard";
+  const defaultWorkspaceView: View = ["accountant", "internal_finance", "external_finance"].includes(role)
+    ? "Finance"
+    : role === "lead_coordinator"
+      ? "Leads"
+      : "Dashboard";
   const requestedInitialView: View =
     initialView === "Costing Breakdown"
       ? "Price Quotations"
@@ -21190,7 +20587,7 @@ export function HuswellWorkspace({
   const loadedTables = useRef(new Set<TableName>());
   const initialViewLoaded = useRef(false);
   const pendingRealtimeTables = useRef(new Set<TableName>());
-  const canEditOwnProfile = ["owner", "admin", "project_manager", "sales_pricing_officer"].includes(
+  const canEditOwnProfile = ["owner", "admin", "project_manager", "sales_pricing_officer", "internal_finance", "external_finance", "lead_coordinator"].includes(
     role,
   );
   useEffect(() => {
@@ -21244,7 +20641,7 @@ export function HuswellWorkspace({
   const fetchTable = useCallback(
     async (table: TableName) => {
       if (table === "commission_summaries") {
-        return client.rpc("commission_summary_rows", {
+        return client.rpc("commission_summary_rows_v3", {
           p_organization_id: organizationId,
         });
       }
@@ -21344,7 +20741,13 @@ export function HuswellWorkspace({
     const neededTables = workspaceViewTables(active, leadMode, role).filter(
       (table) => !loadedTables.current.has(table),
     );
-    if (!neededTables.length) return;
+    if (!neededTables.length) {
+      if (!initialViewLoaded.current) {
+        initialViewLoaded.current = true;
+        setLoading(false);
+      }
+      return;
+    }
     const showLoading = !initialViewLoaded.current;
     void refreshTables(neededTables, showLoading).finally(() => {
       initialViewLoaded.current = true;
@@ -21467,6 +20870,9 @@ export function HuswellWorkspace({
     sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Announcements", "Policy"],
     warehouse: ["Dashboard", "Catalog", "Inventory", "Production", "Announcements", "Policy"],
     accountant: ["Finance", "Commissions", "Announcements", "Policy"],
+    internal_finance: ["Finance", "Commissions", "Announcements", "Policy"],
+    external_finance: ["Finance", "Commissions", "Announcements", "Policy"],
+    lead_coordinator: ["Leads", "Announcements", "Policy"],
     payroll: ["Dashboard", "Payroll & Leave", "Letter Request", "Directory", "Announcements", "Policy"],
     production: ["Dashboard", "Production", "Inventory", "Announcements", "Policy"],
     viewer: [
@@ -21792,8 +21198,8 @@ export function HuswellWorkspace({
     Commissions: {
       title: "Commissions",
       detail: role === "sales_pricing_officer"
-        ? "View Commission and VA Commission assigned to your Price Quotations."
-        : "Manage Sales Executive Commission and VA Commission summaries.",
+        ? "View commission allocations assigned to your Price Quotations."
+        : "Manage Sales Executive Commission allocations.",
     },
     Announcements: {
       title: "Announcements",
@@ -21890,17 +21296,21 @@ export function HuswellWorkspace({
           profileName={profileName}
         />
     ) : active === "Leads" ? (
-        <Records
-          module={leads}
-          store={store}
-          orgId={organizationId}
-          reload={reload}
-          notice={setMessage}
-          role={role}
-          leadMode={activeLeadWorkspaceMode}
-          onLeadModeChange={selectLeadWorkspaceMode}
-          onLeadRemarkSaved={updateLeadRemark}
-        />
+        role === "lead_coordinator" ? (
+          <LeadCoordinatorWorkspace organizationId={organizationId} />
+        ) : (
+          <Records
+            module={leads}
+            store={store}
+            orgId={organizationId}
+            reload={reload}
+            notice={setMessage}
+            role={role}
+            leadMode={activeLeadWorkspaceMode}
+            onLeadModeChange={selectLeadWorkspaceMode}
+            onLeadRemarkSaved={updateLeadRemark}
+          />
+        )
     ) : active === "Supplier's List" ? (
       <SupplierList
         store={store}
@@ -21959,18 +21369,10 @@ export function HuswellWorkspace({
         role={role}
       />
     ) : active === "Finance" ? (
-      <FinanceReports
-        store={store}
-        orgId={organizationId}
-        reload={reload}
-        notice={setMessage}
-        role={role}
-      />
+      <FinanceWorkspace organizationId={organizationId} role={role} />
     ) : active === "Commissions" ? (
       <CommissionSummaryView
         store={store}
-        reload={reload}
-        notice={setMessage}
         role={role}
         readOnly={role === "sales_pricing_officer"}
       />
