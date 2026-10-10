@@ -708,6 +708,8 @@ with check (
 -- Production job assignment and agreement fields remain authoritative from
 -- the approved schedule. The legacy scalar is retained as a compatibility
 -- mirror of the first selected co-assignee.
+drop trigger if exists production_jobs_agreement_fields_guard
+  on public.production_jobs;
 drop function if exists private.guard_production_job_agreement_fields();
 create function private.guard_production_job_agreement_fields()
 returns trigger
@@ -787,8 +789,6 @@ begin
 end;
 $$;
 
-drop trigger if exists production_jobs_agreement_fields_guard
-  on public.production_jobs;
 create trigger production_jobs_agreement_fields_guard
 before insert or update of project_schedule_id, assigned_box_maker,
   assigned_box_makers, agreement_storage_path, agreement_file_name,
