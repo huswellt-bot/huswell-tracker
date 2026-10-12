@@ -8,6 +8,7 @@ import {
   type QuotationPdfStore,
 } from "@/components/huswell-workspace";
 import { ThemeToggle } from "@/components/theme-provider";
+import { NotificationDialog } from "@/components/ui/notification-dialog";
 
 export function QuotationPdfViewer({
   quote,
@@ -80,9 +81,7 @@ export function QuotationPdfViewer({
           </div>
         </header>
         {error ? (
-          <div className="grid flex-1 place-items-center p-6 text-center">
-            <p className="text-[13px] text-[var(--color-danger-text)]">{error}</p>
-          </div>
+          <div className="flex-1 bg-[var(--color-surface-subtle)]" aria-hidden="true" />
         ) : pdfUrl ? (
           <iframe
             title={`${String(quote.quotation_no ?? "Quotation")} PDF`}
@@ -100,6 +99,7 @@ export function QuotationPdfViewer({
           </div>
         )}
       </section>
+      {error && <NotificationDialog message={error} tone="error" close={() => setError(null)} />}
     </main>
   );
 }

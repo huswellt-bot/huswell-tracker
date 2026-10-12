@@ -25,6 +25,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { TABLE_PAGE_SIZE, TablePagination } from "@/components/ui/table-pagination";
 import type { Store } from "@/components/huswell-workspace";
 
 const ATTACHMENT_BUCKET = "employee-request-attachments";
@@ -193,6 +194,7 @@ export function LetterRequestWorkspace({
   } | null>(null);
   const [reviewNote, setReviewNote] = useState("");
   const [withdrawId, setWithdrawId] = useState<string | null>(null);
+  const [requestPage, setRequestPage] = useState(1);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const requests = useMemo(() => {
@@ -206,6 +208,12 @@ export function LetterRequestWorkspace({
         ),
       );
   }, [currentUserId, isReviewer, store.employee_requests]);
+  const requestPageCount = Math.max(1, Math.ceil(requests.length / TABLE_PAGE_SIZE));
+  const activeRequestPage = Math.min(requestPage, requestPageCount);
+  const visibleRequests = requests.slice(
+    (activeRequestPage - 1) * TABLE_PAGE_SIZE,
+    activeRequestPage * TABLE_PAGE_SIZE,
+  );
 
   const selectedEvents = useMemo(
     () =>
@@ -639,8 +647,8 @@ export function LetterRequestWorkspace({
               <LoaderCircle className="size-4 animate-spin" /> Loading Letter Requests…
             </div>
           ) : requests.length ? (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[920px] text-left text-[12px]">
+            <div className="table-shell overflow-x-auto">
+              <table className="app-table w-full min-w-[920px] text-left text-[12px]">
                 <thead>
                   <tr className="border-b border-[var(--color-border)] text-[11px] uppercase tracking-[0.04em] text-[var(--color-text-tertiary)]">
                     {isReviewer ? <th className="px-4 py-3">Requester</th> : null}
@@ -653,7 +661,7 @@ export function LetterRequestWorkspace({
                   </tr>
                 </thead>
                 <tbody>
-                  {requests.map((request) => {
+                  {visibleRequests.map((request) => {
                     const requestId = value(request.id);
                     const status = value(request.status, "draft") as RequestStatus;
                     const requester = value(request.requester_name, "Pricing Officer");
@@ -713,6 +721,7 @@ export function LetterRequestWorkspace({
                   })}
                 </tbody>
               </table>
+              <TablePagination page={activeRequestPage} pageCount={requestPageCount} total={requests.length} onPageChange={setRequestPage} label="Letter Requests pagination" />
               {selectedRequestId ? (
                 <div className="border-t border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-4 py-4">
                   <h3 className="text-[12px] font-semibold text-[var(--color-text-primary)]">Request history</h3>

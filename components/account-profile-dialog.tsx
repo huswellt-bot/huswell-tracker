@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Eye, EyeOff, LoaderCircle, Pencil, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { workspaceRoleLabel } from "@/lib/role-labels";
+import { NotificationDialog } from "@/components/ui/notification-dialog";
 
 type ProfileValues = { fullName: string; email: string; password: string };
 
@@ -258,7 +259,6 @@ export function AccountProfileDialog({
                 </button>
               </div>
             </label>
-            {error && <p className="text-[12px] text-[#b42318]">{error}</p>}
           </div>
         )}
         <div className="mt-4 flex justify-end gap-2">
@@ -336,6 +336,7 @@ export function AccountProfileDialog({
           </section>
         </div>
       )}
+      {error && <NotificationDialog message={error} tone="error" close={() => setError(null)} />}
     </div>
   );
 }

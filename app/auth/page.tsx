@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Image from "next/image";
 import { Eye, EyeOff, LoaderCircle } from "lucide-react";
 import { ThemeToggle } from "@/components/theme-provider";
+import { NotificationDialog } from "@/components/ui/notification-dialog";
 import { createClient } from "@/lib/supabase/client";
 
 export default function AuthPage() {
@@ -107,11 +108,6 @@ export default function AuthPage() {
                 </button>
               </span>
             </label>
-            {message && (
-              <p className="rounded-lg bg-[#fef3f2] px-2.5 py-1.5 text-[11px] text-[#b42318]">
-                {message}
-              </p>
-            )}
             <div className="pt-1">
               <button
                 type="submit"
@@ -126,6 +122,7 @@ export default function AuthPage() {
           </form>
         </div>
       </section>
+      {message && <NotificationDialog message={message} tone="error" close={() => setMessage("")} />}
     </main>
   );
 }

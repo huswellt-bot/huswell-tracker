@@ -31,6 +31,8 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { FileUploadControl } from "@/components/ui/file-upload-control";
 import { NumberInput } from "@/components/ui/number-input";
 import { SearchableLeadSelect } from "@/components/ui/searchable-lead-select";
+import { NotificationDialog } from "@/components/ui/notification-dialog";
+import { TABLE_PAGE_SIZE, TablePagination } from "@/components/ui/table-pagination";
 
 type AnyRow = Record<string, unknown>;
 type RequestStatus = "draft" | "pending" | "needs_revision" | "approved";
@@ -645,11 +647,6 @@ export function CostingRequestWorkspace({
   const [analyzing, setAnalyzing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [reviewNote, setReviewNote] = useState("");
-  useEffect(() => {
-    if (!message) return;
-    const timeoutId = window.setTimeout(() => setMessage(null), 7000);
-    return () => window.clearTimeout(timeoutId);
-  }, [message]);
   const management = role === "owner" || role === "admin" || role === "super_admin";
   const canPrepare = role === "sales_pricing_officer";
   const [requestSetupOpen, setRequestSetupOpen] = useState(false);
@@ -693,6 +690,7 @@ export function CostingRequestWorkspace({
   );
   const defaultRequestTab: RequestStatus = management ? "pending" : "draft";
   const [requestTab, setRequestTab] = useState<RequestStatus>(() => defaultRequestTab);
+  const [requestPage, setRequestPage] = useState(1);
   const requestTabs: RequestTab[] = management
     ? [
         { key: "pending", label: "Pending Review" },
@@ -712,9 +710,15 @@ export function CostingRequestWorkspace({
       .sort((a, b) => String(b.updated_at ?? b.created_at ?? "").localeCompare(String(a.updated_at ?? a.created_at ?? ""))),
     [management, store.costing_requests],
   );
-  const visibleRequests = useMemo(
+  const filteredRequests = useMemo(
     () => requests.filter((row) => requestStatus(row.status) === activeRequestTab),
     [activeRequestTab, requests],
+  );
+  const requestPageCount = Math.max(1, Math.ceil(filteredRequests.length / TABLE_PAGE_SIZE));
+  const activeRequestPage = Math.min(requestPage, requestPageCount);
+  const visibleRequests = filteredRequests.slice(
+    (activeRequestPage - 1) * TABLE_PAGE_SIZE,
+    activeRequestPage * TABLE_PAGE_SIZE,
   );
   const calculation = useMemo(
     () => draft ? calculateCosting({
@@ -1066,7 +1070,6 @@ export function CostingRequestWorkspace({
               <button type="button" onClick={() => setDraft(null)} disabled={busy} aria-label="Close Print Costing editor" className="grid size-8 shrink-0 place-items-center rounded-[var(--radius-control)] text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50"><X size={18} /></button>
             </div>
           </div>
-      {message ? <div className="rounded-[var(--radius-control)] border border-[var(--color-warning-border)] bg-[var(--color-warning-subtle)] px-3 py-2 text-[12px] text-[var(--color-warning-text)]">{message}</div> : null}
       {draft.status === "approved" ? <div className="rounded-[var(--radius-control)] border border-[var(--color-success-border)] bg-[var(--color-success-subtle)] px-3 py-2 text-[12px] text-[var(--color-success-text)]">This costing is approved and locked. Create a revision to make changes.</div> : null}
       {draft.status === "pending" ? <div className="rounded-[var(--radius-control)] border border-[var(--color-warning-border)] bg-[var(--color-warning-subtle)] px-3 py-2 text-[12px] text-[var(--color-warning-text)]">This costing is pending GM review and is read-only until a decision is made.</div> : null}
       {draft.status === "needs_revision" && draft.decision_note ? <div className="rounded-[var(--radius-control)] border border-[var(--color-warning-border)] bg-[var(--color-warning-subtle)] px-3 py-2 text-[12px] text-[var(--color-warning-text)]"><span className="font-semibold">GM note:</span> {draft.decision_note}</div> : null}
@@ -1093,8 +1096,8 @@ export function CostingRequestWorkspace({
             <div><span className="block text-[var(--color-text-tertiary)]">Waste allowance</span><span className="mt-1 block font-semibold text-[var(--color-text-primary)]">{(draft.waste_allowance * 100).toFixed(2)}%</span></div>
             <div><span className="block text-[var(--color-text-tertiary)]">Formula version</span><span className="mt-1 block font-semibold text-[var(--color-text-primary)]">{draft.formula_version}</span></div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-left text-[12px]">
+          <div className="table-shell overflow-x-auto">
+            <table className="app-table w-full min-w-[720px] text-left text-[12px]">
               <thead>
                 <tr className="border-b border-[var(--color-border)] text-[11px] uppercase tracking-[0.04em] text-[var(--color-text-tertiary)]">
                   <th className="px-2 py-2">Material</th>
@@ -1139,8 +1142,8 @@ export function CostingRequestWorkspace({
       <Card>
         <CardHeader><div className="flex flex-wrap items-center justify-between gap-2"><div><h3 className="text-[14px] font-semibold">Costing items</h3><p className="mt-0.5 text-[12px] text-[var(--color-text-secondary)]">Net print area is calculated from width × height × quantity ÷ 1,000,000.</p></div>{editable ? <Button variant="outline" size="sm" onClick={() => setDraftValue({ items: [...draft.items, blankItem(draft.items.length + 1)] })}><Plus /> Add item</Button> : null}</div></CardHeader>
         <CardContent className="border-t border-[var(--color-border)]">
-          <div className="overflow-x-auto pb-1">
-            <table className="w-full min-w-[1120px] text-left text-[12px]">
+          <div className="table-shell overflow-x-auto pb-1">
+            <table className="app-table w-full min-w-[1120px] text-left text-[12px]">
               <thead>
                 <tr className="border-b border-[var(--color-border)] text-[11px] uppercase tracking-[0.04em] text-[var(--color-text-tertiary)]">
                   <th className="px-2 py-2">Material</th>
@@ -1267,7 +1270,6 @@ export function CostingRequestWorkspace({
                 />
               </Field>
               {analyzing ? <div role="status" aria-live="polite" className="flex items-start gap-3 rounded-[var(--radius-control)] border border-[var(--color-accent-border)] bg-[var(--color-accent-subtle)] px-3 py-3 text-[12px] text-[var(--color-accent-text)]"><LoaderCircle className="mt-0.5 size-4 shrink-0 animate-spin" aria-hidden="true" /><div><div className="font-semibold">AI is scanning the document</div><p className="mt-0.5 text-[11px] text-[var(--color-text-secondary)]">Reading the source file and preparing editable costing fields. This may take a moment.</p></div></div> : null}
-              {message ? <div role="alert" className="rounded-[var(--radius-control)] border border-[var(--color-warning-border)] bg-[var(--color-warning-subtle)] px-3 py-2 text-[12px] text-[var(--color-warning-text)]">{message}</div> : null}
               <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--color-border)] pt-4">
                 <Button variant="ghost" onClick={cancelRequest} disabled={analyzing}>Cancel</Button>
                 <Button variant="outline" onClick={startManualEntry} disabled={!selectedLeadId || analyzing}>Enter manually</Button>
@@ -1277,14 +1279,14 @@ export function CostingRequestWorkspace({
           </section>
         </div>
       ) : null}
-      {message && !requestSetupOpen ? <div className="rounded-[var(--radius-control)] border border-[var(--color-warning-border)] bg-[var(--color-warning-subtle)] px-3 py-2 text-[12px] text-[var(--color-warning-text)]">{message}</div> : null}
       <nav aria-label="Print Costing workflow" className="app-tabs overflow-x-auto border-b border-[var(--color-border)]">
         {requestTabs.map((tab) => {
           const count = requests.filter((row) => requestStatus(row.status) === tab.key).length;
-          return <button key={tab.key} type="button" onClick={() => { setRequestTab(tab.key); setMessage(null); }} aria-current={activeRequestTab === tab.key ? "page" : undefined} className="app-tab whitespace-nowrap">{tab.label} ({count})</button>;
+          return <button key={tab.key} type="button" onClick={() => { setRequestTab(tab.key); setRequestPage(1); setMessage(null); }} aria-current={activeRequestTab === tab.key ? "page" : undefined} className="app-tab whitespace-nowrap">{tab.label} ({count})</button>;
         })}
       </nav>
-      <Card><CardHeader><h3 className="text-[14px] font-semibold">Costing requests</h3><p className="mt-0.5 text-[12px] text-[var(--color-text-secondary)]">{management ? "Submitted, returned, and approved requests in your organization are shown here." : "Your prepared requests are shown here."}</p></CardHeader><CardContent className="border-t border-[var(--color-border)] p-0">{visibleRequests.length ? <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-left text-[12px]"><thead><tr className="border-b border-[var(--color-border)] text-[11px] uppercase tracking-[0.04em] text-[var(--color-text-tertiary)]"><th className="px-4 py-3">Request</th><th className="px-4 py-3">Client / project</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Project cost</th><th className="px-4 py-3">Updated</th><th className="px-4 py-3 text-right">Actions</th></tr></thead><tbody>{visibleRequests.map((row) => { const status = requestStatus(row.status); const calculationRow = rowCalculation(row); const projectCost = numberValue(calculationRow.project_cost_consumption); const editableRow = status !== "pending" && status !== "approved" && (management || stringValue(row.prepared_by) === currentUserId); return <tr key={stringValue(row.id)} className="border-b border-[var(--color-border)] last:border-0"><td className="px-4 py-3"><div className="font-medium text-[var(--color-text-primary)]">{stringValue(row.request_no, "Draft")}</div><div className="text-[11px] text-[var(--color-text-tertiary)]">Revision {numberValue(row.revision_number, 1)}</div></td><td className="px-4 py-3"><div className="font-medium">{stringValue(row.client_name, "No client name")}</div><div className="text-[11px] text-[var(--color-text-secondary)]">{stringValue(row.project_name, "No project name")}</div></td><td className="px-4 py-3"><Badge variant={statusVariant(status)}>{statusLabel[status] ?? status}</Badge></td><td className="px-4 py-3 font-medium">{projectCost ? currency.format(projectCost) : "—"}</td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{dateLabel(row.updated_at ?? row.created_at)}</td><td className="px-4 py-3"><div className="flex justify-end gap-1"><Button variant="ghost" size="xs" onClick={() => openExisting(row)}>{status === "pending" && management ? "Review" : editableRow ? "Edit" : "View"}</Button>{status === "approved" && stringValue(row.prepared_by) === currentUserId ? <Button variant="ghost" size="xs" onClick={() => openExisting(row)}>Revision</Button> : null}{stringValue(row.source_storage_path) ? <Button variant="ghost" size="icon-xs" onClick={() => void openSource(row)} aria-label="Open source document"><FileText /></Button> : null}{status === "approved" ? <Button variant="ghost" size="icon-xs" onClick={() => void openPdf(row)} aria-label="Generate costing PDF"><Download /></Button> : null}</div></td></tr>; })}</tbody></table></div> : <div className="p-8 text-center text-[12px] text-[var(--color-text-secondary)]">No costings in this tab yet.{requestTab === "draft" ? " Click Request Costing to select a Lead and upload a document or start manual entry." : ""}</div>}</CardContent></Card>
+      <Card><CardHeader><h3 className="text-[14px] font-semibold">Costing requests</h3><p className="mt-0.5 text-[12px] text-[var(--color-text-secondary)]">{management ? "Submitted, returned, and approved requests in your organization are shown here." : "Your prepared requests are shown here."}</p></CardHeader><CardContent className="border-t border-[var(--color-border)] p-0">{visibleRequests.length ? <><div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[900px] text-left text-[12px]"><thead><tr className="border-b border-[var(--color-border)] text-[11px] uppercase tracking-[0.04em] text-[var(--color-text-tertiary)]"><th className="px-4 py-3">Request</th><th className="px-4 py-3">Client / project</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Project cost</th><th className="px-4 py-3">Updated</th><th className="px-4 py-3 text-right">Actions</th></tr></thead><tbody>{visibleRequests.map((row) => { const status = requestStatus(row.status); const calculationRow = rowCalculation(row); const projectCost = numberValue(calculationRow.project_cost_consumption); const editableRow = status !== "pending" && status !== "approved" && (management || stringValue(row.prepared_by) === currentUserId); return <tr key={stringValue(row.id)} className="border-b border-[var(--color-border)] last:border-0"><td className="px-4 py-3"><div className="font-medium text-[var(--color-text-primary)]">{stringValue(row.request_no, "Draft")}</div><div className="text-[11px] text-[var(--color-text-tertiary)]">Revision {numberValue(row.revision_number, 1)}</div></td><td className="px-4 py-3"><div className="font-medium">{stringValue(row.client_name, "No client name")}</div><div className="text-[11px] text-[var(--color-text-secondary)]">{stringValue(row.project_name, "No project name")}</div></td><td className="px-4 py-3"><Badge variant={statusVariant(status)}>{statusLabel[status] ?? status}</Badge></td><td className="px-4 py-3 font-medium">{projectCost ? currency.format(projectCost) : "—"}</td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{dateLabel(row.updated_at ?? row.created_at)}</td><td className="px-4 py-3"><div className="flex justify-end gap-1"><Button variant="ghost" size="xs" onClick={() => openExisting(row)}>{status === "pending" && management ? "Review" : editableRow ? "Edit" : "View"}</Button>{status === "approved" && stringValue(row.prepared_by) === currentUserId ? <Button variant="ghost" size="xs" onClick={() => openExisting(row)}>Revision</Button> : null}{stringValue(row.source_storage_path) ? <Button variant="ghost" size="icon-xs" onClick={() => void openSource(row)} aria-label="Open source document"><FileText /></Button> : null}{status === "approved" ? <Button variant="ghost" size="icon-xs" onClick={() => void openPdf(row)} aria-label="Generate costing PDF"><Download /></Button> : null}</div></td></tr>; })}</tbody></table></div><TablePagination page={activeRequestPage} pageCount={requestPageCount} total={filteredRequests.length} onPageChange={setRequestPage} label="Costing requests pagination" /></> : <div className="p-8 text-center text-[12px] text-[var(--color-text-secondary)]">No costings in this tab yet.{requestTab === "draft" ? " Click Request Costing to select a Lead and upload a document or start manual entry." : ""}</div>}</CardContent></Card>
+      {message ? <NotificationDialog message={message} tone="warning" close={() => setMessage(null)} /> : null}
     </div>
   );
 }

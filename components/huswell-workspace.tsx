@@ -94,7 +94,9 @@ import { FixedIconTooltip } from "@/components/fixed-icon-tooltip";
 import { FileUploadControl } from "@/components/ui/file-upload-control";
 import { MultiSelect, parseMultiSelectValue } from "@/components/ui/multi-select";
 import { NumberInput } from "@/components/ui/number-input";
+import { NotificationDialog } from "@/components/ui/notification-dialog";
 import { SearchableLeadSelect, type SearchableLeadOption } from "@/components/ui/searchable-lead-select";
+import { TablePagination } from "@/components/ui/table-pagination";
 import { ThemeToggle } from "@/components/theme-provider";
 import { CostingRequestWorkspace } from "@/components/costing-request-workspace";
 import { FinanceWorkspace } from "@/components/finance-workspace";
@@ -137,6 +139,7 @@ type View =
   | "Inventory"
   | "Sales"
   | "Expenses"
+  | "Finance Overview"
   | "Finance"
   | "Payroll & Leave"
   | "Letter Request"
@@ -153,7 +156,6 @@ type View =
   | "Profile";
 
 const TEMPORARILY_HIDDEN_VIEWS: ReadonlyArray<View> = [
-  "Payment Monitoring",
   "Payment Reviews",
 ];
 
@@ -1135,7 +1137,7 @@ function WorkspaceListFilters({
   return (
     <div className="flex flex-wrap items-center gap-2 border-b border-[#edf0f5] py-3">
       <label className="relative min-w-0 flex-1 sm:min-w-56 sm:max-w-sm" htmlFor={`${monthLabel.toLowerCase().replaceAll(" ", "-")}-list-search`}>
-        <Search className="pointer-events-none absolute left-3 top-2.5 text-[#8b92a1]" size={15} />
+        <Search className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]" size={15} />
         <span className="sr-only">Search records</span>
         <input
           id={`${monthLabel.toLowerCase().replaceAll(" ", "-")}-list-search`}
@@ -1143,7 +1145,7 @@ function WorkspaceListFilters({
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={queryPlaceholder}
-          className="min-h-9 w-full rounded-lg border border-[#d9e0e9] bg-white py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
+          className="search-input min-h-9 w-full rounded-lg border border-[#d9e0e9] bg-white py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
         />
       </label>
       <label className="flex items-center gap-2 text-[12px] text-[#687386]">
@@ -1519,6 +1521,9 @@ const doneDealStatusLabel = (value: unknown) =>
   statusLabel(doneDealStatuses, value);
 const memberRole = (role: string) =>
   ["super_admin", "owner", "admin"].includes(role);
+
+const isInternalFinanceRole = (role: string) =>
+  ["accountant", "internal_finance"].includes(role);
 const isProjectOfficerRole = (role: string) =>
   ["project_manager", "sales_pricing_officer"].includes(role);
 const isPricingOfficerRole = (role: string) =>
@@ -1526,6 +1531,36 @@ const isPricingOfficerRole = (role: string) =>
 const pricingProjectTypeKey = (value: unknown) => {
   const normalized = text(value, "").trim().toLowerCase().replace(/\s+/g, " ");
   return normalized === "mockup" ? "mock up" : normalized;
+};
+const canSubmitQuotationPaymentInUi = (
+  quote: Row,
+  role: string,
+  currentUserId: string | null,
+  assignments: Row[],
+) => {
+  const userId = text(currentUserId, "");
+  if (
+    !userId ||
+    !isProjectOfficerRole(role) ||
+    text(quote.document_type) !== "price_quotation" ||
+    Boolean(quote.costing_source_id) ||
+    text(quote.status) !== "approved"
+  ) {
+    return false;
+  }
+  if (role === "project_manager") {
+    return [quote.created_by, quote.prepared_by_user_id, quote.submitted_by]
+      .some((value) => text(value, "") === userId);
+  }
+  return (
+    text(quote.pricing_reviewed_by, "") === userId ||
+    assignments.some(
+      (assignment) =>
+        text(assignment.pricing_officer_user_id, "") === userId &&
+        pricingProjectTypeKey(assignment.project_type) ===
+          pricingProjectTypeKey(quote.project_types),
+    )
+  );
 };
 const assignedPaymentReviewerId = (
   quote: Row,
@@ -3454,7 +3489,7 @@ function CostingBreakdownPdfDocument({
   quotes: Row[];
   store: Store;
   close: () => void;
-  onPdfError?: (message: string) => void;
+  onPdfError: (message: string) => void;
   pdfWindow?: Window | null;
   printAfterOpen?: boolean;
 }) {
@@ -3468,7 +3503,7 @@ function CostingBreakdownPdfDocument({
         throw new Error("Unable to open the Costing Breakdown PDF.");
       }
       if (cancelled) return;
-      showGeneratedPdfWindow(pdfWindow, pdfBlob, printAfterOpen);
+      showGeneratedPdfWindow(pdfWindow, pdfBlob, printAfterOpen, onPdfError);
       close();
     };
     const exportTimer = window.setTimeout(() => {
@@ -3478,8 +3513,7 @@ function CostingBreakdownPdfDocument({
             error instanceof Error
               ? error.message
               : "Unable to generate the Costing Breakdown PDF.";
-          if (onPdfError) onPdfError(message);
-          else window.alert(message);
+          onPdfError(message);
         }
       });
     }, 100);
@@ -3570,11 +3604,12 @@ function showPdfDocumentWindow(
   preview: Window | null,
   pdfUrl: string,
   printAfterOpen = false,
+  onError: (message: string) => void,
 ) {
   if (!preview) {
     const generatedWindow = window.open(pdfUrl, "_blank");
     if (!generatedWindow) {
-      window.alert("Allow pop-ups to open the generated PDF.");
+      onError("Allow pop-ups to open the generated PDF.");
     }
     return;
   }
@@ -3593,9 +3628,10 @@ function showGeneratedPdfWindow(
   preview: Window | null,
   pdf: Blob,
   printAfterOpen = false,
+  onError: (message: string) => void,
 ) {
   const pdfUrl = URL.createObjectURL(pdf);
-  showPdfDocumentWindow(preview, pdfUrl, printAfterOpen);
+  showPdfDocumentWindow(preview, pdfUrl, printAfterOpen, onError);
   window.setTimeout(() => URL.revokeObjectURL(pdfUrl), 5 * 60 * 1_000);
 }
 
@@ -3801,13 +3837,13 @@ function LeadCoordinatorTransferredLeads({
         <div className="flex flex-wrap gap-2 border-t border-[#edf0f5] px-4 py-2 sm:px-6 lg:px-7">
           <label className="relative min-w-0 flex-1 sm:min-w-56">
             <Search
-              className="absolute left-3 top-2.5 text-[#8b92a1]"
+              className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]"
               size={15}
             />
             <DebouncedSearchInput
               value={query}
               onCommit={setQuery}
-              className="w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
+              className="search-input w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
               placeholder="Search name, company, project, or officer"
             />
           </label>
@@ -3830,9 +3866,7 @@ function LeadCoordinatorTransferredLeads({
         {loading ? (
           <Empty>Loading transferred leads…</Empty>
         ) : error ? (
-          <div className="border-t border-[#edf0f5] px-4 py-8 text-center text-[12px] text-[#9b1c1c]">
-            Transferred leads could not load: {error}
-          </div>
+          <Empty>No transferred leads are available.</Empty>
         ) : filteredRows.length ? (
           <>
             <div className="modern-table-shell">
@@ -3881,6 +3915,7 @@ function LeadCoordinatorTransferredLeads({
           </Empty>
         )}
       </Panel>
+      {error && <NotificationDialog message={`Transferred leads could not load: ${error}`} tone="error" close={() => setError("")} />}
     </div>
   );
 }
@@ -3984,13 +4019,13 @@ function PricingOfficerActiveEndorsements({
         <div className="flex flex-wrap gap-2 border-t border-[#edf0f5] px-4 py-2 sm:px-6 lg:px-7">
           <label className="relative min-w-0 flex-1 sm:min-w-56">
             <Search
-              className="absolute left-3 top-2.5 text-[#8b92a1]"
+              className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]"
               size={15}
             />
             <DebouncedSearchInput
               value={query}
               onCommit={setQuery}
-              className="w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
+              className="search-input w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
               placeholder="Search name, company, project, or officer"
             />
           </label>
@@ -4013,9 +4048,7 @@ function PricingOfficerActiveEndorsements({
         {loading ? (
           <Empty>Loading active endorsements…</Empty>
         ) : error ? (
-          <div className="border-t border-[#edf0f5] px-4 py-8 text-center text-[12px] text-[#9b1c1c]">
-            Active endorsements could not load: {error}
-          </div>
+          <Empty>No active endorsements are available.</Empty>
         ) : filteredRows.length ? (
           <>
             <div className="modern-table-shell">
@@ -4064,6 +4097,7 @@ function PricingOfficerActiveEndorsements({
           </Empty>
         )}
       </Panel>
+      {error && <NotificationDialog message={`Active endorsements could not load: ${error}`} tone="error" close={() => setError("")} />}
     </div>
   );
 }
@@ -4416,9 +4450,7 @@ function Table({
   alignRightLabels?: string[];
 }) {
   return (
-    <div
-      className="max-w-full overflow-hidden rounded-lg border border-[#d6dee8] bg-white"
-    >
+    <div className="table-shell overflow-hidden">
       <div
         className={scrollable ? `${scrollContainerClassName ?? "max-h-[656px]"} overflow-x-auto overflow-y-auto overscroll-x-contain` : "overflow-x-hidden"}
       >
@@ -5196,12 +5228,6 @@ function LeadImportDialog({
           {fileName && <span className="min-w-0 truncate text-[11px] text-[#687386]">{fileName}</span>}
         </div>
 
-        {error && (
-          <div className="mt-3 rounded-lg border border-[#fed7d7] bg-[#fff5f5] p-3 text-[12px] leading-5 text-[#9b1c1c]">
-            <p>{error}</p>
-          </div>
-        )}
-
         {preview ? (
           <>
             <div className="mt-4 grid gap-2 sm:grid-cols-3">
@@ -5293,6 +5319,7 @@ function LeadImportDialog({
           </button>
         </footer>
       </section>
+      {error && <NotificationDialog message={error} tone="error" close={() => setError("")} />}
     </div>
   );
 }
@@ -5381,6 +5408,9 @@ function Records({
     date_contacted: "",
   });
   const [contactDateSaving, setContactDateSaving] = useState(false);
+  useEffect(() => {
+    setPage(0);
+  }, [leadMode, module.table]);
   const isProjectsPage = module.table === "leads" && leadMode === "projects";
   const isLeadChangeRequestsPage =
     module.table === "leads" && leadMode === "lead_change_requests";
@@ -5732,8 +5762,9 @@ function Records({
       monthFilter,
     ],
   );
-  const shown =
-    module.table === "leads" ? rows : rows.slice(page * 10, page * 10 + 10);
+  const pageCount = Math.max(1, Math.ceil(rows.length / 10));
+  const activePage = Math.min(page, pageCount - 1);
+  const shown = rows.slice(activePage * 10, activePage * 10 + 10);
   const totalLeadCount = rows.length;
   const leadOfficerDistribution = useMemo(() => {
     if (!canFilterByProjectOfficer || projectOfficerFilter !== "all") return [];
@@ -6766,13 +6797,13 @@ function Records({
               <div className="flex flex-wrap gap-2 border-t border-[#edf0f5] px-4 py-2 sm:px-6 lg:px-7">
                 <label className="relative min-w-0 flex-1 sm:min-w-56">
                   <Search
-                    className="absolute left-3 top-2.5 text-[#8b92a1]"
+                    className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]"
                     size={15}
                   />
                   <DebouncedSearchInput
                     value={leadChangeQuery}
                     onCommit={setLeadChangeQuery}
-                    className="w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
+                    className="search-input w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
                     placeholder="Search name, company, project, or request"
                   />
                 </label>
@@ -7037,7 +7068,7 @@ function Records({
         >
           <label className="relative min-w-0 flex-1 sm:min-w-56">
             <Search
-              className="absolute left-3 top-2.5 text-[#8b92a1]"
+              className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]"
               size={15}
             />
             <DebouncedSearchInput
@@ -7046,7 +7077,7 @@ function Records({
                 setQuery(value);
                 setPage(0);
               }}
-              className="w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
+              className="search-input w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
               placeholder="Search saved records"
             />
           </label>
@@ -7413,32 +7444,14 @@ function Records({
                 ))}
               </Table>
             </div>
-            <div
-              className={`flex items-center justify-between border-t border-[#edf0f5] ${isPageLayout ? "modern-table-footer" : contentPadding} py-3 text-[12px] text-[#626b7a]`}
-            >
-              <span>
-                {rows.length} record{rows.length === 1 ? "" : "s"}
-              </span>
-              {!isPageLayout && (
-                <div className="flex gap-2">
-                  <Button
-                    secondary
-                    disabled={page === 0}
-                    onClick={() => setPage(page - 1)}
-                  >
-                    <ChevronLeft size={14} />
-                    Previous
-                  </Button>
-                  <Button
-                    secondary
-                    disabled={(page + 1) * 10 >= rows.length}
-                    onClick={() => setPage(page + 1)}
-                  >
-                    Next
-                    <ChevronRight size={14} />
-                  </Button>
-                </div>
-              )}
+            <div className={isPageLayout ? "modern-table-footer" : undefined}>
+              <TablePagination
+                page={activePage + 1}
+                pageCount={pageCount}
+                total={rows.length}
+                onPageChange={(nextPage) => setPage(nextPage - 1)}
+                label={`${module.title} pagination`}
+              />
             </div>
           </>
         ) : (
@@ -8253,8 +8266,14 @@ function QuotationPaymentDialog({
   );
   const summary = quotationPaymentSummary(liveQuote, records);
   const quotationLabel = text(liveQuote.document_type) === "mockup_quotation" ? "Mockup Quotation" : "Price Quotation";
-  const canSubmit = isProjectOfficerRole(role) && text(liveQuote.status) === "approved";
+  const canSubmit = canSubmitQuotationPaymentInUi(
+    liveQuote,
+    role,
+    currentUserId,
+    store.pricing_officer_project_types,
+  );
   const canReviewAsManager = memberRole(role);
+  const canReviewAsFinance = isInternalFinanceRole(role);
   const paymentRequirement = text(liveQuote.payment_requirement, "downpayment");
   const initialPaymentKind = quotationPaymentDefaultKind(liveQuote, summary);
   const reviewerForPayment = (payment: Row) =>
@@ -8264,10 +8283,7 @@ function QuotationPaymentDialog({
       store.pricing_officer_project_types,
     );
   const canReviewPayment = (payment: Row) =>
-    canReviewAsManager ||
-    (isPricingOfficerRole(role) &&
-      reviewerForPayment(payment) === currentUserId &&
-      text(payment.submitted_by, "") !== currentUserId);
+    (canReviewAsManager || canReviewAsFinance) && text(payment.status) === "pending";
   const [formOpen, setFormOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [termsSaving, setTermsSaving] = useState(false);
@@ -8600,7 +8616,7 @@ function QuotationPaymentDialog({
               <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
                 <div className="min-w-0">
                   <h3 className="text-[13px] font-semibold text-[#202938]">Client payment receipt</h3>
-                  <p className="mt-1 max-w-3xl text-[12px] leading-[1.45] text-[#687386]">Record each client payment separately. The assigned Sales &amp; Pricing Officer verifies the receipt before it counts as paid; the General Manager can override exceptions.</p>
+                  <p className="mt-1 max-w-3xl text-[12px] leading-[1.45] text-[#687386]">Record each client payment separately. Internal Finance checks the receipt against the actual funds received before it counts as Money In; management can handle reversals and exceptions.</p>
                 </div>
                 {!formOpen && <Button disabled={summary.available <= 0} onClick={openPaymentForm}><ReceiptText size={14} /> Add payment</Button>}
               </div>
@@ -8653,7 +8669,7 @@ function QuotationPaymentDialog({
                         ) : canReviewAsManager && status === "verified" ? (
                           <button type="button" disabled={working} onClick={() => openNoteRequest(payment, "reverse")} className="inline-flex min-h-7 items-center gap-1 rounded-[6px] border border-[#e3a7a2] bg-white px-2.5 text-[11px] font-semibold text-[#b42318] transition-colors hover:bg-[#fff5f4] disabled:cursor-not-allowed disabled:opacity-50"><RotateCcw size={13} /> Undo verification</button>
                         ) : (
-                          <span className="text-[11px] text-[#8b92a1]">{status === "pending" ? (reviewerId ? (reviewerId === text(payment.submitted_by, "") ? "Awaiting General Manager exception review" : "Awaiting Sales & Pricing Officer") : "Awaiting General Manager") : text(payment.verified_at ?? payment.reversed_at, "-")}</span>
+                          <span className="text-[11px] text-[#8b92a1]">{status === "pending" ? (canReviewAsFinance ? "Awaiting Internal Finance confirmation" : reviewerId ? (reviewerId === text(payment.submitted_by, "") ? "Awaiting General Manager exception review" : "Awaiting Internal Finance confirmation") : "Awaiting General Manager") : text(payment.verified_at ?? payment.reversed_at, "-")}</span>
                         )}
                       </td>
                     </tr>;
@@ -8830,7 +8846,7 @@ function PaymentMonitoring({
   return (
     <Panel
       title={assignedOnly ? "Payment Reviews" : "Payment Monitoring"}
-      detail={assignedOnly ? "Verify client payment receipts assigned to you. Rejected or self-submitted receipts require General Manager review." : "Monitor client receipt submissions separately from quotation and production approvals. Assigned Sales & Pricing Officers review normal receipts; General Managers can override exceptions."}
+      detail={assignedOnly ? "Payment Reviews is reserved for the future assigned-review workflow." : "Internal Finance reviews client receipt evidence separately from quotation and production approvals. Only verified collections become Money In."}
       variant="page"
       hideHeading
     >
@@ -9076,7 +9092,7 @@ function QuotationCostingOverview({
       <div className="px-4 py-4 sm:px-5 lg:px-6">
         <div className="flex flex-wrap items-center gap-2 border-b border-[#edf0f5] py-3">
           <label className="relative min-w-0 flex-1 sm:min-w-56 sm:max-w-sm" htmlFor="costed-quotation-search">
-            <Search className="pointer-events-none absolute left-3 top-2.5 text-[#8b92a1]" size={15} />
+            <Search className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]" size={15} />
             <span className="sr-only">Search costed quotations</span>
             <input
               id="costed-quotation-search"
@@ -9084,7 +9100,7 @@ function QuotationCostingOverview({
               value={costedQuery}
               onChange={(event) => setCostedQuery(event.target.value)}
               placeholder="Search quotation, client, or project"
-              className="min-h-9 w-full rounded-lg border border-[#d9e0e9] bg-white py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
+              className="search-input min-h-9 w-full rounded-lg border border-[#d9e0e9] bg-white py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
             />
           </label>
           <label className="flex items-center gap-2 text-[12px] text-[#687386]">
@@ -9922,7 +9938,7 @@ function ProjectCalendar({
             ))}
           </nav>
           <div className="flex flex-wrap items-center gap-2">
-            <label className="relative min-w-0 sm:w-56" htmlFor="project-search"><Search className="pointer-events-none absolute left-3 top-2.5 text-[#8b92a1]" size={15} /><span className="sr-only">Search projects</span><input id="project-search" type="search" value={projectQuery} onChange={(event) => setProjectQuery(event.target.value)} placeholder="Search projects" className="min-h-9 w-full rounded-lg border border-[#d9e0e9] bg-white py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]" /></label>
+          <label className="relative min-w-0 sm:w-56" htmlFor="project-search"><Search className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]" size={15} /><span className="sr-only">Search projects</span><input id="project-search" type="search" value={projectQuery} onChange={(event) => setProjectQuery(event.target.value)} placeholder="Search projects" className="search-input min-h-9 w-full rounded-lg border border-[#d9e0e9] bg-white py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]" /></label>
             <label className="flex items-center gap-2 text-[12px] text-[#687386]">
               <span className="whitespace-nowrap">Month</span>
               <input
@@ -10600,7 +10616,7 @@ function MaterialsList({
       ) : undefined}
     >
       <div className="border-t border-[#edf0f5] px-5 py-2.5">
-        <label className="relative block max-w-md"><Search className="absolute left-3 top-2.5 text-[#8b92a1]" size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} className="w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]" placeholder="Search materials" /></label>
+        <label className="relative block max-w-md"><Search className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]" size={15} /><input value={query} onChange={(event) => setQuery(event.target.value)} className="search-input w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]" placeholder="Search materials" /></label>
         {canManage && activeSuppliers.length === 0 && (
           <p className="mt-2 text-[12px] text-[#8b92a1]">
             Add an active supplier before adding materials.
@@ -11007,11 +11023,11 @@ function SuppliersList({
     >
       <div className="border-t border-[#edf0f5] px-4 py-2.5 sm:px-5">
         <label className="relative block max-w-md">
-          <Search className="absolute left-3 top-2.5 text-[#8b92a1]" size={15} />
+          <Search className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]" size={15} />
           <input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            className="w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
+            className="search-input w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
             placeholder="Search suppliers"
           />
         </label>
@@ -11482,11 +11498,11 @@ function SupplierList({
         </div>
         <div className="flex flex-wrap gap-2 border-t border-[#edf0f5] px-4 py-2 sm:px-6 lg:px-7">
           <label className="relative min-w-0 flex-1 sm:min-w-56">
-            <Search className="absolute left-3 top-2.5 text-[#8b92a1]" size={15} />
+            <Search className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]" size={15} />
             <input
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              className="w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
+              className="search-input w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
               placeholder="Search suppliers"
             />
           </label>
@@ -11681,7 +11697,7 @@ function QuotationDocument({
   quote: Row;
   store: Store;
   close: () => void;
-  onPdfError?: (message: string) => void;
+  onPdfError: (message: string) => void;
   autoExportPdf?: boolean;
   pdfWindow?: Window | null;
   printAfterOpen?: boolean;
@@ -11722,7 +11738,7 @@ function QuotationDocument({
       if (cancelled) {
         return;
       }
-      showGeneratedPdfWindow(pdfWindow, pdfBlob, printAfterOpen);
+      showGeneratedPdfWindow(pdfWindow, pdfBlob, printAfterOpen, onPdfError);
       close();
     };
     const exportTimer = window.setTimeout(() => {
@@ -11732,8 +11748,7 @@ function QuotationDocument({
             error instanceof Error
               ? error.message
               : "Unable to generate the quotation PDF.";
-          if (onPdfError) onPdfError(message);
-          else window.alert(message);
+          onPdfError?.(message);
         }
       });
     }, 100);
@@ -12598,7 +12613,7 @@ function CostingDocument({
   quote: Row;
   store: Store;
   close: () => void;
-  onPdfError?: (message: string) => void;
+  onPdfError: (message: string) => void;
   pdfWindow?: Window | null;
   printAfterOpen?: boolean;
 }) {
@@ -12646,7 +12661,7 @@ function CostingDocument({
         throw new Error("Unable to open the Costing Breakdown PDF.");
       }
       if (cancelled) return;
-      showGeneratedPdfWindow(pdfWindow, pdfBlob, printAfterOpen);
+      showGeneratedPdfWindow(pdfWindow, pdfBlob, printAfterOpen, onPdfError);
       close();
     };
     const exportTimer = window.setTimeout(() => {
@@ -12656,8 +12671,7 @@ function CostingDocument({
             error instanceof Error
               ? error.message
               : "Unable to generate the Costing Breakdown PDF.";
-          if (onPdfError) onPdfError(message);
-          else window.alert(message);
+          onPdfError?.(message);
         }
       });
     }, 100);
@@ -13461,11 +13475,11 @@ function Quotations({
         )}
         <div className="flex flex-wrap gap-2 border-t border-[#edf0f5] px-4 py-2.5 sm:px-5">
           <label className="relative min-w-0 flex-1 sm:min-w-56 sm:max-w-md">
-            <Search className="absolute left-3 top-2.5 text-[#8b92a1]" size={15} />
+            <Search className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]" size={15} />
             <input
               value={quoteQuery}
               onChange={(event) => setQuoteQuery(event.target.value)}
-              className="w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
+              className="search-input w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]"
               placeholder="Search quotation, project, company, or client"
             />
           </label>
@@ -14614,7 +14628,7 @@ function PriceQuotationSubmissions({
       ) : (
         <>
       <div className="flex flex-wrap items-end gap-2 border-b border-[#edf0f5] px-4 py-3 sm:px-5">
-        <label className="min-w-[190px] flex-1 text-[11px] font-medium text-[#687386]">Search<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Quotation, client, or project" className="input mt-1" /></label>
+        <label className="min-w-[190px] flex-1 text-[11px] font-medium text-[#687386]">Search<span className="relative mt-1 block"><Search className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]" size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Quotation, client, or project" className="input mt-0 w-full search-input" /></span></label>
         <label className="text-[11px] font-medium text-[#687386]">Month<input type="month" value={month} onClick={(event) => event.currentTarget.showPicker?.()} onChange={(event) => setMonth(event.target.value)} className="input mt-1 w-[155px]" /></label>
         <label className="text-[11px] font-medium text-[#687386]">Submission<select value={submissionType} onChange={(event) => setSubmissionType(event.target.value as "all" | "new" | "revised")} className="input mt-1 w-[130px]"><option value="all">All</option><option value="new">New</option><option value="revised">Revised</option></select></label>
         {(search || month || submissionType !== "all") && <Button secondary onClick={() => { setSearch(""); setMonth(""); setSubmissionType("all"); }}>Clear filters</Button>}
@@ -14733,6 +14747,7 @@ function PriceQuotationWorkspace({
   const [reviewing, setReviewing] = useState<Row | null>(null);
   const [revisionNoteQuote, setRevisionNoteQuote] = useState<Row | null>(null);
   const [illustrationQuote, setIllustrationQuote] = useState<Row | null>(null);
+  const [paymentQuote, setPaymentQuote] = useState<Row | null>(null);
   const [printAfterOpen, setPrintAfterOpen] = useState(false);
   const canPrepare = isProjectOfficerRole(role);
   const isGeneralManager = memberRole(role);
@@ -14751,11 +14766,26 @@ function PriceQuotationWorkspace({
           text(quote.document_type) === "price_quotation" &&
           (!isGeneralManager || text(quote.status) !== "draft") &&
           (!isCombinedRole ||
-            [quote.created_by, quote.prepared_by_user_id, quote.submitted_by].some(
-              (userId) => text(userId, "") === currentUserId,
+            [
+              quote.created_by,
+              quote.prepared_by_user_id,
+              quote.submitted_by,
+              quote.pricing_reviewed_by,
+            ].some((userId) => text(userId, "") === currentUserId) ||
+            store.pricing_officer_project_types.some(
+              (assignment) =>
+                text(assignment.pricing_officer_user_id, "") === currentUserId &&
+                pricingProjectTypeKey(assignment.project_type) ===
+                  pricingProjectTypeKey(quote.project_types),
             )),
       ),
-    [currentUserId, isCombinedRole, isGeneralManager, store.quotations],
+    [
+      currentUserId,
+      isCombinedRole,
+      isGeneralManager,
+      store.pricing_officer_project_types,
+      store.quotations,
+    ],
   );
   const preparedByKey = useCallback(
     (quote: Row) => projectOfficerIdForQuote(store, quote) || text(quote.representative, ""),
@@ -15010,12 +15040,34 @@ function PriceQuotationWorkspace({
   const deletePriceQuotation = async (quote: Row) => {
     if (!quote.id || !canDeletePriceQuotation(quote)) return;
     setSaving(true);
-    const { error } = await createClient().rpc("delete_price_quotation", {
+    const client = createClient();
+    const receiptPrefix = `${orgId}/${quote.id}`;
+    const { data: receiptFiles, error: receiptListError } = await client.storage
+      .from("quotation-payment-receipts")
+      .list(receiptPrefix, { limit: 1000 });
+    if (receiptListError) {
+      setSaving(false);
+      return notice(`Price Quotation could not be deleted because its receipt files could not be prepared: ${receiptListError.message}`);
+    }
+    const receiptPaths = (receiptFiles ?? [])
+      .filter((file) => Boolean(file.id && file.name))
+      .map((file) => `${receiptPrefix}/${file.name}`);
+    const { error } = await client.rpc("delete_price_quotation", {
       p_quotation_id: quote.id,
     });
+    if (error) {
+      setSaving(false);
+      return notice(error.message);
+    }
+    let receiptCleanupWarning = false;
+    if (receiptPaths.length) {
+      const { error: receiptCleanupError } = await client.storage
+        .from("quotation-payment-receipts")
+        .remove(receiptPaths);
+      receiptCleanupWarning = Boolean(receiptCleanupError);
+    }
     setSaving(false);
-    if (error) return notice(error.message);
-    notice("Price Quotation deleted.");
+    notice(`Price Quotation deleted.${receiptCleanupWarning ? " Its receipt files could not all be removed." : ""}`);
     await reload();
   };
   const chooseIllustration = (itemKey: string, file?: File) => {
@@ -15102,7 +15154,7 @@ function PriceQuotationWorkspace({
           })}
         </nav>
         <div className="flex flex-wrap items-center gap-2 border-b border-[#edf0f5] py-3">
-          <label className="relative min-w-0 flex-1 sm:min-w-56 sm:max-w-sm" htmlFor="price-quotation-search"><Search className="pointer-events-none absolute left-3 top-2.5 text-[#8b92a1]" size={15} /><span className="sr-only">Search quotations</span><input id="price-quotation-search" type="search" value={quotationQuery} onChange={(event) => setQuotationQuery(event.target.value)} placeholder="Search quotations" className="w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]" /></label>
+          <label className="relative min-w-0 flex-1 sm:min-w-56 sm:max-w-sm" htmlFor="price-quotation-search"><Search className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]" size={15} /><span className="sr-only">Search quotations</span><input id="price-quotation-search" type="search" value={quotationQuery} onChange={(event) => setQuotationQuery(event.target.value)} placeholder="Search quotations" className="search-input w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]" /></label>
           <label className="flex items-center gap-2 text-[12px] text-[#687386]"><span className="whitespace-nowrap">Month</span><input type="month" value={quotationMonth} onClick={(event) => event.currentTarget.showPicker?.()} onChange={(event) => setQuotationMonth(event.target.value)} className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px] text-[#202938] outline-none focus:border-[#c43b43]" /></label>
           {!isProjectOfficerRole(role) && <><label className="sr-only" htmlFor="price-quotation-officer">Sales Officer</label><select id="price-quotation-officer" value={preparedByFilter} onChange={(event) => setPreparedByFilter(event.target.value)} className={`min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-3 text-[12px] font-medium outline-none focus:border-[#c43b43] ${preparedByFilter === "all" ? "text-[#8b92a1]" : "text-[#202938]"}`}><option value="all">All Sales Officers</option>{quotationPreparers.map((officer) => <option key={officer.id} value={officer.id}>{officer.name}</option>)}</select></>}
           {!quotationMonth && <span className="text-[11px] text-[#8b92a1]">All months</span>}
@@ -15168,6 +15220,11 @@ function PriceQuotationWorkspace({
                   )}
                   {isProjectOfficerRole(role) && !isLegacy && text(quote.status) === "approved" && (
                     <ActionIcon label="Edit and resubmit Price Quotation" tone="amber" loading={saving} disabled={saving || Boolean(priceRevisionRequest)} onClick={() => void beginRevision(quote)}><RotateCcw size={15} /></ActionIcon>
+                  )}
+                  {canSubmitQuotationPaymentInUi(quote, role, currentUserId, store.pricing_officer_project_types) && (
+                    <ActionIcon label="Record client payment" confirm={false} onClick={() => setPaymentQuote(quote)}>
+                      <ReceiptText size={15} />
+                    </ActionIcon>
                   )}
                   {canDeletePriceQuotation(quote) && (
                     <ActionIcon
@@ -15261,6 +15318,7 @@ function PriceQuotationWorkspace({
       )}
       {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); notice(message); }} autoExportPdf pdfWindow={pdfWindow} printAfterOpen={printAfterOpen} hidden showInternalCosting={isGeneralManager} />}
       {reviewing && <PriceQuotationReview quotation={reviewing} store={store} saving={saving} showInternalMarkups={isGeneralManager} close={() => setReviewing(null)} notice={notice} reload={reload} />}
+      {paymentQuote && <QuotationPaymentDialog quote={paymentQuote} store={store} orgId={orgId} role={role} close={() => setPaymentQuote(null)} reload={reload} />}
     </Panel>
   );
 }
@@ -20615,12 +20673,15 @@ function CommissionSummaryView({
         <div className={"flex flex-wrap items-end gap-2 border-b border-[#e4e8ef] px-3 sm:px-4 " + (readOnly ? "-mt-2 pb-2 pt-0" : "py-2")}>
           <label className="min-w-48 flex-1 text-[11px] font-medium">
             Search
-            <input
-              value={commissionQuery}
-              onChange={(event) => setCommissionQuery(event.target.value)}
-              placeholder="Quotation, client, or officer"
-              className="input mt-1"
-            />
+            <span className="relative mt-1 block">
+              <Search className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]" size={15} />
+              <input
+                value={commissionQuery}
+                onChange={(event) => setCommissionQuery(event.target.value)}
+                placeholder="Quotation, client, or officer"
+                className="input mt-0 w-full search-input"
+              />
+            </span>
           </label>
           <label className="min-w-40 text-[11px] font-medium">
             Month
@@ -21391,7 +21452,7 @@ export function HuswellWorkspace({
   initialView?: View;
 }) {
   const defaultWorkspaceView: View = ["accountant", "internal_finance", "external_finance"].includes(role)
-    ? "Finance"
+    ? "Finance Overview"
     : role === "lead_coordinator"
       ? "Leads"
       : "Dashboard";
@@ -21645,7 +21706,9 @@ export function HuswellWorkspace({
       "Price Quotations",
       "PDF Costing",
       "Approvals",
+      "Finance Overview",
       "Finance",
+      "Payment Monitoring",
       "Commissions",
       "Settings",
     ],
@@ -21658,7 +21721,9 @@ export function HuswellWorkspace({
       "Quotation Costing Overview",
       "PDF Costing",
       "Approvals",
+      "Finance Overview",
       "Finance",
+      "Payment Monitoring",
       "Commissions",
       "Letter Request",
       "Announcements",
@@ -21674,7 +21739,9 @@ export function HuswellWorkspace({
       "Quotation Costing Overview",
       "PDF Costing",
       "Approvals",
+      "Finance Overview",
       "Finance",
+      "Payment Monitoring",
       "Commissions",
       "Letter Request",
       "Announcements",
@@ -21705,9 +21772,9 @@ export function HuswellWorkspace({
     ],
     sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Announcements", "Policy"],
     warehouse: ["Dashboard", "Catalog", "Inventory", "Production", "Announcements", "Policy"],
-    accountant: ["Finance", "Commissions", "Announcements", "Policy"],
-    internal_finance: ["Finance", "Commissions", "Announcements", "Policy"],
-    external_finance: ["Finance", "Commissions", "Announcements", "Policy"],
+    accountant: ["Finance Overview", "Finance", "Payment Monitoring", "Commissions", "Announcements", "Policy"],
+    internal_finance: ["Finance Overview", "Finance", "Payment Monitoring", "Commissions", "Announcements", "Policy"],
+    external_finance: ["Finance Overview", "Finance", "Commissions", "Announcements", "Policy"],
     lead_coordinator: ["Leads", "Announcements", "Policy"],
     payroll: ["Dashboard", "Payroll & Leave", "Letter Request", "Directory", "Announcements", "Policy"],
     production: ["Dashboard", "Production", "Inventory", "Announcements", "Policy"],
@@ -21809,7 +21876,9 @@ export function HuswellWorkspace({
     {
       label: "Business",
       items: [
+        { view: "Finance Overview", icon: Wallet },
         { view: "Finance", icon: Wallet },
+        { view: "Payment Monitoring", icon: ReceiptText },
         { view: "Commissions", icon: PhilippinePeso },
         { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
@@ -21866,7 +21935,9 @@ export function HuswellWorkspace({
     {
       label: "Finance",
       items: [
+        { view: "Finance Overview", icon: Wallet },
         { view: "Finance", icon: Wallet },
+        { view: "Payment Monitoring", icon: ReceiptText },
         { view: "Commissions", icon: PhilippinePeso },
       ],
     },
@@ -21986,9 +22057,15 @@ export function HuswellWorkspace({
       title: expenses.title,
       detail: expenses.detail,
     },
+    "Finance Overview": {
+      title: "Finance Overview",
+      detail: role === "external_finance"
+        ? "Track submitted money movements, budget requests, and supplier obligations."
+        : "Monitor cash, approvals, receivables, and payables.",
+    },
     Finance: {
-      title: "Finance",
-      detail: "Review receivables, payables, and financial performance.",
+      title: role === "external_finance" ? "External Finance" : isInternalFinanceRole(role) ? "Internal Finance" : "Finance",
+      detail: "Manage finance transactions, accounts, budget requests, and supplier costing.",
     },
     "Payroll & Leave": {
       title: "Payroll & Leave",
@@ -22017,7 +22094,7 @@ export function HuswellWorkspace({
     },
     "Payment Monitoring": {
       title: "Payment Monitoring",
-      detail: "Monitor quotation payment receipts and payment-review exceptions.",
+      detail: "Internal Finance confirms client receipts before they become Money In.",
     },
     "Payment Reviews": {
       title: "Payment Reviews",
@@ -22216,8 +22293,10 @@ export function HuswellWorkspace({
         notice={setMessage}
         role={role}
       />
+    ) : active === "Finance Overview" ? (
+      <FinanceWorkspace key={active} organizationId={organizationId} role={role} overviewOnly />
     ) : active === "Finance" ? (
-      <FinanceWorkspace organizationId={organizationId} role={role} />
+      <FinanceWorkspace key={active} organizationId={organizationId} role={role} />
     ) : active === "Commissions" ? (
       <CommissionSummaryView
         store={store}
@@ -22361,6 +22440,10 @@ export function HuswellWorkspace({
                           ? "Generated Leads"
                       : view === "Projects"
                             ? "Production"
+                            : view === "Finance" && role === "external_finance"
+                              ? "External Finance"
+                            : view === "Finance" && isInternalFinanceRole(role)
+                              ? "Internal Finance"
                             : role === "sales_pricing_officer" && view === "Price Quotation Review"
                               ? "Quotation Review Queue"
                             : view === "Quotation Costing Overview"
@@ -22536,41 +22619,7 @@ export function HuswellWorkspace({
           </div>
         </header>
         <div className={`workspace-content ${(["Projects", "Price Quotations", "Price Quotation Review", "Approvals", "Payment Monitoring", "Payment Reviews", "Announcements", "Policy"].includes(active)) ? "p-0" : "p-2 sm:p-3 lg:p-4"}`}>
-          {message && (
-            <div className="fixed inset-0 z-[999] grid place-items-center bg-[var(--color-overlay)] p-4">
-              <section
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="notification-title"
-                className="w-full max-w-sm rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-none"
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h2
-                      id="notification-title"
-                      className="text-[16px] font-semibold text-[var(--color-text-primary)]"
-                    >
-                      Notification
-                    </h2>
-                    <p className="mt-1.5 text-[13px] leading-[1.45] text-[var(--color-text-secondary)]">
-                      {message}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setMessage(null)}
-                    aria-label="Close notification"
-                    className="grid size-8 shrink-0 place-items-center rounded-[var(--radius-control)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)]"
-                  >
-                    <X size={16} strokeWidth={1.75} />
-                  </button>
-                </div>
-                <div className="mt-4 flex justify-end">
-                  <Button onClick={() => setMessage(null)}>Okay</Button>
-                </div>
-              </section>
-            </div>
-          )}
+          {message && <NotificationDialog message={message} close={() => setMessage(null)} />}
           {content}
         </div>
       </main>

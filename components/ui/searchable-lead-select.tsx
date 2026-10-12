@@ -157,10 +157,10 @@ export function SearchableLeadSelect({
       </button>
 
       {open && (
-        <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 overflow-hidden rounded-lg border border-[#d9e0e9] bg-white shadow-xl">
+        <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 overflow-hidden rounded-lg border border-[#d9e0e9] bg-white shadow-none">
           <div className="border-b border-[#edf0f5] p-2">
             <div className="relative">
-              <Search size={14} className="pointer-events-none absolute left-2.5 top-2.5 z-10 text-[#8b92a1]" aria-hidden="true" />
+              <Search size={15} className="search-icon pointer-events-none absolute left-3 z-10 text-[#8b92a1]" aria-hidden="true" />
               <input
                 ref={searchRef}
                 type="search"
@@ -178,7 +178,7 @@ export function SearchableLeadSelect({
                 }}
                 onKeyDown={handleSearchKeyDown}
                 placeholder={searchPlaceholder}
-                className="searchable-lead-search input mt-0 h-9 w-full !pl-8 !pr-3 text-[12px]"
+                className="searchable-lead-search input mt-0 h-9 w-full search-input !pr-3 text-[12px]"
               />
             </div>
           </div>

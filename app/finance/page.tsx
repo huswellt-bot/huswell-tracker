@@ -9,5 +9,5 @@ export default async function FinancePage() {
     redirect("/");
   }
 
-  return <HuswellWorkspace {...access} initialView="Finance" />;
+  return <HuswellWorkspace {...access} initialView="Finance Overview" />;
 }

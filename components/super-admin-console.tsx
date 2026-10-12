@@ -12,7 +12,6 @@ import {
   LogOut,
   Pencil,
   Plus,
-  ShieldCheck,
   Trash2,
   UserRound,
   UsersRound,
@@ -23,6 +22,8 @@ import { AccountProfileDialog } from "@/components/account-profile-dialog";
 import { FixedIconTooltip } from "@/components/fixed-icon-tooltip";
 import { ThemeToggle } from "@/components/theme-provider";
 import { FileUploadControl } from "@/components/ui/file-upload-control";
+import { NotificationDialog } from "@/components/ui/notification-dialog";
+import { TABLE_PAGE_SIZE, TablePagination } from "@/components/ui/table-pagination";
 import { createClient } from "@/lib/supabase/client";
 import { quotationProjectTypes } from "@/lib/quotation-project-types";
 import { workspaceAccountLabel, workspaceRoleLabel } from "@/lib/role-labels";
@@ -100,6 +101,7 @@ export function SuperAdminConsole({
   const [editSignatureFile, setEditSignatureFile] = useState<File | null>(
     null,
   );
+  const [userPage, setUserPage] = useState(1);
 
   const load = useCallback(async () => {
     const response = await fetch("/api/super-admin/users", {
@@ -117,6 +119,13 @@ export function SuperAdminConsole({
   useEffect(() => {
     void load();
   }, [load]);
+
+  const userPageCount = Math.max(1, Math.ceil(users.length / TABLE_PAGE_SIZE));
+  const activeUserPage = Math.min(userPage, userPageCount);
+  const visibleUsers = users.slice(
+    (activeUserPage - 1) * TABLE_PAGE_SIZE,
+    activeUserPage * TABLE_PAGE_SIZE,
+  );
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -360,7 +369,7 @@ export function SuperAdminConsole({
               Add User
             </button>
           </div>
-          <div className="max-h-[460px] overflow-auto rounded-lg border border-[#d6dee8] bg-white">
+          <div className="table-shell max-h-[460px] overflow-auto">
               <table className="app-table w-full min-w-[980px] text-left text-[12px]">
               <thead className="sticky top-0 z-10 border-b border-[#1F4E79] bg-[#1F4E79] text-[12px] font-bold text-white">
                 <tr>
@@ -384,7 +393,7 @@ export function SuperAdminConsole({
                     </td>
                   </tr>
                 ) : users.length ? (
-                  users.map((user) => (
+                  visibleUsers.map((user) => (
                     <tr key={user.id}>
                       <td className="px-5 py-4 font-medium">
                         {user.full_name}
@@ -497,21 +506,10 @@ export function SuperAdminConsole({
               </tbody>
             </table>
           </div>
+          <TablePagination page={activeUserPage} pageCount={userPageCount} total={users.length} onPageChange={setUserPage} label="User management pagination" />
         </section>
       </div>
-      {message && (
-        <div className="fixed bottom-5 right-5 z-40 flex max-w-sm items-start gap-3 rounded-xl border border-[#d9e0e9] bg-white p-4 shadow-xl">
-          <ShieldCheck size={18} className="mt-0.5 text-[#c43b43]" />
-          <p className="flex-1 text-[14px] text-[#344054]">{message}</p>
-          <button
-            type="button"
-            onClick={() => setMessage(null)}
-            aria-label="Close Message"
-          >
-            <X size={16} />
-          </button>
-        </div>
-      )}
+      {message && <NotificationDialog message={message} close={() => setMessage(null)} />}
       <AccountProfileDialog
         open={profileOpen}
         onClose={() => setProfileOpen(false)}
