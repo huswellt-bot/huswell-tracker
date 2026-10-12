@@ -13,6 +13,10 @@ const geist = Geist({
 export const metadata: Metadata = {
   title: "Huswell Trading | Business Workspace",
   description: "Operations and finance workspace for Huswell Trading.",
+  robots: {
+    index: false,
+    follow: false,
+  },
   icons: {
     icon: "https://huswelltrading.com/favicon.ico",
   },
