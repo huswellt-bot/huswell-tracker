@@ -15137,7 +15137,7 @@ function PriceQuotationWorkspace({
       action={
         canPrepare ? (
           <Button onClick={openNew}>
-            <Plus size={14} /> Request Price Quotation
+            <Plus size={14} /> Prepare Price Quotation
           </Button>
         ) : undefined
       }
@@ -15255,7 +15255,7 @@ function PriceQuotationWorkspace({
       {editorOpen && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/30 p-4">
           <section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
-            <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">{editing ? "Edit Price Quotation" : "Request Price Quotation"}</h2><p className="mt-1 text-[12px] text-[#687386]">Add the requested materials and quantities. Selling prices are entered by the assigned Sales & Pricing Officer.</p></div><button type="button" onClick={resetEditor} aria-label="Close" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div>
+            <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">{editing ? "Edit Price Quotation" : "Prepare Price Quotation"}</h2><p className="mt-1 text-[12px] text-[#687386]">Add the requested materials and quantities. Selling prices are entered by the assigned Sales & Pricing Officer.</p></div><button type="button" onClick={resetEditor} aria-label="Close" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div>
             <label className="mt-5 block text-[12px] font-medium text-[#202938]">Company Name - Contact Name<SearchableLeadSelect options={leadOptions} value={leadId} onChange={setLeadId} required clearable={false} placeholder="Select a lead" searchPlaceholder="Search name, contact, project, or lead number" ariaLabel="Company Name - Contact Name" className="mt-1" /></label>
             <label className="mt-4 block text-[12px] font-medium text-[#202938]">Project Type<select value={projectType} onChange={(event) => setProjectType(event.target.value)} className={`input mt-1 ${projectType ? "text-[#151922]" : "text-[#8b92a1]"}`} required><option value="">Select project type</option>{quotationProjectTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
             <section className="mt-5 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-4">
@@ -21899,9 +21899,9 @@ export function HuswellWorkspace({
         { view: "Leads", icon: ClipboardCheck },
         { view: "Supplier's List", icon: UsersRound },
         { view: "Price Quotations", icon: FileText },
+        { view: "Price Quotation Review", icon: ClipboardCheck, badge: pendingPricingReviewCount },
         { view: "Quotation Costing Overview", icon: ReceiptText },
         { view: "PDF Costing", icon: FileSpreadsheet },
-        { view: "Price Quotation Review", icon: ClipboardCheck, badge: pendingPricingReviewCount },
       ],
     },
     {
