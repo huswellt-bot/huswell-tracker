@@ -12,6 +12,7 @@ import {
 import {
   Ban,
   Check,
+  Eye,
   FileText,
   LoaderCircle,
   Paperclip,
@@ -188,6 +189,7 @@ export function LetterRequestWorkspace({
   const [attachmentRemoved, setAttachmentRemoved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+  const [viewRequest, setViewRequest] = useState<RequestRow | null>(null);
   const [reviewDialog, setReviewDialog] = useState<{
     request: RequestRow;
     decision: Decision;
@@ -255,6 +257,20 @@ export function LetterRequestWorkspace({
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [closeForm, formOpen, saving]);
+
+  useEffect(() => {
+    if (!viewRequest) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setViewRequest(null);
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [viewRequest]);
 
   const startEdit = (request: RequestRow) => {
     setEditingId(value(request.id));
@@ -686,6 +702,10 @@ export function LetterRequestWorkspace({
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex justify-end gap-1">
+                            <Button type="button" variant="ghost" size="xs" onClick={() => setViewRequest(request)}>
+                              <Eye />
+                              View
+                            </Button>
                             <Button type="button" variant="ghost" size="xs" onClick={() => setSelectedRequestId(isSelected ? null : requestId)}>
                               {isSelected ? "Hide history" : "History"}
                             </Button>
@@ -748,6 +768,102 @@ export function LetterRequestWorkspace({
           )}
         </CardContent>
       </Card>
+
+      {viewRequest ? (
+        <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-[var(--color-overlay)] px-3 py-4 sm:px-5 sm:py-7" role="presentation">
+          <section
+            className="my-0 flex max-h-[calc(100vh-2rem)] w-full max-w-2xl flex-col overflow-hidden rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-xl sm:my-2"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="view-letter-request-title"
+            aria-describedby="view-letter-request-description"
+          >
+            <header className="flex shrink-0 items-start justify-between gap-4 border-b border-[var(--color-border)] px-4 py-4 sm:px-5">
+              <div>
+                <h2 id="view-letter-request-title" className="text-[16px] font-semibold text-[var(--color-text-primary)]">
+                  Letter Request details
+                </h2>
+                <p id="view-letter-request-description" className="mt-1 text-[12px] text-[var(--color-text-secondary)]">
+                  Full request submitted by {value(viewRequest.requester_name, "Pricing Officer")}.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewRequest(null)}
+                className="grid size-8 shrink-0 place-items-center rounded-[var(--radius-control)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)]"
+                aria-label="Close Letter Request details"
+              >
+                <X size={18} />
+              </button>
+            </header>
+            <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <span className="block text-[11px] font-medium uppercase tracking-[0.04em] text-[var(--color-text-tertiary)]">Requester</span>
+                  <p className="mt-1 text-[13px] text-[var(--color-text-primary)]">{value(viewRequest.requester_name, "Pricing Officer")}</p>
+                </div>
+                <div>
+                  <span className="block text-[11px] font-medium uppercase tracking-[0.04em] text-[var(--color-text-tertiary)]">Request type</span>
+                  <p className="mt-1 text-[13px] text-[var(--color-text-primary)]">{requestTypeLabel(viewRequest.request_type)}</p>
+                </div>
+                <div>
+                  <span className="block text-[11px] font-medium uppercase tracking-[0.04em] text-[var(--color-text-tertiary)]">Dates</span>
+                  <p className="mt-1 text-[13px] text-[var(--color-text-primary)]">
+                    {formatDate(viewRequest.start_date)} – {formatDate(viewRequest.end_date)}
+                  </p>
+                </div>
+                <div>
+                  <span className="block text-[11px] font-medium uppercase tracking-[0.04em] text-[var(--color-text-tertiary)]">Status</span>
+                  <div className="mt-1"><StatusBadge status={viewRequest.status} /></div>
+                </div>
+              </div>
+
+              <div className="mt-5 border-t border-[var(--color-border)] pt-4">
+                <h3 className="text-[13px] font-semibold text-[var(--color-text-primary)]">Employee message</h3>
+                <p className="mt-2 whitespace-pre-wrap break-words text-[13px] leading-6 text-[var(--color-text-secondary)]">
+                  {value(viewRequest.reason, "No reason was provided.")}
+                </p>
+              </div>
+
+              {value(viewRequest.request_type) === "work_from_home" ? (
+                <div className="mt-5 border-t border-[var(--color-border)] pt-4">
+                  <h3 className="text-[13px] font-semibold text-[var(--color-text-primary)]">Work plan</h3>
+                  <p className="mt-2 whitespace-pre-wrap break-words text-[13px] leading-6 text-[var(--color-text-secondary)]">
+                    {value(viewRequest.work_plan, "No work plan was provided.")}
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-5 border-t border-[var(--color-border)] pt-4">
+                  <h3 className="text-[13px] font-semibold text-[var(--color-text-primary)]">Leave type</h3>
+                  <p className="mt-2 text-[13px] text-[var(--color-text-secondary)]">{leaveTypeLabel(viewRequest.leave_type)}</p>
+                </div>
+              )}
+
+              {value(viewRequest.attachment_storage_path) ? (
+                <div className="mt-5 border-t border-[var(--color-border)] pt-4">
+                  <h3 className="text-[13px] font-semibold text-[var(--color-text-primary)]">Supporting file</h3>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={() => void openAttachment(viewRequest)}>
+                      <FileText />
+                      Open {value(viewRequest.attachment_file_name, "supporting file")}
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+
+              {value(viewRequest.decision_note) ? (
+                <div className="mt-5 border-t border-[var(--color-border)] pt-4">
+                  <h3 className="text-[13px] font-semibold text-[var(--color-text-primary)]">Decision note</h3>
+                  <p className="mt-2 whitespace-pre-wrap break-words text-[13px] leading-6 text-[var(--color-text-secondary)]">{value(viewRequest.decision_note)}</p>
+                </div>
+              ) : null}
+            </div>
+            <footer className="flex shrink-0 justify-end border-t border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-4 py-3 sm:px-5">
+              <Button type="button" variant="outline" onClick={() => setViewRequest(null)}>Close</Button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
 
       {reviewDialog ? (
         <div className="fixed inset-0 z-[70] grid place-items-center bg-[var(--color-overlay)] p-4" role="presentation">

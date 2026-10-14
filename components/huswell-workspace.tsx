@@ -21635,7 +21635,11 @@ export function HuswellWorkspace({
     [],
   );
   useEffect(() => {
-    const neededTables = workspaceViewTables(active, leadMode, role).filter(
+    const viewTables = workspaceViewTables(active, leadMode, role);
+    const notificationTables: TableName[] = ["owner", "admin"].includes(role)
+      ? ["employee_requests"]
+      : [];
+    const neededTables = [...new Set([...viewTables, ...notificationTables])].filter(
       (table) => !loadedTables.current.has(table),
     );
     if (!neededTables.length) {
@@ -21823,6 +21827,9 @@ export function HuswellWorkspace({
   const pendingPdfCostingCount = isManagementRole
     ? store.costing_requests.filter((request) => text(request.status) === "pending").length
     : 0;
+  const pendingLetterRequestCount = ["owner", "admin"].includes(role)
+    ? store.employee_requests.filter((request) => text(request.status) === "pending").length
+    : 0;
   const pendingProductionApprovalCount = productionApprovalOnly
     ? store.project_schedules.filter((schedule) => text(schedule.status) === "pending").length
       + store.project_schedule_revision_requests.filter((request) => text(request.status) === "pending").length
@@ -21883,7 +21890,7 @@ export function HuswellWorkspace({
         { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
         { view: "Settings", icon: Settings },
-        { view: "Letter Request", icon: FileText },
+        { view: "Letter Request", icon: FileText, badge: pendingLetterRequestCount },
       ],
     },
   ] : role === "sales_pricing_officer" ? [
