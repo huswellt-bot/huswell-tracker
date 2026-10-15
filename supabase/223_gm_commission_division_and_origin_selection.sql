@@ -150,7 +150,8 @@ begin
     raise exception 'Choose a valid commission division';
   end if;
   if p_handling_mode = 'self_handled' and not v_self_handled then
-    raise exception 'Self-handled quotations require the 100%% S.E. Origin division';
+    raise exception using
+      message = 'Self-handled quotations require the 100% S.E. Origin division';
   end if;
   if p_handling_mode = 'shared' and v_self_handled then
     raise exception 'Shared quotations require a shared commission division';
