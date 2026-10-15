@@ -288,6 +288,7 @@ export type QuotationPdfStore = Pick<
   | "price_quotation_costing_markups"
   | "customers"
   | "leads"
+  | "profiles"
 >;
 type PendingCostLine = {
   id: string;
@@ -948,6 +949,14 @@ const text = (value: unknown, fallback = "-") =>
       ? fallback
       : String(value),
   );
+const quotationPreparedByName = (quote: Row, profiles: Row[]) => {
+  const preparedById =
+    text(quote.prepared_by_user_id, "") || text(quote.created_by, "");
+  return text(
+    profiles.find((profile) => text(profile.id, "") === preparedById)?.full_name,
+    text(quote.representative, "Sales Executive"),
+  );
+};
 const productionBoxMakers = [
   "Kuya Diego",
   "Kuya Ted",
@@ -3215,6 +3224,7 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
   const approvedByName = text(quote.approved_by_name, "Marvin S. Tavarez");
   const approvedByRole = quote.approved_by_name ? "General Manager" : "Proprietor";
   const preparedBySignature = text(quote.prepared_by_signature_url, "") || undefined;
+  const preparedByName = quotationPreparedByName(quote, store.profiles);
   const approvedBySignature = text(quote.approved_by_signature_url, "") || (approvedByName === "Marvin S. Tavarez" ? `${origin}/marvin-tavarez-signature.png` : undefined);
   // Direct Price Quotations are based on a Lead. The saved quotation values
   // remain as a fallback for historical records where lead fields are absent.
@@ -3253,8 +3263,8 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
       <PdfView style={priceQuotationPdfStyles.logoColumn}><PdfImage src={`${origin}/huswell-quotation-logo.png`} style={[priceQuotationPdfStyles.logo, compact ? priceQuotationPdfCompactStyles.logo : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.logo : undefined]} /></PdfView>
       <PdfView style={priceQuotationPdfStyles.businessColumn}>
         <PdfText style={[priceQuotationPdfStyles.businessDetail, compact ? priceQuotationPdfCompactStyles.businessDetail : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.businessDetail : undefined]}>72 Adrian St., North Fairview Park Subd.,{`\n`}Brgy. North Fairview, Quezon City, Metro Manila</PdfText>
-        <PdfText style={[priceQuotationPdfStyles.businessDetail, compact ? priceQuotationPdfCompactStyles.businessDetail : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.businessDetail : undefined]}>(02) 456-7890</PdfText>
-        <PdfText style={[priceQuotationPdfStyles.businessDetail, compact ? priceQuotationPdfCompactStyles.businessDetail : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.businessDetail : undefined]}>info@huswelltrading.com</PdfText>
+        <PdfText style={[priceQuotationPdfStyles.businessDetail, compact ? priceQuotationPdfCompactStyles.businessDetail : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.businessDetail : undefined]}>09173183354</PdfText>
+        <PdfText style={[priceQuotationPdfStyles.businessDetail, compact ? priceQuotationPdfCompactStyles.businessDetail : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.businessDetail : undefined]}>sales@huswelltrading.com</PdfText>
         <PdfText style={[priceQuotationPdfStyles.businessDetail, compact ? priceQuotationPdfCompactStyles.businessDetail : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.businessDetail : undefined]}>www.huswelltrading.com</PdfText>
       </PdfView>
       <PdfView style={[priceQuotationPdfStyles.quoteColumn, compact ? priceQuotationPdfCompactStyles.quoteColumn : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.quoteColumn : undefined]}>
@@ -3263,7 +3273,7 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
           ["Quotation No.", text(quote.quotation_no)],
           ...(sourceQuotation ? [["Source Price Quotation", text(sourceQuotation.quotation_no)]] : []),
           ["Quotation Date", issueDate],
-          ["Prepared By", text(quote.representative, "Sales Executive")],
+          ["Prepared By", preparedByName],
         ].map(([label, value]) => <PdfView key={label} style={priceQuotationPdfStyles.quoteMetaRow}><PdfText style={[priceQuotationPdfStyles.quoteMetaLabel, compact ? priceQuotationPdfCompactStyles.quoteMetaLabel : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.quoteMetaLabel : undefined]}>{label}</PdfText><PdfText style={[priceQuotationPdfStyles.quoteMetaColon, compact ? priceQuotationPdfCompactStyles.quoteMetaColon : undefined, superCompact ? priceQuotationPdfCompactStyles.quoteMetaColon : undefined]}>:</PdfText>{label === "Source Price Quotation" && sourceQuotationUrl ? <PdfLink src={sourceQuotationUrl} style={[priceQuotationPdfStyles.quoteMetaValue, compact ? priceQuotationPdfCompactStyles.quoteMetaValue : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.quoteMetaValue : undefined, { color: "#1769e8", textDecoration: "underline" }]}>{value}</PdfLink> : <PdfText style={[priceQuotationPdfStyles.quoteMetaValue, compact ? priceQuotationPdfCompactStyles.quoteMetaValue : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.quoteMetaValue : undefined]}>{value}</PdfText>}</PdfView>)}
       </PdfView>
     </PdfView>
@@ -3297,7 +3307,7 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
   );
   const signatureSection = (
     <PdfView style={[priceQuotationPdfStyles.signatures, compact ? priceQuotationPdfCompactStyles.signatures : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatures : undefined]}>
-      <PdfView style={[priceQuotationPdfStyles.signatureColumn, compact ? priceQuotationPdfCompactStyles.signatureColumn : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureColumn : undefined]}><PriceQuotationSignature superCompact={superCompact} compact={compact} label="Prepared by:" name={text(quote.representative, "Sales Executive")} signatureSource={preparedBySignature} /><PdfText style={[priceQuotationPdfStyles.signatureRole, compact ? priceQuotationPdfCompactStyles.signatureRole : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureRole : undefined]}>Sales Executive</PdfText></PdfView>
+      <PdfView style={[priceQuotationPdfStyles.signatureColumn, compact ? priceQuotationPdfCompactStyles.signatureColumn : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureColumn : undefined]}><PriceQuotationSignature superCompact={superCompact} compact={compact} label="Prepared by:" name={preparedByName} signatureSource={preparedBySignature} /><PdfText style={[priceQuotationPdfStyles.signatureRole, compact ? priceQuotationPdfCompactStyles.signatureRole : undefined, superCompact ? priceQuotationPdfCompactStyles.signatureRole : undefined]}>Sales Executive</PdfText></PdfView>
       <PdfView style={[priceQuotationPdfStyles.signatureColumnRight, compact ? priceQuotationPdfCompactStyles.signatureColumnRight : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureColumnRight : undefined]}><PriceQuotationSignature superCompact={superCompact} compact={compact} label="Approved by:" name={approvedByName} signatureSource={approvedBySignature} /><PdfText style={[priceQuotationPdfStyles.signatureRole, compact ? priceQuotationPdfCompactStyles.signatureRole : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureRole : undefined]}>{approvedByRole}</PdfText><PdfView style={[priceQuotationPdfStyles.signatureLine, { marginTop: compact ? 3 : 5 }, compact ? priceQuotationPdfCompactStyles.signatureLine : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureLine : undefined]}><PdfText style={[priceQuotationPdfStyles.signatureLabel, compact ? priceQuotationPdfCompactStyles.signatureLabel : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureLabel : undefined]}>Conforme:</PdfText><PdfView style={[priceQuotationPdfStyles.signatureSignatory, compact ? priceQuotationPdfCompactStyles.signatureSignatory : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureSignatory : undefined]}><PdfText style={[priceQuotationPdfStyles.signatureName, compact ? priceQuotationPdfCompactStyles.signatureName : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureName : undefined]}> </PdfText></PdfView></PdfView><PdfView style={[priceQuotationPdfStyles.signatureLine, { marginTop: compact ? 3 : 5 }, compact ? priceQuotationPdfCompactStyles.signatureLine : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureLine : undefined]}><PdfText style={[priceQuotationPdfStyles.signatureLabel, compact ? priceQuotationPdfCompactStyles.signatureLabel : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureLabel : undefined]}>Date:</PdfText><PdfView style={[priceQuotationPdfStyles.signatureSignatory, compact ? priceQuotationPdfCompactStyles.signatureSignatory : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureSignatory : undefined]}><PdfText style={[priceQuotationPdfStyles.signatureName, compact ? priceQuotationPdfCompactStyles.signatureName : undefined, superCompact ? priceQuotationPdfSuperCompactStyles.signatureName : undefined]}> </PdfText></PdfView></PdfView></PdfView>
     </PdfView>
   );
@@ -3732,7 +3742,7 @@ function PriceQuotationPdfLegacy({ quote, store, origin }: { quote: Row; store: 
   return <PdfDocument title={`Price Quotation ${text(quote.quotation_no)}`}>
     <PdfPage size={LEGAL_PORTRAIT} orientation="portrait" style={generatedPdfStyles.page}>
       <PdfView style={generatedPdfStyles.header}>
-        <PdfView><PdfImage src={`${origin}/huswell-quotation-logo.png`} style={generatedPdfStyles.logo} /><PdfText>72 Adrian St. North Fairview Park Subd.</PdfText><PdfText>Brgy. North Fairview, Quezon City</PdfText><PdfText>09171697153</PdfText><PdfText>saleshuswell@gmail.com</PdfText></PdfView>
+        <PdfView><PdfImage src={`${origin}/huswell-quotation-logo.png`} style={generatedPdfStyles.logo} /><PdfText>72 Adrian St. North Fairview Park Subd.</PdfText><PdfText>Brgy. North Fairview, Quezon City</PdfText><PdfText>09173183354</PdfText><PdfText>sales@huswelltrading.com</PdfText></PdfView>
         <PdfView style={generatedPdfStyles.quotationHeader}><PdfText style={generatedPdfStyles.quotationTitle}>PRICE QUOTATION</PdfText><PdfView style={generatedPdfStyles.quotationDetails}><PdfText style={generatedPdfStyles.quotationDetail}>Quotation No.: {text(quote.quotation_no)}</PdfText><PdfText style={generatedPdfStyles.quotationDetail}>Quotation Date: {issueDate}</PdfText><PdfText style={generatedPdfStyles.quotationDetail}>Prepared For: {text(customer?.company_name ?? lead?.client_name ?? quote.client_name, "—")}</PdfText><PdfText style={generatedPdfStyles.quotationDetail}>Attention: {text(customer?.contact_name ?? lead?.contact_name ?? quote.client_contact_name, "—")}</PdfText></PdfView></PdfView>
       </PdfView>
       <PdfView style={{ marginTop: 14 }}>
@@ -3754,7 +3764,7 @@ function PriceQuotationPdfLegacy({ quote, store, origin }: { quote: Row; store: 
       <PdfText style={generatedPdfStyles.sectionTitle}>TERMS AND CONDITIONS</PdfText>
       <PdfText style={generatedPdfStyles.terms}>{terms.map((term, index) => `${index + 1}. ${term}`).join("\n")}</PdfText>
       <PdfBankDetails details={bankDetails} />
-      <PdfView style={generatedPdfStyles.signatureRow}><PdfSignatureBlock label="Prepared by:" name={text(quote.representative)} role="Sales Executive" signatureSource={text(quote.prepared_by_signature_url, "") || undefined} /><PdfSignatureBlock label="Approved by:" name={approvedByName} role={approvedByRole} signatureSource={approvedBySignature} /></PdfView>
+      <PdfView style={generatedPdfStyles.signatureRow}><PdfSignatureBlock label="Prepared by:" name={quotationPreparedByName(quote, store.profiles)} role="Sales Executive" signatureSource={text(quote.prepared_by_signature_url, "") || undefined} /><PdfSignatureBlock label="Approved by:" name={approvedByName} role={approvedByRole} signatureSource={approvedBySignature} /></PdfView>
       <PdfText style={[generatedPdfStyles.terms, { marginTop: 10 }]}>Conforme: ______________________________</PdfText>
       <PdfText style={[generatedPdfStyles.terms, { marginTop: 14, textAlign: "center", fontStyle: "italic" }]}>Thank you for the opportunity to provide this quotation.</PdfText>
       <PdfText style={[generatedPdfStyles.terms, { textAlign: "center" }]}>We look forward to working with you.</PdfText>
@@ -3780,7 +3790,7 @@ function CostingBreakdownPdf({ quote, store, origin }: { quote: Row; store: Stor
     <PdfView style={[generatedPdfStyles.table, { marginTop: 15 }]}><PdfView style={generatedPdfStyles.row}><PdfCell width="52%" header>Materials and Production</PdfCell><PdfCell width="14%" header>Quantity</PdfCell><PdfCell width="17%" header>Unit Cost</PdfCell><PdfCell width="17%" header>Subtotal</PdfCell></PdfView>{lines.map((line, index) => <PdfView key={text(line.id, String(index))} style={generatedPdfStyles.row} wrap={false}><PdfCell width="52%">{text(line.description)}</PdfCell><PdfCell width="14%">{n(line.quantity)}</PdfCell><PdfCell width="17%">{currency(n(line.unit_cost))}</PdfCell><PdfCell width="17%">{currency(n(line.line_total))}</PdfCell></PdfView>)}<PdfView style={generatedPdfStyles.row}><PdfCell width="83%" total>TOTAL ESTIMATED COGS</PdfCell><PdfCell width="17%" total>{currency(cogs)}</PdfCell></PdfView></PdfView>
     <PdfText style={generatedPdfStyles.sectionTitle}>MARKUP, VAT, EXPENSES</PdfText>
     {[["Declared Markup", cogs * n(quote.profit_margin_rate) / 100], ["Overhead Allocation", cogs * n(quote.overhead_rate) / 100], ["Buffer Margin", cogs * n(quote.buffer_margin_rate) / 100], ["Production Commission", cogs * n(quote.commission_rate) / 100], ["VAT", n(quote.vat_amount)], ["SELLING PRICE VAT EX.", sellingExVat], ["SELLING PRICE VAT INC.", n(quote.total_amount)]].map(([label, value]) => <PdfView key={String(label)} style={generatedPdfStyles.infoRow}><PdfText style={generatedPdfStyles.infoLabel}>{String(label)}:</PdfText><PdfText style={generatedPdfStyles.infoValue}>{currency(Number(value))}</PdfText></PdfView>)}
-    <PdfView style={generatedPdfStyles.signatureRow}><PdfSignatureBlock label="Prepared by:" name={text(quote.representative)} role="Sales Executive" signatureSource={text(quote.prepared_by_signature_url, "") || undefined} /><PdfSignatureBlock label="Approved by:" name={approvedByName} role={approvedByRole} signatureSource={approvedBySignature} /></PdfView>
+    <PdfView style={generatedPdfStyles.signatureRow}><PdfSignatureBlock label="Prepared by:" name={quotationPreparedByName(quote, store.profiles)} role="Sales Executive" signatureSource={text(quote.prepared_by_signature_url, "") || undefined} /><PdfSignatureBlock label="Approved by:" name={approvedByName} role={approvedByRole} signatureSource={approvedBySignature} /></PdfView>
   </PdfPage></PdfDocument>;
 }
 
@@ -12271,9 +12281,9 @@ function QuotationDocument({
               >
                 <p>72 Adrian St. North Fairview Park Subd.</p>
                 <p>Brgy. North Fairview, Quezon City</p>
-                <p>09171697153</p>
+                <p>09173183354</p>
                 <p style={{ color: "#0000ee", textDecoration: "underline" }}>
-                  saleshuswell@gmail.com
+                  sales@huswelltrading.com
                 </p>
               </div>
             </div>
@@ -12593,7 +12603,7 @@ function QuotationDocument({
                 textAlign: "center",
               }}
             >
-              {text(quote.representative)}
+              {quotationPreparedByName(quote, store.profiles)}
             </p>
               <p>Sales Executive</p>
             <div
@@ -12864,7 +12874,7 @@ function QuotationDocument({
                   textDecoration: "underline",
                 }}
               >
-                {text(quote.representative)}
+                {quotationPreparedByName(quote, store.profiles)}
               </p>
               <p
                 className="absolute"
@@ -13046,7 +13056,7 @@ function CostingDocument({
           <section className="mt-5 grid grid-cols-2 gap-7 border-y border-[#111] py-3"><div><b>DETAILS</b><dl className="mt-2 grid grid-cols-[145px_1fr] gap-y-1"><dt>Size: L x W x H (in./cm.):</dt><dd className="border-b border-[#777] px-1">{text(quote.size_details)}</dd><dt>Quantity:</dt><dd className="border-b border-[#777] px-1">{text(quote.project_quantity)}</dd><dt>Delivery Date:</dt><dd className="border-b border-[#777] px-1">{day(quote.delivery_date)}</dd></dl></div><div><b>PROJECT TYPE</b><div className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1.5">{projectTypeOptions.map((type) => <div key={type} className="flex items-center gap-2"><span className="inline-grid size-4 place-items-center border border-[#111] text-[11px]">{text(quote.project_types, "") === type ? "✓" : ""}</span><span>{type}</span></div>)}</div></div></section>
           <table className="pdf-fixed-table mt-6 w-full border-collapse text-sm"><thead className="font-bold"><tr className="bg-[#c43b43] text-white"><th className="w-[52%] border border-[#c43b43] p-2 text-left">Materials and Production</th><th className="w-[14%] border border-[#c43b43] p-2">Quantity</th><th className="w-[17%] border border-[#c43b43] p-2">Unit Cost</th><th className="w-[17%] border border-[#c43b43] p-2">Subtotal</th></tr></thead><tbody>{lines.map((line) => <tr key={text(line.id)}><td className="border border-[#d5dbe5] p-2">{text(line.description)}</td><td className="border border-[#d5dbe5] p-2 text-center">{n(line.quantity)}</td><td className="border border-[#d5dbe5] p-2 text-right">{peso.format(n(line.unit_cost))}</td><td className="border border-[#d5dbe5] p-2 text-right">{peso.format(n(line.line_total))}</td></tr>)}<tr className="font-medium"><td colSpan={3} className="border border-[#d5dbe5] bg-[#fff7f7] p-2">TOTAL ESTIMATED COGS</td><td className="border border-[#d5dbe5] bg-[#fff7f7] p-2 text-right">{peso.format(cogs)}</td></tr></tbody></table>
           <section className="mt-7 max-w-sm border border-[#d5dbe5]"><h2 className="border-b border-[#d5dbe5] bg-[#fff7f7] px-3 py-2 font-medium text-[#a22d35]">MARKUP, VAT, EXPENSES</h2><Cost label={`Declared Markup (${n(quote.profit_margin_rate)}%)`} value={profit} /><Cost label={`Overhead Allocation (${n(quote.overhead_rate)}%)`} value={overhead} /><Cost label={`Buffer Margin (${n(quote.buffer_margin_rate)}%)`} value={buffer} /><Cost label={`Production Commission (${n(quote.commission_rate)}%)`} value={commission} /><Cost label={`VAT (${vatRate}%)`} value={n(quote.vat_amount)} /><Cost label="SELLING PRICE VAT INC." value={n(quote.total_amount)} strong /><Cost label="SELLING PRICE VAT EX." value={sellingExVat} strong /></section>
-          <section className="mt-12 flex items-end justify-between"><div className="w-56 text-center"><div className="h-14" /><div className="mx-auto w-52 border-b border-[#111] pb-1 font-semibold">{text(quote.representative)}</div><div>Sales Executive</div></div><div className="w-56 text-center"><div className="h-14">{approved && <img src="/marvin-tavarez-signature.png" alt="Signature of Mr. Marvin S. Tavarez" className="mx-auto h-14 max-w-full object-contain" />}</div><div className="mx-auto w-52 border-b border-[#111] pb-1 font-semibold">{approved ? "Mr. Marvin S. Tavarez" : "Pending approval"}</div><div>{approved ? `Approved and Signed By · ${day(quote.approved_at)}` : "Approved and Signed By"}</div></div></section>
+          <section className="mt-12 flex items-end justify-between"><div className="w-56 text-center"><div className="h-14" /><div className="mx-auto w-52 border-b border-[#111] pb-1 font-semibold">{quotationPreparedByName(quote, store.profiles)}</div><div>Sales Executive</div></div><div className="w-56 text-center"><div className="h-14">{approved && <img src="/marvin-tavarez-signature.png" alt="Signature of Mr. Marvin S. Tavarez" className="mx-auto h-14 max-w-full object-contain" />}</div><div className="mx-auto w-52 border-b border-[#111] pb-1 font-semibold">{approved ? "Mr. Marvin S. Tavarez" : "Pending approval"}</div><div>{approved ? `Approved and Signed By · ${day(quote.approved_at)}` : "Approved and Signed By"}</div></div></section>
         </article>
     </div>
   );

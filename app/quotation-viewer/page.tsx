@@ -66,6 +66,26 @@ export default async function Page({ searchParams }: PageProps) {
         : Promise.resolve({ data: null, error: null }),
     ]);
 
+  const preparedByIds = Array.from(
+    new Set(
+      [
+        quote.prepared_by_user_id,
+        quote.created_by,
+        sourceResult.data?.prepared_by_user_id,
+        sourceResult.data?.created_by,
+      ].filter(
+        (value): value is string =>
+          typeof value === "string" && value.length > 0,
+      ),
+    ),
+  );
+  const profilesResult = preparedByIds.length
+    ? await supabase
+        .from("profiles")
+        .select("id,full_name")
+        .in("id", preparedByIds)
+    : { data: [], error: null };
+
   const quoteRows = [
     quote,
     ...(sourceResult.data ? [sourceResult.data] : []),
@@ -82,6 +102,7 @@ export default async function Page({ searchParams }: PageProps) {
     leads: leadResult.data
       ? [leadResult.data as unknown as QuotationPdfRow]
       : [],
+    profiles: (profilesResult.data ?? []) as unknown as QuotationPdfRow[],
   } satisfies QuotationPdfStore;
 
   return <QuotationPdfViewer quote={quoteRows[0]} store={store} />;
