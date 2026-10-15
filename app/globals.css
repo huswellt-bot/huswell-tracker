@@ -1563,16 +1563,41 @@ select option[value=""] {
   cursor: pointer;
   transition:
     border-color 150ms ease,
-    color 150ms ease;
+    color 150ms ease,
+    background-color 150ms ease;
 }
 
 .app-tab:hover {
+  background: var(--color-surface-subtle);
   color: var(--color-text-primary);
 }
 
 .app-tab[aria-current="page"],
+.app-tab[aria-selected="true"],
 .app-tab.active {
   border-bottom-color: var(--color-accent);
+  color: var(--color-accent-text);
+  background: color-mix(in srgb, var(--color-accent) 5%, var(--color-surface));
+  font-weight: 700;
+}
+
+.app-tab-count {
+  display: inline-flex;
+  min-width: 20px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  padding: 2px 6px;
+  font-size: 10px;
+  line-height: 1.2;
+  background: var(--color-surface-subtle);
+  color: var(--color-text-secondary);
+}
+
+.app-tab[aria-current="page"] .app-tab-count,
+.app-tab[aria-selected="true"] .app-tab-count,
+.app-tab.active .app-tab-count {
+  background: color-mix(in srgb, var(--color-accent) 5%, var(--color-surface));
   color: var(--color-accent-text);
 }
 

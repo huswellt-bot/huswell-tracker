@@ -688,8 +688,17 @@ export function CostingRequestWorkspace({
       : null,
     [linkedLeadId, store.leads],
   );
+  const requests = useMemo(
+    () => [...store.costing_requests]
+      .filter((row) => !management || requestStatus(row.status) !== "draft")
+      .sort((a, b) => String(b.updated_at ?? b.created_at ?? "").localeCompare(String(a.updated_at ?? a.created_at ?? ""))),
+    [management, store.costing_requests],
+  );
   const defaultRequestTab: RequestStatus = management ? "pending" : "draft";
-  const [requestTab, setRequestTab] = useState<RequestStatus>(() => defaultRequestTab);
+  const initialRequestTab: RequestStatus = !management && canPrepare && requests.some((row) => requestStatus(row.status) === "needs_revision")
+    ? "needs_revision"
+    : defaultRequestTab;
+  const [requestTab, setRequestTab] = useState<RequestStatus>(() => initialRequestTab);
   const [requestPage, setRequestPage] = useState(1);
   const requestTabs: RequestTab[] = management
     ? [
@@ -704,12 +713,6 @@ export function CostingRequestWorkspace({
         { key: "approved", label: "Approved" },
       ];
   const activeRequestTab = requestTabs.some((tab) => tab.key === requestTab) ? requestTab : defaultRequestTab;
-  const requests = useMemo(
-    () => [...store.costing_requests]
-      .filter((row) => !management || requestStatus(row.status) !== "draft")
-      .sort((a, b) => String(b.updated_at ?? b.created_at ?? "").localeCompare(String(a.updated_at ?? a.created_at ?? ""))),
-    [management, store.costing_requests],
-  );
   const filteredRequests = useMemo(
     () => requests.filter((row) => requestStatus(row.status) === activeRequestTab),
     [activeRequestTab, requests],

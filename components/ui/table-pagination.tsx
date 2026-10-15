@@ -27,11 +27,11 @@ export function TablePagination({
   const lastRow = total ? Math.min(safePage * pageSize, total) : 0;
 
   return (
-    <div
-      className={`flex flex-wrap items-center justify-between gap-3 border-t border-[#edf0f5] bg-white px-4 py-3 text-[11px] text-[#687386] ${className ?? ""}`}
+    <nav
+      className={`flex flex-wrap items-center justify-between gap-3 border-t border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3 text-[11px] text-[var(--color-text-secondary)] ${className ?? ""}`}
       aria-label={label}
     >
-      <span>{total ? `Showing ${firstRow}-${lastRow} of ${total}` : "No records to display"}</span>
+      <span aria-live="polite">{total ? `Showing ${firstRow}-${lastRow} of ${total}` : "No records to display"}</span>
       {safePageCount > 1 ? (
         <div className="flex items-center gap-2">
           <button
@@ -55,6 +55,6 @@ export function TablePagination({
           </button>
         </div>
       ) : null}
-    </div>
+    </nav>
   );
 }

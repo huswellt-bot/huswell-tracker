@@ -10,6 +10,7 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -96,7 +97,8 @@ import { MultiSelect, parseMultiSelectValue } from "@/components/ui/multi-select
 import { NumberInput } from "@/components/ui/number-input";
 import { NotificationDialog } from "@/components/ui/notification-dialog";
 import { SearchableLeadSelect, type SearchableLeadOption } from "@/components/ui/searchable-lead-select";
-import { TablePagination } from "@/components/ui/table-pagination";
+import { SearchableSelect } from "@/components/ui/searchable-select";
+import { TABLE_PAGE_SIZE, TablePagination } from "@/components/ui/table-pagination";
 import { ThemeToggle } from "@/components/theme-provider";
 import { CostingRequestWorkspace } from "@/components/costing-request-workspace";
 import { FinanceWorkspace } from "@/components/finance-workspace";
@@ -154,6 +156,35 @@ type View =
   | "Settings"
   | "Commissions"
   | "Profile";
+
+type SidebarQueueCountKey =
+  | "management_approvals"
+  | "pdf_costing"
+  | "pricing_review"
+  | "production_approval"
+  | "letter_requests"
+  | "quotation_payments"
+  | "finance";
+type SidebarQueueCounts = Record<SidebarQueueCountKey, number>;
+const sidebarQueueCountKeys: SidebarQueueCountKey[] = [
+  "management_approvals",
+  "pdf_costing",
+  "pricing_review",
+  "production_approval",
+  "letter_requests",
+  "quotation_payments",
+  "finance",
+];
+const parseSidebarQueueCounts = (value: unknown): SidebarQueueCounts | null => {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  if (!sidebarQueueCountKeys.every((key) => Object.prototype.hasOwnProperty.call(raw, key))) return null;
+  return sidebarQueueCountKeys.reduce((counts, key) => {
+    const count = Number(raw[key]);
+    counts[key] = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
+    return counts;
+  }, {} as SidebarQueueCounts);
+};
 
 const TEMPORARILY_HIDDEN_VIEWS: ReadonlyArray<View> = [
   "Payment Reviews",
@@ -1009,6 +1040,13 @@ const leadOwnerId = (lead: Row) =>
 const isPricingOfficerRevision = (quote: Row) =>
   text(quote.status, "") === "needs_revision" &&
   text(quote.revision_requested_to, "") === "pricing_officer";
+const isAssignedPricingOfficerVisible = (quote: Row, userId: string | null) => {
+  if (!userId || text(quote.assigned_pricing_officer_user_id, "") !== userId) {
+    return false;
+  }
+  const status = text(quote.status, "");
+  return [`pending`, `pending_gm_approval`, `approved`].includes(status) || isPricingOfficerRevision(quote);
+};
 const comparableDisplayText = (value: unknown) =>
   text(value, "")
     .replace(/\s+/g, " ")
@@ -1384,11 +1422,85 @@ const newestActivityFirst = (left: Row, right: Row) => {
 };
 const ref = (prefix: string) =>
   `${prefix}-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+type QuotationPaymentTermsOption = "completion_50_50" | "pdc_50_50";
+type CommissionHandlingMode = "self_handled" | "shared";
+type CommissionSplitOption = "self_handled_100_0" | "50_50" | "60_40" | "70_30" | "80_20";
+const commissionSplitOptions: Array<{
+  value: CommissionSplitOption;
+  label: string;
+  detail: string;
+}> = [
+  { value: "self_handled_100_0", label: "100% S.E. Origin", detail: "The S.E. Origin handles and receives the full commission." },
+  { value: "50_50", label: "50% / 50%", detail: "Split equally between the S.E. Origin and Co-Worker." },
+  { value: "60_40", label: "60% / 40%", detail: "S.E. Origin receives 60%; Co-Worker receives 40%." },
+  { value: "70_30", label: "70% / 30%", detail: "S.E. Origin receives 70%; Co-Worker receives 30%." },
+  { value: "80_20", label: "80% / 20%", detail: "S.E. Origin receives 80%; Co-Worker receives 20%." },
+];
+const sharedCommissionSplitOptions = commissionSplitOptions.filter(
+  (option) => option.value !== "self_handled_100_0",
+);
+const quotationCommissionHandlingMode = (value: unknown): CommissionHandlingMode =>
+  value === "self_handled" ? "self_handled" : "shared";
+const quotationCommissionSplitOption = (value: unknown, mode: CommissionHandlingMode = "shared"): CommissionSplitOption => {
+  if (mode === "self_handled") return "self_handled_100_0";
+  return commissionSplitOptions.some((option) => option.value === value && option.value !== "self_handled_100_0")
+    ? value as CommissionSplitOption
+    : "60_40";
+};
+const quotationPaymentTermsOptions: Array<{
+  value: QuotationPaymentTermsOption;
+  label: string;
+  detail: string;
+}> = [
+  {
+    value: "completion_50_50",
+    label: "50% downpayment, then completion",
+    detail: "The remaining 50% is payable in full upon completion.",
+  },
+  {
+    value: "pdc_50_50",
+    label: "50% downpayment, then PDC",
+    detail: "The remaining 50% is payable by post-dated check.",
+  },
+];
+const quotationPdcTermDays = [15, 30, 60] as const;
+const quotationPaymentTermsOption = (value: unknown): QuotationPaymentTermsOption =>
+  value === "pdc_50_50" ? "pdc_50_50" : "completion_50_50";
+const quotationPaymentTermDays = (value: unknown) => {
+  const parsed = Number(value);
+  return quotationPdcTermDays.includes(parsed as (typeof quotationPdcTermDays)[number])
+    ? parsed
+    : 30;
+};
+const quotationPaymentTermsText = (quote: Row) => {
+  const option = quotationPaymentTermsOption(quote.payment_terms_option);
+  if (option === "pdc_50_50") {
+    return `Payment Terms: A 50% down payment is required upon confirmation. The remaining 50% balance shall be payable through a post-dated check (PDC) with a ${quotationPaymentTermDays(quote.pdc_term_days)}-day payment term from the date of confirmation.`;
+  }
+  return "Payment Terms: A 50% down payment is required upon confirmation, with the remaining 50% balance payable in full upon completion.";
+};
+const quotationTermsWithPaymentOption = (terms: unknown, quote: Row) => {
+  const source = text(terms, DEFAULT_QUOTATION_TERMS);
+  const lines = source
+    .split(/\r?\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const paymentTerm = quotationPaymentTermsText(quote);
+  const paymentIndex = lines.findIndex((line) => /^payment terms\s*:/i.test(line));
+  if (paymentIndex >= 0) lines[paymentIndex] = paymentTerm;
+  else lines.push(paymentTerm);
+  return lines.join("\n");
+};
+const quotationTermLines = (quote: Row) =>
+  quotationTermsWithPaymentOption(quote.terms_conditions, quote)
+    .split(/\r?\n+/)
+    .map((line) => line.trim().replace(/^\d+[.)]\s*/, ""))
+    .filter((line) => line && !line.toLowerCase().startsWith("validity:"));
 const DEFAULT_QUOTATION_TERMS = [
   "Production Lead Time: 2-4 weeks upon receipt of the approved artwork and downpayment.",
   "Prices: All prices quoted are VAT INCLUSIVE.",
   "Delivery: Pickup or delivery via a third-party courier. Delivery charges shall be shouldered by the client.",
-  "Payment Terms: 50% downpayment is required upon approval of the quotation. The remaining 50% balance must be paid prior to release or delivery.",
+  "Payment Terms: A 50% down payment is required upon confirmation, with the remaining 50% balance payable in full upon completion.",
   "Cancellations: Orders cannot be cancelled once production has started",
   "Artwork Revisions: Any revisions or changes requested after the artwork has been approved may result in an adjustment of the production lead time. The revised delivery schedule will be based on the scope and timing of the requested changes.",
   "Two revisions only.",
@@ -1426,6 +1538,94 @@ const quotationBankDetailsSnapshot = (value: unknown): BankDetail[] | null => {
 };
 const quotationBankDetails = (value: unknown): BankDetail[] =>
   quotationBankDetailsSnapshot(value) ?? DEFAULT_QUOTATION_BANK_DETAILS;
+
+function QuotationPaymentTermsEditor({
+  option,
+  termDays,
+  onOptionChange,
+  onTermDaysChange,
+  description = "Choose the client-facing term before sending this Costing Breakdown for GM approval.",
+  disabled = false,
+}: {
+  option: QuotationPaymentTermsOption;
+  termDays: number;
+  onOptionChange: (value: QuotationPaymentTermsOption) => void;
+  onTermDaysChange: (value: number) => void;
+  description?: string;
+  disabled?: boolean;
+}) {
+  const optionGroupId = useId();
+  const previewQuote: Row = {
+    payment_terms_option: option,
+    pdc_term_days: termDays,
+  };
+  return (
+    <section className="rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] p-4">
+      <h3 className="text-[13px] font-semibold text-[var(--color-text-primary)]">Payment terms</h3>
+      <p className="mt-1 text-[12px] leading-5 text-[var(--color-text-secondary)]">
+        {description}
+      </p>
+      <fieldset className="mt-4" disabled={disabled}>
+        <legend className="text-[12px] font-medium text-[var(--color-text-primary)]">Choose the payment arrangement</legend>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          {quotationPaymentTermsOptions.map((item) => {
+            const selected = option === item.value;
+            return (
+              <label
+                key={item.value}
+                className={`relative flex cursor-pointer gap-3 rounded-[var(--radius-control)] border p-3 transition-colors ${
+                  selected
+                    ? "border-[var(--color-accent)] bg-[var(--color-accent-subtle)]"
+                    : "border-[var(--color-border)] bg-[var(--color-surface)] hover:border-[var(--color-border-strong)]"
+                } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+              >
+                <input
+                  type="radio"
+                  name={optionGroupId}
+                  value={item.value}
+                  checked={selected}
+                  onChange={() => onOptionChange(item.value)}
+                  className="sr-only"
+                />
+                <span
+                  aria-hidden="true"
+                  className={`mt-0.5 grid size-4 shrink-0 place-items-center rounded-full border ${selected ? "border-[var(--color-accent)] bg-[var(--color-accent)]" : "border-[var(--color-border-strong)]"}`}
+                >
+                  {selected && <span className="size-1.5 rounded-full bg-[var(--color-on-accent)]" />}
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[12px] font-semibold text-[var(--color-text-primary)]">{item.label}</span>
+                  <span className="mt-1 block text-[11px] leading-4 text-[var(--color-text-secondary)]">{item.detail}</span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      </fieldset>
+      {option === "pdc_50_50" && (
+        <label className="mt-3 block text-[12px] font-medium text-[var(--color-text-primary)]">
+          PDC payment term
+          <select
+            value={String(termDays)}
+            disabled={disabled}
+            onChange={(event) => onTermDaysChange(quotationPaymentTermDays(event.target.value))}
+            className={`input mt-1 max-w-xs ${disabled ? "bg-[var(--color-surface-subtle)] text-[var(--color-text-secondary)]" : ""}`}
+          >
+            {quotationPdcTermDays.map((days) => (
+              <option key={days} value={days}>
+                {days} days from confirmation
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <div className="mt-3 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2">
+        <p className="text-[10px] font-semibold uppercase tracking-[.06em] text-[var(--color-text-tertiary)]">Quotation PDF preview</p>
+        <p className="mt-1 text-[12px] leading-5 text-[var(--color-text-secondary)]">{quotationPaymentTermsText(previewQuote)}</p>
+      </div>
+    </section>
+  );
+}
 const isPdfAttachment = (contentType: unknown, url?: unknown, fileName?: unknown) =>
   text(contentType).toLowerCase() === "application/pdf" ||
   /\.pdf(?:$|[?#])/i.test(text(fileName) || text(url));
@@ -1535,32 +1735,16 @@ const pricingProjectTypeKey = (value: unknown) => {
 const canSubmitQuotationPaymentInUi = (
   quote: Row,
   role: string,
-  currentUserId: string | null,
-  assignments: Row[],
 ) => {
-  const userId = text(currentUserId, "");
   if (
-    !userId ||
-    !isProjectOfficerRole(role) ||
+    role !== "external_finance" ||
     text(quote.document_type) !== "price_quotation" ||
     Boolean(quote.costing_source_id) ||
     text(quote.status) !== "approved"
   ) {
     return false;
   }
-  if (role === "project_manager") {
-    return [quote.created_by, quote.prepared_by_user_id, quote.submitted_by]
-      .some((value) => text(value, "") === userId);
-  }
-  return (
-    text(quote.pricing_reviewed_by, "") === userId ||
-    assignments.some(
-      (assignment) =>
-        text(assignment.pricing_officer_user_id, "") === userId &&
-        pricingProjectTypeKey(assignment.project_type) ===
-          pricingProjectTypeKey(quote.project_types),
-    )
-  );
+  return true;
 };
 const assignedPaymentReviewerId = (
   quote: Row,
@@ -1777,6 +1961,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "suppliers",
     "employees",
     "inventory_items",
+    "quotations",
     "invoices",
     "invoice_items",
     "payments",
@@ -1816,6 +2001,7 @@ const roleReadableTables: Record<string, TableName[]> = {
     "customers",
     "suppliers",
     "leads",
+    "quotations",
     "commission_summaries",
     "quotation_payment_records",
     "announcements",
@@ -1824,7 +2010,7 @@ const roleReadableTables: Record<string, TableName[]> = {
   external_finance: [
     "profiles",
     "leads",
-    "commission_summaries",
+    "quotations",
     "quotation_payment_records",
     "announcements",
     "policies",
@@ -1929,6 +2115,7 @@ const workspaceViewTables = (
       "inventory_items",
       "business_settings",
       "profiles",
+      "organization_members",
       "price_quotation_revision_requests",
       "quotation_payment_records",
       "pricing_officer_project_types",
@@ -2919,10 +3106,7 @@ function salesQuotationPageDensity(
   store: Pick<Store, "quotation_items">,
 ): SalesQuotationPageDensity {
   const lines = store.quotation_items.filter((item) => item.quotation_id === quote.id);
-  const terms = text(quote.terms_conditions, DEFAULT_QUOTATION_TERMS)
-    .split(/\r?\n+/)
-    .map((item) => item.trim().replace(/^\d+[.)]\s*/, ""))
-    .filter((item) => item && !item.toLowerCase().startsWith("validity:"));
+  const terms = quotationTermLines(quote);
   const bankDetails = quotationBankDetails(quote.bank_details);
   const lineUnits = lines.reduce(
     (total, line) => total + quotationTextUnits(line.description, 48),
@@ -3021,7 +3205,7 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
   };
   const issueDate = formatDate(quote.issue_date);
   const leadDate = formatDate(lead?.date_sent ?? lead?.created_at ?? quote.issue_date);
-  const terms = text(quote.terms_conditions, DEFAULT_QUOTATION_TERMS).split(/\r?\n+/).map((item) => item.trim().replace(/^\d+[.)]\s*/, "")).filter((item) => item && !item.toLowerCase().startsWith("validity:"));
+  const terms = quotationTermLines(quote);
   const termRows = terms.map((term) => {
     const [heading, ...description] = term.split(":");
     return { heading: heading.trim(), description: description.join(":").trim() || heading.trim() };
@@ -3530,7 +3714,7 @@ function PriceQuotationPdfLegacy({ quote, store, origin }: { quote: Row; store: 
   const lead = store.leads.find((item) => item.id === quote.lead_id);
   const lines = store.quotation_items.filter((item) => item.quotation_id === quote.id);
   const issueDate = quote.issue_date ? new Intl.DateTimeFormat("en-US", { month: "long", day: "numeric", year: "numeric" }).format(new Date(`${quote.issue_date}T00:00:00`)) : "—";
-  const terms = text(quote.terms_conditions, DEFAULT_QUOTATION_TERMS).split(/\r?\n+/).map((item) => item.trim().replace(/^\d+[.)]\s*/, "")).filter((item) => item && !item.toLowerCase().startsWith("validity:"));
+  const terms = quotationTermLines(quote);
   const bankDetails = quotationBankDetails(quote.bank_details);
   const currency = (value: number) => new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP" }).format(value);
   const approvedByName = text(quote.approved_by_name, "Marvin S. Tavarez");
@@ -8139,7 +8323,6 @@ function PolicyView({
 
 const quotationPaymentKinds = [
   ["downpayment", "Downpayment"],
-  ["partial_payment", "Partial payment"],
   ["full_payment", "Full payment"],
 ] as const;
 const quotationPaymentMethods = [
@@ -8150,26 +8333,23 @@ const quotationPaymentMethods = [
   ["check", "Check"],
   ["other", "Other"],
 ] as const;
-const quotationPaymentRequirementLabel = (quote: Row) => {
-  const requirement = text(quote.payment_requirement, "downpayment");
-  if (requirement === "none") return "No payment requirement";
-  if (requirement === "full_payment") return "Full payment";
-  return `${n(quote.downpayment_rate) || 50}% downpayment`;
-};
 const quotationPaymentKindLabel = (value: unknown) =>
   quotationPaymentKinds.find(([key]) => key === text(value))?.[1] ?? text(value).replaceAll("_", " ");
 const quotationPaymentMethodLabel = (value: unknown) =>
   quotationPaymentMethods.find(([key]) => key === text(value))?.[1] ?? text(value).replaceAll("_", " ");
+type QuotationPaymentAccount = {
+  id: string;
+  account_name: string;
+  account_type: string;
+  payment_method: string;
+};
 const roundQuotationPayment = (value: number) =>
   Math.round((value + Number.EPSILON) * 100) / 100;
 const quotationPaymentDefaultKind = (
-  quote: Row,
   summary?: Pick<QuotationPaymentSummary, "downpaymentRemaining" | "available">,
 ) => {
-  const requirement = text(quote.payment_requirement, "downpayment");
-  if (requirement === "full_payment") return "full_payment";
-  if (requirement === "downpayment" && (!summary || summary.downpaymentRemaining > 0)) return "downpayment";
-  return "partial_payment";
+  if (!summary || summary.downpaymentRemaining > 0) return "downpayment";
+  return "full_payment";
 };
 const quotationPaymentSuggestedAmount = (
   kind: string,
@@ -8199,12 +8379,7 @@ const quotationPaymentSummary = (quote: Row, records: Row[]): QuotationPaymentSu
   const verified = roundQuotationPayment(related
     .filter((record) => text(record.status) === "verified")
     .reduce((sum, record) => sum + n(record.amount), 0));
-  const requirement = text(quote.payment_requirement, "downpayment");
-  const downpaymentTarget = roundQuotationPayment(requirement === "none"
-    ? 0
-    : requirement === "full_payment"
-      ? total
-      : total * (n(quote.downpayment_rate) || 50) / 100);
+  const downpaymentTarget = roundQuotationPayment(total * 0.5);
   const balance = roundQuotationPayment(Math.max(0, total - verified));
   const available = roundQuotationPayment(Math.max(0, total - verified - pending));
   const downpaymentRemaining = roundQuotationPayment(Math.max(0, downpaymentTarget - verified - pending));
@@ -8257,7 +8432,6 @@ function QuotationPaymentDialog({
   reload: () => Promise<void>;
 }) {
   const liveQuote = store.quotations.find((item) => item.id === quote.id) ?? quote;
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const records = useMemo(
     () => store.quotation_payment_records
       .filter((record) => record.quotation_id === liveQuote.id)
@@ -8269,13 +8443,10 @@ function QuotationPaymentDialog({
   const canSubmit = canSubmitQuotationPaymentInUi(
     liveQuote,
     role,
-    currentUserId,
-    store.pricing_officer_project_types,
   );
   const canReviewAsManager = memberRole(role);
   const canReviewAsFinance = isInternalFinanceRole(role);
-  const paymentRequirement = text(liveQuote.payment_requirement, "downpayment");
-  const initialPaymentKind = quotationPaymentDefaultKind(liveQuote, summary);
+  const initialPaymentKind = quotationPaymentDefaultKind(summary);
   const reviewerForPayment = (payment: Row) =>
     assignedPaymentReviewerId(
       liveQuote,
@@ -8284,23 +8455,20 @@ function QuotationPaymentDialog({
     );
   const canReviewPayment = (payment: Row) =>
     (canReviewAsManager || canReviewAsFinance) && text(payment.status) === "pending";
+  const [paymentAccounts, setPaymentAccounts] = useState<QuotationPaymentAccount[]>([]);
+  const [paymentAccountsLoading, setPaymentAccountsLoading] = useState(true);
+  const [paymentAccountsError, setPaymentAccountsError] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [termsSaving, setTermsSaving] = useState(false);
-  const [editingTerms, setEditingTerms] = useState(false);
   const [paymentValues, setPaymentValues] = useState({
     payment_kind: initialPaymentKind,
     amount: "",
     paid_at: isoToday(),
-    method: "cash",
+    finance_account_id: "",
     reference_no: "",
     notes: "",
   });
   const [paymentFile, setPaymentFile] = useState<File | null>(null);
-  const [termsValues, setTermsValues] = useState({
-    requirement: text(liveQuote.payment_requirement, "downpayment"),
-    rate: text(liveQuote.downpayment_rate, "50"),
-  });
   const [workingPaymentId, setWorkingPaymentId] = useState<string | null>(null);
   const [receiptUrls, setReceiptUrls] = useState<Record<string, string>>({});
   const [feedback, setFeedback] = useState<{ tone: "error" | "success"; message: string } | null>(null);
@@ -8308,21 +8476,88 @@ function QuotationPaymentDialog({
     payment: Row;
     action: "reject" | "reverse";
   } | null>(null);
+  const [accountRequest, setAccountRequest] = useState<{
+    payment: Row;
+    accountId: string;
+  } | null>(null);
+  const [accountSaving, setAccountSaving] = useState(false);
   const [notePayment, setNotePayment] = useState<Row | null>(null);
   const [noteValue, setNoteValue] = useState("");
   const paymentKey = records
     .map((record) => `${text(record.id)}:${text(record.receipt_storage_path)}`)
     .join("|");
 
+  const paymentAccountsForKind = (kind: string) =>
+    kind === "full_payment" && quotationPaymentTermsOption(liveQuote.payment_terms_option) === "pdc_50_50"
+      ? paymentAccounts.filter((account) => account.payment_method === "check")
+      : paymentAccounts;
+  const defaultPaymentAccountId = (kind: string) => {
+    const options = paymentAccountsForKind(kind);
+    return options.length === 1 ? options[0].id : "";
+  };
+  const selectedPaymentAccount = paymentAccounts.find(
+    (account) => account.id === paymentValues.finance_account_id,
+  );
+  const paymentAccountOptions = paymentAccountsForKind(paymentValues.payment_kind);
+  const paymentAccountSelectOptions = paymentAccountOptions.map((account) => ({
+    value: account.id,
+    label: `${account.account_name} · ${quotationPaymentMethodLabel(account.payment_method)}`,
+    searchText: `${account.account_name} ${account.account_type} ${quotationPaymentMethodLabel(account.payment_method)}`,
+  }));
+  const paymentAccountSelectOptionsForKind = (kind: string) => paymentAccountsForKind(kind).map((account) => ({
+    value: account.id,
+    label: `${account.account_name} · ${quotationPaymentMethodLabel(account.payment_method)}`,
+    searchText: `${account.account_name} ${account.account_type} ${quotationPaymentMethodLabel(account.payment_method)}`,
+  }));
+
   useEffect(() => {
     let active = true;
-    void createClient().auth.getUser().then(({ data }) => {
-      if (active) setCurrentUserId(data.user?.id ?? null);
-    });
+    setPaymentAccountsLoading(true);
+    setPaymentAccountsError("");
+    void (async () => {
+      try {
+        const { data, error } = await createClient().rpc(
+          "list_quotation_payment_accounts",
+          { p_organization_id: orgId },
+        );
+        if (error) throw error;
+        if (!active) return;
+        const rows = Array.isArray(data) ? data : [];
+        setPaymentAccounts(
+          rows
+            .map((account) => ({
+              id: text(account.id),
+              account_name: text(account.account_name),
+              account_type: text(account.account_type),
+              payment_method: text(account.payment_method),
+            }))
+            .filter((account) => account.id && account.account_name && account.payment_method),
+        );
+      } catch (error: unknown) {
+        if (!active) return;
+        setPaymentAccounts([]);
+        setPaymentAccountsError(error instanceof Error ? error.message : "Receiving accounts could not be loaded.");
+      } finally {
+        if (active) setPaymentAccountsLoading(false);
+      }
+    })();
     return () => {
       active = false;
     };
-  }, []);
+  }, [orgId]);
+
+  useEffect(() => {
+    if (!formOpen || paymentValues.finance_account_id) return;
+    const options = paymentAccounts.filter((account) =>
+      paymentValues.payment_kind !== "full_payment"
+      || quotationPaymentTermsOption(liveQuote.payment_terms_option) !== "pdc_50_50"
+      || account.payment_method === "check",
+    );
+    if (options.length !== 1) return;
+    setPaymentValues((current) => current.finance_account_id
+      ? current
+      : { ...current, finance_account_id: options[0].id });
+  }, [formOpen, liveQuote.payment_terms_option, paymentAccounts, paymentValues.finance_account_id, paymentValues.payment_kind]);
 
   useEffect(() => {
     let active = true;
@@ -8356,19 +8591,19 @@ function QuotationPaymentDialog({
       payment_kind: initialPaymentKind,
       amount: "",
       paid_at: isoToday(),
-      method: "cash",
+      finance_account_id: defaultPaymentAccountId(initialPaymentKind),
       reference_no: "",
       notes: "",
     });
   };
   const openPaymentForm = () => {
-    const kind = quotationPaymentDefaultKind(liveQuote, summary);
+    const kind = quotationPaymentDefaultKind(summary);
     setFeedback(null);
     setPaymentValues({
       payment_kind: kind,
       amount: quotationPaymentSuggestedAmount(kind, summary),
       paid_at: isoToday(),
-      method: "cash",
+      finance_account_id: defaultPaymentAccountId(kind),
       reference_no: "",
       notes: "",
     });
@@ -8379,6 +8614,7 @@ function QuotationPaymentDialog({
       ...current,
       payment_kind: kind,
       amount: quotationPaymentSuggestedAmount(kind, summary),
+      finance_account_id: defaultPaymentAccountId(kind),
     }));
     setFeedback(null);
   };
@@ -8395,6 +8631,43 @@ function QuotationPaymentDialog({
     setNoteValue("");
     setFeedback(null);
   };
+  const openAccountRequest = (payment: Row) => {
+    setFeedback(null);
+    setAccountRequest({
+      payment,
+      accountId: text(payment.finance_account_id),
+    });
+  };
+  const closeAccountRequest = () => {
+    if (accountSaving) return;
+    setAccountRequest(null);
+    setFeedback(null);
+  };
+  const saveReceivingAccount = async () => {
+    if (!accountRequest) return;
+    const paymentKind = text(accountRequest.payment.payment_kind);
+    const eligibleAccounts = paymentAccountsForKind(paymentKind);
+    const selectedAccount = eligibleAccounts.find((account) => account.id === accountRequest.accountId);
+    if (!selectedAccount) {
+      setError("Choose an active Finance account for this payment.");
+      return;
+    }
+    setAccountSaving(true);
+    try {
+      const { error } = await createClient().rpc("update_pending_quotation_payment_account", {
+        p_payment_id: accountRequest.payment.id,
+        p_finance_account_id: selectedAccount.id,
+      });
+      if (error) throw error;
+      setAccountRequest(null);
+      setSuccess("Receiving account updated. Verify the receipt when the funds are confirmed.");
+      await reload();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "The receiving account could not be updated.");
+    } finally {
+      setAccountSaving(false);
+    }
+  };
   const paymentNotes = (payment: Row) => {
     return [
       { label: "Payment note", value: text(payment.notes, "") },
@@ -8404,12 +8677,16 @@ function QuotationPaymentDialog({
   };
   const savePayment = async () => {
     if (!paymentFile) return setError("Upload the client's payment receipt image.");
+    const eligibleAccounts = paymentAccountsForKind(paymentValues.payment_kind);
+    if (!selectedPaymentAccount || !eligibleAccounts.some((account) => account.id === selectedPaymentAccount.id)) {
+      return setError("Choose the Finance account that received the client payment.");
+    }
+    const paymentMethod = selectedPaymentAccount.payment_method;
     const amount = roundQuotationPayment(n(paymentValues.amount));
     if (!paymentValues.amount || amount <= 0) return setError("Enter a payment amount greater than zero.");
     if (!paymentValues.paid_at) return setError("Choose the date the client paid.");
     if (summary.available <= 0) return setError("No unallocated quotation balance remains. Review the pending receipts first.");
     if (paymentValues.payment_kind === "downpayment") {
-      if (paymentRequirement !== "downpayment") return setError("Set a downpayment term before recording a downpayment receipt.");
       if (summary.downpaymentRemaining <= 0) return setError("The downpayment target is already covered by verified or pending payments.");
       if (!quotationPaymentAmountsMatch(amount, summary.downpaymentRemaining)) {
         return setError(`Downpayment must be ${peso.format(summary.downpaymentRemaining)} to reach the required target.`);
@@ -8418,8 +8695,15 @@ function QuotationPaymentDialog({
       if (!quotationPaymentAmountsMatch(amount, summary.available)) {
         return setError(`Full payment must equal the available balance of ${peso.format(summary.available)} after pending receipts.`);
       }
-    } else if (amount >= summary.available) {
-      return setError(`Use Full payment for the entire available balance of ${peso.format(summary.available)}.`);
+    } else {
+      return setError("Choose either the required downpayment or the remaining full payment.");
+    }
+    if (
+      quotationPaymentTermsOption(liveQuote.payment_terms_option) === "pdc_50_50"
+      && paymentValues.payment_kind === "full_payment"
+      && paymentMethod !== "check"
+    ) {
+      return setError("The remaining balance for this term must use a Check/PDC account.");
     }
     const validTypes = ["image/jpeg", "image/png", "image/webp"];
     if (!validTypes.includes(paymentFile.type) || paymentFile.size > 10 * 1024 * 1024) {
@@ -8435,13 +8719,13 @@ function QuotationPaymentDialog({
         .from("quotation-payment-receipts")
         .upload(path, paymentFile, { contentType: paymentFile.type, upsert: false });
       if (uploadError) throw uploadError;
-      const { error: registerError } = await client.rpc("register_quotation_payment", {
+      const { error: registerError } = await client.rpc("register_quotation_payment_with_account", {
         p_payment_id: paymentId,
         p_quotation_id: liveQuote.id,
         p_payment_kind: paymentValues.payment_kind,
         p_amount: amount,
         p_paid_at: paymentValues.paid_at,
-        p_method: paymentValues.method,
+        p_finance_account_id: selectedPaymentAccount.id,
         p_reference_no: paymentValues.reference_no.trim() || null,
         p_notes: paymentValues.notes.trim() || null,
         p_receipt_storage_path: path,
@@ -8458,29 +8742,6 @@ function QuotationPaymentDialog({
       setError(error instanceof Error ? error.message : "Payment receipt could not be saved.");
     } finally {
       setSaving(false);
-    }
-  };
-  const saveTerms = async () => {
-    const requirement = termsValues.requirement;
-    const rate = n(termsValues.rate);
-    if (requirement === "downpayment" && (rate <= 0 || rate >= 100)) {
-      return setError("Downpayment percentage must be greater than 0 and less than 100.");
-    }
-    setTermsSaving(true);
-    try {
-      const { error } = await createClient().rpc("set_quotation_payment_terms", {
-        p_quotation_id: liveQuote.id,
-        p_payment_requirement: requirement,
-        p_downpayment_rate: rate,
-      });
-      if (error) throw error;
-      setEditingTerms(false);
-      setSuccess("Payment terms saved.");
-      await reload();
-    } catch (error) {
-      setError(error instanceof Error ? error.message : "Payment terms could not be saved.");
-    } finally {
-      setTermsSaving(false);
     }
   };
   const reviewPayment = async (payment: Row, decision: "verified" | "rejected", decisionNote = "") => {
@@ -8552,13 +8813,8 @@ function QuotationPaymentDialog({
     ? `Required remaining downpayment: ${peso.format(summary.downpaymentRemaining)}`
     : paymentValues.payment_kind === "full_payment"
       ? `Must equal available balance: ${peso.format(summary.available)}`
-      : summary.available > 0
-        ? `Enter an installment below ${peso.format(summary.available)}`
-        : "No unallocated balance is available while pending receipts are under review";
-  const paymentAmountReadOnly = paymentValues.payment_kind !== "partial_payment";
-  const partialPaymentMax = summary.available > 0
-    ? roundQuotationPayment(summary.available - 0.01).toFixed(2)
-    : undefined;
+      : "Choose the payment type first";
+  const paymentAmountReadOnly = true;
 
   return (
     <>
@@ -8566,7 +8822,7 @@ function QuotationPaymentDialog({
         className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-[#151922]/40 px-3 py-4 sm:px-5 sm:py-7"
         role="presentation"
         onMouseDown={(event) => {
-          if (event.target === event.currentTarget && !saving && !termsSaving && !workingPaymentId) close();
+          if (event.target === event.currentTarget && !saving && !workingPaymentId) close();
         }}
       >
         <section
@@ -8583,7 +8839,7 @@ function QuotationPaymentDialog({
             </div>
             <div className="flex shrink-0 items-start gap-3">
               <PaymentStatusBadge status={summary.status} />
-              <button type="button" onClick={close} disabled={saving || termsSaving || Boolean(workingPaymentId)} aria-label="Close quotation payments" className="grid size-8 place-items-center rounded-[6px] text-[#687386] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938] disabled:cursor-not-allowed disabled:opacity-50"><X size={18} /></button>
+              <button type="button" onClick={close} disabled={saving || Boolean(workingPaymentId)} aria-label="Close quotation payments" className="grid size-8 place-items-center rounded-[6px] text-[#687386] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938] disabled:cursor-not-allowed disabled:opacity-50"><X size={18} /></button>
             </div>
           </header>
 
@@ -8606,9 +8862,9 @@ function QuotationPaymentDialog({
               <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
                 <div>
                   <h3 className="text-[13px] font-semibold text-[#202938]">Payment terms</h3>
-                  {!editingTerms ? <p className="mt-1 text-[12px] text-[#687386]">{quotationPaymentRequirementLabel(liveQuote)}{summary.downpaymentTarget > 0 ? ` · target ${peso.format(summary.downpaymentTarget)}` : ""}</p> : <div className="mt-2 flex flex-wrap items-center gap-2"><select value={termsValues.requirement} onChange={(event) => setTermsValues((current) => ({ ...current, requirement: event.target.value }))} className="input mt-0 w-auto"><option value="none">No payment requirement</option><option value="downpayment">Downpayment</option><option value="full_payment">Full payment</option></select>{termsValues.requirement === "downpayment" && <label className="flex items-center gap-2 text-[12px] text-[#687386]"><span>Rate</span><NumberInput min="1" max="99" step="1" value={termsValues.rate} onChange={(value) => setTermsValues((current) => ({ ...current, rate: value }))} className="input mt-0 w-20" /><span>%</span></label>}</div>}
+                  <p className="mt-1 max-w-3xl text-[12px] leading-5 text-[#687386]">{quotationPaymentTermsText(liveQuote)}</p>
+                  <p className="mt-1 text-[11px] text-[#8b92a1]">Required downpayment target: {peso.format(summary.downpaymentTarget)}</p>
                 </div>
-                {(canSubmit || canReviewAsManager) && <div className="flex gap-2">{editingTerms ? <><Button secondary disabled={termsSaving} onClick={() => setEditingTerms(false)}>Cancel</Button><Button loading={termsSaving} disabled={termsSaving} onClick={() => void saveTerms()}><Save size={13} /> Save terms</Button></> : <Button secondary onClick={() => { setFeedback(null); setTermsValues({ requirement: text(liveQuote.payment_requirement, "downpayment"), rate: text(liveQuote.downpayment_rate, "50") }); setEditingTerms(true); }}><Pencil size={13} /> Edit terms</Button>}</div>}
               </div>
             </section>
 
@@ -8616,18 +8872,23 @@ function QuotationPaymentDialog({
               <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-3">
                 <div className="min-w-0">
                   <h3 className="text-[13px] font-semibold text-[#202938]">Client payment receipt</h3>
-                  <p className="mt-1 max-w-3xl text-[12px] leading-[1.45] text-[#687386]">Record each client payment separately. Internal Finance checks the receipt against the actual funds received before it counts as Money In; management can handle reversals and exceptions.</p>
+                  <p className="mt-1 max-w-3xl text-[12px] leading-[1.45] text-[#687386]">External Finance records each client payment separately. Internal Finance checks the receipt against the actual funds received before it counts as Cash In; management can handle reversals and exceptions.</p>
                 </div>
-                {!formOpen && <Button disabled={summary.available <= 0} onClick={openPaymentForm}><ReceiptText size={14} /> Add payment</Button>}
+                {!formOpen && <Button disabled={summary.available <= 0 || paymentAccountsLoading || paymentAccountsForKind(initialPaymentKind).length === 0} onClick={openPaymentForm}><ReceiptText size={14} /> Add payment</Button>}
               </div>
+              {paymentAccountsError || (!paymentAccountsLoading && paymentAccounts.length === 0) ? (
+                <div role="alert" className="border-t border-[#f2b8b5] bg-[#fff5f4] px-4 py-2.5 text-[12px] text-[#b42318]">
+                  {paymentAccountsError ? "Receiving accounts could not be loaded. Refresh and try again." : "Internal Finance must add an active receiving account before a client payment can be recorded."}
+                </div>
+              ) : null}
               {formOpen && <div className="grid gap-3 border-t border-[#edf0f5] px-4 py-4 sm:grid-cols-2 lg:grid-cols-4">
-                <label className="text-[12px] font-medium text-[#202938]">Payment type<select value={paymentValues.payment_kind} onChange={(event) => changePaymentKind(event.target.value)} className="input mt-1">{quotationPaymentKinds.map(([key, label]) => <option key={key} value={key} disabled={key === "downpayment" && paymentRequirement !== "downpayment"}>{label}{key === "downpayment" && paymentRequirement !== "downpayment" ? " (set terms first)" : ""}</option>)}</select></label>
-                <label className="text-[12px] font-medium text-[#202938]">Amount<NumberInput min="0.01" max={paymentValues.payment_kind === "partial_payment" ? partialPaymentMax : undefined} step="0.01" readOnly={paymentAmountReadOnly} value={paymentValues.amount} onChange={(value) => setPaymentValues((current) => ({ ...current, amount: value }))} className={`input mt-1 ${paymentAmountReadOnly ? "bg-[#f6f8fb] text-[#687386]" : ""}`} placeholder="0.00" /><span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">{paymentAmountHint}</span></label>
+                <label className="text-[12px] font-medium text-[#202938]">Payment type<select value={paymentValues.payment_kind} onChange={(event) => changePaymentKind(event.target.value)} className="input mt-1">{quotationPaymentKinds.map(([key, label]) => <option key={key} value={key}>{key === "full_payment" && quotationPaymentTermsOption(liveQuote.payment_terms_option) === "pdc_50_50" ? "Full balance (PDC)" : label}</option>)}</select></label>
+                <label className="text-[12px] font-medium text-[#202938]">Amount<NumberInput min="0.01" step="0.01" readOnly={paymentAmountReadOnly} value={paymentValues.amount} onChange={(value) => setPaymentValues((current) => ({ ...current, amount: value }))} className={`input mt-1 ${paymentAmountReadOnly ? "bg-[#f6f8fb] text-[#687386]" : ""}`} placeholder="0.00" /><span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">{paymentAmountHint}</span></label>
                 <label className="text-[12px] font-medium text-[#202938]">Paid date<input type="date" value={paymentValues.paid_at} onChange={(event) => setPaymentValues((current) => ({ ...current, paid_at: event.target.value }))} className="input mt-1" /></label>
-                <label className="text-[12px] font-medium text-[#202938]">Method<select value={paymentValues.method} onChange={(event) => setPaymentValues((current) => ({ ...current, method: event.target.value }))} className="input mt-1">{quotationPaymentMethods.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+                <label className="text-[12px] font-medium text-[#202938]">Received into account<SearchableSelect options={paymentAccountSelectOptions} value={paymentValues.finance_account_id} onChange={(value) => setPaymentValues((current) => ({ ...current, finance_account_id: value }))} placeholder={paymentAccountsLoading ? "Loading accounts..." : "Choose receiving account"} searchPlaceholder="Search receiving accounts" noResultsLabel="No matching receiving accounts." ariaLabel="Receiving Finance account" required clearable={false} disabled={paymentAccountsLoading || paymentAccountOptions.length === 0} className="mt-1" /><span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">{paymentAccountsLoading ? "Loading active Finance accounts..." : paymentAccountOptions.length === 0 && quotationPaymentTermsOption(liveQuote.payment_terms_option) === "pdc_50_50" && paymentValues.payment_kind === "full_payment" ? "No active Finance account is mapped to Check/PDC." : "Only active accounts added by Internal Finance are shown."}</span></label>
                 <label className="text-[12px] font-medium text-[#202938] sm:col-span-2">Reference number (optional)<input value={paymentValues.reference_no} onChange={(event) => setPaymentValues((current) => ({ ...current, reference_no: event.target.value }))} className="input mt-1" placeholder="Receipt or transaction reference" /></label>
                 <div className="text-[12px] font-medium text-[#202938] sm:col-span-2"><span className="mb-1 block">Receipt image</span><FileUploadControl accept="image/jpeg,image/png,image/webp" ariaLabel="Choose payment receipt image" className="mt-1" emptyLabel="Choose receipt image" files={paymentFile ? [paymentFile] : []} onFilesSelected={(files) => setPaymentFile(files[0] ?? null)} /></div>
-                <div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-3 sm:col-span-2 lg:col-span-4"><Button secondary disabled={saving} onClick={resetPaymentForm}>Cancel</Button><Button loading={saving} disabled={saving} onClick={() => void savePayment()}><Send size={13} /> Submit receipt</Button></div>
+                <div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-3 sm:col-span-2 lg:col-span-4"><Button secondary disabled={saving} onClick={resetPaymentForm}>Cancel</Button><Button loading={saving} disabled={saving || !selectedPaymentAccount || !paymentAccountOptions.some((account) => account.id === selectedPaymentAccount.id)} onClick={() => void savePayment()}><Send size={13} /> Submit receipt</Button></div>
               </div>}
             </section>}
 
@@ -8640,17 +8901,25 @@ function QuotationPaymentDialog({
                 {summary.pending > 0 && <span className="text-[11px] font-medium text-[#a76605]">{peso.format(summary.pending)} pending review</span>}
               </div>
               {records.length ? <div className="overflow-x-auto rounded-[8px] border border-[#e1e6ee]">
-                <Table labels={["Paid date", "Type", "Amount", "Method", "Receipt", "Status", "Notes", "Review"]} minWidth={1020}>
+                <Table labels={["Paid date", "Type", "Amount", "Received into", "Receipt", "Status", "Notes", "Review"]} minWidth={1020}>
                   {records.map((payment) => {
                     const paymentId = text(payment.id);
                     const status = text(payment.status);
                     const working = workingPaymentId?.startsWith(`${paymentId}:`) ?? false;
                     const reviewerId = reviewerForPayment(payment);
+                    const paymentAccountId = text(payment.finance_account_id);
+                    const paymentAccount = paymentAccounts.find((account) => account.id === paymentAccountId);
                     return <tr key={paymentId}>
                       <td className="px-3 py-2.5">{day(payment.paid_at)}</td>
                       <td className="px-3 py-2.5">{quotationPaymentKindLabel(payment.payment_kind)}</td>
                       <td className="px-3 py-2.5 font-semibold">{peso.format(n(payment.amount))}</td>
-                      <td className="px-3 py-2.5">{quotationPaymentMethodLabel(payment.method)}<small>{text(payment.reference_no)}</small></td>
+                      <td className="px-3 py-2.5">
+                        <div className="space-y-1">
+                          <span className="block">{paymentAccount?.account_name ?? (paymentAccountId ? "Account no longer active" : "Legacy account mapping")}</span>
+                          <small>{paymentAccount ? quotationPaymentMethodLabel(paymentAccount.payment_method) : quotationPaymentMethodLabel(payment.method)}{text(payment.reference_no) ? ` · Ref ${text(payment.reference_no)}` : ""}</small>
+                          {canReviewAsFinance && status === "pending" && <button type="button" disabled={accountSaving || working} onClick={() => openAccountRequest(payment)} className="inline-flex items-center gap-1 text-[10px] font-medium text-[#c43b43] hover:text-[#9f2934] disabled:cursor-not-allowed disabled:opacity-50"><Pencil size={11} /> {paymentAccountId ? "Change account" : "Assign account"}</button>}
+                        </div>
+                      </td>
                       <td className="px-3 py-2.5">{receiptUrls[paymentId] ? <a href={receiptUrls[paymentId]} target="_blank" rel="noreferrer" className="inline-flex size-11 overflow-hidden rounded-[6px] border border-[#d9e0e9] bg-[#fafbfc]"><img src={receiptUrls[paymentId]} alt={text(payment.receipt_file_name, "Payment receipt")} className="size-full object-cover" /></a> : <span className="inline-flex items-center gap-1 text-[11px] text-[#8b92a1]"><ReceiptText size={14} /> Loading</span>}</td>
                       <td className="px-3 py-2.5"><Status value={status} /></td>
                       <td className="px-3 py-2.5">
@@ -8679,7 +8948,7 @@ function QuotationPaymentDialog({
             </section>
           </div>
           <footer className="flex justify-end border-t border-[#e1e6ee] px-4 py-3 sm:px-5">
-            <Button secondary disabled={saving || termsSaving || Boolean(workingPaymentId)} onClick={close}>Close</Button>
+            <Button secondary disabled={saving || Boolean(workingPaymentId)} onClick={close}>Close</Button>
           </footer>
         </section>
       </div>
@@ -8706,6 +8975,46 @@ function QuotationPaymentDialog({
             <div className="mt-5 flex justify-end gap-2 border-t border-[#e1e6ee] pt-3">
               <Button secondary disabled={noteDialogBusy} onClick={closeNoteRequest}>Cancel</Button>
               <button type="button" disabled={noteDialogBusy} onClick={() => void submitNoteRequest()} className="inline-flex min-h-8 items-center gap-1.5 rounded-[6px] bg-[#b42318] px-3 text-[13px] font-medium text-white transition-colors hover:bg-[#8f1d14] disabled:cursor-not-allowed disabled:opacity-50">{noteDialogBusy && <LoaderCircle size={14} className="animate-spin" />}{noteRequest.action === "reject" ? <><XCircle size={14} /> Reject receipt</> : <><RotateCcw size={14} /> Undo verification</>}</button>
+            </div>
+          </section>
+        </div>
+      )}
+      {accountRequest && (
+        <div
+          className="fixed inset-0 z-[100] grid place-items-center bg-[#151922]/50 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeAccountRequest();
+          }}
+        >
+          <section role="dialog" aria-modal="true" aria-labelledby="payment-account-title" className="w-full max-w-md rounded-[8px] border border-[#d9e0e9] bg-white p-4 shadow-none sm:p-5">
+            <div className="flex items-start justify-between gap-4 border-b border-[#e1e6ee] pb-3">
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-wide text-[#7b8494]">Pending payment correction</p>
+                <h2 id="payment-account-title" className="mt-1 text-[16px] font-semibold text-[#202938]">Change receiving account</h2>
+              </div>
+              <button type="button" onClick={closeAccountRequest} disabled={accountSaving} aria-label="Close receiving account correction" className="grid size-8 place-items-center rounded-[6px] text-[#687386] hover:bg-[#f0f3f7] disabled:cursor-not-allowed disabled:opacity-50"><X size={18} /></button>
+            </div>
+            <p className="mt-4 text-[12px] leading-[1.45] text-[#687386]">Use this when the client payment was received into a different Internal Finance account. This correction is allowed only while the receipt is pending; verification will post Cash In to the selected account.</p>
+            <label className="mt-4 block text-[12px] font-medium text-[#202938]">Received into account
+              <SearchableSelect
+                options={paymentAccountSelectOptionsForKind(text(accountRequest.payment.payment_kind))}
+                value={accountRequest.accountId}
+                onChange={(value) => setAccountRequest((current) => current ? { ...current, accountId: value } : current)}
+                placeholder="Choose receiving account"
+                searchPlaceholder="Search receiving accounts"
+                noResultsLabel="No matching receiving accounts."
+                ariaLabel="Correct receiving Finance account"
+                required
+                clearable={false}
+                disabled={accountSaving || paymentAccountSelectOptionsForKind(text(accountRequest.payment.payment_kind)).length === 0}
+                className="mt-1"
+              />
+            </label>
+            {text(accountRequest.payment.payment_kind) === "full_payment" && quotationPaymentTermsOption(liveQuote.payment_terms_option) === "pdc_50_50" && <p className="mt-1 text-[10px] text-[#8b92a1]">The remaining balance for this quotation must use a Check/PDC account.</p>}
+            <div className="mt-5 flex justify-end gap-2 border-t border-[#e1e6ee] pt-3">
+              <Button secondary disabled={accountSaving} onClick={closeAccountRequest}>Cancel</Button>
+              <Button loading={accountSaving} disabled={accountSaving || !accountRequest.accountId || paymentAccountSelectOptionsForKind(text(accountRequest.payment.payment_kind)).length === 0} onClick={() => void saveReceivingAccount()}><Save size={13} /> Save account</Button>
             </div>
           </section>
         </div>
@@ -8761,10 +9070,13 @@ function PaymentMonitoring({
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [paymentQuote, setPaymentQuote] = useState<Row | null>(null);
   const [scope, setScope] = useState<"pending" | "all">("all");
+  const paymentScopeAutoResolved = useRef(false);
   const [paymentQuery, setPaymentQuery] = useState("");
   const [paymentMonth, setPaymentMonth] = useState("");
   const [paymentOfficerFilter, setPaymentOfficerFilter] = useState("all");
+  const [paymentPage, setPaymentPage] = useState(1);
   const isGeneralManager = memberRole(role);
+  const isExternalFinance = role === "external_finance";
   const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
   const deferredPaymentQuery = useDeferredValue(paymentQuery);
   useEffect(() => {
@@ -8836,17 +9148,40 @@ function PaymentMonitoring({
     [currentUserId, deferredPaymentQuery, paymentMonth, paymentOfficerFilter, store],
   );
   const rows = approvedQuotes.filter(({ summary, pendingForReview }) => assignedOnly ? pendingForReview.length > 0 : scope === "all" || summary.pending > 0);
+  const paymentPageCount = Math.max(1, Math.ceil(rows.length / TABLE_PAGE_SIZE));
+  const activePaymentPage = Math.min(paymentPage, paymentPageCount);
+  const visiblePaymentRows = rows.slice(
+    (activePaymentPage - 1) * TABLE_PAGE_SIZE,
+    activePaymentPage * TABLE_PAGE_SIZE,
+  );
+  useEffect(() => {
+    setPaymentPage(1);
+  }, [assignedOnly, paymentMonth, paymentOfficerFilter, paymentQuery, scope]);
   const pendingCount = assignedOnly
     ? approvedQuotes.reduce((count, { pendingForReview }) => count + pendingForReview.length, 0)
     : approvedQuotes.filter(({ summary }) => summary.pending > 0).length;
+  useEffect(() => {
+    if (paymentScopeAutoResolved.current || assignedOnly || isExternalFinance) return;
+    setScope(pendingCount > 0 ? "pending" : "all");
+    paymentScopeAutoResolved.current = true;
+  }, [assignedOnly, isExternalFinance, pendingCount]);
   const pendingAmount = assignedOnly
     ? approvedQuotes.reduce((sum, { pendingForReview }) => sum + pendingForReview.reduce((total, payment) => total + n(payment.amount), 0), 0)
     : approvedQuotes.reduce((sum, { summary }) => sum + summary.pending, 0);
   const verifiedAmount = approvedQuotes.reduce((sum, { summary }) => sum + summary.verified, 0);
+  const monitoringDetail = assignedOnly
+    ? "Payment Reviews is reserved for the future assigned-review workflow."
+    : isExternalFinance
+      ? "Record client payment receipts for approved quotations. Internal Finance verifies them before they become Cash In."
+      : isGeneralManager
+        ? "Review client payment receipts and reverse verified entries when necessary."
+        : "Internal Finance reviews client receipt evidence separately from quotation and production approvals. Only verified collections become Cash In.";
+  const pendingScopeLabel = isExternalFinance ? "Pending confirmation" : "Pending review";
+  const paymentActionLabel = isExternalFinance ? "View or record quotation payments" : "Review quotation payments";
   return (
     <Panel
-      title={assignedOnly ? "Payment Reviews" : "Payment Monitoring"}
-      detail={assignedOnly ? "Payment Reviews is reserved for the future assigned-review workflow." : "Internal Finance reviews client receipt evidence separately from quotation and production approvals. Only verified collections become Money In."}
+      title={assignedOnly ? "Payment Reviews" : "Quotation Payments"}
+      detail={monitoringDetail}
       variant="page"
       hideHeading
     >
@@ -8875,14 +9210,15 @@ function PaymentMonitoring({
           hasFilters={Boolean(paymentQuery || paymentMonth || paymentOfficerFilter !== "all")}
         />
         {!assignedOnly && <nav aria-label="Payment monitoring scope" className="app-tabs mt-4">
-          <button type="button" onClick={() => setScope("pending")} aria-current={scope === "pending" ? "page" : undefined} className="app-tab">Pending review ({pendingCount})</button>
-          <button type="button" onClick={() => setScope("all")} aria-current={scope === "all" ? "page" : undefined} className="app-tab">All approved ({approvedQuotes.length})</button>
+          <button type="button" onClick={() => setScope("pending")} aria-current={scope === "pending" ? "page" : undefined} className="app-tab">{pendingScopeLabel} ({pendingCount})</button>
+          <button type="button" onClick={() => setScope("all")} aria-current={scope === "all" ? "page" : undefined} className="app-tab">Approved quotations ({approvedQuotes.length})</button>
         </nav>}
         {paymentMonth && <p className="mt-2 text-[11px] text-[var(--muted)]">The month filter selects quotations with receipts in that month. Payment status and totals include the complete quotation history.</p>}
         {rows.length ? (
+          <>
           <div className="modern-table-shell">
-          <Table labels={["Quotation", "Client", "Prepared by", "Payment status", "Pending", "Verified / Total", "Last receipt", "Review"]} minWidth={1120}>
-            {rows.map(({ quote, allRecords, pendingForReview, summary }) => {
+          <Table labels={["Quotation", "Client", "Prepared by", "Payment status", "Pending", "Verified / Total", "Last receipt", isExternalFinance ? "Payments" : "Review"]} minWidth={1120}>
+            {visiblePaymentRows.map(({ quote, allRecords, pendingForReview, summary }) => {
               const party = quotationParty(quote, store);
               const preparedBy = text(store.profiles.find((profile) => profile.id === (quote.prepared_by_user_id ?? quote.created_by))?.full_name, text(quote.representative, "Sales Executive"));
               const pendingAmountForRow = assignedOnly
@@ -8896,13 +9232,21 @@ function PaymentMonitoring({
                 <td className="px-5 py-3 font-medium text-[#a76605]">{peso.format(pendingAmountForRow)}</td>
                 <td className="px-5 py-3">{peso.format(summary.verified)} / {peso.format(summary.total)}</td>
                 <td className="px-5 py-3">{allRecords[0] ? day(allRecords[0].paid_at ?? allRecords[0].submitted_at ?? allRecords[0].created_at) : "-"}</td>
-                <td className="px-5 py-3"><ActionIcon label="Review quotation payments" confirm={false} onClick={() => setPaymentQuote(quote)}><ReceiptText size={15} /></ActionIcon></td>
+                <td className="px-5 py-3"><ActionIcon label={paymentActionLabel} confirm={false} onClick={() => setPaymentQuote(quote)}><ReceiptText size={15} /></ActionIcon></td>
               </tr>;
             })}
           </Table>
           </div>
+          <TablePagination
+            page={activePaymentPage}
+            pageCount={paymentPageCount}
+            total={rows.length}
+            onPageChange={setPaymentPage}
+            label="Payment monitoring pagination"
+          />
+          </>
         ) : (
-          <Empty>{assignedOnly ? "No payment receipts are currently assigned to you." : scope === "pending" ? "No quotation payment receipts are awaiting review." : "No approved Price Quotations match the current filters."}</Empty>
+          <Empty>{assignedOnly ? "No payment receipts are currently assigned to you." : scope === "pending" ? (isExternalFinance ? "No quotation payment receipts are awaiting Internal Finance confirmation." : "No quotation payment receipts are awaiting review.") : "No approved Price Quotations match the current filters."}</Empty>
         )}
       </div>
       {paymentQuote && <QuotationPaymentDialog quote={paymentQuote} store={store} orgId={orgId} role={role} close={() => setPaymentQuote(null)} reload={reload} />}
@@ -11798,10 +12142,7 @@ function QuotationDocument({
   const clientAddress = text(customer?.billing_address, "—");
   const totalAmount = n(quote.total_amount);
   const totalCost = n(quote.total_cost);
-  const projectTerms = text(quote.terms_conditions, DEFAULT_QUOTATION_TERMS)
-    .split(/\r?\n+/)
-    .map((term) => term.trim().replace(/^\d+[.)]\s*/, ""))
-    .filter(Boolean);
+  const projectTerms = quotationTermLines(quote);
   const termsBeforeBank = projectTerms.slice(0, 4);
   const termsAfterBank = projectTerms.slice(4, 6);
   const continuedTerms = projectTerms.slice(6);
@@ -13053,6 +13394,15 @@ function Quotations({
       buffer_margin_rate: n(values.buffer_margin_rate),
       commission_rate: n(values.commission_rate),
       vat_rate: n(values.vat_rate),
+      payment_terms_option: quotationPaymentTermsOption(values.payment_terms_option),
+      pdc_term_days: quotationPaymentTermDays(values.pdc_term_days),
+      terms_conditions: quotationTermsWithPaymentOption(
+        values.terms_conditions || DEFAULT_QUOTATION_TERMS,
+        {
+          payment_terms_option: quotationPaymentTermsOption(values.payment_terms_option),
+          pdc_term_days: quotationPaymentTermDays(values.pdc_term_days),
+        },
+      ),
       created_by: user.user.id,
     };
     clean.size_details = costingSizeDetails(
@@ -13323,6 +13673,15 @@ function Quotations({
       values.size_details ?? "",
       values.size_unit ?? "Inch",
     );
+    patch.payment_terms_option = quotationPaymentTermsOption(values.payment_terms_option);
+    patch.pdc_term_days = quotationPaymentTermDays(values.pdc_term_days);
+    patch.terms_conditions = quotationTermsWithPaymentOption(
+      text(values.terms_conditions, text(editingQuote.terms_conditions, DEFAULT_QUOTATION_TERMS)),
+      {
+        payment_terms_option: quotationPaymentTermsOption(values.payment_terms_option),
+        pdc_term_days: quotationPaymentTermDays(values.pdc_term_days),
+      },
+    );
     delete patch.size_unit;
     delete patch.contact_display;
     officerCostingFields
@@ -13425,6 +13784,8 @@ function Quotations({
                       setValues({
                         costing_source_id: "",
                         terms_conditions: DEFAULT_QUOTATION_TERMS,
+                        payment_terms_option: "completion_50_50",
+                        pdc_term_days: "30",
                         customer_id: "",
                         project_name: "",
                         lead_id: "",
@@ -13659,6 +14020,9 @@ function Quotations({
                                 ),
                                 size_unit: costingSizeUnit(q.size_details),
                                 contact_display: "phone",
+                                payment_terms_option: quotationPaymentTermsOption(q.payment_terms_option),
+                                pdc_term_days: String(quotationPaymentTermDays(q.pdc_term_days)),
+                                terms_conditions: quotationTermsWithPaymentOption(q.terms_conditions, q),
                               });
                               setCostingQuoteId(text(q.id));
                               setCostingValues({
@@ -13899,6 +14263,22 @@ function Quotations({
           >
             {
               <div className="mt-6 border-t border-[#edf0f5] pt-5">
+                <QuotationPaymentTermsEditor
+                  option={quotationPaymentTermsOption(values.payment_terms_option)}
+                  termDays={quotationPaymentTermDays(values.pdc_term_days)}
+                  onOptionChange={(value) =>
+                    setValues((current) => ({
+                      ...current,
+                      payment_terms_option: value,
+                    }))
+                  }
+                  onTermDaysChange={(value) =>
+                    setValues((current) => ({
+                      ...current,
+                      pdc_term_days: String(value),
+                    }))
+                  }
+                />
                 <h3 className="text-[14px] font-semibold text-[#202938]">
                   Material and production costs
                 </h3>
@@ -14526,6 +14906,8 @@ function PriceQuotationSubmissions({
   const [month, setMonth] = useState("");
   const [submissionType, setSubmissionType] = useState<"all" | "new" | "revised">("all");
   const [queueTab, setQueueTab] = useState<ReviewQueueTab>("pending");
+  const queueTabAutoResolved = useRef(false);
+  const [submissionPage, setSubmissionPage] = useState(1);
   const queueStage = queueTab === "gm_revision" ? "gm_revision" : "pending";
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   useEffect(() => {
@@ -14542,19 +14924,24 @@ function PriceQuotationSubmissions({
       .filter((assignment) => text(assignment.pricing_officer_user_id, "") === currentUserId)
       .map((assignment) => pricingProjectTypeKey(assignment.project_type)),
   );
-  const isOwnQuotation = (quotation: Row) =>
-    role !== "sales_pricing_officer" || (
-      Boolean(currentUserId) &&
-      [quotation.created_by, quotation.prepared_by_user_id, quotation.submitted_by]
-        .some((userId) => text(userId, "") === currentUserId)
-    );
+  const isOwnQuotation = (quotation: Row) => {
+    if (role !== "sales_pricing_officer") return true;
+    if (!currentUserId) return false;
+    const assignedOfficerId = text(quotation.assigned_pricing_officer_user_id, "");
+    if (assignedOfficerId) return assignedOfficerId === currentUserId;
+    return [quotation.created_by, quotation.prepared_by_user_id, quotation.submitted_by]
+      .some((userId) => text(userId, "") === currentUserId);
+  };
+  const isAssignedProjectType = (quotation: Row) => {
+    return assignedProjectTypes.has(pricingProjectTypeKey(quotation.project_types));
+  };
   const pendingPriceQuotations = store.quotations.filter(
     (quotation) =>
       text(quotation.status) === "pending" &&
       text(quotation.document_type) === "price_quotation" &&
       !quotation.costing_source_id &&
       isOwnQuotation(quotation) &&
-      assignedProjectTypes.has(pricingProjectTypeKey(quotation.project_types)),
+      isAssignedProjectType(quotation),
   ).sort(newestActivityFirst);
   const gmRevisionPriceQuotations = store.quotations.filter(
     (quotation) =>
@@ -14562,14 +14949,28 @@ function PriceQuotationSubmissions({
       text(quotation.document_type) === "price_quotation" &&
       !quotation.costing_source_id &&
       isOwnQuotation(quotation) &&
-      assignedProjectTypes.has(pricingProjectTypeKey(quotation.project_types)),
+      isAssignedProjectType(quotation),
   ).sort(newestActivityFirst);
+  useEffect(() => {
+    if (queueTabAutoResolved.current) return;
+    if (role === "sales_pricing_officer" && !currentUserId) return;
+    if (role === "sales_pricing_officer") {
+      setQueueTab(
+        pendingPriceQuotations.length
+          ? "pending"
+          : gmRevisionPriceQuotations.length
+            ? "gm_revision"
+            : "pending",
+      );
+    }
+    queueTabAutoResolved.current = true;
+  }, [currentUserId, gmRevisionPriceQuotations.length, pendingPriceQuotations.length, role]);
   const normalizedSearch = search.trim().toLowerCase();
   const matchesSubmissionFilters = (quotation: Row) => {
     const activityAt = queueStage === "gm_revision"
       ? text(quotation.revision_requested_at ?? quotation.updated_at ?? quotation.created_at, "")
       : text(quotation.submitted_at, "");
-    const preparedBy = store.profiles.find((profile) => profile.id === (quotation.prepared_by_user_id ?? quotation.submitted_by ?? quotation.created_by))?.full_name;
+    const preparedBy = store.profiles.find((profile) => profile.id === (quotation.assigned_pricing_officer_user_id ?? quotation.prepared_by_user_id ?? quotation.submitted_by ?? quotation.created_by))?.full_name;
     const party = quotationParty(quotation, store);
     const matchesSearch = !normalizedSearch || [quotation.quotation_no, party.clientName, party.companyName, quotation.project_name, preparedBy]
       .some((value) => text(value).toLowerCase().includes(normalizedSearch));
@@ -14591,9 +14992,18 @@ function PriceQuotationSubmissions({
   const activeSubmissions = queueStage === "gm_revision"
     ? filteredGmRevisionPriceQuotations
     : filteredPriceQuotations;
+  const submissionPageCount = Math.max(1, Math.ceil(activeSubmissions.length / TABLE_PAGE_SIZE));
+  const activeSubmissionPage = Math.min(submissionPage, submissionPageCount);
+  const visibleSubmissions = activeSubmissions.slice(
+    (activeSubmissionPage - 1) * TABLE_PAGE_SIZE,
+    activeSubmissionPage * TABLE_PAGE_SIZE,
+  );
   const activePendingSubmissions = queueStage === "gm_revision"
     ? gmRevisionPriceQuotations
     : pendingPriceQuotations;
+  useEffect(() => {
+    setSubmissionPage(1);
+  }, [month, queueTab, search, submissionType]);
   const submissionLabel = (quotation: Row) => {
     const count = n(quotation.resubmission_count);
     return count === 0 ? "New" : count === 1 ? "Revised" : `Revised ${count}×`;
@@ -14602,9 +15012,9 @@ function PriceQuotationSubmissions({
     text(
       store.profiles.find(
         (profile) =>
-          profile.id === (quotation.prepared_by_user_id ?? quotation.submitted_by ?? quotation.created_by),
+          profile.id === (quotation.assigned_pricing_officer_user_id ?? quotation.prepared_by_user_id ?? quotation.submitted_by ?? quotation.created_by),
       )?.full_name,
-      "Sales Executive",
+      "Sales & Pricing Officer",
     );
   return (
     <Panel
@@ -14634,9 +15044,10 @@ function PriceQuotationSubmissions({
         {(search || month || submissionType !== "all") && <Button secondary onClick={() => { setSearch(""); setMonth(""); setSubmissionType("all"); }}>Clear filters</Button>}
       </div>
       {activeSubmissions.length ? (
+        <>
         <div className="modern-table-shell">
-        <Table labels={["Price Quotation", "Client's Name", "Company Name", "Prepared by", queueStage === "gm_revision" ? "Returned" : "Submitted", "Note", "Review"]} minWidth={940}>
-          {activeSubmissions.map((quotation) => {
+        <Table labels={["Price Quotation", "Client's Name", "Company Name", "Assigned to", queueStage === "gm_revision" ? "Returned" : "Submitted", "Note", "Review"]} minWidth={940}>
+          {visibleSubmissions.map((quotation) => {
             const lead = store.leads.find((item) => item.id === quotation.lead_id);
             const party = quotationParty(quotation, store);
             return (
@@ -14665,6 +15076,14 @@ function PriceQuotationSubmissions({
           })}
         </Table>
         </div>
+        <TablePagination
+          page={activeSubmissionPage}
+          pageCount={submissionPageCount}
+          total={activeSubmissions.length}
+          onPageChange={setSubmissionPage}
+          label="Quotation review queue pagination"
+        />
+        </>
       ) : (
         <Empty>{activePendingSubmissions.length ? "No Price Quotations match the selected filters." : queueStage === "gm_revision" ? "No Price Quotations have been returned by the General Manager." : "No Price Quotations are awaiting review."}</Empty>
       )}
@@ -14729,6 +15148,9 @@ function PriceQuotationWorkspace({
   const [editing, setEditing] = useState<Row | null>(null);
   const [leadId, setLeadId] = useState("");
   const [projectType, setProjectType] = useState("");
+  const [commissionHandlingMode, setCommissionHandlingMode] = useState<CommissionHandlingMode>("shared");
+  const [commissionCoWorkerId, setCommissionCoWorkerId] = useState("");
+  const [commissionSplitOption, setCommissionSplitOption] = useState<CommissionSplitOption>("60_40");
   const [items, setItems] = useState<DraftItem[]>([
     { key: "item-1", description: "", quantity: "1" },
   ]);
@@ -14737,10 +15159,12 @@ function PriceQuotationWorkspace({
   >([]);
   const [saving, setSaving] = useState(false);
   const [quotationTab, setQuotationTab] = useState<"draft" | "pending" | "needs_revision" | "approved">(() => isProjectOfficerRole(role) ? "draft" : memberRole(role) ? "approved" : "pending");
+  const [approvedPaymentTab, setApprovedPaymentTab] = useState<"outstanding" | "paid">("outstanding");
   const [quotationQuery, setQuotationQuery] = useState("");
   const quotationDefaultMonth = isPricingOfficerRole(role) ? "" : currentMonth();
   const [quotationMonth, setQuotationMonth] = useState(quotationDefaultMonth);
   const [preparedByFilter, setPreparedByFilter] = useState("all");
+  const [quotationPage, setQuotationPage] = useState(1);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [pdfQuote, setPdfQuote] = useState<Row | null>(null);
   const [pdfWindow, setPdfWindow] = useState<Window | null>(null);
@@ -14759,6 +15183,11 @@ function PriceQuotationWorkspace({
     return () => { active = false; };
   }, []);
   const isCombinedRole = role === "sales_pricing_officer";
+  const canManageQuotationAsOrigin = (quote: Row) =>
+    isProjectOfficerRole(role) &&
+    Boolean(currentUserId) &&
+    [quote.created_by, quote.prepared_by_user_id, quote.se_origin_user_id]
+      .some((userId) => text(userId, "") === currentUserId);
   const quotations = useMemo(
     () =>
       store.quotations.filter(
@@ -14770,15 +15199,16 @@ function PriceQuotationWorkspace({
               quote.created_by,
               quote.prepared_by_user_id,
               quote.submitted_by,
-              quote.pricing_reviewed_by,
+              quote.se_origin_user_id,
             ].some((userId) => text(userId, "") === currentUserId) ||
-            store.pricing_officer_project_types.some(
+            isAssignedPricingOfficerVisible(quote, currentUserId) ||
+            (!text(quote.assigned_pricing_officer_user_id, "") && store.pricing_officer_project_types.some(
               (assignment) =>
                 text(assignment.pricing_officer_user_id, "") === currentUserId &&
                 pricingProjectTypeKey(assignment.project_type) ===
                   pricingProjectTypeKey(quote.project_types),
-            )),
-      ),
+            ))
+      )),
     [
       currentUserId,
       isCombinedRole,
@@ -14804,12 +15234,29 @@ function PriceQuotationWorkspace({
     ).map(([id, name]) => ({ id, name })).filter((officer) => officer.id),
     [preparedByKey, preparedByName, quotations],
   );
+  const approvedPaymentCounts = useMemo(() => {
+    let outstanding = 0;
+    let paid = 0;
+    quotations
+      .filter((quote) => text(quote.status) === "approved")
+      .forEach((quote) => {
+        const paymentStatus = quotationPaymentSummary(quote, store.quotation_payment_records).status;
+        if (paymentStatus === "paid" || paymentStatus === "overpaid") paid += 1;
+        else outstanding += 1;
+      });
+    return { outstanding, paid };
+  }, [quotations, store.quotation_payment_records]);
   const deferredQuotationQuery = useDeferredValue(quotationQuery);
   const filteredQuotations = useMemo(() => {
     if (editorOpen) return [];
     const search = deferredQuotationQuery.trim().toLowerCase();
     return quotations.filter((quote) => {
       if (text(quote.status) !== quotationTab) return false;
+      if (quotationTab === "approved") {
+        const paymentStatus = quotationPaymentSummary(quote, store.quotation_payment_records).status;
+        const isPaid = paymentStatus === "paid" || paymentStatus === "overpaid";
+        if (approvedPaymentTab === "paid" ? !isPaid : isPaid) return false;
+      }
       if (preparedByFilter !== "all" && preparedByKey(quote) !== preparedByFilter) return false;
       const quotationDate = text(
         text(quote.status) === "approved"
@@ -14826,7 +15273,16 @@ function PriceQuotationWorkspace({
       ].map((value) => text(value).toLowerCase()).join(" ");
       return searchable.includes(search);
     }).sort(newestActivityFirst);
-  }, [deferredQuotationQuery, editorOpen, preparedByFilter, preparedByKey, preparedByName, quotationMonth, quotationTab, quotations]);
+  }, [approvedPaymentTab, deferredQuotationQuery, editorOpen, preparedByFilter, preparedByKey, preparedByName, quotationMonth, quotationTab, quotations, store.quotation_payment_records]);
+  const quotationPageCount = Math.max(1, Math.ceil(filteredQuotations.length / TABLE_PAGE_SIZE));
+  const activeQuotationPage = Math.min(quotationPage, quotationPageCount);
+  const visibleQuotations = filteredQuotations.slice(
+    (activeQuotationPage - 1) * TABLE_PAGE_SIZE,
+    activeQuotationPage * TABLE_PAGE_SIZE,
+  );
+  useEffect(() => {
+    setQuotationPage(1);
+  }, [approvedPaymentTab, preparedByFilter, quotationMonth, quotationQuery, quotationTab]);
   const availableLeads = useMemo(
     () =>
       store.leads.filter(
@@ -14851,11 +15307,51 @@ function PriceQuotationWorkspace({
     })),
     [availableLeads],
   );
+  const eligibleCommissionOfficers = useMemo(() => {
+    const allOfficers = pricingOfficerOptions(store);
+    const assigned = projectType.trim()
+      ? allOfficers.filter((officer) =>
+        store.pricing_officer_project_types.some(
+          (assignment) =>
+            text(assignment.pricing_officer_user_id, "") === officer.id &&
+            pricingProjectTypeKey(assignment.project_type) === pricingProjectTypeKey(projectType),
+        ),
+      )
+      : [];
+    const selected = allOfficers.find((officer) => officer.id === commissionCoWorkerId);
+    return selected && !assigned.some((officer) => officer.id === selected.id)
+      ? [selected, ...assigned]
+      : assigned;
+  }, [commissionCoWorkerId, projectType, store]);
+  const commissionOfficerSelectOptions = useMemo(
+    () => eligibleCommissionOfficers
+      .filter((officer) => officer.id !== currentUserId)
+      .map((officer) => ({
+        value: officer.id,
+        label: officer.name,
+        searchText: officer.name,
+      })),
+    [currentUserId, eligibleCommissionOfficers],
+  );
+  const canChooseSelfHandled = role === "sales_pricing_officer";
+  const setEditorProjectType = (value: string) => {
+    setProjectType(value);
+    if (commissionCoWorkerId && !store.pricing_officer_project_types.some(
+      (assignment) =>
+        text(assignment.pricing_officer_user_id, "") === commissionCoWorkerId &&
+        pricingProjectTypeKey(assignment.project_type) === pricingProjectTypeKey(value),
+    )) {
+      setCommissionCoWorkerId("");
+    }
+  };
   const resetEditor = () => {
     setEditorOpen(false);
     setEditing(null);
     setLeadId("");
     setProjectType("");
+    setCommissionHandlingMode("shared");
+    setCommissionCoWorkerId("");
+    setCommissionSplitOption("60_40");
     setItems([{ key: `item-${Date.now()}`, description: "", quantity: "1" }]);
     setQuotationIllustrations([]);
   };
@@ -14863,6 +15359,9 @@ function PriceQuotationWorkspace({
     setEditing(null);
     setLeadId("");
     setProjectType("");
+    setCommissionHandlingMode("shared");
+    setCommissionCoWorkerId("");
+    setCommissionSplitOption("60_40");
     setItems([{ key: `item-${Date.now()}`, description: "", quantity: "1" }]);
     setQuotationIllustrations([]);
     setEditorOpen(true);
@@ -14874,6 +15373,10 @@ function PriceQuotationWorkspace({
     setEditing(quote);
     setLeadId(text(quote.lead_id));
     setProjectType(text(quote.project_types));
+    const editMode = quotationCommissionHandlingMode(quote.commission_handling_mode);
+    setCommissionHandlingMode(editMode);
+    setCommissionCoWorkerId(text(quote.commission_co_worker_user_id, ""));
+    setCommissionSplitOption(quotationCommissionSplitOption(quote.commission_split_option, editMode));
     setItems(
       quoteItems.length
         ? quoteItems.map((item, index) => ({
@@ -14898,9 +15401,22 @@ function PriceQuotationWorkspace({
     );
     setEditorOpen(true);
   };
-  const saveDraft = async () => {
+  const saveDraft = async (submitAfterSave = false) => {
     if (!leadId) return notice("Select a lead before saving the quotation.");
     if (!projectType.trim()) return notice("Enter the project type before saving the quotation.");
+    if (commissionHandlingMode === "self_handled" && !canChooseSelfHandled) {
+      return notice("Only a Sales & Pricing Officer can choose self-handled mode.");
+    }
+    if (commissionHandlingMode === "self_handled" && !store.pricing_officer_project_types.some(
+      (assignment) =>
+        text(assignment.pricing_officer_user_id, "") === currentUserId &&
+        pricingProjectTypeKey(assignment.project_type) === pricingProjectTypeKey(projectType),
+    )) {
+      return notice("You are not assigned to the selected project type, so this quotation must be shared with an assigned Pricing Officer.");
+    }
+    if (commissionHandlingMode === "shared" && !commissionCoWorkerId) {
+      return notice("Choose the Co-Worker who will prepare this quotation.");
+    }
     if (items.filter((item) => item.imageUrl || item.imageFile).length > 5) {
       return notice("A Price Quotation can have a maximum of five illustrations.");
     }
@@ -14943,7 +15459,7 @@ function PriceQuotationWorkspace({
       setSaving(false);
       return notice(error instanceof Error ? error.message : "Illustrations could not be uploaded.");
     }
-    const { data, error } = await client.rpc("save_price_quotation_draft", {
+    const { data, error } = await client.rpc("save_price_quotation_draft_with_commission", {
       p_quotation_id: editing?.id ?? null,
       p_lead_id: leadId,
       p_project_type: projectType.trim(),
@@ -14958,16 +15474,16 @@ function PriceQuotationWorkspace({
       // persisted by the six-argument wrapper in migration 093.
       p_has_illustrations: savedItems.some((item) => Boolean(item.imageUrl)),
       p_quotation_illustrations: savedQuotationIllustrations,
+      p_commission_handling_mode: commissionHandlingMode,
+      p_commission_co_worker_user_id: commissionHandlingMode === "shared" ? commissionCoWorkerId : null,
+      p_commission_split_option: commissionSplitOption,
     });
     if (error) {
       setSaving(false);
       return notice(error.message);
     }
-    const resubmitRevision =
-      isProjectOfficerRole(role) &&
-      text(editing?.status) === "needs_revision";
-    if (resubmitRevision) {
-      const { error: submitError } = await client.rpc("submit_price_quotation", {
+    if (submitAfterSave) {
+      const { error: submitError } = await client.rpc("submit_price_quotation_with_commission", {
         p_quotation_id: text(data),
       });
       if (submitError) {
@@ -14978,8 +15494,8 @@ function PriceQuotationWorkspace({
     setSaving(false);
     resetEditor();
     notice(
-      resubmitRevision
-        ? "Price Quotation updated and submitted to the assigned Sales & Pricing Officer."
+      submitAfterSave
+        ? "Price Quotation request submitted to the assigned Sales & Pricing Officer."
         : editing
           ? "Price Quotation updated."
           : "Price Quotation draft created.",
@@ -14989,9 +15505,14 @@ function PriceQuotationWorkspace({
   };
   const submit = async (quote: Row) => {
     setSaving(true);
-    const { error } = await createClient().rpc("submit_price_quotation", {
+    const { error } = await createClient().rpc(
+      quote.commission_handling_mode
+        ? "submit_price_quotation_with_commission"
+        : "submit_price_quotation",
+      {
       p_quotation_id: quote.id,
-    });
+      },
+    );
     setSaving(false);
     if (error) return notice(error.message);
     notice("Price Quotation submitted to the assigned Sales & Pricing Officer.");
@@ -15124,6 +15645,13 @@ function PriceQuotationWorkspace({
     setPdfWindow(nextWindow);
     setPdfQuote(quote);
   };
+  const showPaymentStatus = quotationTab === "approved";
+  const quotationSectionTabs = isGeneralManager
+    ? (["pending", "needs_revision", "approved"] as const)
+    : (["draft", "pending", "needs_revision", "approved"] as const);
+  const quotationTableLabels = isProjectOfficerRole(role)
+    ? ["Quotation", "Client's Name", "Company Name", "Status", ...(showPaymentStatus ? ["Payment"] : []), "Date", "Actions"]
+    : ["Quotation", "Client's Name", "Company Name", "Prepared by", "Status", ...(showPaymentStatus ? ["Payment"] : []), "Date", "Actions"];
   return (
     <Panel
       title="Price Quotations"
@@ -15145,14 +15673,17 @@ function PriceQuotationWorkspace({
       {!editorOpen && <div className="px-4 py-4 sm:px-5 lg:px-6">
       <div className="mb-4">
         <nav aria-label="Price quotation sections" className="app-tabs">
-          {(isGeneralManager
-            ? (["pending", "needs_revision", "approved"] as const)
-            : (["draft", "pending", "needs_revision", "approved"] as const)
-          ).map((tab) => {
+          {quotationSectionTabs.map((tab) => {
             const labels = { draft: "Draft", pending: "Pending Review", needs_revision: "Needs Revision", approved: "Approved" };
             return <button key={tab} type="button" onClick={() => setQuotationTab(tab)} aria-current={quotationTab === tab ? "page" : undefined} className="app-tab">{labels[tab]} ({quotations.filter((quote) => text(quote.status) === tab).length})</button>;
           })}
         </nav>
+        {quotationTab === "approved" && (
+          <nav aria-label="Approved quotation payment status" className="app-tabs mt-3">
+            <button type="button" onClick={() => setApprovedPaymentTab("outstanding")} aria-current={approvedPaymentTab === "outstanding" ? "page" : undefined} className="app-tab">Outstanding ({approvedPaymentCounts.outstanding})</button>
+            <button type="button" onClick={() => setApprovedPaymentTab("paid")} aria-current={approvedPaymentTab === "paid" ? "page" : undefined} className="app-tab">Paid ({approvedPaymentCounts.paid})</button>
+          </nav>
+        )}
         <div className="flex flex-wrap items-center gap-2 border-b border-[#edf0f5] py-3">
           <label className="relative min-w-0 flex-1 sm:min-w-56 sm:max-w-sm" htmlFor="price-quotation-search"><Search className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]" size={15} /><span className="sr-only">Search quotations</span><input id="price-quotation-search" type="search" value={quotationQuery} onChange={(event) => setQuotationQuery(event.target.value)} placeholder="Search quotations" className="search-input w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]" /></label>
           <label className="flex items-center gap-2 text-[12px] text-[#687386]"><span className="whitespace-nowrap">Month</span><input type="month" value={quotationMonth} onClick={(event) => event.currentTarget.showPicker?.()} onChange={(event) => setQuotationMonth(event.target.value)} className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px] text-[#202938] outline-none focus:border-[#c43b43]" /></label>
@@ -15162,19 +15693,22 @@ function PriceQuotationWorkspace({
         </div>
       </div>
       {filteredQuotations.length ? (
+        <>
         <div className="modern-table-shell">
         <Table
-          labels={isProjectOfficerRole(role) ? ["Quotation", "Client's Name", "Company Name", "Status", "Date", "Actions"] : ["Quotation", "Client's Name", "Company Name", "Prepared by", "Status", "Date", "Actions"]}
-          minWidth={isProjectOfficerRole(role) ? 880 : 1020}
+          labels={quotationTableLabels}
+          minWidth={isProjectOfficerRole(role) ? (showPaymentStatus ? 980 : 880) : (showPaymentStatus ? 1120 : 1020)}
           className="!w-full"
         >
-          {filteredQuotations.map((quote) => {
+          {visibleQuotations.map((quote) => {
             const lead = store.leads.find((item) => item.id === quote.lead_id);
             const party = quotationParty(quote, store);
             const preparedBy = preparedByName(quote);
             const isLegacy = Boolean(quote.costing_source_id);
             const pricingOfficerRevision = isPricingOfficerRevision(quote);
-            const editable = !isLegacy && !pricingOfficerRevision && ["draft", "needs_revision"].includes(text(quote.status));
+            const canEditAsOrigin = canManageQuotationAsOrigin(quote);
+            const editable = canEditAsOrigin && !isLegacy && !pricingOfficerRevision && ["draft", "needs_revision"].includes(text(quote.status));
+            const paymentSummary = showPaymentStatus ? quotationPaymentSummary(quote, store.quotation_payment_records) : null;
             const priceRevisionRequest = store.price_quotation_revision_requests.find(
               (request) =>
                 request.quotation_id === quote.id &&
@@ -15195,6 +15729,7 @@ function PriceQuotationWorkspace({
                 <td className="px-5 py-3">{party.companyName}</td>
                 {!isProjectOfficerRole(role) && <td className="px-5 py-3">{preparedBy}</td>}
                 <td className="px-5 py-3"><div className="flex items-center gap-1.5"><Status value={quote.status} />{priceRevisionRequest && <span className="text-[11px] text-[#a76605]">Revision requested</span>}{text(quote.status) === "needs_revision" && <NoteAction label="View revision note" tone="amber" onClick={() => setRevisionNoteQuote(quote)} />}</div></td>
+                {paymentSummary && <td className="px-5 py-3"><PaymentStatusBadge status={paymentSummary.status} /><small>{peso.format(paymentSummary.verified)} / {peso.format(paymentSummary.total)} verified</small></td>}
                 <td className="px-5 py-3">{text(quote.status) === "approved" ? day(quote.approved_at) : day(quote.submitted_at)}</td>
                 <td className="px-5 py-3"><div className="flex items-center gap-1">
                   {editable && canPrepare && (
@@ -15203,10 +15738,10 @@ function PriceQuotationWorkspace({
                   {isProjectOfficerRole(role) && editable && (
                     <ActionIcon label="Submit to Sales & Pricing Officer" tone="green" loading={saving} disabled={saving} onClick={() => void submit(quote)}><Send size={15} /></ActionIcon>
                   )}
-                  {isProjectOfficerRole(role) && text(quote.status) === "pending" && (
+                  {isProjectOfficerRole(role) && canEditAsOrigin && text(quote.status) === "pending" && (
                     <ActionIcon label="Unsubmit and return to draft" tone="amber" loading={saving} disabled={saving} onClick={() => void unsubmit(quote)}><RotateCcw size={15} /></ActionIcon>
                   )}
-                  {isProjectOfficerRole(role) && priceRevisionRequest && (
+                  {isProjectOfficerRole(role) && canEditAsOrigin && priceRevisionRequest && (
                     <ActionIcon
                       label="Unsubmit Price Quotation revision request"
                       tone="amber"
@@ -15218,10 +15753,10 @@ function PriceQuotationWorkspace({
                       <RotateCcw size={15} />
                     </ActionIcon>
                   )}
-                  {isProjectOfficerRole(role) && !isLegacy && text(quote.status) === "approved" && (
+                  {canEditAsOrigin && !isLegacy && text(quote.status) === "approved" && (
                     <ActionIcon label="Edit and resubmit Price Quotation" tone="amber" loading={saving} disabled={saving || Boolean(priceRevisionRequest)} onClick={() => void beginRevision(quote)}><RotateCcw size={15} /></ActionIcon>
                   )}
-                  {canSubmitQuotationPaymentInUi(quote, role, currentUserId, store.pricing_officer_project_types) && (
+                  {canSubmitQuotationPaymentInUi(quote, role) && (
                     <ActionIcon label="Record client payment" confirm={false} onClick={() => setPaymentQuote(quote)}>
                       <ReceiptText size={15} />
                     </ActionIcon>
@@ -15250,6 +15785,14 @@ function PriceQuotationWorkspace({
           })}
         </Table>
         </div>
+        <TablePagination
+          page={activeQuotationPage}
+          pageCount={quotationPageCount}
+          total={filteredQuotations.length}
+          onPageChange={setQuotationPage}
+          label="Price Quotations pagination"
+        />
+        </>
       ) : <Empty>{quotations.length ? "No Price Quotations match the selected filters." : "No Price Quotations yet. Create one from a lead to begin."}</Empty>}
       </div>}
       {editorOpen && (
@@ -15257,7 +15800,58 @@ function PriceQuotationWorkspace({
           <section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
             <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">{editing ? "Edit Price Quotation" : "Prepare Price Quotation"}</h2><p className="mt-1 text-[12px] text-[#687386]">Add the requested materials and quantities. Selling prices are entered by the assigned Sales & Pricing Officer.</p></div><button type="button" onClick={resetEditor} aria-label="Close" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div>
             <label className="mt-5 block text-[12px] font-medium text-[#202938]">Company Name - Contact Name<SearchableLeadSelect options={leadOptions} value={leadId} onChange={setLeadId} required clearable={false} placeholder="Select a lead" searchPlaceholder="Search name, contact, project, or lead number" ariaLabel="Company Name - Contact Name" className="mt-1" /></label>
-            <label className="mt-4 block text-[12px] font-medium text-[#202938]">Project Type<select value={projectType} onChange={(event) => setProjectType(event.target.value)} className={`input mt-1 ${projectType ? "text-[#151922]" : "text-[#8b92a1]"}`} required><option value="">Select project type</option>{quotationProjectTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+            <label className="mt-4 block text-[12px] font-medium text-[#202938]">Project Type<select value={projectType} onChange={(event) => setEditorProjectType(event.target.value)} className={`input mt-1 ${projectType ? "text-[#151922]" : "text-[#8b92a1]"}`} required><option value="">Select project type</option>{quotationProjectTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+            <section className="mt-5 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-4">
+              <div>
+                <h3 className="text-[14px] font-semibold text-[#202938]">Commission assignment</h3>
+                <p className="mt-1 text-[12px] text-[#687386]">Internal routing only. This selection is not included in the client Price Quotation PDF.</p>
+              </div>
+              <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1fr]">
+                <label className="block text-[12px] font-medium text-[#202938]">Handling mode
+                  <SegmentedToggle
+                    ariaLabel="Commission handling mode"
+                    value={commissionHandlingMode}
+                    options={canChooseSelfHandled
+                      ? [{ value: "self_handled", label: "Self-handled" }, { value: "shared", label: "Shared" }]
+                      : [{ value: "shared", label: "Shared" }]}
+                    onChange={(value) => {
+                      const nextMode = value as CommissionHandlingMode;
+                      setCommissionHandlingMode(nextMode);
+                      if (nextMode === "self_handled") {
+                        setCommissionCoWorkerId("");
+                        setCommissionSplitOption("self_handled_100_0");
+                      } else if (commissionSplitOption === "self_handled_100_0") {
+                        setCommissionSplitOption("60_40");
+                      }
+                    }}
+                    className="mt-1 w-full"
+                  />
+                  {!canChooseSelfHandled && <span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">Sales Executives route the quotation to a Sales &amp; Pricing Officer.</span>}
+                </label>
+                <label className="block text-[12px] font-medium text-[#202938]">Commission division
+                  <select value={commissionSplitOption} onChange={(event) => setCommissionSplitOption(event.target.value as CommissionSplitOption)} disabled={commissionHandlingMode === "self_handled"} className="input mt-1">
+                    {(commissionHandlingMode === "self_handled" ? commissionSplitOptions : sharedCommissionSplitOptions).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                  <span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">{commissionSplitOptions.find((option) => option.value === commissionSplitOption)?.detail}</span>
+                </label>
+              </div>
+              {commissionHandlingMode === "shared" && <label className="mt-3 block text-[12px] font-medium text-[#202938]">Co-Worker / assigned Pricing Officer
+                <SearchableSelect
+                  options={commissionOfficerSelectOptions}
+                  value={commissionCoWorkerId}
+                  onChange={setCommissionCoWorkerId}
+                  placeholder={projectType ? "Choose Sales & Pricing Officer" : "Select project type first"}
+                  searchPlaceholder="Search Sales & Pricing Officers"
+                  noResultsLabel={projectType ? "No officer is assigned to this project type." : "Select a project type first."}
+                  ariaLabel="Co-Worker / assigned Pricing Officer"
+                  required
+                  clearable={false}
+                  disabled={!projectType || commissionOfficerSelectOptions.length === 0}
+                  className="mt-1"
+                />
+                <span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">Only active Sales &amp; Pricing Officers assigned to the selected project type are listed.</span>
+              </label>}
+            </section>
             <section className="mt-5 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div><h3 className="text-[14px] font-semibold text-[#202938]">Illustrations</h3><p className="mt-1 text-[12px] text-[#687386]">Upload up to five pictures or PDF reference files (5 MB each). They are public, view-only, and are not included in the PDF.</p></div>
@@ -15287,7 +15881,7 @@ function PriceQuotationWorkspace({
               </Table>
               <div className="mt-3 flex justify-end"><Button onClick={() => setItems((current) => [...current, { key: `item-${Date.now()}`, description: "", quantity: "1" }])}><Plus size={14} /> Add Item</Button></div>
             </div>
-            <div className="mt-6 flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary disabled={saving} onClick={resetEditor}>Cancel</Button><Button loading={saving} disabled={saving} onClick={() => void saveDraft()}>{saving ? (editing ? "Saving changes…" : "Saving draft…") : (editing ? "Save changes" : "Save draft")}</Button></div>
+            <div className="mt-6 flex flex-wrap justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary disabled={saving} onClick={resetEditor}>Cancel</Button><Button secondary loading={saving} disabled={saving} onClick={() => void saveDraft(false)}>{saving ? "Saving…" : "Save draft"}</Button><Button loading={saving} disabled={saving} onClick={() => void saveDraft(true)}>{saving ? "Submitting…" : "Submit Request"}</Button></div>
           </section>
         </div>
       )}
@@ -15618,6 +16212,10 @@ type PriceQuotationReviewContentProps = {
   total: number;
   terms: string[];
   setTerms: (next: string[] | ((current: string[]) => string[])) => void;
+  paymentTermsOption: QuotationPaymentTermsOption;
+  pdcTermDays: number;
+  onPaymentTermsOptionChange: (value: QuotationPaymentTermsOption) => void;
+  onPdcTermDaysChange: (value: number) => void;
   bankDetails: BankDetail[];
   setBankDetails: (next: BankDetail[] | ((current: BankDetail[]) => BankDetail[])) => void;
   revisionNote: string;
@@ -15638,6 +16236,17 @@ type PriceQuotationReviewContentProps = {
   documentLabel?: string;
   sourceQuotationNo?: string;
   readOnly?: boolean;
+  commissionAssignmentVisible: boolean;
+  commissionOriginName: string;
+  commissionHandlingMode: CommissionHandlingMode;
+  commissionCoWorkerUserId: string;
+  commissionSplitOption: CommissionSplitOption;
+  commissionOfficerOptions: { value: string; label: string; searchText?: string }[];
+  commissionHandlingEditable: boolean;
+  commissionSplitEditable: boolean;
+  onCommissionHandlingModeChange: (value: CommissionHandlingMode) => void;
+  onCommissionCoWorkerChange: (value: string) => void;
+  onCommissionSplitOptionChange: (value: CommissionSplitOption) => void;
 };
 
 function RevisionRequestDialog({
@@ -15975,16 +16584,84 @@ function ProductCostingsSectionWithPricing({
 
 function PriceQuotationReviewContent({
   lines, projectName, projectType, illustrations, productCostings, pricingDefaults, setProductCostings, prices, setPrices, subtotal, vatRate, setVatRate, tax,
-  total, terms, setTerms, bankDetails, setBankDetails,
+  total, terms, setTerms, paymentTermsOption, pdcTermDays, onPaymentTermsOptionChange, onPdcTermDaysChange, bankDetails, setBankDetails,
   revisionNote, setRevisionNote, submissionNote, setSubmissionNote, close, saving, working, review, finalApproval, showInternalMarkups, sensitiveValuesHidden, toggleSensitiveValues, visibleMarkupKeys, bankVisibility, pricingRevision, readOnly = false,
-  documentLabel = "Price Quotation", sourceQuotationNo,
+  documentLabel = "Price Quotation", sourceQuotationNo, commissionAssignmentVisible, commissionOriginName, commissionHandlingMode, commissionCoWorkerUserId, commissionSplitOption, commissionOfficerOptions, commissionHandlingEditable, commissionSplitEditable, onCommissionHandlingModeChange, onCommissionCoWorkerChange, onCommissionSplitOptionChange,
 }: PriceQuotationReviewContentProps) {
   const [revisionDialogOpen, setRevisionDialogOpen] = useState(false);
+  const syncTermsWithPaymentOption = (
+    option: QuotationPaymentTermsOption,
+    termDays: number,
+  ) => {
+    setTerms((current) =>
+      quotationTermsWithPaymentOption(current.join("\n"), {
+        payment_terms_option: option,
+        pdc_term_days: termDays,
+      })
+        .split(/\r?\n+/)
+        .filter(Boolean),
+    );
+  };
+  const updatePaymentTermsOption = (value: QuotationPaymentTermsOption) => {
+    onPaymentTermsOptionChange(value);
+    syncTermsWithPaymentOption(value, pdcTermDays);
+  };
+  const updatePdcTermDays = (value: number) => {
+    onPdcTermDaysChange(value);
+    syncTermsWithPaymentOption(paymentTermsOption, value);
+  };
   const displayedBankDetails = bankDetails
     .map((bank, index) => ({ bank, index }))
     .filter(({ index }) => !showInternalMarkups || bankVisibility?.[index] !== false);
   return (
     <div className="mt-5 space-y-5">
+      {commissionAssignmentVisible && <section className="rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4">
+        <div>
+          <h3 className="text-[14px] font-semibold">Commission assignment</h3>
+          <p className="mt-1 text-[12px] text-[#687386]">Internal workflow only. The General Manager has final authority over this assignment. It is not printed on the client Price Quotation.</p>
+        </div>
+        <dl className="mt-3 grid gap-1 text-[13px] sm:grid-cols-[140px_1fr]">
+          <dt className="text-[#687386]">S.E. Origin</dt>
+          <dd className="font-medium text-[#202938]">{commissionOriginName || "Sales Executive"}</dd>
+        </dl>
+        <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1fr]">
+          <label className="block text-[12px] font-medium text-[#202938]">Handling mode
+            <SegmentedToggle
+              ariaLabel="Commission handling mode"
+              value={commissionHandlingMode}
+              options={[{ value: "self_handled", label: "Self-handled" }, { value: "shared", label: "Shared" }]}
+              onChange={(value) => onCommissionHandlingModeChange(value as CommissionHandlingMode)}
+              disabled={!commissionHandlingEditable || readOnly}
+              className="mt-1 w-full"
+            />
+          </label>
+          <label className="block text-[12px] font-medium text-[#202938]">Commission division
+            <select
+              value={commissionSplitOption}
+              onChange={(event) => onCommissionSplitOptionChange(event.target.value as CommissionSplitOption)}
+              disabled={!commissionSplitEditable || readOnly || commissionHandlingMode === "self_handled"}
+              className="input mt-1"
+            >
+              {(commissionHandlingMode === "self_handled" ? commissionSplitOptions : sharedCommissionSplitOptions).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+            <span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">{commissionSplitOptions.find((option) => option.value === commissionSplitOption)?.detail}</span>
+          </label>
+        </div>
+        {commissionHandlingMode === "shared" && <label className="mt-3 block text-[12px] font-medium text-[#202938]">Co-Worker / assigned Pricing Officer
+          <SearchableSelect
+            options={commissionOfficerOptions}
+            value={commissionCoWorkerUserId}
+            onChange={onCommissionCoWorkerChange}
+            placeholder="Choose Sales & Pricing Officer"
+            searchPlaceholder="Search Sales & Pricing Officers"
+            noResultsLabel="No eligible Sales & Pricing Officers found."
+            ariaLabel="Co-Worker / assigned Pricing Officer"
+            clearable={false}
+            disabled={!commissionHandlingEditable || readOnly}
+            className="mt-1"
+          />
+        </label>}
+      </section>}
       <section className="rounded-xl border border-[#e1e6ee] p-4">
         <h3 className="text-[14px] font-semibold">{documentLabel} details</h3>
         <dl className="mt-3 grid gap-1 text-[13px] sm:grid-cols-[120px_1fr]">
@@ -16000,6 +16677,18 @@ function PriceQuotationReviewContent({
       </section>}
       <QuotationReviewSummary lines={lines} prices={prices} subtotal={subtotal} vatRate={vatRate} tax={tax} total={total} productCostings={productCostings} showPrices={showInternalMarkups} />
       <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups={showInternalMarkups} editableInternalMarkups={finalApproval} visibleMarkupKeys={visibleMarkupKeys ?? (showInternalMarkups ? internalPricingMarkupKeys : ["discounts"])} canEditVat={finalApproval} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
+      <QuotationPaymentTermsEditor
+        option={paymentTermsOption}
+        termDays={pdcTermDays}
+        onOptionChange={updatePaymentTermsOption}
+        onTermDaysChange={updatePdcTermDays}
+        disabled={readOnly}
+        description={readOnly
+          ? "Approved payment terms for this quotation."
+          : finalApproval
+            ? "Review or edit the client-facing payment terms before final approval."
+            : "Select the client-facing payment terms before submitting this quotation to the General Manager."}
+      />
       <fieldset disabled={readOnly} className="min-w-0 border-0 p-0">
       <section className="rounded-xl border border-[#e1e6ee] p-4">
         <h3 className="text-[14px] font-semibold">Terms and Conditions</h3>
@@ -16055,6 +16744,11 @@ function PriceQuotationReview({
 }) {
   const pricingRevision = !finalApproval && isPricingOfficerRevision(quotation);
   const documentLabel = "Price Quotation";
+  const commissionAssignmentVisible = Boolean(text(quotation.commission_handling_mode, ""));
+  const commissionOriginUserId = text(
+    quotation.se_origin_user_id,
+    text(quotation.created_by, text(quotation.prepared_by_user_id, "")),
+  );
   const [sensitiveValuesHidden, setSensitiveValuesHidden] = useState(false);
   const illustrationQuotationId = text(quotation.id, "");
   const pricingDefaultSettings = store.business_settings.find(
@@ -16075,8 +16769,49 @@ function PriceQuotationReview({
     ),
   );
   const [vatRate, setVatRate] = useState(initialVatRate);
+  const [paymentTermsOption, setPaymentTermsOption] = useState<QuotationPaymentTermsOption>(
+    quotationPaymentTermsOption(quotation.payment_terms_option),
+  );
+  const [pdcTermDays, setPdcTermDays] = useState(
+    quotationPaymentTermDays(quotation.pdc_term_days),
+  );
+  const [commissionHandlingMode, setCommissionHandlingMode] = useState<CommissionHandlingMode>(() =>
+    quotationCommissionHandlingMode(quotation.commission_handling_mode),
+  );
+  const [commissionCoWorkerUserId, setCommissionCoWorkerUserId] = useState(() =>
+    text(quotation.commission_co_worker_user_id, ""),
+  );
+  const [commissionSplitOption, setCommissionSplitOption] = useState<CommissionSplitOption>(() =>
+    quotationCommissionSplitOption(
+      quotation.commission_split_option,
+      quotationCommissionHandlingMode(quotation.commission_handling_mode),
+    ),
+  );
+  const commissionOriginName = text(
+    store.profiles.find((profile) => profile.id === commissionOriginUserId)?.full_name,
+    "Sales Executive",
+  );
+  const commissionOfficerOptions = useMemo(() => {
+    const allOfficers = pricingOfficerOptions(store);
+    const eligible = allOfficers.filter((officer) =>
+      store.pricing_officer_project_types.some(
+        (assignment) =>
+          text(assignment.pricing_officer_user_id, "") === officer.id &&
+          pricingProjectTypeKey(assignment.project_type) === pricingProjectTypeKey(quotation.project_types),
+      ),
+    );
+    const selected = allOfficers.find((officer) => officer.id === commissionCoWorkerUserId);
+    const options = selected && !eligible.some((officer) => officer.id === selected.id)
+      ? [selected, ...eligible]
+      : eligible;
+    return options.map((officer) => ({
+      value: officer.id,
+      label: officer.name,
+      searchText: officer.name,
+    }));
+  }, [commissionCoWorkerUserId, quotation.project_types, store]);
   const [terms, setTerms] = useState(
-    text(quotation.terms_conditions, DEFAULT_QUOTATION_TERMS)
+    quotationTermsWithPaymentOption(quotation.terms_conditions, quotation)
       .split(/\r?\n+/)
       .filter((term) => term && !term.trim().toLowerCase().startsWith("validity:")),
   );
@@ -16264,6 +16999,15 @@ function PriceQuotationReview({
     ) ?? configuredBankDetails[index];
     return bank.visible !== false && configured?.visible !== false;
   });
+  const changeCommissionHandlingMode = (value: CommissionHandlingMode) => {
+    setCommissionHandlingMode(value);
+    if (value === "self_handled") {
+      setCommissionCoWorkerUserId("");
+      setCommissionSplitOption("self_handled_100_0");
+    } else if (commissionSplitOption === "self_handled_100_0") {
+      setCommissionSplitOption("60_40");
+    }
+  };
   const review = async (decision: "approved" | "needs_revision"): Promise<boolean> => {
     if (pricingRevision && decision !== "approved") {
       notice("GM revisions must be resubmitted to the General Manager.");
@@ -16274,10 +17018,17 @@ function PriceQuotationReview({
       return false;
     }
     setWorking(true);
-    const savedTerms = terms
+    const savedTerms = quotationTermsWithPaymentOption(
+      terms
       .filter((term) => term.trim())
       .filter((term) => !finalApproval || n(vatRate) > 0 || !/vat\s+inclusive/i.test(term))
-      .join("\n");
+      .join("\n"),
+      {
+        ...quotation,
+        payment_terms_option: paymentTermsOption,
+        pdc_term_days: pdcTermDays,
+      },
+    );
     const costingsPayload = productCostings.map((costing) => ({
       quotation_item_id: costing.quotationItemId,
       internal_vat_rate: n(costing.internalVatRate),
@@ -16297,11 +17048,28 @@ function PriceQuotationReview({
       })),
       pricing_model: costing.pricingModel,
     }));
+    const useCommissionWorkflow = commissionAssignmentVisible;
       const { error } = finalApproval && decision === "needs_revision"
-        ? await createClient().rpc("return_price_quotation_from_gm", { p_quotation_id: quotation.id, p_note: revisionNote })
+        ? await createClient().rpc("return_price_quotation_from_gm_with_edits_and_costings", {
+          p_quotation_id: quotation.id,
+          p_note: revisionNote,
+          p_vat_rate: n(vatRate),
+          p_terms_conditions: savedTerms,
+          p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
+          p_costings: costingsPayload,
+          p_vat_calculation_type: "percentage",
+          p_vat_fixed_amount: 0,
+          p_payment_terms_option: paymentTermsOption,
+          p_pdc_term_days: pdcTermDays,
+          p_commission_handling_mode: useCommissionWorkflow ? commissionHandlingMode : null,
+          p_commission_co_worker_user_id: useCommissionWorkflow && commissionHandlingMode === "shared" ? commissionCoWorkerUserId : null,
+          p_commission_split_option: useCommissionWorkflow ? commissionSplitOption : null,
+        })
         : finalApproval && decision === "approved"
         ? await createClient().rpc(
-          "final_approve_price_quotation_with_edits",
+          useCommissionWorkflow
+            ? "final_approve_price_quotation_with_commission"
+            : "final_approve_price_quotation_with_edits",
           {
             p_quotation_id: quotation.id,
             p_vat_rate: n(vatRate),
@@ -16310,10 +17078,21 @@ function PriceQuotationReview({
             p_terms_conditions: savedTerms,
             p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
             p_costings: costingsPayload,
+            p_payment_terms_option: paymentTermsOption,
+            p_pdc_term_days: pdcTermDays,
+            ...(useCommissionWorkflow ? {
+              p_commission_handling_mode: commissionHandlingMode,
+              p_commission_co_worker_user_id: commissionHandlingMode === "shared" ? commissionCoWorkerUserId : null,
+              p_commission_split_option: commissionSplitOption,
+            } : {}),
           },
         )
       : !finalApproval
-      ? await createClient().rpc("pricing_review_price_quotation", {
+      ? await createClient().rpc(
+        useCommissionWorkflow
+          ? "pricing_review_price_quotation_with_commission"
+          : "pricing_review_price_quotation",
+        {
           p_quotation_id: quotation.id,
           p_decision: decision,
           p_vat_rate: 0,
@@ -16324,7 +17103,13 @@ function PriceQuotationReview({
           p_costings: costingsPayload,
           p_revision_note: revisionNote,
           p_submission_note: submissionNote.trim() || null,
-        })
+          p_payment_terms_option: paymentTermsOption,
+          p_pdc_term_days: pdcTermDays,
+          ...(useCommissionWorkflow ? {
+            p_commission_split_option: commissionSplitOption,
+          } : {}),
+        },
+      )
       : await createClient().rpc("review_price_quotation", {
           p_quotation_id: quotation.id,
           p_decision: decision,
@@ -16377,6 +17162,10 @@ function PriceQuotationReview({
           total={total}
           terms={terms}
           setTerms={setTerms}
+          paymentTermsOption={paymentTermsOption}
+          pdcTermDays={pdcTermDays}
+          onPaymentTermsOptionChange={setPaymentTermsOption}
+          onPdcTermDaysChange={setPdcTermDays}
           bankDetails={bankDetails}
           setBankDetails={updateBankDetails}
           revisionNote={revisionNote}
@@ -16394,6 +17183,17 @@ function PriceQuotationReview({
           visibleMarkupKeys={showInternalMarkups ? gmVisibleMarkupKeys : ["discounts"]}
           bankVisibility={bankVisibility}
           pricingRevision={pricingRevision}
+          commissionAssignmentVisible={commissionAssignmentVisible}
+          commissionOriginName={commissionOriginName}
+          commissionHandlingMode={commissionHandlingMode}
+          commissionCoWorkerUserId={commissionCoWorkerUserId}
+          commissionSplitOption={commissionSplitOption}
+          commissionOfficerOptions={commissionOfficerOptions}
+          commissionHandlingEditable={finalApproval}
+          commissionSplitEditable={!readOnly}
+          onCommissionHandlingModeChange={changeCommissionHandlingMode}
+          onCommissionCoWorkerChange={setCommissionCoWorkerUserId}
+          onCommissionSplitOptionChange={setCommissionSplitOption}
           readOnly={readOnly}
         />
       </section>
@@ -16428,9 +17228,15 @@ function GeneralManagerCostingReview({
     vat_rate: text(quotationVatRate(quotation), "12"),
   });
   const [terms, setTerms] = useState(
-    text(quotation.terms_conditions, DEFAULT_QUOTATION_TERMS)
+    quotationTermsWithPaymentOption(quotation.terms_conditions, quotation)
       .split(/\r?\n+/)
       .filter(Boolean),
+  );
+  const [paymentTermsOption, setPaymentTermsOption] = useState<QuotationPaymentTermsOption>(
+    quotationPaymentTermsOption(quotation.payment_terms_option),
+  );
+  const [pdcTermDays, setPdcTermDays] = useState(
+    quotationPaymentTermDays(quotation.pdc_term_days),
   );
   const businessSettings = store.business_settings.find(
     (setting) => text(setting.organization_id) === text(quotation.organization_id),
@@ -16482,7 +17288,15 @@ function GeneralManagerCostingReview({
     buffer_margin_rate: n(rates.buffer_margin_rate),
     commission_rate: n(rates.commission_rate),
     vat_rate: n(rates.vat_rate),
-    terms_conditions: terms.filter((term) => term.trim()).join("\n"),
+    terms_conditions: quotationTermsWithPaymentOption(
+      terms.filter((term) => term.trim()).join("\n"),
+      {
+        payment_terms_option: paymentTermsOption,
+        pdc_term_days: pdcTermDays,
+      },
+    ),
+    payment_terms_option: paymentTermsOption,
+    pdc_term_days: pdcTermDays,
     bank_details: bankDetails.filter((detail) => detail.bank_name || detail.account_name || detail.account_number),
   };
   const rateRows: Array<{
@@ -16534,7 +17348,13 @@ function GeneralManagerCostingReview({
               </tr>
             </Table>
             <section className="order-3 mt-5 rounded-xl border border-[#e1e6ee] p-4">
-<div className="flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div>
+              <QuotationPaymentTermsEditor
+                option={paymentTermsOption}
+                termDays={pdcTermDays}
+                onOptionChange={setPaymentTermsOption}
+                onTermDaysChange={setPdcTermDays}
+              />
+              <div className="mt-5 flex items-center justify-between"><h3 className="text-[14px] font-semibold">Terms and Conditions</h3><Button onClick={() => setTerms((current) => [...current, ""])}><Plus size={13} /> Add term</Button></div>
               <div className="mt-3 space-y-2">{terms.map((term, index) => <div key={index} className="flex gap-2"><span className="pt-2 text-[12px] text-[#7d8797]">{index + 1}.</span><input value={term} onChange={(event) => setTerms((current) => current.map((value, itemIndex) => itemIndex === index ? titleCaseEntry(event.target.value, "term") : value))} className="input mt-0 flex-1" /><button type="button" aria-label="Remove term" onClick={() => setTerms((current) => current.filter((_, itemIndex) => itemIndex !== index))} className="grid size-9 place-items-center rounded text-[#8a95a6] transition-colors hover:bg-[#fff1f1] hover:text-[#b42318]"><Trash2 size={15} /></button></div>)}</div>
             </section>
             <section className="order-4 mt-4 rounded-xl border border-[#e1e6ee] p-4">
@@ -16670,12 +17490,7 @@ function SubmissionReview({
     (line) => line.quotation_id === quotation.id,
   );
   const isCosting = text(quotation.document_type) === "costing_breakdown";
-  const terms = isCosting
-    ? []
-    : text(quotation.terms_conditions, DEFAULT_QUOTATION_TERMS)
-        .split(/\r?\n+/)
-        .map((term) => term.trim())
-        .filter(Boolean);
+  const terms = isCosting ? [] : quotationTermLines(quotation);
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-[#151922]/30 p-4">
       <section className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-[14px] border border-[#d9e0e9] bg-white p-5">
@@ -17087,7 +17902,13 @@ function Submissions({
     if (!quotation.id) return;
     setSavingId(quotation.id);
     const client = createClient();
-    const { error } = await client.rpc("review_costing_breakdown", {
+    const paymentTermsOption = quotationPaymentTermsOption(
+      reviewChanges.payment_terms_option ?? quotation.payment_terms_option,
+    );
+    const pdcTermDays = quotationPaymentTermDays(
+      reviewChanges.pdc_term_days ?? quotation.pdc_term_days,
+    );
+    const { error } = await client.rpc("review_costing_breakdown_with_payment_terms", {
       p_costing_id: quotation.id,
       p_decision: status,
       p_profit_margin_rate: n(
@@ -17101,14 +17922,21 @@ function Submissions({
         reviewChanges.commission_rate ?? quotation.commission_rate,
       ),
       p_vat_rate: n(reviewChanges.vat_rate ?? quotationVatRate(quotation)),
-      p_terms_conditions:
+      p_terms_conditions: quotationTermsWithPaymentOption(
         typeof reviewChanges.terms_conditions === "string"
           ? reviewChanges.terms_conditions
-          : text(quotation.terms_conditions, ""),
+          : text(quotation.terms_conditions, DEFAULT_QUOTATION_TERMS),
+        {
+          payment_terms_option: paymentTermsOption,
+          pdc_term_days: pdcTermDays,
+        },
+      ),
       p_bank_details: Array.isArray(reviewChanges.bank_details)
         ? reviewChanges.bank_details
         : quotationBankDetails(quotation.bank_details),
       p_revision_note: revisionNote,
+      p_payment_terms_option: paymentTermsOption,
+      p_pdc_term_days: pdcTermDays,
     });
     setSavingId(null);
     if (error) return notice(error.message);
@@ -18239,8 +19067,15 @@ function Production({
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [activityNote, setActivityNote] = useState<Row | null>(null);
+  const [activityPage, setActivityPage] = useState(1);
   const canRecordUsage = canAccess(role, "production_material_usage", "create");
   const canUpdateJob = canAccess(role, "production_jobs", "update");
+  const activityPageCount = Math.max(1, Math.ceil(store.production_job_activity.length / TABLE_PAGE_SIZE));
+  const activeActivityPage = Math.min(activityPage, activityPageCount);
+  const visibleActivity = store.production_job_activity.slice(
+    (activeActivityPage - 1) * TABLE_PAGE_SIZE,
+    activeActivityPage * TABLE_PAGE_SIZE,
+  );
   const addUsage = async () => {
     setSaving(true);
     const client = createClient();
@@ -18396,11 +19231,12 @@ function Production({
       </Panel>
       <Panel
         title="Production activity"
-        detail="Review each job's status changes and activity history."
+        detail="Review the 10 most recent job status changes per page."
       >
         {store.production_job_activity.length ? (
-          <Table labels={["When", "Job", "Action", "Note"]}>
-            {store.production_job_activity.slice(0, 30).map((activity) => (
+          <>
+            <Table labels={["When", "Job", "Action", "Note"]}>
+            {visibleActivity.map((activity) => (
               <tr key={text(activity.id)}>
                 <td className="px-5 py-3">{day(activity.created_at)}</td>
                 <td className="px-5 py-3">
@@ -18427,7 +19263,9 @@ function Production({
                 </td>
               </tr>
             ))}
-          </Table>
+            </Table>
+            <TablePagination page={activeActivityPage} pageCount={activityPageCount} total={store.production_job_activity.length} onPageChange={setActivityPage} label="Production activity pagination" />
+          </>
         ) : (
           <Empty>No production activity recorded yet.</Empty>
         )}
@@ -18497,7 +19335,14 @@ function Inventory({
   const [move, setMove] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [movementPage, setMovementPage] = useState(1);
   const canRecordMovement = canAccess(role, "inventory_movements", "create");
+  const movementPageCount = Math.max(1, Math.ceil(store.inventory_movements.length / TABLE_PAGE_SIZE));
+  const activeMovementPage = Math.min(movementPage, movementPageCount);
+  const visibleMovements = store.inventory_movements.slice(
+    (activeMovementPage - 1) * TABLE_PAGE_SIZE,
+    activeMovementPage * TABLE_PAGE_SIZE,
+  );
   const saveMovement = async () => {
     setSaving(true);
     const kind = values.movement_type;
@@ -18550,7 +19395,7 @@ function Inventory({
       />
       <Panel
         title="Stock movement log"
-        detail="Opening, stock in, production use, sales, returns, and adjustments."
+        detail="Opening, stock in, production use, sales, returns, and adjustments. 10 records per page."
         action={
           canRecordMovement ? (
             <Button
@@ -18572,8 +19417,9 @@ function Inventory({
         }
       >
         {store.inventory_movements.length ? (
-          <Table labels={["Date", "Supply", "Type", "Change", "Unit cost"]}>
-            {store.inventory_movements.slice(0, 20).map((m) => (
+          <>
+            <Table labels={["Date", "Supply", "Type", "Change", "Unit cost"]}>
+            {visibleMovements.map((m) => (
               <tr key={text(m.id)}>
                 <td className="px-5 py-3">{day(m.occurred_at)}</td>
                 <td className="px-5 py-3">
@@ -18596,7 +19442,9 @@ function Inventory({
                 <td className="px-5 py-3">{peso.format(n(m.unit_cost))}</td>
               </tr>
             ))}
-          </Table>
+            </Table>
+            <TablePagination page={activeMovementPage} pageCount={movementPageCount} total={store.inventory_movements.length} onPageChange={setMovementPage} label="Stock movement pagination" />
+          </>
         ) : (
           <Empty>No material movements recorded.</Empty>
         )}
@@ -18664,7 +19512,14 @@ function FinishedStockIns({
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [stockInPage, setStockInPage] = useState(1);
   const canStockIn = canAccess(role, "finished_product_stock_ins", "create");
+  const stockInPageCount = Math.max(1, Math.ceil(store.finished_product_stock_ins.length / TABLE_PAGE_SIZE));
+  const activeStockInPage = Math.min(stockInPage, stockInPageCount);
+  const visibleStockIns = store.finished_product_stock_ins.slice(
+    (activeStockInPage - 1) * TABLE_PAGE_SIZE,
+    activeStockInPage * TABLE_PAGE_SIZE,
+  );
   const save = async () => {
     setSaving(true);
     const client = createClient();
@@ -18688,7 +19543,7 @@ function FinishedStockIns({
   return (
     <Panel
       title="Finished-product stock-in log"
-      detail="Completed stock-ins increase finished-goods inventory."
+      detail="Completed stock-ins increase finished-goods inventory. 10 records per page."
       action={
         canStockIn ? (
           <Button
@@ -18711,8 +19566,9 @@ function FinishedStockIns({
       }
     >
       {store.finished_product_stock_ins.length ? (
-        <Table labels={["Date", "Product", "Quantity", "Status", "Job"]}>
-          {store.finished_product_stock_ins.slice(0, 20).map((row) => (
+        <>
+          <Table labels={["Date", "Product", "Quantity", "Status", "Job"]}>
+          {visibleStockIns.map((row) => (
             <tr key={text(row.id)}>
               <td className="px-5 py-3">{day(row.stock_in_date)}</td>
               <td className="px-5 py-3">
@@ -18736,7 +19592,9 @@ function FinishedStockIns({
               </td>
             </tr>
           ))}
-        </Table>
+          </Table>
+          <TablePagination page={activeStockInPage} pageCount={stockInPageCount} total={store.finished_product_stock_ins.length} onPageChange={setStockInPage} label="Finished-product stock-in pagination" />
+        </>
       ) : (
         <Empty>No finished-product stock-ins yet.</Empty>
       )}
@@ -18810,10 +19668,34 @@ function Sales({
   const [selectedInvoice, setSelectedInvoice] = useState<Row | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [invoiceLinePage, setInvoiceLinePage] = useState(1);
+  const [invoiceActionPage, setInvoiceActionPage] = useState(1);
+  const [salesPaymentPage, setSalesPaymentPage] = useState(1);
   const canCreateInvoiceLine = canAccess(role, "invoice_items", "create");
   const canUpdateInvoice = canAccess(role, "invoices", "update");
   const canCreatePayment = canAccess(role, "payments", "create");
   const canRequestSalesApproval = canAccess(role, "payments", "request");
+  const invoiceActionRows = store.invoices.filter((invoice) =>
+    ["draft", "issued", "partial"].includes(text(invoice.status)),
+  );
+  const invoiceLinePageCount = Math.max(1, Math.ceil(store.invoice_items.length / TABLE_PAGE_SIZE));
+  const activeInvoiceLinePage = Math.min(invoiceLinePage, invoiceLinePageCount);
+  const visibleInvoiceLines = store.invoice_items.slice(
+    (activeInvoiceLinePage - 1) * TABLE_PAGE_SIZE,
+    activeInvoiceLinePage * TABLE_PAGE_SIZE,
+  );
+  const invoiceActionPageCount = Math.max(1, Math.ceil(invoiceActionRows.length / TABLE_PAGE_SIZE));
+  const activeInvoiceActionPage = Math.min(invoiceActionPage, invoiceActionPageCount);
+  const visibleInvoiceActions = invoiceActionRows.slice(
+    (activeInvoiceActionPage - 1) * TABLE_PAGE_SIZE,
+    activeInvoiceActionPage * TABLE_PAGE_SIZE,
+  );
+  const paymentPageCount = Math.max(1, Math.ceil(store.payments.length / TABLE_PAGE_SIZE));
+  const activeSalesPaymentPage = Math.min(salesPaymentPage, paymentPageCount);
+  const visibleSalesPayments = store.payments.slice(
+    (activeSalesPaymentPage - 1) * TABLE_PAGE_SIZE,
+    activeSalesPaymentPage * TABLE_PAGE_SIZE,
+  );
   const recordPayment = async () => {
     setSaving(true);
     const client = createClient();
@@ -18939,38 +19821,41 @@ function Sales({
         }
       >
         {store.invoice_items.length ? (
-          <Table
-            labels={[
-              "Invoice",
-              "Description",
-              "Qty",
-              "Price",
-              "Discount",
-              "Net",
-            ]}
-          >
-            {store.invoice_items.slice(0, 20).map((line) => (
-              <tr key={text(line.id)}>
-                <td className="px-5 py-3">
-                  <b>
-                    {text(
-                      store.invoices.find((i) => i.id === line.invoice_id)
-                        ?.invoice_no,
-                    )}
-                  </b>
-                </td>
-                <td className="px-5 py-3">{text(line.description)}</td>
-                <td className="px-5 py-3">{n(line.quantity)}</td>
-                <td className="px-5 py-3">{peso.format(n(line.unit_price))}</td>
-                <td className="px-5 py-3">
-                  {peso.format(n(line.discount_amount))}
-                </td>
-                <td className="px-5 py-3 font-semibold">
-                  {peso.format(n(line.line_total) - n(line.discount_amount))}
-                </td>
-              </tr>
-            ))}
-          </Table>
+          <>
+            <Table
+              labels={[
+                "Invoice",
+                "Description",
+                "Qty",
+                "Price",
+                "Discount",
+                "Net",
+              ]}
+            >
+              {visibleInvoiceLines.map((line) => (
+                <tr key={text(line.id)}>
+                  <td className="px-5 py-3">
+                    <b>
+                      {text(
+                        store.invoices.find((i) => i.id === line.invoice_id)
+                          ?.invoice_no,
+                      )}
+                    </b>
+                  </td>
+                  <td className="px-5 py-3">{text(line.description)}</td>
+                  <td className="px-5 py-3">{n(line.quantity)}</td>
+                  <td className="px-5 py-3">{peso.format(n(line.unit_price))}</td>
+                  <td className="px-5 py-3">
+                    {peso.format(n(line.discount_amount))}
+                  </td>
+                  <td className="px-5 py-3 font-semibold">
+                    {peso.format(n(line.line_total) - n(line.discount_amount))}
+                  </td>
+                </tr>
+              ))}
+            </Table>
+            <TablePagination page={activeInvoiceLinePage} pageCount={invoiceLinePageCount} total={store.invoice_items.length} onPageChange={setInvoiceLinePage} label="Invoice line items pagination" />
+          </>
         ) : (
           <Empty>
             No invoice lines yet. Add lines to calculate a draft invoice.
@@ -18979,17 +19864,12 @@ function Sales({
       </Panel>
       <Panel
         title="Invoice actions"
-        detail="Issue a draft invoice before recording payment."
+        detail="Issue a draft invoice before recording payment. 10 records per page."
       >
-        {store.invoices.filter((i) =>
-          ["draft", "issued", "partial"].includes(text(i.status)),
-        ).length ? (
-          <Table labels={["Invoice", "Customer", "Total", "State", "Action"]}>
-            {store.invoices
-              .filter((i) =>
-                ["draft", "issued", "partial"].includes(text(i.status)),
-              )
-              .map((invoice) => (
+        {invoiceActionRows.length ? (
+          <>
+            <Table labels={["Invoice", "Customer", "Total", "State", "Action"]}>
+              {visibleInvoiceActions.map((invoice) => (
                 <tr key={text(invoice.id)}>
                   <td className="px-5 py-3">
                     <b>{text(invoice.invoice_no)}</b>
@@ -19039,14 +19919,16 @@ function Sales({
                   </td>
                 </tr>
               ))}
-          </Table>
+            </Table>
+            <TablePagination page={activeInvoiceActionPage} pageCount={invoiceActionPageCount} total={invoiceActionRows.length} onPageChange={setInvoiceActionPage} label="Invoice actions pagination" />
+          </>
         ) : (
           <Empty>No draft or outstanding invoices.</Empty>
         )}
       </Panel>
       <Panel
         title="Payment collection"
-        detail="Record downpayments and partial customer payments against issued invoices."
+        detail="Record downpayments and partial customer payments against issued invoices. 10 records per page."
         action={
           canCreatePayment ? (
             <Button
@@ -19069,17 +19951,18 @@ function Sales({
         }
       >
         {store.payments.length ? (
-          <Table
-            labels={[
-              "Payment date",
-              "Invoice",
-              "Method",
-              "Amount",
-              "Reference",
-              "Action",
-            ]}
-          >
-            {store.payments.slice(0, 12).map((p) => (
+          <>
+            <Table
+              labels={[
+                "Payment date",
+                "Invoice",
+                "Method",
+                "Amount",
+                "Reference",
+                "Action",
+              ]}
+            >
+            {visibleSalesPayments.map((p) => (
               <tr key={text(p.id)}>
                 <td className="px-5 py-3">{day(p.paid_at)}</td>
                 <td className="px-5 py-3">
@@ -19108,7 +19991,9 @@ function Sales({
                 </td>
               </tr>
             ))}
-          </Table>
+            </Table>
+            <TablePagination page={activeSalesPaymentPage} pageCount={paymentPageCount} total={store.payments.length} onPageChange={setSalesPaymentPage} label="Payment collection pagination" />
+          </>
         ) : (
           <Empty>No payments recorded.</Empty>
         )}
@@ -20451,6 +21336,20 @@ function Approvals({
 }) {
   const admin = memberRole(role);
   const [approvalNote, setApprovalNote] = useState<Row | null>(null);
+  const [approvalPage, setApprovalPage] = useState(1);
+  const [activityPage, setActivityPage] = useState(1);
+  const approvalPageCount = Math.max(1, Math.ceil(store.approval_requests.length / TABLE_PAGE_SIZE));
+  const activeApprovalPage = Math.min(approvalPage, approvalPageCount);
+  const visibleApprovalRequests = store.approval_requests.slice(
+    (activeApprovalPage - 1) * TABLE_PAGE_SIZE,
+    activeApprovalPage * TABLE_PAGE_SIZE,
+  );
+  const activityPageCount = Math.max(1, Math.ceil(store.activity_log.length / TABLE_PAGE_SIZE));
+  const activeActivityPage = Math.min(activityPage, activityPageCount);
+  const visibleActivity = store.activity_log.slice(
+    (activeActivityPage - 1) * TABLE_PAGE_SIZE,
+    activeActivityPage * TABLE_PAGE_SIZE,
+  );
   const decide = async (r: Row, status: "approved" | "rejected") => {
     if (r.resource_type === "quotation") {
       return notice(
@@ -20474,8 +21373,9 @@ function Approvals({
       action={undefined}
     >
       {store.approval_requests.length ? (
-        <Table labels={["Request", "Submitted", "Status", "Decision"]}>
-          {store.approval_requests.map((r) => (
+        <>
+          <Table labels={["Request", "Submitted", "Status", "Decision"]}>
+          {visibleApprovalRequests.map((r) => (
             <tr key={text(r.id)}>
               <td className="px-5 py-3">
                 <b className="capitalize">
@@ -20522,18 +21422,21 @@ function Approvals({
               </td>
             </tr>
           ))}
-        </Table>
+          </Table>
+          <TablePagination page={activeApprovalPage} pageCount={approvalPageCount} total={store.approval_requests.length} onPageChange={setApprovalPage} label="Approval request pagination" />
+        </>
       ) : (
         <Empty>No approval requests yet.</Empty>
       )}
       <div className="border-t border-[#e4e8ef] p-5">
         <h3 className="text-[15px] font-semibold">Recent activity</h3>
-        {store.activity_log.slice(0, 8).map((a) => (
+        {visibleActivity.map((a) => (
           <p className="mt-2 text-[12px] text-[#626b7a]" key={text(a.id)}>
             {day(a.created_at)} · <b>{text(a.resource_type)}</b>{" "}
             {text(a.action)}
           </p>
         ))}
+        {store.activity_log.length ? <TablePagination page={activeActivityPage} pageCount={activityPageCount} total={store.activity_log.length} onPageChange={setActivityPage} label="Approval activity pagination" /> : <p className="mt-2 text-[12px] text-[#626b7a]">No approval activity yet.</p>}
       </div>
       <NoteDialog
         open={Boolean(approvalNote)}
@@ -20560,6 +21463,7 @@ function CommissionSummaryView({
   const [commissionQuery, setCommissionQuery] = useState("");
   const [commissionMonth, setCommissionMonth] = useState(currentMonth);
   const [officerFilter, setOfficerFilter] = useState("all");
+  const [commissionPage, setCommissionPage] = useState(1);
 
   const userName = useCallback(
     (userId: unknown, fallback = "Sales & Pricing Officer") =>
@@ -20619,6 +21523,15 @@ function CommissionSummaryView({
     store.commission_summaries,
     userName,
   ]);
+  const commissionPageCount = Math.max(1, Math.ceil(filteredRows.length / TABLE_PAGE_SIZE));
+  const activeCommissionPage = Math.min(commissionPage, commissionPageCount);
+  const visibleCommissionRows = filteredRows.slice(
+    (activeCommissionPage - 1) * TABLE_PAGE_SIZE,
+    activeCommissionPage * TABLE_PAGE_SIZE,
+  );
+  useEffect(() => {
+    setCommissionPage(1);
+  }, [commissionMonth, commissionQuery, officerFilter]);
   const commissionTotal = filteredRows.reduce(
     (sum, summary) => sum + totalCommissionAmount(summary),
     0,
@@ -20647,7 +21560,7 @@ function CommissionSummaryView({
         detail={
           readOnly
             ? "Only your allocation from approved Price Quotations is shown."
-            : "Commission allocations are created automatically from approved costing markups."
+            : "Commission allocations are created from approved costing and the GM-approved S.E. Origin / Co-Worker division."
         }
         action={
           readOnly ? (
@@ -20666,7 +21579,7 @@ function CommissionSummaryView({
             </div>
             <div className="rounded-[8px] border border-[#b7dfc5] bg-[#f1fbf4] p-2.5 text-[11px]">
               <p className="text-[#687386]">Payout model</p>
-              <p className="mt-0.5 text-[12px] font-semibold text-[#176b40]">Self-handled 100% - Endorsed 60/40</p>
+              <p className="mt-0.5 text-[12px] font-semibold text-[#176b40]">Approved self-handled or S.E. Origin / Co-Worker division</p>
             </div>
           </div>
         )}
@@ -20724,6 +21637,7 @@ function CommissionSummaryView({
           )}
         </div>
         {filteredRows.length ? (
+          <>
           <Table
             labels={["Quotation", "Name / Company", "S.E. Origin", "Co-Worker", "Grand Total", "Commission"]}
             minWidth={920}
@@ -20731,7 +21645,7 @@ function CommissionSummaryView({
             columnWidths={["15%", "23%", "18%", "18%", "12%", "14%"]}
             alignRightLabels={["Grand Total", "Commission"]}
           >
-            {filteredRows.map((summary) => {
+            {visibleCommissionRows.map((summary) => {
               const allocations = allocationRowsFor(summary);
               const originAllocation = allocations.find((allocation) =>
                 ["originating_se", "self_handled_se"].includes(text(allocation.allocation_role)),
@@ -20768,6 +21682,14 @@ function CommissionSummaryView({
               );
             })}
           </Table>
+          <TablePagination
+            page={activeCommissionPage}
+            pageCount={commissionPageCount}
+            total={filteredRows.length}
+            onPageChange={setCommissionPage}
+            label="Commission summary pagination"
+          />
+          </>
         ) : (
           <Empty>
             {store.commission_summaries.length
@@ -21484,6 +22406,15 @@ export function HuswellWorkspace({
   const loadedTables = useRef(new Set<TableName>());
   const initialViewLoaded = useRef(false);
   const pendingRealtimeTables = useRef(new Set<TableName>());
+  const [sidebarQueueCounts, setSidebarQueueCounts] = useState<SidebarQueueCounts | null>(null);
+  const refreshSidebarQueueCounts = useCallback(async () => {
+    const { data, error } = await client.rpc("sidebar_queue_counts", {
+      p_organization_id: organizationId,
+    });
+    if (error) return;
+    const parsed = parseSidebarQueueCounts(data);
+    if (parsed) setSidebarQueueCounts(parsed);
+  }, [client, organizationId]);
   const canEditOwnProfile = ["owner", "admin", "project_manager", "sales_pricing_officer", "internal_finance", "external_finance", "lead_coordinator"].includes(
     role,
   );
@@ -21542,6 +22473,11 @@ export function HuswellWorkspace({
           p_organization_id: organizationId,
         });
       }
+      if (table === "quotations" && role === "external_finance") {
+        return client.rpc("external_finance_quotation_rows", {
+          p_organization_id: organizationId,
+        });
+      }
       const childTables: TableName[] = [
         "profiles",
         "quotation_items",
@@ -21564,7 +22500,7 @@ export function HuswellWorkspace({
             .eq("organization_id", organizationId)
             .order("created_at", { ascending: false });
     },
-    [client, organizationId],
+    [client, organizationId, role],
   );
   const refreshTables = useCallback(async (
     requestedTables: TableName[],
@@ -21620,7 +22556,10 @@ export function HuswellWorkspace({
     async (showLoading = false) => refreshTables(tables, showLoading),
     [refreshTables],
   );
-  const reload = useCallback(() => load(false), [load]);
+  const reload = useCallback(async () => {
+    await load(false);
+    await refreshSidebarQueueCounts();
+  }, [load, refreshSidebarQueueCounts]);
   const updateLeadRemark = useCallback(
     (leadId: string, leadRemark: string | null) => {
       setStore((current) => ({
@@ -21695,6 +22634,78 @@ export function HuswellWorkspace({
       void client.removeChannel(channel);
     };
   }, [client, organizationId, productionApprovalEnabled, refreshTables, role]);
+  useEffect(() => {
+    setSidebarQueueCounts(null);
+    void refreshSidebarQueueCounts();
+    const interval = window.setInterval(() => {
+      void refreshSidebarQueueCounts();
+    }, 30_000);
+    return () => window.clearInterval(interval);
+  }, [refreshSidebarQueueCounts]);
+  useEffect(() => {
+    const isManagement = memberRole(role);
+    const isFinance = [
+      "super_admin",
+      "owner",
+      "admin",
+      "accountant",
+      "internal_finance",
+      "external_finance",
+    ].includes(role);
+    const isInternalFinance = [
+      "super_admin",
+      "owner",
+      "admin",
+      "accountant",
+      "internal_finance",
+    ].includes(role);
+    const queueTables = new Set<string>();
+    if (isManagement) {
+      [
+        "quotations",
+        "price_quotation_revision_requests",
+        "quotation_revision_requests",
+        "project_schedules",
+        "project_schedule_revision_requests",
+        "project_schedule_completion_requests",
+        "project_edit_requests",
+        "lead_change_requests",
+        "lead_unendorsement_requests",
+        "approval_requests",
+        "costing_requests",
+      ].forEach((table) => queueTables.add(table));
+    }
+    if (role === "sales_pricing_officer") {
+      ["quotations", "pricing_officer_project_types", "costing_requests"].forEach((table) => queueTables.add(table));
+    }
+    if (productionApprovalEnabled) {
+      [
+        "project_schedules",
+        "project_schedule_revision_requests",
+        "project_schedule_completion_requests",
+      ].forEach((table) => queueTables.add(table));
+    }
+    if (["owner", "admin", "payroll"].includes(role)) queueTables.add("employee_requests");
+    if (isFinance) {
+      ["finance_transactions", "finance_budget_requests"].forEach((table) => queueTables.add(table));
+    }
+    if (isInternalFinance) {
+      ["supplier_payables", "commission_summary_allocations", "quotation_payment_records"].forEach((table) => queueTables.add(table));
+    }
+    if (!queueTables.size) return;
+    const channel = client.channel(`sidebar-queue-counts:${organizationId}`);
+    queueTables.forEach((table) => {
+      channel.on(
+        "postgres_changes",
+        { event: "*", schema: "public", table },
+        () => void refreshSidebarQueueCounts(),
+      );
+    });
+    channel.subscribe();
+    return () => {
+      void client.removeChannel(channel);
+    };
+  }, [client, organizationId, productionApprovalEnabled, refreshSidebarQueueCounts, role]);
   useEffect(() => {
     const refreshDate = () => setNavigationDate(new Date());
     refreshDate();
@@ -21777,8 +22788,8 @@ export function HuswellWorkspace({
     sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Announcements", "Policy"],
     warehouse: ["Dashboard", "Catalog", "Inventory", "Production", "Announcements", "Policy"],
     accountant: ["Finance Overview", "Finance", "Payment Monitoring", "Commissions", "Announcements", "Policy"],
-    internal_finance: ["Finance Overview", "Finance", "Payment Monitoring", "Commissions", "Announcements", "Policy"],
-    external_finance: ["Finance Overview", "Finance", "Commissions", "Announcements", "Policy"],
+    internal_finance: ["Finance Overview", "Finance", "Payment Monitoring", "Announcements", "Policy"],
+    external_finance: ["Finance Overview", "Finance", "Payment Monitoring", "Announcements", "Policy"],
     lead_coordinator: ["Leads", "Announcements", "Policy"],
     payroll: ["Dashboard", "Payroll & Leave", "Letter Request", "Directory", "Announcements", "Policy"],
     production: ["Dashboard", "Production", "Inventory", "Announcements", "Policy"],
@@ -21804,51 +22815,6 @@ export function HuswellWorkspace({
   if (productionApprovalOnly && !allowedRoleViews.includes("Approvals")) {
     allowedRoleViews.push("Approvals");
   }
-  const pendingManagementApprovalCount = isManagementRole
-    ? store.quotations.filter(
-        (quotation) =>
-          text(quotation.status) === "pending_gm_approval" &&
-          text(quotation.document_type) === "price_quotation" &&
-          !quotation.costing_source_id,
-      ).length
-      + store.quotations.filter(
-        (quotation) => text(quotation.status) === "pending" && text(quotation.document_type) === "costing_breakdown",
-      ).length
-      + store.price_quotation_revision_requests.filter((request) => text(request.status) === "pending").length
-      + store.quotation_revision_requests.filter((request) => text(request.status) === "pending").length
-      + store.project_schedules.filter((schedule) => text(schedule.status) === "pending").length
-      + store.project_schedule_revision_requests.filter((request) => text(request.status) === "pending").length
-      + store.project_schedule_completion_requests.filter((request) => text(request.status) === "pending").length
-      + store.project_edit_requests.filter((request) => text(request.status) === "pending").length
-      + store.lead_change_requests.filter((request) => text(request.status) === "pending").length
-      + store.lead_unendorsement_requests.filter((request) => text(request.status) === "pending").length
-      + store.approval_requests.filter((request) => text(request.status) === "pending" && text(request.resource_type) !== "quotation").length
-    : 0;
-  const pendingPdfCostingCount = isManagementRole
-    ? store.costing_requests.filter((request) => text(request.status) === "pending").length
-    : 0;
-  const pendingLetterRequestCount = ["owner", "admin"].includes(role)
-    ? store.employee_requests.filter((request) => text(request.status) === "pending").length
-    : 0;
-  const pendingProductionApprovalCount = productionApprovalOnly
-    ? store.project_schedules.filter((schedule) => text(schedule.status) === "pending").length
-      + store.project_schedule_revision_requests.filter((request) => text(request.status) === "pending").length
-      + store.project_schedule_completion_requests.filter((request) => text(request.status) === "pending").length
-    : 0;
-  const assignedProjectTypes = new Set(
-    store.pricing_officer_project_types
-      .filter((assignment) => text(assignment.pricing_officer_user_id, "") === currentUserId)
-      .map((assignment) => pricingProjectTypeKey(assignment.project_type)),
-  );
-  const pendingPricingReviewCount = isPricingOfficerRole(role)
-    ? store.quotations.filter(
-        (quotation) =>
-          text(quotation.status) === "pending" &&
-          text(quotation.document_type) === "price_quotation" &&
-          !quotation.costing_source_id &&
-          assignedProjectTypes.has(pricingProjectTypeKey(quotation.project_types)),
-      ).length
-    : 0;
   useEffect(() => {
     let active = true;
     void client.auth.getUser().then(({ data }) => {
@@ -21858,6 +22824,10 @@ export function HuswellWorkspace({
       active = false;
     };
   }, [client]);
+  const sidebarBadge = (key: SidebarQueueCountKey) => {
+    const count = sidebarQueueCounts?.[key];
+    return count && count > 0 ? count : undefined;
+  };
   const navBase: {
     label: string;
     items: { view: View; icon: typeof LayoutDashboard; badge?: number }[];
@@ -21866,7 +22836,7 @@ export function HuswellWorkspace({
       label: "Management",
       items: [
         { view: "Dashboard", icon: LayoutDashboard },
-        { view: "Approvals", icon: ClipboardCheck, badge: pendingManagementApprovalCount },
+        { view: "Approvals", icon: ClipboardCheck, badge: sidebarBadge("management_approvals") },
         { view: "Leads", icon: ClipboardCheck },
         { view: "Supplier's List", icon: UsersRound },
       ],
@@ -21876,7 +22846,7 @@ export function HuswellWorkspace({
       items: [
         { view: "Price Quotations", icon: FileText },
         { view: "Quotation Costing Overview", icon: ReceiptText },
-        { view: "PDF Costing", icon: FileSpreadsheet, badge: pendingPdfCostingCount },
+        { view: "PDF Costing", icon: FileSpreadsheet, badge: sidebarBadge("pdf_costing") },
         { view: "Projects", icon: ClipboardCheck },
       ],
     },
@@ -21884,13 +22854,13 @@ export function HuswellWorkspace({
       label: "Business",
       items: [
         { view: "Finance Overview", icon: Wallet },
-        { view: "Finance", icon: Wallet },
-        { view: "Payment Monitoring", icon: ReceiptText },
+        { view: "Finance", icon: Wallet, badge: sidebarBadge("finance") },
+        { view: "Payment Monitoring", icon: ReceiptText, badge: sidebarBadge("quotation_payments") },
         { view: "Commissions", icon: PhilippinePeso },
         { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
         { view: "Settings", icon: Settings },
-        { view: "Letter Request", icon: FileText, badge: pendingLetterRequestCount },
+        { view: "Letter Request", icon: FileText, badge: sidebarBadge("letter_requests") },
       ],
     },
   ] : role === "sales_pricing_officer" ? [
@@ -21906,15 +22876,15 @@ export function HuswellWorkspace({
         { view: "Leads", icon: ClipboardCheck },
         { view: "Supplier's List", icon: UsersRound },
         { view: "Price Quotations", icon: FileText },
-        { view: "Price Quotation Review", icon: ClipboardCheck, badge: pendingPricingReviewCount },
+        { view: "Price Quotation Review", icon: ClipboardCheck, badge: sidebarBadge("pricing_review") },
         { view: "Quotation Costing Overview", icon: ReceiptText },
-        { view: "PDF Costing", icon: FileSpreadsheet },
+        { view: "PDF Costing", icon: FileSpreadsheet, badge: sidebarBadge("pdf_costing") },
       ],
     },
     {
       label: "Operations",
       items: [
-        { view: "Approvals", icon: ClipboardCheck, badge: pendingProductionApprovalCount },
+        { view: "Approvals", icon: ClipboardCheck, badge: sidebarBadge("production_approval") },
         { view: "Projects", icon: ClipboardCheck },
       ],
     },
@@ -21943,15 +22913,15 @@ export function HuswellWorkspace({
       label: "Finance",
       items: [
         { view: "Finance Overview", icon: Wallet },
-        { view: "Finance", icon: Wallet },
-        { view: "Payment Monitoring", icon: ReceiptText },
-        { view: "Commissions", icon: PhilippinePeso },
+        { view: "Finance", icon: Wallet, badge: sidebarBadge("finance") },
+        { view: "Payment Monitoring", icon: ReceiptText, badge: sidebarBadge("quotation_payments") },
+        ...(!["external_finance", "internal_finance"].includes(role) ? [{ view: "Commissions" as View, icon: PhilippinePeso }] : []),
       ],
     },
     {
       label: "Control",
       items: [
-        { view: "Submissions", icon: ClipboardCheck },
+        { view: "Submissions", icon: ClipboardCheck, badge: sidebarBadge("production_approval") },
         { view: "Settings", icon: Settings },
       ],
     },
@@ -21960,7 +22930,7 @@ export function HuswellWorkspace({
       items: [
         { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
-        { view: "Letter Request", icon: FileText },
+        { view: "Letter Request", icon: FileText, badge: sidebarBadge("letter_requests") },
       ],
     },
   ];
@@ -22100,8 +23070,12 @@ export function HuswellWorkspace({
         : "Review every pending management decision from one queue.",
     },
     "Payment Monitoring": {
-      title: "Payment Monitoring",
-      detail: "Internal Finance confirms client receipts before they become Money In.",
+      title: "Quotation Payments",
+      detail: role === "external_finance"
+        ? "Record client payment receipts for approved quotations; Internal Finance confirms them before they become Cash In."
+        : memberRole(role)
+          ? "Review client payment receipts and reverse verified entries when necessary."
+          : "Internal Finance confirms client receipts before they become Cash In.",
     },
     "Payment Reviews": {
       title: "Payment Reviews",
@@ -22149,11 +23123,11 @@ export function HuswellWorkspace({
     ) : loading ? (
       <Panel
         title={
-          active === "Leads" ? leads.title : active === "Projects" ? projects.title : active === "Price Quotation Review" ? "Price Quotation Review" : active === "PDF Costing" ? "Print Costing" : active === "Approvals" || active === "Submissions" ? (productionApprovalOnly ? "Production Approval Center" : "Management Approval Center") : active === "Payment Monitoring" ? "Payment Monitoring" : active === "Payment Reviews" ? "Payment Reviews" : "Loading workspace"
+          active === "Leads" ? leads.title : active === "Projects" ? projects.title : active === "Price Quotation Review" ? "Price Quotation Review" : active === "PDF Costing" ? "Print Costing" : active === "Approvals" || active === "Submissions" ? (productionApprovalOnly ? "Production Approval Center" : "Management Approval Center") : active === "Payment Monitoring" ? "Quotation Payments" : active === "Payment Reviews" ? "Payment Reviews" : "Loading workspace"
         }
         detail={
           active === "Leads" || active === "Projects" || active === "Price Quotation Review" || active === "PDF Costing" || active === "Approvals" || active === "Submissions" || active === "Payment Monitoring" || active === "Payment Reviews"
-            ? (active === "Projects" ? projects.detail : active === "Price Quotation Review" ? "Loading Price Quotation review queue." : active === "PDF Costing" ? "Loading Print Costing requests." : active === "Approvals" || active === "Submissions" ? (productionApprovalOnly ? "Loading production approval queue." : "Loading management approval queue.") : active === "Payment Monitoring" ? "Loading payment monitoring." : active === "Payment Reviews" ? "Loading assigned payment reviews." : leads.detail)
+            ? (active === "Projects" ? projects.detail : active === "Price Quotation Review" ? "Loading Price Quotation review queue." : active === "PDF Costing" ? "Loading Print Costing requests." : active === "Approvals" || active === "Submissions" ? (productionApprovalOnly ? "Loading production approval queue." : "Loading management approval queue.") : active === "Payment Monitoring" ? "Loading quotation payments." : active === "Payment Reviews" ? "Loading assigned payment reviews." : leads.detail)
             : "Loading business data."
         }
       >
@@ -22447,6 +23421,8 @@ export function HuswellWorkspace({
                           ? "Generated Leads"
                       : view === "Projects"
                             ? "Production"
+                            : view === "Finance Overview" && (isInternalFinanceRole(role) || role === "external_finance")
+                              ? "Overview"
                             : view === "Finance" && role === "external_finance"
                               ? "External Finance"
                             : view === "Finance" && isInternalFinanceRole(role)
@@ -22462,7 +23438,7 @@ export function HuswellWorkspace({
                               : view === "Approvals"
                                 ? "Approval Center"
                                 : view === "Payment Monitoring"
-                                  ? "Payment Monitoring"
+                                  ? "Quotation Payments"
                                 : view === "Payment Reviews"
                                   ? "Payment Reviews"
                                 : view;
@@ -22473,8 +23449,8 @@ export function HuswellWorkspace({
                       navigate(view);
                       setMobile(false);
                     }}
-                    title={navigationLabel}
-                    aria-label={navigationLabel}
+                    title={badge ? `${navigationLabel}: ${badge > 99 ? "99+" : badge} items requiring attention` : navigationLabel}
+                    aria-label={badge ? `${navigationLabel}: ${badge > 99 ? "more than 99" : badge} items requiring attention` : navigationLabel}
                     style={{
                       fontSize: "var(--font-size-body)",
                       lineHeight: "var(--line-height-body)",
@@ -22488,7 +23464,7 @@ export function HuswellWorkspace({
                       className={`${active === view ? "text-[var(--color-on-accent)]" : "text-[var(--color-text-tertiary)] group-hover:text-[var(--color-text-tertiary)]"} shrink-0 transition-colors`}
                     />
                     <span className={`min-w-0 flex-1 truncate ${sidebarCollapsed ? "lg:hidden" : ""}`}>{navigationLabel}</span>
-                    {badge ? <span className={`sidebar-badge min-w-5 rounded-full px-1.5 py-0.5 text-center text-[10px] font-semibold ${active === view ? "bg-white text-[var(--color-accent-text)]" : "bg-[var(--color-accent-subtle)] text-[var(--color-accent-text)]"}`}>{badge > 99 ? "99+" : badge}</span> : null}
+                    {badge ? <span aria-hidden="true" className={`sidebar-badge min-w-5 rounded-full px-1.5 py-0.5 text-center text-[10px] font-semibold ${active === view ? "bg-white text-[var(--color-accent-text)]" : "bg-[var(--color-accent-subtle)] text-[var(--color-accent-text)]"}`}>{badge > 99 ? "99+" : badge}</span> : null}
                   </button>
                   );
                 })}

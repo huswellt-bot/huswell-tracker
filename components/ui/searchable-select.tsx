@@ -8,6 +8,7 @@ export type SearchableOption = {
   value: string;
   label: string;
   searchText?: string;
+  groupLabel?: string;
 };
 
 type SearchableSelectProps = {
@@ -131,6 +132,7 @@ export function SearchableSelect({
         type="button"
         aria-label={ariaLabel}
         aria-expanded={open}
+        aria-controls={open ? listboxId : undefined}
         aria-haspopup="listbox"
         disabled={disabled}
         onClick={() => (open ? closeMenu() : openMenu())}
@@ -138,19 +140,19 @@ export function SearchableSelect({
         className={cn(
           "input !flex w-full !items-center justify-between gap-2 text-left",
           className,
-          !selectedOption && "text-[#8b92a1]",
+          !selectedOption && "text-[var(--color-text-tertiary)]",
           disabled && "cursor-not-allowed opacity-60",
         )}
       >
         <span className="min-w-0 flex-1 truncate">{selectedOption?.label ?? placeholder}</span>
-        <ChevronDown size={15} className={cn("shrink-0 text-[#8b92a1] transition-transform", open && "rotate-180")} aria-hidden="true" />
+        <ChevronDown size={15} className={cn("shrink-0 text-[var(--color-text-tertiary)] transition-transform", open && "rotate-180")} aria-hidden="true" />
       </button>
 
       {open && (
-        <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 overflow-hidden rounded-lg border border-[#d9e0e9] bg-white shadow-none">
-          <div className="border-b border-[#edf0f5] p-2">
+        <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 overflow-hidden rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-[var(--card-shadow)]">
+          <div className="border-b border-[var(--color-border)] p-2">
             <div className="relative">
-              <Search size={15} className="search-icon pointer-events-none absolute left-3 z-10 text-[#8b92a1]" aria-hidden="true" />
+              <Search size={15} className="search-icon pointer-events-none absolute left-3 z-10 text-[var(--color-text-tertiary)]" aria-hidden="true" />
               <input
                 ref={searchRef}
                 type="search"
@@ -180,7 +182,7 @@ export function SearchableSelect({
                   onChange("");
                   closeMenu(true);
                 }}
-                className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-[11px] text-[#687386] hover:bg-[#f6f8fb] focus-visible:bg-[#f6f8fb] focus-visible:outline-none"
+                className="flex w-full items-center gap-2 rounded-[var(--radius-control)] px-2.5 py-2 text-left text-[11px] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)] focus-visible:bg-[var(--color-surface-subtle)] focus-visible:outline-none"
               >
                 <X size={13} aria-hidden="true" />
                 {clearLabel}
@@ -189,26 +191,34 @@ export function SearchableSelect({
             {filteredOptions.map((option, index) => {
               const selected = option.value === value;
               const active = index === activeIndex;
+              const previousOption = filteredOptions[index - 1];
+              const startsGroup = option.groupLabel && option.groupLabel !== previousOption?.groupLabel;
               return (
-                <button
-                  key={`${option.value}-${index}`}
-                  id={`${listboxId}-${index}`}
-                  type="button"
-                  role="option"
-                  aria-selected={selected}
-                  onMouseEnter={() => setActiveIndex(index)}
-                  onClick={() => selectOption(option)}
-                  className={cn(
-                    "flex w-full items-center justify-between gap-2 rounded-md px-2.5 py-2 text-left text-[11px] text-[#202938] focus-visible:outline-none",
-                    active ? "bg-[#f6f8fb]" : "hover:bg-[#f6f8fb]",
+                <div key={`${option.value}-${index}`} role="presentation">
+                  {startsGroup && (
+                    <div role="presentation" className="px-2.5 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-[var(--color-text-tertiary)]">
+                      {option.groupLabel}
+                    </div>
                   )}
-                >
-                  <span className="min-w-0 truncate">{option.label}</span>
-                  {selected && <Check size={14} className="shrink-0 text-[#c43b43]" aria-hidden="true" />}
-                </button>
+                  <button
+                    id={`${listboxId}-${index}`}
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    onMouseEnter={() => setActiveIndex(index)}
+                    onClick={() => selectOption(option)}
+                    className={cn(
+                      "flex w-full items-center justify-between gap-2 rounded-[var(--radius-control)] px-2.5 py-2 text-left text-[11px] text-[var(--color-text-primary)] focus-visible:outline-none focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--color-accent)]",
+                      active ? "bg-[var(--color-surface-subtle)]" : "hover:bg-[var(--color-surface-subtle)]",
+                    )}
+                  >
+                    <span className="min-w-0 truncate">{option.label}</span>
+                    {selected && <Check size={14} className="shrink-0 text-[#c43b43]" aria-hidden="true" />}
+                  </button>
+                </div>
               );
             })}
-            {!filteredOptions.length && <p className="px-2.5 py-3 text-[11px] text-[#7d8797]">{noResultsLabel}</p>}
+            {!filteredOptions.length && <p className="px-2.5 py-3 text-[11px] text-[var(--color-text-tertiary)]">{noResultsLabel}</p>}
           </div>
         </div>
       )}
