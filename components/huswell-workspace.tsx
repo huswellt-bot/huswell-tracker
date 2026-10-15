@@ -249,6 +249,48 @@ type TableName =
   | "costing_request_events";
 type Row = { id?: string; [key: string]: unknown };
 export type Store = Record<TableName, Row[]>;
+
+const persistedSequenceValue = (value: unknown) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const comparePersistedSequence = (left: Row, right: Row) => {
+  const sortDifference =
+    persistedSequenceValue(left.sort_order) - persistedSequenceValue(right.sort_order);
+  if (sortDifference !== 0) return sortDifference;
+
+  const createdDifference = String(left.created_at ?? "").localeCompare(
+    String(right.created_at ?? ""),
+  );
+  if (createdDifference !== 0) return createdDifference;
+  return String(left.id ?? "").localeCompare(String(right.id ?? ""));
+};
+
+const orderedQuotationItems = (items: Row[]) =>
+  [...items].sort(comparePersistedSequence);
+
+const quotationItemsForQuote = (items: Row[], quotationId: unknown) =>
+  orderedQuotationItems(
+    items.filter(
+      (item) => String(item.quotation_id ?? "") === String(quotationId ?? ""),
+    ),
+  );
+
+const orderedProductCostings = (costings: Row[], quotationItems: Row[]) => {
+  const itemPositions = new Map(
+    quotationItems.map((item, index) => [String(item.id ?? ""), index]),
+  );
+  return [...costings].sort((left, right) => {
+    const leftPosition =
+      itemPositions.get(String(left.quotation_item_id ?? "")) ?? Number.MAX_SAFE_INTEGER;
+    const rightPosition =
+      itemPositions.get(String(right.quotation_item_id ?? "")) ?? Number.MAX_SAFE_INTEGER;
+    if (leftPosition !== rightPosition) return leftPosition - rightPosition;
+    return comparePersistedSequence(left, right);
+  });
+};
+
 type ApprovalDecision = "approved" | "rejected";
 type ApprovalQueueTab =
   | "quotations"
@@ -505,6 +547,20 @@ type ProductCostingDraft = {
     rate?: string;
   }[];
 };
+const orderedProductCostingDrafts = (
+  costings: ProductCostingDraft[],
+  quotationItems: Row[],
+) => {
+  const itemPositions = new Map(
+    quotationItems.map((item, index) => [String(item.id ?? ""), index]),
+  );
+  return [...costings].sort((left, right) => {
+    const leftPosition = itemPositions.get(left.quotationItemId) ?? Number.MAX_SAFE_INTEGER;
+    const rightPosition = itemPositions.get(right.quotationItemId) ?? Number.MAX_SAFE_INTEGER;
+    if (leftPosition !== rightPosition) return leftPosition - rightPosition;
+    return left.key.localeCompare(right.key);
+  });
+};
 const markupCalculationType = (markup: ProductCostingDraft["markups"][number]): MarkupCalculationType =>
   markup.calculationType ?? "percentage";
 const markupValue = (markup: ProductCostingDraft["markups"][number]) =>
@@ -541,8 +597,9 @@ const productCostingDrafts = (
   costings: Row[],
   costLines: Row[],
   markups: Row[],
+  quotationItems?: Row[],
 ): ProductCostingDraft[] =>
-  costings.map((costing, costingIndex) => {
+  (quotationItems ? orderedProductCostings(costings, quotationItems) : [...costings]).map((costing, costingIndex) => {
     const pricingModel = text(costing.pricing_model, "legacy_markup") === "target_margin" ? "target_margin" : "legacy_markup";
     const loadedMarkups = markups
       .filter((markup) => markup.product_costing_id === costing.id)
@@ -3121,7 +3178,7 @@ function salesQuotationPageDensity(
   quote: Row,
   store: Pick<Store, "quotation_items">,
 ): SalesQuotationPageDensity {
-  const lines = store.quotation_items.filter((item) => item.quotation_id === quote.id);
+  const lines = quotationItemsForQuote(store.quotation_items, quote.id);
   const terms = quotationTermLines(quote);
   const bankDetails = quotationBankDetails(quote.bank_details);
   const lineUnits = lines.reduce(
@@ -3213,7 +3270,7 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
     : undefined;
   const customer = store.customers.find((item) => item.id === quote.customer_id);
   const lead = store.leads.find((item) => item.id === quote.lead_id);
-  const lines = store.quotation_items.filter((item) => item.quotation_id === quote.id);
+  const lines = quotationItemsForQuote(store.quotation_items, quote.id);
   const formatDate = (value: unknown) => {
     if (!value) return "-";
     const parsed = new Date(`${String(value).slice(0, 10)}T00:00:00`);
@@ -3251,7 +3308,10 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
   const compact = false;
   const superCompact = false;
   const productCostings = showInternalCosting
-    ? store.price_quotation_product_costings.filter((costing) => costing.quotation_id === quote.id)
+    ? orderedProductCostings(
+      store.price_quotation_product_costings.filter((costing) => costing.quotation_id === quote.id),
+      lines,
+    )
     : [];
   const internalCostingDrafts = productCostings
     .map((costing) => productCostingDrafts(
@@ -3383,16 +3443,18 @@ function InternalCostingBreakdownPdf({
       }
     >
       {quotes.map((quote, quoteIndex) => {
-        const lines = store.quotation_items.filter(
-          (item) => item.quotation_id === quote.id,
-        );
-        const productCostings = store.price_quotation_product_costings.filter(
-          (costing) => costing.quotation_id === quote.id,
+        const lines = quotationItemsForQuote(store.quotation_items, quote.id);
+        const productCostings = orderedProductCostings(
+          store.price_quotation_product_costings.filter(
+            (costing) => costing.quotation_id === quote.id,
+          ),
+          lines,
         );
         const loadedCostings = productCostingDrafts(
           productCostings,
           store.price_quotation_costing_lines,
           store.price_quotation_costing_markups,
+          lines,
         );
         const costingDrafts = loadedCostings;
         const vatRate = quotationVatRate(quote);
@@ -16503,6 +16565,7 @@ function ProductCostingsSectionWithPricing({
     const product = lines.find((line) => line.id === costing.quotationItemId);
     return sum + productCostingTotals(costing, n(product?.quantity), n(vatValue)).vat;
   }, 0);
+  const orderedCostings = orderedProductCostingDrafts(costings, lines);
 
   return (
     <section className="rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4">
@@ -16534,7 +16597,7 @@ function ProductCostingsSectionWithPricing({
         <p className="mt-4 rounded-lg border border-dashed border-[#ccd5e0] bg-white px-3 py-3 text-[12px] text-[#687386]">No internal costing table has been added. Add one costing table for each finished product before submitting for review.</p>
       ) : (
         <div className="mt-4 space-y-4">
-          {costings.map((costing, costingIndex) => {
+          {orderedCostings.map((costing, costingIndex) => {
             const product = lines.find((line) => line.id === costing.quotationItemId);
             const totals = productCostingTotals(costing, n(product?.quantity), n(vatValue));
             return (
@@ -16861,12 +16924,14 @@ function PriceQuotationReview({
     () => pricingMarkupDefaults(activePricingDefaultSettings?.pricing_markup_defaults, activePricingDefaultSettings),
     [activePricingDefaultSettings],
   );
+  const lines = useMemo(
+    () => quotationItemsForQuote(store.quotation_items, quotation.id),
+    [quotation.id, store.quotation_items],
+  );
   const initialVatRate = () => finalApproval ? "12" : "0";
   const [prices, setPrices] = useState<Record<string, string>>(() =>
     Object.fromEntries(
-      store.quotation_items
-        .filter((item) => item.quotation_id === quotation.id)
-        .map((item) => [text(item.id), text(item.unit_cost, "")]),
+      lines.map((item) => [text(item.id), text(item.unit_cost, "")]),
     ),
   );
   const [vatRate, setVatRate] = useState(initialVatRate);
@@ -17012,6 +17077,7 @@ function PriceQuotationReview({
       ),
       store.price_quotation_costing_lines,
       store.price_quotation_costing_markups,
+      lines,
     );
     return savedCostings;
   });
@@ -17046,6 +17112,7 @@ function PriceQuotationReview({
         costings,
         (costLineResult.data ?? []) as Row[],
         (markupResult.data ?? []) as Row[],
+        lines,
       );
       setProductCostings(loadedCostings);
     };
@@ -17053,7 +17120,7 @@ function PriceQuotationReview({
     return () => {
       active = false;
     };
-  }, [defaultPricingDefaults, finalApproval, quotation.id]);
+  }, [defaultPricingDefaults, finalApproval, lines, quotation.id]);
   const [galleryIllustrations, setGalleryIllustrations] = useState<Row[]>(() =>
     store.price_quotation_illustrations.filter(
       (illustration) => illustration.quotation_id === illustrationQuotationId,
@@ -17073,7 +17140,6 @@ function PriceQuotationReview({
       active = false;
     };
   }, [illustrationQuotationId]);
-  const lines = store.quotation_items.filter((item) => item.quotation_id === quotation.id);
   useEffect(() => {
     if (!productCostings.length) return;
     setPrices((current) => {
@@ -17192,7 +17258,7 @@ function PriceQuotationReview({
         pdc_term_days: pdcTermDays,
       },
     );
-    const costingsPayload = productCostings.map((costing) => ({
+    const costingsPayload = orderedProductCostingDrafts(productCostings, lines).map((costing) => ({
       quotation_item_id: costing.quotationItemId,
       internal_vat_rate: n(costing.internalVatRate),
       cost_lines: costing.costLines.map((line) => ({
