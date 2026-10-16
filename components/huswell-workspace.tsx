@@ -14,8 +14,10 @@ import {
   useMemo,
   useRef,
   useState,
+  startTransition,
 } from "react";
 import Image from "next/image";
+import dynamic from "next/dynamic";
 import {
   Document as PdfDocument,
   Font as PdfFont,
@@ -93,6 +95,7 @@ import { createClient } from "@/lib/supabase/client";
 import { AccountProfileDialog } from "@/components/account-profile-dialog";
 import { FixedIconTooltip } from "@/components/fixed-icon-tooltip";
 import { FileUploadControl } from "@/components/ui/file-upload-control";
+import { LoadingState } from "@/components/ui/loading-state";
 import { MultiSelect, parseMultiSelectValue } from "@/components/ui/multi-select";
 import { NumberInput } from "@/components/ui/number-input";
 import { NotificationDialog } from "@/components/ui/notification-dialog";
@@ -100,8 +103,6 @@ import { SearchableLeadSelect, type SearchableLeadOption } from "@/components/ui
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { TABLE_PAGE_SIZE, TablePagination } from "@/components/ui/table-pagination";
 import { ThemeToggle } from "@/components/theme-provider";
-import { CostingRequestWorkspace } from "@/components/costing-request-workspace";
-import { FinanceWorkspace } from "@/components/finance-workspace";
 import { LetterRequestWorkspace } from "@/components/letter-request-workspace";
 import {
   DEFAULT_PRINT_COSTING_DEFAULTS,
@@ -113,6 +114,15 @@ import {
   quotationProjectTypes,
 } from "@/lib/quotation-project-types";
 import { workspaceAccountLabel } from "@/lib/role-labels";
+
+const DynamicCostingRequestWorkspace = dynamic(
+  () => import("@/components/costing-request-workspace").then((module) => module.CostingRequestWorkspace),
+  { loading: () => <LoadingState variant="section" label="Loading Print Costing..." /> },
+);
+const DynamicFinanceWorkspace = dynamic(
+  () => import("@/components/finance-workspace").then((module) => module.FinanceWorkspace),
+  { loading: () => <LoadingState variant="section" label="Loading Finance..." /> },
+);
 
 PdfFont.register({
   family: "SF Pro Display",
@@ -2171,18 +2181,13 @@ const workspaceViewTables = (
       "costing_request_events",
       "profiles",
     ];
-  if (
-    view === "Price Quotations" ||
-    view === "Price Quotation Review" ||
-    (view === "Leads" && leadMode === "quotation")
-  )
+  if (view === "Price Quotation Review")
+    return ["quotations", "quotation_items", "leads", "customers", "profiles", "organization_members", "pricing_officer_project_types"];
+  if (view === "Price Quotations" || (view === "Leads" && leadMode === "quotation"))
     return [
       "quotations",
       "quotation_items",
       "price_quotation_illustrations",
-      "price_quotation_product_costings",
-      "price_quotation_costing_lines",
-      "price_quotation_costing_markups",
       "leads",
       "customers",
       "inventory_items",
@@ -2243,9 +2248,6 @@ const workspaceViewTables = (
       "quotations",
       "quotation_items",
       "price_quotation_illustrations",
-      "price_quotation_product_costings",
-      "price_quotation_costing_lines",
-      "price_quotation_costing_markups",
       "profiles",
       "organization_members",
       "customers",
@@ -2269,6 +2271,104 @@ const workspaceViewTables = (
   if (view === "Policy") return ["policies"];
   return [];
 };
+
+const workspaceViewCriticalTables = (
+  view: View,
+  leadMode: LeadWorkspaceMode,
+  role: string,
+): TableName[] => {
+  const allTables = workspaceViewTables(view, leadMode, role);
+  let criticalTables: TableName[];
+
+  if (view === "Dashboard") criticalTables = allTables;
+  else if (view === "Leads" && leadMode === "quotation") {
+    criticalTables = [
+      "quotations",
+      "quotation_items",
+      "price_quotation_illustrations",
+      "leads",
+      "customers",
+      "profiles",
+      "organization_members",
+      "pricing_officer_project_types",
+    ];
+  } else if (view === "Leads") {
+    criticalTables = [
+      "leads",
+      "quotations",
+      "profiles",
+      "organization_members",
+      "lead_change_requests",
+      "lead_unendorsement_requests",
+    ];
+  } else if (view === "Projects") {
+    criticalTables = ["project_schedules", "quotations", "leads", "profiles"];
+  } else if (view === "Quotation Costing Overview") {
+    criticalTables = [
+      "quotations",
+      "quotation_items",
+      "price_quotation_product_costings",
+      "price_quotation_costing_lines",
+      "price_quotation_costing_markups",
+      "leads",
+      "customers",
+      "profiles",
+    ];
+  } else if (view === "PDF Costing") {
+    criticalTables = ["costing_requests", "leads", "profiles", "business_settings"];
+  } else if (view === "Price Quotations" || view === "Price Quotation Review") {
+    criticalTables = [
+      "quotations",
+      "quotation_items",
+      "price_quotation_illustrations",
+      "leads",
+      "customers",
+      "profiles",
+      "organization_members",
+      "pricing_officer_project_types",
+    ];
+  } else if (view === "Supplier's List") criticalTables = ["suppliers"];
+  else if (view === "Production") criticalTables = ["production_jobs", "customers", "inventory_items"];
+  else if (view === "Catalog" || view === "Inventory") criticalTables = ["inventory_items"];
+  else if (view === "Sales") criticalTables = ["invoices", "customers", "payments"];
+  else if (view === "Expenses") criticalTables = ["expenses", "suppliers"];
+  else if (view === "Commissions") criticalTables = ["commission_summaries", "profiles"];
+  else if (view === "Payroll & Leave") criticalTables = ["employees", "payroll_periods", "payroll_entries", "leave_requests"];
+  else if (view === "Letter Request") criticalTables = ["employee_requests", "employee_request_events"];
+  else if (view === "Directory") criticalTables = ["customers", "suppliers", "employees"];
+  else if (view === "Targets") criticalTables = ["target_goals"];
+  else if (view === "Payment Monitoring" || view === "Payment Reviews") criticalTables = [
+    "quotations",
+    "profiles",
+    "leads",
+    "customers",
+    "quotation_payment_records",
+  ];
+  else if (view === "Approvals" || view === "Submissions") criticalTables = allTables;
+  else if (view === "Settings") criticalTables = ["business_settings", "organization_members", "profiles"];
+  else if (view === "Announcements") criticalTables = ["announcements"];
+  else if (view === "Policy") criticalTables = ["policies"];
+  else criticalTables = allTables;
+
+  return [...new Set(criticalTables.filter((table) => allTables.includes(table)))];
+};
+
+const quotationCostingTables: TableName[] = [
+  "quotations",
+  "quotation_items",
+  "price_quotation_illustrations",
+  "price_quotation_product_costings",
+  "price_quotation_costing_lines",
+  "price_quotation_costing_markups",
+  "leads",
+  "customers",
+  "business_settings",
+  "profiles",
+  "organization_members",
+  "price_quotation_revision_requests",
+  "quotation_payment_records",
+  "pricing_officer_project_types",
+];
 
 const directory: Module = {
   table: "customers",
@@ -4127,7 +4227,7 @@ function LeadCoordinatorTransferredLeads({
           )}
         </div>
         {loading ? (
-          <Empty>Loading transferred leads…</Empty>
+          <LoadingState variant="section" label="Loading transferred leads..." />
         ) : error ? (
           <Empty>No transferred leads are available.</Empty>
         ) : filteredRows.length ? (
@@ -4309,7 +4409,7 @@ function PricingOfficerActiveEndorsements({
           )}
         </div>
         {loading ? (
-          <Empty>Loading active endorsements…</Empty>
+          <LoadingState variant="section" label="Loading active endorsements..." />
         ) : error ? (
           <Empty>No active endorsements are available.</Empty>
         ) : filteredRows.length ? (
@@ -4535,7 +4635,7 @@ function MonthlyKpiActivityGraphs({
       ) : data ? (
         <div className="flex h-60 items-center justify-center px-5 text-center text-[12px] text-[#8b92a1]">Monthly KPI activity is unavailable.</div>
       ) : (
-        <div className="flex h-60 items-center justify-center px-5 text-center text-[12px] text-[#8b92a1]">Loading monthly KPI activity…</div>
+        <LoadingState variant="section" label="Loading monthly KPI activity..." className="h-60" />
       )}
     </section>
   );
@@ -8955,6 +9055,11 @@ function QuotationPaymentDialog({
                 </div>
                 {!formOpen && <Button disabled={summary.available <= 0 || paymentAccountsLoading || paymentAccountsForKind(initialPaymentKind).length === 0} onClick={openPaymentForm}><ReceiptText size={14} /> Add payment</Button>}
               </div>
+              {paymentAccountsLoading && (
+                <div className="border-t border-[#edf0f5] px-4 py-2">
+                  <LoadingState label="Loading receiving accounts..." />
+                </div>
+              )}
               {paymentAccountsError || (!paymentAccountsLoading && paymentAccounts.length === 0) ? (
                 <div role="alert" className="border-t border-[#f2b8b5] bg-[#fff5f4] px-4 py-2.5 text-[12px] text-[#b42318]">
                   {paymentAccountsError ? "Receiving accounts could not be loaded. Refresh and try again." : "Internal Finance must add an active receiving account before a client payment can be recorded."}
@@ -14972,11 +15077,17 @@ function PriceQuotationSubmissions({
   reload,
   notice,
   role,
+  currentUserId,
+  currentUserLoaded,
+  loadTables,
 }: {
   store: Store;
   reload: () => Promise<void>;
   notice: (message: string) => void;
   role: string;
+  currentUserId: string | null;
+  currentUserLoaded: boolean;
+  loadTables: (requestedTables: TableName[]) => Promise<void>;
 }) {
   type ReviewQueueTab = "pending" | "gm_revision" | "summary";
   const [selectedPriceQuotation, setSelectedPriceQuotation] = useState<Row | null>(null);
@@ -14988,16 +15099,23 @@ function PriceQuotationSubmissions({
   const queueTabAutoResolved = useRef(false);
   const [submissionPage, setSubmissionPage] = useState(1);
   const queueStage = queueTab === "gm_revision" ? "gm_revision" : "pending";
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const queueIdentityLoading = role === "sales_pricing_officer" && !currentUserLoaded;
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const summaryReload = useCallback(async () => {
+    await loadTables(quotationCostingTables);
+    await reload();
+  }, [loadTables, reload]);
   useEffect(() => {
+    if (queueTab !== "summary") return;
     let active = true;
-    void createClient().auth.getUser().then(({ data }) => {
-      if (active) setCurrentUserId(data.user?.id ?? null);
+    setSummaryLoading(true);
+    void loadTables(quotationCostingTables).finally(() => {
+      if (active) setSummaryLoading(false);
     });
     return () => {
       active = false;
     };
-  }, []);
+  }, [loadTables, queueTab]);
   const assignedProjectTypes = new Set(
     store.pricing_officer_project_types
       .filter((assignment) => text(assignment.pricing_officer_user_id, "") === currentUserId)
@@ -15032,7 +15150,7 @@ function PriceQuotationSubmissions({
   ).sort(newestActivityFirst);
   useEffect(() => {
     if (queueTabAutoResolved.current) return;
-    if (role === "sales_pricing_officer" && !currentUserId) return;
+    if (role === "sales_pricing_officer" && !currentUserLoaded) return;
     if (role === "sales_pricing_officer") {
       setQueueTab(
         pendingPriceQuotations.length
@@ -15043,7 +15161,7 @@ function PriceQuotationSubmissions({
       );
     }
     queueTabAutoResolved.current = true;
-  }, [currentUserId, gmRevisionPriceQuotations.length, pendingPriceQuotations.length, role]);
+  }, [currentUserLoaded, currentUserId, gmRevisionPriceQuotations.length, pendingPriceQuotations.length, role]);
   const normalizedSearch = search.trim().toLowerCase();
   const matchesSubmissionFilters = (quotation: Row) => {
     const activityAt = queueStage === "gm_revision"
@@ -15103,17 +15221,21 @@ function PriceQuotationSubmissions({
       hideHeading
     >
       <div className="app-tabs border-b border-[#edf0f5] px-4 pt-2 sm:px-5">
-        <button type="button" onClick={() => { setQueueTab("pending"); setSelectedPriceQuotation(null); }} aria-current={queueTab === "pending" ? "page" : undefined} className="app-tab">Awaiting Review ({pendingPriceQuotations.length})</button>
-        <button type="button" onClick={() => { setQueueTab("gm_revision"); setSelectedPriceQuotation(null); }} aria-current={queueTab === "gm_revision" ? "page" : undefined} className="app-tab">GM Revisions ({gmRevisionPriceQuotations.length})</button>
+        <button type="button" onClick={() => { setQueueTab("pending"); setSelectedPriceQuotation(null); }} aria-current={queueTab === "pending" ? "page" : undefined} className="app-tab">Awaiting Review ({queueIdentityLoading ? "…" : pendingPriceQuotations.length})</button>
+        <button type="button" onClick={() => { setQueueTab("gm_revision"); setSelectedPriceQuotation(null); }} aria-current={queueTab === "gm_revision" ? "page" : undefined} className="app-tab">GM Revisions ({queueIdentityLoading ? "…" : gmRevisionPriceQuotations.length})</button>
         {role === "sales_pricing_officer" && <button type="button" onClick={() => { setQueueTab("summary"); setSelectedPriceQuotation(null); setNoteQuotation(null); }} aria-current={queueTab === "summary" ? "page" : undefined} className="app-tab">Costing Breakdown Summary</button>}
       </div>
       {queueTab === "summary" ? (
-        <QuotationCostingOverview
-          store={store}
-          reload={reload}
-          notice={notice}
-          role={role}
-        />
+        summaryLoading ? (
+          <LoadingState variant="section" label="Loading costing breakdown data..." />
+        ) : (
+          <QuotationCostingOverview
+            store={store}
+            reload={summaryReload}
+            notice={notice}
+            role={role}
+          />
+        )
       ) : (
         <>
       <div className="flex flex-wrap items-end gap-2 border-b border-[#edf0f5] px-4 py-3 sm:px-5">
@@ -15122,7 +15244,9 @@ function PriceQuotationSubmissions({
         <label className="text-[11px] font-medium text-[#687386]">Submission<select value={submissionType} onChange={(event) => setSubmissionType(event.target.value as "all" | "new" | "revised")} className="input mt-1 w-[130px]"><option value="all">All</option><option value="new">New</option><option value="revised">Revised</option></select></label>
         {(search || month || submissionType !== "all") && <Button secondary onClick={() => { setSearch(""); setMonth(""); setSubmissionType("all"); }}>Clear filters</Button>}
       </div>
-      {activeSubmissions.length ? (
+      {queueIdentityLoading ? (
+        <LoadingState variant="section" label="Loading your review assignments..." />
+      ) : activeSubmissions.length ? (
         <>
         <div className="modern-table-shell">
         <Table labels={["Price Quotation", "Client's Name", "Company Name", "Assigned to", queueStage === "gm_revision" ? "Returned" : "Submitted", "Note", "Review"]} minWidth={940}>
@@ -22629,6 +22753,8 @@ export function HuswellWorkspace({
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [store, setStore] = useState<Store>(blank);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [backgroundLoading, setBackgroundLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [policyAction, setPolicyAction] = useState<"announcement" | "policy" | null>(null);
   const [signOutOpen, setSignOutOpen] = useState(false);
@@ -22636,8 +22762,13 @@ export function HuswellWorkspace({
   const [navigationDate, setNavigationDate] = useState(() => new Date());
   const client = useMemo(() => createClient(), []);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUserLoaded, setCurrentUserLoaded] = useState(false);
   const workspaceRefreshTimer = useRef<number | null>(null);
+  const sidebarQueueRefreshTimer = useRef<number | null>(null);
+  const refreshActivityCount = useRef(0);
+  const backgroundActivityCount = useRef(0);
   const tableRequestIds = useRef(new Map<TableName, number>());
+  const loadingRequestVersion = useRef(0);
   const loadedTables = useRef(new Set<TableName>());
   const initialViewLoaded = useRef(false);
   const pendingRealtimeTables = useRef(new Set<TableName>());
@@ -22740,12 +22871,14 @@ export function HuswellWorkspace({
   const refreshTables = useCallback(async (
     requestedTables: TableName[],
     showLoading = false,
+    readyTables?: TableName[],
   ) => {
     const tablesToRefresh = [...new Set(requestedTables)].filter((table) =>
       canReadTable(role, table, productionApprovalEnabled),
     );
+    const loadingVersion = showLoading ? ++loadingRequestVersion.current : null;
     if (!tablesToRefresh.length) {
-      if (showLoading) setLoading(false);
+      if (showLoading && loadingVersion === loadingRequestVersion.current) setLoading(false);
       return;
     }
     const requestIds = new Map(
@@ -22756,45 +22889,98 @@ export function HuswellWorkspace({
       }),
     );
     if (showLoading) setLoading(true);
-    const results = await Promise.all(
-      tablesToRefresh
-        .map(async (table) => ({
-          table,
-          result: await fetchTable(table),
-        })),
+    const foregroundRefresh = !showLoading;
+    if (foregroundRefresh) {
+      refreshActivityCount.current += 1;
+      setRefreshing(true);
+    }
+    const requests = tablesToRefresh.map((table) => ({
+      table,
+      requestId: requestIds.get(table) ?? 0,
+      load: () => fetchTable(table).catch((error: unknown) => ({
+        data: null,
+        error: {
+          message: error instanceof Error ? error.message : "Request failed",
+        },
+      })),
+    }));
+    const resolveRequests = (batch: typeof requests) => Promise.all(
+      batch.map(async ({ table, requestId, load }) => ({
+        table,
+        requestId,
+        result: await load(),
+      })),
     );
-    const errors = results
-      .filter((r) => r.result.error)
-      .map((r) => `${r.table}: ${r.result.error?.message}`);
-    const freshResults = results.filter(
-      (result) =>
-        tableRequestIds.current.get(result.table) === requestIds.get(result.table),
-    );
-    if (!freshResults.length) return;
-    setStore((current) => {
-      const next = { ...current };
-      freshResults.forEach((result) => {
-        if (!result.result.error) {
-          next[result.table] = (result.result.data ?? []) as Row[];
-          loadedTables.current.add(result.table);
-        }
-      });
-      return next;
-    });
-    if (showLoading) setLoading(false);
-    if (errors.length)
-      setMessage(
-        `Workspace data could not load: ${errors.join(" | ")}`,
+    const applyResults = (
+      results: Awaited<ReturnType<typeof resolveRequests>>,
+      hideLoading = false,
+    ) => {
+      const freshResults = results.filter(
+        (result) =>
+          tableRequestIds.current.get(result.table) === result.requestId,
       );
+      if (freshResults.length) {
+        const successfulResults = freshResults.filter((result) => !result.result.error);
+        successfulResults.forEach((result) => loadedTables.current.add(result.table));
+        const updateStore = () => setStore((current) => {
+          const next = { ...current };
+          successfulResults.forEach((result) => {
+            next[result.table] = (result.result.data ?? []) as Row[];
+          });
+          return next;
+        });
+        if (hideLoading) updateStore();
+        else startTransition(updateStore);
+      }
+      const errors = freshResults
+        .filter((result) => result.result.error)
+        .map((result) => `${result.table}: ${result.result.error?.message}`);
+      if (hideLoading && loadingVersion === loadingRequestVersion.current) setLoading(false);
+      if (errors.length)
+        setMessage(
+          `Workspace data could not load: ${errors.join(" | ")}`,
+        );
+    };
+    const tablesToWaitFor = showLoading && readyTables
+      ? readyTables.filter((table) => tablesToRefresh.includes(table))
+      : tablesToRefresh;
+    const readyTableSet = new Set(tablesToWaitFor);
+    try {
+      const readyResults = await resolveRequests(
+        requests.filter(({ table }) => readyTableSet.has(table)),
+      );
+      applyResults(readyResults, showLoading);
+      const backgroundRequests = requests.filter(({ table }) => !readyTableSet.has(table));
+      if (backgroundRequests.length) {
+        backgroundActivityCount.current += 1;
+        setBackgroundLoading(true);
+        try {
+          const backgroundResults = await resolveRequests(backgroundRequests);
+          applyResults(backgroundResults);
+        } finally {
+          backgroundActivityCount.current = Math.max(0, backgroundActivityCount.current - 1);
+          if (backgroundActivityCount.current === 0) setBackgroundLoading(false);
+        }
+      }
+    } finally {
+      if (foregroundRefresh) {
+        refreshActivityCount.current = Math.max(0, refreshActivityCount.current - 1);
+        if (refreshActivityCount.current === 0) setRefreshing(false);
+      }
+    }
   }, [fetchTable, productionApprovalEnabled, role]);
-  const load = useCallback(
-    async (showLoading = false) => refreshTables(tables, showLoading),
+  const reload = useCallback(async () => {
+    const currentViewTables = [
+      ...workspaceViewTables(active, leadMode, role),
+      ...(role === "owner" || role === "admin" ? ["employee_requests" as TableName] : []),
+    ];
+    await refreshTables(currentViewTables, false);
+    await refreshSidebarQueueCounts();
+  }, [active, leadMode, refreshSidebarQueueCounts, refreshTables, role]);
+  const loadTables = useCallback(
+    async (requestedTables: TableName[]) => refreshTables(requestedTables, false),
     [refreshTables],
   );
-  const reload = useCallback(async () => {
-    await load(false);
-    await refreshSidebarQueueCounts();
-  }, [load, refreshSidebarQueueCounts]);
   const updateLeadRemark = useCallback(
     (leadId: string, leadRemark: string | null) => {
       setStore((current) => ({
@@ -22813,10 +22999,13 @@ export function HuswellWorkspace({
     const notificationTables: TableName[] = ["owner", "admin"].includes(role)
       ? ["employee_requests"]
       : [];
-    const neededTables = [...new Set([...viewTables, ...notificationTables])].filter(
+    const allViewTables = [...new Set([...viewTables, ...notificationTables])];
+    const neededTables = allViewTables.filter(
       (table) => !loadedTables.current.has(table),
     );
-    if (!neededTables.length) {
+    const firstLoad = !initialViewLoaded.current;
+    const tablesToLoad = firstLoad ? neededTables : allViewTables;
+    if (!tablesToLoad.length) {
       if (!initialViewLoaded.current) {
         initialViewLoaded.current = true;
         setLoading(false);
@@ -22824,12 +23013,22 @@ export function HuswellWorkspace({
       return;
     }
     const showLoading = !initialViewLoaded.current;
-    void refreshTables(neededTables, showLoading).finally(() => {
+    const criticalTables = [
+      ...workspaceViewCriticalTables(active, leadMode, role),
+      ...notificationTables,
+    ];
+    void refreshTables(tablesToLoad, showLoading, criticalTables).finally(() => {
       initialViewLoaded.current = true;
     });
   }, [active, leadMode, refreshTables, role]);
   useEffect(() => {
-    const realtimeTables = tables.filter((table) =>
+    const notificationTables: TableName[] = ["owner", "admin"].includes(role)
+      ? ["employee_requests"]
+      : [];
+    const realtimeTables = [...new Set([
+      ...workspaceViewTables(active, leadMode, role),
+      ...notificationTables,
+    ])].filter((table) =>
       canReadTable(role, table, productionApprovalEnabled),
     );
     if (!realtimeTables.length) return;
@@ -22868,7 +23067,7 @@ export function HuswellWorkspace({
       pendingTables.clear();
       void client.removeChannel(channel);
     };
-  }, [client, organizationId, productionApprovalEnabled, refreshTables, role]);
+  }, [active, client, leadMode, organizationId, productionApprovalEnabled, refreshTables, role]);
   useEffect(() => {
     setSidebarQueueCounts(null);
     void refreshSidebarQueueCounts();
@@ -22928,16 +23127,28 @@ export function HuswellWorkspace({
       ["supplier_payables", "commission_summary_allocations", "quotation_payment_records"].forEach((table) => queueTables.add(table));
     }
     if (!queueTables.size) return;
+    const scheduleQueueCountRefresh = () => {
+      if (sidebarQueueRefreshTimer.current)
+        window.clearTimeout(sidebarQueueRefreshTimer.current);
+      sidebarQueueRefreshTimer.current = window.setTimeout(() => {
+        sidebarQueueRefreshTimer.current = null;
+        void refreshSidebarQueueCounts();
+      }, 250);
+    };
     const channel = client.channel(`sidebar-queue-counts:${organizationId}`);
     queueTables.forEach((table) => {
       channel.on(
         "postgres_changes",
         { event: "*", schema: "public", table },
-        () => void refreshSidebarQueueCounts(),
+        scheduleQueueCountRefresh,
       );
     });
     channel.subscribe();
     return () => {
+      if (sidebarQueueRefreshTimer.current) {
+        window.clearTimeout(sidebarQueueRefreshTimer.current);
+        sidebarQueueRefreshTimer.current = null;
+      }
       void client.removeChannel(channel);
     };
   }, [client, organizationId, productionApprovalEnabled, refreshSidebarQueueCounts, role]);
@@ -23052,9 +23263,17 @@ export function HuswellWorkspace({
   }
   useEffect(() => {
     let active = true;
-    void client.auth.getUser().then(({ data }) => {
-      if (active) setCurrentUserId(data.user?.id ?? null);
-    });
+    void client.auth.getUser()
+      .then(({ data }) => {
+        if (!active) return;
+        setCurrentUserId(data.user?.id ?? null);
+        setCurrentUserLoaded(true);
+      })
+      .catch(() => {
+        if (!active) return;
+        setCurrentUserId(null);
+        setCurrentUserLoaded(true);
+      });
     return () => {
       active = false;
     };
@@ -23371,7 +23590,7 @@ export function HuswellWorkspace({
             active === "Leads" || active === "Projects" || active === "Price Quotation Review" || active === "PDF Costing" || active === "Approvals" || active === "Submissions" || active === "Payment Monitoring" || active === "Payment Reviews" ? "min-h-[280px]" : undefined
           }
         >
-          <Empty>Loading records…</Empty>
+          <LoadingState variant="page" label="Loading records..." />
         </div>
       </Panel>
     ) : active === "Dashboard" ? (
@@ -23392,7 +23611,7 @@ export function HuswellWorkspace({
         role={role}
       />
     ) : active === "PDF Costing" ? (
-      <CostingRequestWorkspace
+      <DynamicCostingRequestWorkspace
         store={store}
         orgId={organizationId}
         role={role}
@@ -23416,6 +23635,9 @@ export function HuswellWorkspace({
         reload={reload}
         notice={setMessage}
         role={role}
+        currentUserId={currentUserId}
+        currentUserLoaded={currentUserLoaded}
+        loadTables={loadTables}
       />
     ) : active === "Price Quotations" ? (
         <PriceQuotationWorkspace
@@ -23510,9 +23732,9 @@ export function HuswellWorkspace({
         role={role}
       />
     ) : active === "Finance Overview" ? (
-      <FinanceWorkspace key={active} organizationId={organizationId} role={role} overviewOnly />
+      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={role} overviewOnly />
     ) : active === "Finance" ? (
-      <FinanceWorkspace key={active} organizationId={organizationId} role={role} />
+      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={role} />
     ) : active === "Commissions" ? (
       <CommissionSummaryView
         store={store}
@@ -23798,6 +24020,13 @@ export function HuswellWorkspace({
               </div>
             )}
             <span className="sr-only">{activePageHeader.title}</span>
+            {(refreshing || backgroundLoading) && (
+              <LoadingState
+                variant="bar"
+                label={backgroundLoading ? "Updating data..." : "Refreshing data..."}
+                className="hidden max-w-[180px] truncate sm:flex"
+              />
+            )}
           </div>
           <div className="flex shrink-0 items-center gap-2.5 text-[var(--color-text-secondary)]">
             <span className="hidden items-center gap-1.5 text-[11px] font-medium sm:flex">

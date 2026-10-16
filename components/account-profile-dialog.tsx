@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Eye, EyeOff, LoaderCircle, Pencil, X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { workspaceRoleLabel } from "@/lib/role-labels";
+import { LoadingState } from "@/components/ui/loading-state";
 import { NotificationDialog } from "@/components/ui/notification-dialog";
 
 type ProfileValues = { fullName: string; email: string; password: string };
@@ -168,7 +169,9 @@ export function AccountProfileDialog({
             </button>
           ) : null}
         </div>
-        {embedded && !editing ? (
+        {loading ? (
+          <LoadingState variant="section" label="Loading profile..." />
+        ) : embedded && !editing ? (
           <div className="mt-4 divide-y divide-[#edf0f5] border-y border-[#edf0f5]">
             <div className="grid gap-1 py-2 sm:grid-cols-3">
               <span className="text-[11px] font-medium text-[#7d8797]">

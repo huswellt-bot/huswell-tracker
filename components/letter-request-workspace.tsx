@@ -26,6 +26,7 @@ import { createClient } from "@/lib/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { LoadingState } from "@/components/ui/loading-state";
 import { TABLE_PAGE_SIZE, TablePagination } from "@/components/ui/table-pagination";
 import type { Store } from "@/components/huswell-workspace";
 
@@ -659,9 +660,7 @@ export function LetterRequestWorkspace({
         </CardHeader>
         <CardContent className="border-t border-[var(--color-border)] p-0">
           {loading ? (
-            <div className="flex items-center justify-center gap-2 px-4 py-10 text-[12px] text-[var(--color-text-secondary)]">
-              <LoaderCircle className="size-4 animate-spin" /> Loading Letter Requests…
-            </div>
+            <LoadingState variant="section" label="Loading Letter Requests..." />
           ) : requests.length ? (
             <div className="table-shell overflow-x-auto">
               <table className="app-table w-full min-w-[920px] text-left text-[12px]">

@@ -2,7 +2,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import Image from "next/image";
-import { FormEvent, useCallback, useEffect, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   Ban,
   CheckCircle2,
@@ -22,6 +22,7 @@ import { AccountProfileDialog } from "@/components/account-profile-dialog";
 import { FixedIconTooltip } from "@/components/fixed-icon-tooltip";
 import { ThemeToggle } from "@/components/theme-provider";
 import { FileUploadControl } from "@/components/ui/file-upload-control";
+import { LoadingState } from "@/components/ui/loading-state";
 import { NotificationDialog } from "@/components/ui/notification-dialog";
 import { TABLE_PAGE_SIZE, TablePagination } from "@/components/ui/table-pagination";
 import { createClient } from "@/lib/supabase/client";
@@ -102,6 +103,7 @@ export function SuperAdminConsole({
     null,
   );
   const [userPage, setUserPage] = useState(1);
+  const userRefreshTimer = useRef<number | null>(null);
 
   const load = useCallback(async () => {
     const response = await fetch("/api/super-admin/users", {
@@ -118,6 +120,33 @@ export function SuperAdminConsole({
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  useEffect(() => {
+    const client = createClient();
+    const scheduleRefresh = () => {
+      if (userRefreshTimer.current) window.clearTimeout(userRefreshTimer.current);
+      userRefreshTimer.current = window.setTimeout(() => {
+        userRefreshTimer.current = null;
+        void load();
+      }, 400);
+    };
+    const channel = client.channel("super-admin-users");
+    ["organization_members", "profiles"].forEach((table) => {
+      channel.on(
+        "postgres_changes",
+        { event: "*", schema: "public", table },
+        scheduleRefresh,
+      );
+    });
+    channel.subscribe();
+    return () => {
+      if (userRefreshTimer.current) {
+        window.clearTimeout(userRefreshTimer.current);
+        userRefreshTimer.current = null;
+      }
+      void client.removeChannel(channel);
+    };
   }, [load]);
 
   const userPageCount = Math.max(1, Math.ceil(users.length / TABLE_PAGE_SIZE));
@@ -389,7 +418,7 @@ export function SuperAdminConsole({
                       colSpan={7}
                       className="px-5 py-10 text-center text-[#7d8797]"
                     >
-                      Loading Users…
+                      <LoadingState variant="section" label="Loading users..." />
                     </td>
                   </tr>
                 ) : users.length ? (

@@ -24,6 +24,7 @@ import {
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { FileUploadControl } from "@/components/ui/file-upload-control";
+import { LoadingState } from "@/components/ui/loading-state";
 import { NumberInput } from "@/components/ui/number-input";
 import { SearchableLeadSelect } from "@/components/ui/searchable-lead-select";
 import { SearchableSelect, type SearchableOption } from "@/components/ui/searchable-select";
@@ -935,11 +936,8 @@ function FinanceConfirmDialog({
 
 function FinanceLoadingState({ cardCount = 4 }: { cardCount?: number }) {
   return (
-    <div role="status" className="space-y-4" aria-label="Loading Finance">
-      <div className="flex items-center gap-2 rounded-lg border border-[#d9e0e9] bg-white px-4 py-3 text-[12px] text-[#687386]">
-        <LoaderCircle size={15} className="animate-spin text-[#c43b43]" />
-        Loading Finance workspace…
-      </div>
+    <div className="space-y-4">
+      <LoadingState variant="bar" label="Loading Finance workspace..." />
       <div className={`grid gap-4 sm:grid-cols-2 ${cardCount === 3 ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
         {Array.from({ length: cardCount }, (_, index) => index + 1).map((item) => <div key={item} className="h-24 animate-pulse rounded-lg border border-[#edf0f5] bg-[#f6f8fb]" />)}
       </div>
@@ -1027,6 +1025,7 @@ export function FinanceWorkspace({
   const [budgetValues, setBudgetValues] = useState({ amount: "", note: "" });
   const [supplierCostOpen, setSupplierCostOpen] = useState(false);
   const [supplierCostValues, setSupplierCostValues] = useState({ supplier_id: "", quotation_id: "", lead_id: "", description: "", amount: "", due_date: "", notes: "" });
+  const financeRefreshTimer = useRef<number | null>(null);
 
   useEffect(() => {
     if (overviewOnly || tab === "overview" || financeTabs.some(([value]) => value === tab)) return;
@@ -1105,6 +1104,48 @@ export function FinanceWorkspace({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    const realtimeTables = [
+      "finance_transactions",
+      "finance_categories",
+      "finance_accounts",
+      "finance_account_funding_entries",
+      "finance_budget_requests",
+      "supplier_payables",
+      "commission_summary_allocations",
+      "quotation_payment_records",
+      "leads",
+      "quotations",
+      "suppliers",
+      "profiles",
+    ];
+    const scheduleRefresh = () => {
+      if (financeRefreshTimer.current) {
+        window.clearTimeout(financeRefreshTimer.current);
+      }
+      financeRefreshTimer.current = window.setTimeout(() => {
+        financeRefreshTimer.current = null;
+        void load();
+      }, 400);
+    };
+    const channel = client.channel(`finance-data:${organizationId}`);
+    realtimeTables.forEach((table) => {
+      channel.on(
+        "postgres_changes",
+        { event: "*", schema: "public", table },
+        scheduleRefresh,
+      );
+    });
+    channel.subscribe();
+    return () => {
+      if (financeRefreshTimer.current) {
+        window.clearTimeout(financeRefreshTimer.current);
+        financeRefreshTimer.current = null;
+      }
+      void client.removeChannel(channel);
+    };
+  }, [client, load, organizationId]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(Date.now()), 60_000);
@@ -2790,7 +2831,7 @@ export function FinanceWorkspace({
 
       {budgetOpen && <FinanceDialog title={budgetRevision ? "Revise budget request" : "Request budget"} detail={budgetRevision ? "Correct the returned request and resubmit it for Internal Finance review." : "The request will be reviewed by Internal Finance."} close={closeBudgetForm}><div className="mt-5 space-y-3"><label className="field-label">Amount<NumberInput min="0.01" step="0.01" value={budgetValues.amount} onChange={(value) => setBudgetValues((current) => ({ ...current, amount: value }))} className="input mt-1" /></label><label className="field-label">Note<textarea value={budgetValues.note} onChange={(event) => setBudgetValues((current) => ({ ...current, note: event.target.value }))} className="input mt-1 min-h-24" placeholder="Explain the budget request" /></label></div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={closeBudgetForm} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveBudget()} disabled={saving} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} {budgetRevision ? "Resubmit request" : "Submit request"}</button></div></FinanceDialog>}
 
-      {loading && <p className="text-[12px] text-[#7d8797]">Loading Finance…</p>}
+      {loading && <LoadingState label="Updating Finance data..." />}
     </div>
   );
 }
