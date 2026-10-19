@@ -43,6 +43,7 @@ export async function POST(request: Request) {
 
   const organizationId = formString(form, "organization_id");
   const quotationId = formString(form, "quotation_id");
+  const resubmissionPaymentId = formString(form, "payment_id");
   const paymentKind = formString(form, "payment_kind");
   const amount = formString(form, "amount");
   const paidAt = formString(form, "paid_at");
@@ -54,7 +55,7 @@ export async function POST(request: Request) {
   if (!organizationId || !quotationId || !paymentKind || !amount || !paidAt || !financeAccountId || !(receipt instanceof File)) {
     return json({ error: "Complete the payment details and upload the receipt image." }, 400);
   }
-  if (!UUID_PATTERN.test(organizationId) || !UUID_PATTERN.test(quotationId) || !UUID_PATTERN.test(financeAccountId)) {
+  if (!UUID_PATTERN.test(organizationId) || !UUID_PATTERN.test(quotationId) || !UUID_PATTERN.test(financeAccountId) || (resubmissionPaymentId && !UUID_PATTERN.test(resubmissionPaymentId))) {
     return json({ error: "The workspace, quotation, or receiving account is invalid." }, 400);
   }
   if (!['downpayment', 'full_payment'].includes(paymentKind)) {
@@ -106,8 +107,9 @@ export async function POST(request: Request) {
     return json({ error: "Payments can only be recorded against an approved direct Price Quotation." }, 400);
   }
 
-  const paymentId = crypto.randomUUID();
-  const path = `${organizationId}/${quotationId}/${paymentId}.${extension}`;
+  const paymentId = resubmissionPaymentId || crypto.randomUUID();
+  const receiptObjectId = resubmissionPaymentId ? crypto.randomUUID() : paymentId;
+  const path = `${organizationId}/${quotationId}/${receiptObjectId}.${extension}`;
   const storageClient = createSupabaseClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
@@ -125,20 +127,34 @@ export async function POST(request: Request) {
   if (uploadError) return json({ error: `Receipt upload failed: ${uploadError.message}` }, 500);
 
   try {
-    const { error: registerError } = await supabase.rpc("register_quotation_payment_with_account", {
-      p_payment_id: paymentId,
-      p_quotation_id: quotationId,
-      p_payment_kind: paymentKind,
-      p_amount: amountValue,
-      p_paid_at: paidAt,
-      p_finance_account_id: financeAccountId,
-      p_reference_no: referenceNo || null,
-      p_notes: notes || null,
-      p_receipt_storage_path: path,
-      p_receipt_file_name: receipt.name,
-      p_receipt_content_type: receipt.type,
-      p_receipt_file_size: receipt.size,
-    });
+    const { error: registerError } = resubmissionPaymentId
+      ? await supabase.rpc("resubmit_quotation_payment_with_account", {
+          p_payment_id: paymentId,
+          p_payment_kind: paymentKind,
+          p_amount: amountValue,
+          p_paid_at: paidAt,
+          p_finance_account_id: financeAccountId,
+          p_reference_no: referenceNo || null,
+          p_notes: notes || null,
+          p_receipt_storage_path: path,
+          p_receipt_file_name: receipt.name,
+          p_receipt_content_type: receipt.type,
+          p_receipt_file_size: receipt.size,
+        })
+      : await supabase.rpc("register_quotation_payment_with_account", {
+          p_payment_id: paymentId,
+          p_quotation_id: quotationId,
+          p_payment_kind: paymentKind,
+          p_amount: amountValue,
+          p_paid_at: paidAt,
+          p_finance_account_id: financeAccountId,
+          p_reference_no: referenceNo || null,
+          p_notes: notes || null,
+          p_receipt_storage_path: path,
+          p_receipt_file_name: receipt.name,
+          p_receipt_content_type: receipt.type,
+          p_receipt_file_size: receipt.size,
+        });
     if (!registerError) return json({ ok: true });
 
     await storageClient.storage.from(RECEIPT_BUCKET).remove([path]);

@@ -72,6 +72,7 @@ import {
   X,
   XCircle,
   TrendingUp,
+  Undo2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
@@ -1736,7 +1737,7 @@ const statusStyle = (value: unknown) => {
   const v = text(value, "draft").toLowerCase();
   return v.includes("rejected") || v.includes("cancelled") || v.includes("void") || v.includes("overpaid")
     ? "bg-[#fef3f2] text-[#b42318]"
-    : v.includes("pending") || v.includes("partial") || v.includes("review")
+    : v.includes("pending") || v.includes("partial") || v.includes("review") || v.includes("revision")
       ? "bg-[#fff8e9] text-[#a76605]"
       : v.includes("unpaid") || v.includes("not_earned")
         ? "bg-[#f1f4f8] text-[#626b7a]"
@@ -8547,7 +8548,7 @@ type QuotationPaymentSummary = {
   available: number;
   downpaymentTarget: number;
   downpaymentRemaining: number;
-  status: "unpaid" | "pending" | "partial" | "paid" | "overpaid";
+  status: "unpaid" | "pending" | "needs_revision" | "partial" | "paid" | "overpaid";
 };
 const quotationPaymentSummary = (quote: Row, records: Row[]): QuotationPaymentSummary => {
   const total = roundQuotationPayment(Math.max(0, n(quote.total_amount)));
@@ -8562,12 +8563,15 @@ const quotationPaymentSummary = (quote: Row, records: Row[]): QuotationPaymentSu
   const balance = roundQuotationPayment(Math.max(0, total - verified));
   const available = roundQuotationPayment(Math.max(0, total - verified - pending));
   const downpaymentRemaining = roundQuotationPayment(Math.max(0, downpaymentTarget - verified - pending));
+  const hasRevisionRequested = related.some((record) => text(record.status) === "revision_requested");
   const status = verified > total && total > 0
     ? "overpaid"
     : total > 0 && verified >= total
       ? "paid"
       : pending > 0 && verified <= 0
         ? "pending"
+        : hasRevisionRequested
+          ? "needs_revision"
         : verified > 0
           ? "partial"
           : "unpaid";
@@ -8585,6 +8589,7 @@ const quotationPaymentSummary = (quote: Row, records: Row[]): QuotationPaymentSu
 const quotationPaymentStatusLabel = (value: QuotationPaymentSummary["status"]) => ({
   unpaid: "Unpaid",
   pending: "Pending review",
+  needs_revision: "Needs correction",
   partial: "Partially paid",
   paid: "Paid",
   overpaid: "Overpaid",
@@ -8600,6 +8605,8 @@ function QuotationPaymentDialog({
   store,
   orgId,
   role,
+  allowReview = true,
+  historyOnly = false,
   close,
   reload,
 }: {
@@ -8607,6 +8614,8 @@ function QuotationPaymentDialog({
   store: Store;
   orgId: string;
   role: string;
+  allowReview?: boolean;
+  historyOnly?: boolean;
   close: () => void;
   reload: () => Promise<void>;
 }) {
@@ -8619,13 +8628,14 @@ function QuotationPaymentDialog({
   );
   const summary = quotationPaymentSummary(liveQuote, records);
   const quotationLabel = text(liveQuote.document_type) === "mockup_quotation" ? "Mockup Quotation" : "Price Quotation";
-  const canSubmit = canSubmitQuotationPaymentInUi(
-    liveQuote,
-    role,
-  );
+  const canSubmit = !historyOnly && canSubmitQuotationPaymentInUi(liveQuote, role);
   const canReviewAsManager = memberRole(role);
-  const canReviewAsFinance = isInternalFinanceRole(role);
+  const canReviewAsFinance = allowReview && isInternalFinanceRole(role);
+  const canManagePaymentAccount = isInternalFinanceRole(role);
   const initialPaymentKind = quotationPaymentDefaultKind(summary);
+  const revisionPayment = canSubmit
+    ? records.find((payment) => text(payment.status) === "revision_requested") ?? null
+    : null;
   const reviewerForPayment = (payment: Row) =>
     assignedPaymentReviewerId(
       liveQuote,
@@ -8638,6 +8648,7 @@ function QuotationPaymentDialog({
   const [paymentAccountsLoading, setPaymentAccountsLoading] = useState(true);
   const [paymentAccountsError, setPaymentAccountsError] = useState("");
   const [formOpen, setFormOpen] = useState(false);
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [paymentValues, setPaymentValues] = useState({
     payment_kind: initialPaymentKind,
@@ -8653,7 +8664,7 @@ function QuotationPaymentDialog({
   const [feedback, setFeedback] = useState<{ tone: "error" | "success"; message: string } | null>(null);
   const [noteRequest, setNoteRequest] = useState<{
     payment: Row;
-    action: "reject" | "reverse";
+    action: "return" | "reverse";
   } | null>(null);
   const [accountRequest, setAccountRequest] = useState<{
     payment: Row;
@@ -8764,6 +8775,7 @@ function QuotationPaymentDialog({
 
   const resetPaymentForm = () => {
     setFormOpen(false);
+    setEditingPaymentId(null);
     setPaymentFile(null);
     setFeedback(null);
     setPaymentValues({
@@ -8775,17 +8787,22 @@ function QuotationPaymentDialog({
       notes: "",
     });
   };
-  const openPaymentForm = () => {
-    const kind = quotationPaymentDefaultKind(summary);
+  const openPaymentForm = (payment: Row | null = revisionPayment) => {
+    const paymentKind = text(payment?.payment_kind, "");
+    const kind = ["downpayment", "full_payment"].includes(paymentKind)
+      ? paymentKind
+      : quotationPaymentDefaultKind(summary);
     setFeedback(null);
+    setEditingPaymentId(payment ? text(payment.id) : null);
     setPaymentValues({
       payment_kind: kind,
-      amount: quotationPaymentSuggestedAmount(kind, summary),
-      paid_at: isoToday(),
-      finance_account_id: defaultPaymentAccountId(kind),
-      reference_no: "",
-      notes: "",
+      amount: payment ? n(payment.amount).toFixed(2) : quotationPaymentSuggestedAmount(kind, summary),
+      paid_at: payment ? text(payment.paid_at, isoToday()) : isoToday(),
+      finance_account_id: payment ? text(payment.finance_account_id) : defaultPaymentAccountId(kind),
+      reference_no: payment ? text(payment.reference_no) : "",
+      notes: payment ? text(payment.notes) : "",
     });
+    setPaymentFile(null);
     setFormOpen(true);
   };
   const changePaymentKind = (kind: string) => {
@@ -8799,7 +8816,7 @@ function QuotationPaymentDialog({
   };
   const setError = (message: string) => setFeedback({ tone: "error", message });
   const setSuccess = (message: string) => setFeedback({ tone: "success", message });
-  const openNoteRequest = (payment: Row, action: "reject" | "reverse") => {
+  const openNoteRequest = (payment: Row, action: "return" | "reverse") => {
     setFeedback(null);
     setNoteValue("");
     setNoteRequest({ payment, action });
@@ -8851,6 +8868,7 @@ function QuotationPaymentDialog({
     return [
       { label: "Payment note", value: text(payment.notes, "") },
       { label: "Verification note", value: text(payment.verification_note, "") },
+      { label: "Correction requested", value: text(payment.correction_note, "") },
       { label: "Reversal note", value: text(payment.reversal_note, "") },
     ].filter((entry) => entry.value);
   };
@@ -8890,9 +8908,11 @@ function QuotationPaymentDialog({
     }
     setSaving(true);
     try {
+      const wasResubmission = Boolean(editingPaymentId);
       const form = new FormData();
       form.set("organization_id", orgId);
       form.set("quotation_id", text(liveQuote.id));
+      if (editingPaymentId) form.set("payment_id", editingPaymentId);
       form.set("payment_kind", paymentValues.payment_kind);
       form.set("amount", String(amount));
       form.set("paid_at", paymentValues.paid_at);
@@ -8908,7 +8928,7 @@ function QuotationPaymentDialog({
       const payload = await response.json().catch(() => null) as { error?: string } | null;
       if (!response.ok) throw new Error(payload?.error || "Payment receipt could not be saved.");
       resetPaymentForm();
-      setSuccess("Payment receipt submitted for review.");
+      setSuccess(wasResubmission ? "Corrected payment receipt resubmitted for review." : "Payment receipt submitted for review.");
       await reload();
     } catch (error) {
       setError(error instanceof Error ? error.message : "Payment receipt could not be saved.");
@@ -8916,10 +8936,10 @@ function QuotationPaymentDialog({
       setSaving(false);
     }
   };
-  const reviewPayment = async (payment: Row, decision: "verified" | "rejected", decisionNote = "") => {
+  const reviewPayment = async (payment: Row, decision: "verified" | "revision_requested", decisionNote = "") => {
     const note = decisionNote.trim();
-    if (decision === "rejected" && !note) {
-      setError("Enter a reason before rejecting the payment.");
+    if (decision === "revision_requested" && !note) {
+      setError("Enter a correction reason before returning the payment.");
       return false;
     }
     setWorkingPaymentId(`${text(payment.id)}:${decision}`);
@@ -8930,7 +8950,7 @@ function QuotationPaymentDialog({
         p_decision_note: note || null,
       });
       if (error) throw error;
-      setSuccess(decision === "verified" ? "Payment marked as verified." : "Payment receipt rejected.");
+      setSuccess(decision === "verified" ? "Payment marked as verified." : "Payment returned to External Finance for correction.");
       await reload();
       return true;
     } catch (error) {
@@ -8967,11 +8987,11 @@ function QuotationPaymentDialog({
     if (!noteRequest) return;
     const note = noteValue.trim();
     if (!note) {
-      setError(noteRequest.action === "reject" ? "Enter a reason before rejecting the payment." : "Enter a reason before undoing the verification.");
+      setError(noteRequest.action === "return" ? "Enter a correction reason before returning the payment." : "Enter a reason before undoing the verification.");
       return;
     }
-    const saved = noteRequest.action === "reject"
-      ? await reviewPayment(noteRequest.payment, "rejected", note)
+    const saved = noteRequest.action === "return"
+      ? await reviewPayment(noteRequest.payment, "revision_requested", note)
       : await reversePayment(noteRequest.payment, note);
     if (saved) {
       setNoteRequest(null);
@@ -8979,14 +8999,14 @@ function QuotationPaymentDialog({
     }
   };
   const noteDialogBusy = noteRequest
-    ? workingPaymentId === `${text(noteRequest.payment.id)}:${noteRequest.action === "reject" ? "rejected" : "reversed"}`
+    ? workingPaymentId === `${text(noteRequest.payment.id)}:${noteRequest.action === "return" ? "revision_requested" : "reversed"}`
     : false;
   const paymentAmountHint = paymentValues.payment_kind === "downpayment"
     ? `Required remaining downpayment: ${peso.format(summary.downpaymentRemaining)}`
     : paymentValues.payment_kind === "full_payment"
       ? `Must equal available balance: ${peso.format(summary.available)}`
       : "Choose the payment type first";
-  const paymentAmountReadOnly = true;
+  const paymentAmountReadOnly = !editingPaymentId;
 
   return (
     <>
@@ -9045,8 +9065,9 @@ function QuotationPaymentDialog({
                 <div className="min-w-0">
                   <h3 className="text-[13px] font-semibold text-[#202938]">Client payment receipt</h3>
                   <p className="mt-1 max-w-3xl text-[12px] leading-[1.45] text-[#687386]">External Finance records each client payment separately. Internal Finance checks the receipt against the actual funds received before it counts as Cash In; management can handle reversals and exceptions.</p>
+                  {revisionPayment && <p className="mt-2 max-w-3xl rounded-[6px] border border-[#f0d49b] bg-[#fff8e9] px-3 py-2 text-[11px] leading-[1.45] text-[#8a5a00]">This receipt was returned for correction{text(revisionPayment.correction_note) ? `: ${text(revisionPayment.correction_note)}` : ". Upload the corrected details and receipt image, then resubmit it."}</p>}
                 </div>
-                {!formOpen && <Button disabled={summary.available <= 0 || paymentAccountsLoading || paymentAccountsForKind(initialPaymentKind).length === 0} onClick={openPaymentForm}><ReceiptText size={14} /> Add payment</Button>}
+                {!formOpen && <Button disabled={summary.available <= 0 || paymentAccountsLoading || paymentAccountsForKind(initialPaymentKind).length === 0} onClick={() => openPaymentForm()}><ReceiptText size={14} /> {revisionPayment ? "Edit & resubmit" : "Add payment"}</Button>}
               </div>
               {paymentAccountsLoading && (
                 <div className="border-t border-[#edf0f5] px-4 py-2">
@@ -9064,8 +9085,8 @@ function QuotationPaymentDialog({
                 <label className="text-[12px] font-medium text-[#202938]">Paid date<input type="date" value={paymentValues.paid_at} onChange={(event) => setPaymentValues((current) => ({ ...current, paid_at: event.target.value }))} className="input mt-1" /></label>
                 <label className="text-[12px] font-medium text-[#202938]">Received into account<SearchableSelect options={paymentAccountSelectOptions} value={paymentValues.finance_account_id} onChange={(value) => setPaymentValues((current) => ({ ...current, finance_account_id: value }))} placeholder={paymentAccountsLoading ? "Loading accounts..." : "Choose receiving account"} searchPlaceholder="Search receiving accounts" noResultsLabel="No matching receiving accounts." ariaLabel="Receiving Finance account" required clearable={false} disabled={paymentAccountsLoading || paymentAccountOptions.length === 0} className="mt-1" /><span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">{paymentAccountsLoading ? "Loading active Finance accounts..." : paymentAccountOptions.length === 0 && quotationPaymentTermsOption(liveQuote.payment_terms_option) === "pdc_50_50" && paymentValues.payment_kind === "full_payment" ? "No active Finance account is mapped to Check/PDC." : "Only active accounts added by Internal Finance are shown."}</span></label>
                 <label className="text-[12px] font-medium text-[#202938] sm:col-span-2">Reference number (optional)<input value={paymentValues.reference_no} onChange={(event) => setPaymentValues((current) => ({ ...current, reference_no: event.target.value }))} className="input mt-1" placeholder="Receipt or transaction reference" /></label>
-                <div className="text-[12px] font-medium text-[#202938] sm:col-span-2"><span className="mb-1 block">Receipt image</span><FileUploadControl accept="image/jpeg,image/png,image/webp" ariaLabel="Choose payment receipt image" className="mt-1" emptyLabel="Choose receipt image" files={paymentFile ? [paymentFile] : []} onFilesSelected={(files) => setPaymentFile(files[0] ?? null)} /></div>
-                <div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-3 sm:col-span-2 lg:col-span-4"><Button secondary disabled={saving} onClick={resetPaymentForm}>Cancel</Button><Button loading={saving} disabled={saving || !selectedPaymentAccount || !paymentAccountOptions.some((account) => account.id === selectedPaymentAccount.id)} onClick={() => void savePayment()}><Send size={13} /> Submit receipt</Button></div>
+                <div className="text-[12px] font-medium text-[#202938] sm:col-span-2"><span className="mb-1 block">Receipt image</span><FileUploadControl accept="image/jpeg,image/png,image/webp" ariaLabel="Choose payment receipt image" className="mt-1" emptyLabel={editingPaymentId ? "Choose replacement receipt image" : "Choose receipt image"} files={paymentFile ? [paymentFile] : []} onFilesSelected={(files) => setPaymentFile(files[0] ?? null)} /></div>
+                <div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-3 sm:col-span-2 lg:col-span-4"><Button secondary disabled={saving} onClick={resetPaymentForm}>Cancel</Button><Button loading={saving} disabled={saving || !selectedPaymentAccount || !paymentAccountOptions.some((account) => account.id === selectedPaymentAccount.id)} onClick={() => void savePayment()}><Send size={13} /> {editingPaymentId ? "Resubmit receipt" : "Submit receipt"}</Button></div>
               </div>}
             </section>}
 
@@ -9094,11 +9115,11 @@ function QuotationPaymentDialog({
                         <div className="space-y-1">
                           <span className="block">{paymentAccount?.account_name ?? (paymentAccountId ? "Account no longer active" : "Legacy account mapping")}</span>
                           <small>{paymentAccount ? quotationPaymentMethodLabel(paymentAccount.payment_method) : quotationPaymentMethodLabel(payment.method)}{text(payment.reference_no) ? ` · Ref ${text(payment.reference_no)}` : ""}</small>
-                          {canReviewAsFinance && status === "pending" && <button type="button" disabled={accountSaving || working} onClick={() => openAccountRequest(payment)} className="inline-flex items-center gap-1 text-[10px] font-medium text-[#c43b43] hover:text-[#9f2934] disabled:cursor-not-allowed disabled:opacity-50"><Pencil size={11} /> {paymentAccountId ? "Change account" : "Assign account"}</button>}
+                          {canManagePaymentAccount && status === "pending" && <button type="button" disabled={accountSaving || working} onClick={() => openAccountRequest(payment)} className="inline-flex items-center gap-1 text-[10px] font-medium text-[#c43b43] hover:text-[#9f2934] disabled:cursor-not-allowed disabled:opacity-50"><Pencil size={11} /> {paymentAccountId ? "Change account" : "Assign account"}</button>}
                         </div>
                       </td>
                       <td className="px-3 py-2.5">{receiptUrls[paymentId] ? <a href={receiptUrls[paymentId]} target="_blank" rel="noreferrer" className="inline-flex size-11 overflow-hidden rounded-[6px] border border-[#d9e0e9] bg-[#fafbfc]"><img src={receiptUrls[paymentId]} alt={text(payment.receipt_file_name, "Payment receipt")} className="size-full object-cover" /></a> : <span className="inline-flex items-center gap-1 text-[11px] text-[#8b92a1]"><ReceiptText size={14} /> Loading</span>}</td>
-                      <td className="px-3 py-2.5"><Status value={status} /></td>
+                      <td className="px-3 py-2.5"><Status value={status === "revision_requested" ? "needs revision" : status} /></td>
                       <td className="px-3 py-2.5">
                         {paymentNotes(payment).length ? (
                           <NoteAction label="View payment notes" onClick={() => setNotePayment(payment)} />
@@ -9107,15 +9128,17 @@ function QuotationPaymentDialog({
                         )}
                       </td>
                       <td className="min-w-44 px-3 py-2.5">
-                        {canReviewPayment(payment) && status === "pending" ? (
+                        {canSubmit && status === "revision_requested" ? (
+                          <button type="button" disabled={working || saving} onClick={() => openPaymentForm(payment)} className="inline-flex min-h-7 items-center gap-1 rounded-[6px] border border-[#d6b467] bg-white px-2.5 text-[11px] font-semibold text-[#8a5a00] transition-colors hover:bg-[#fff8e9] disabled:cursor-not-allowed disabled:opacity-50"><Pencil size={13} /> Edit &amp; resubmit</button>
+                        ) : canReviewPayment(payment) && status === "pending" ? (
                           <div className="flex flex-wrap items-center gap-1.5">
                             <button type="button" disabled={working} onClick={() => void reviewPayment(payment, "verified")} className="inline-flex min-h-7 items-center gap-1 rounded-[6px] bg-[#218b55] px-2.5 text-[11px] font-semibold text-white transition-colors hover:bg-[#176b40] disabled:cursor-not-allowed disabled:opacity-50"><Check size={13} /> Verify</button>
-                            <button type="button" disabled={working} onClick={() => openNoteRequest(payment, "reject")} className="inline-flex min-h-7 items-center gap-1 rounded-[6px] border border-[#e3a7a2] bg-white px-2.5 text-[11px] font-semibold text-[#b42318] transition-colors hover:bg-[#fff5f4] disabled:cursor-not-allowed disabled:opacity-50"><XCircle size={13} /> Reject</button>
+                            <button type="button" disabled={working} onClick={() => openNoteRequest(payment, "return")} className="inline-flex min-h-7 items-center gap-1 rounded-[6px] border border-[#d6b467] bg-white px-2.5 text-[11px] font-semibold text-[#8a5a00] transition-colors hover:bg-[#fff8e9] disabled:cursor-not-allowed disabled:opacity-50"><Undo2 size={13} /> Return for correction</button>
                           </div>
                         ) : canReviewAsManager && status === "verified" ? (
                           <button type="button" disabled={working} onClick={() => openNoteRequest(payment, "reverse")} className="inline-flex min-h-7 items-center gap-1 rounded-[6px] border border-[#e3a7a2] bg-white px-2.5 text-[11px] font-semibold text-[#b42318] transition-colors hover:bg-[#fff5f4] disabled:cursor-not-allowed disabled:opacity-50"><RotateCcw size={13} /> Undo verification</button>
                         ) : (
-                          <span className="text-[11px] text-[#8b92a1]">{status === "pending" ? (canReviewAsFinance ? "Awaiting Internal Finance confirmation" : reviewerId ? (reviewerId === text(payment.submitted_by, "") ? "Awaiting General Manager exception review" : "Awaiting Internal Finance confirmation") : "Awaiting Internal Finance confirmation") : text(payment.verified_at ?? payment.reversed_at, "-")}</span>
+                          <span className="text-[11px] text-[#8b92a1]">{status === "pending" ? (!allowReview && isInternalFinanceRole(role) ? "Review in Finance > Pending approvals" : canReviewAsFinance ? "Awaiting Internal Finance confirmation" : reviewerId ? (reviewerId === text(payment.submitted_by, "") ? "Awaiting General Manager exception review" : "Awaiting Internal Finance confirmation") : "Awaiting Internal Finance confirmation") : status === "revision_requested" ? "Awaiting External Finance correction" : text(payment.verified_at ?? payment.reversed_at, "-")}</span>
                         )}
                       </td>
                     </tr>;
@@ -9142,16 +9165,16 @@ function QuotationPaymentDialog({
             <div className="flex items-start justify-between gap-4 border-b border-[#e1e6ee] pb-3">
               <div>
                 <p className="text-[11px] font-medium uppercase tracking-wide text-[#7b8494]">Payment review note</p>
-                <h2 id="payment-note-title" className="mt-1 text-[16px] font-semibold text-[#202938]">{noteRequest.action === "reject" ? "Reject receipt" : "Undo verification"}</h2>
+                <h2 id="payment-note-title" className="mt-1 text-[16px] font-semibold text-[#202938]">{noteRequest.action === "return" ? "Return for correction" : "Undo verification"}</h2>
               </div>
               <button type="button" onClick={closeNoteRequest} disabled={noteDialogBusy} aria-label="Close payment review note" className="grid size-8 place-items-center rounded-[6px] text-[#687386] hover:bg-[#f0f3f7] disabled:cursor-not-allowed disabled:opacity-50"><X size={18} /></button>
             </div>
-            <p className="mt-4 text-[12px] leading-[1.45] text-[#687386]">{noteRequest.action === "reject" ? "Explain why this client receipt cannot be accepted. The payment will remain unverified." : "Use this only when a previously verified receipt was invalidated, refunded, or entered incorrectly. Its amount will stop counting toward Verified Paid."}</p>
+            <p className="mt-4 text-[12px] leading-[1.45] text-[#687386]">{noteRequest.action === "return" ? "Explain what External Finance must correct. The receipt will remain outside Cash In until it is resubmitted and verified." : "Use this only when a previously verified receipt was invalidated, refunded, or entered incorrectly. Its amount will stop counting toward Verified Paid."}</p>
             {feedback && <div role="alert" className={`mt-4 flex items-start gap-2 rounded-[6px] border px-3 py-2.5 text-[12px] ${feedback.tone === "error" ? "border-[#f2b8b5] bg-[#fff5f4] text-[#b42318]" : "border-[#b7dfc5] bg-[#f1fbf4] text-[#176b40]"}`}><XCircle size={15} className="mt-0.5 shrink-0" /><span>{feedback.message}</span></div>}
-            <label className="mt-4 block text-[12px] font-medium text-[#202938]">Reason<textarea autoFocus rows={4} value={noteValue} onChange={(event) => { setNoteValue(event.target.value); if (feedback?.tone === "error") setFeedback(null); }} className="input mt-1 min-h-[96px] resize-y" placeholder={noteRequest.action === "reject" ? "Reason for rejecting this receipt" : "Reason for undoing the verification"} /></label>
+            <label className="mt-4 block text-[12px] font-medium text-[#202938]">Reason<textarea autoFocus rows={4} value={noteValue} onChange={(event) => { setNoteValue(event.target.value); if (feedback?.tone === "error") setFeedback(null); }} className="input mt-1 min-h-[96px] resize-y" placeholder={noteRequest.action === "return" ? "Explain what must be corrected" : "Reason for undoing the verification"} /></label>
             <div className="mt-5 flex justify-end gap-2 border-t border-[#e1e6ee] pt-3">
               <Button secondary disabled={noteDialogBusy} onClick={closeNoteRequest}>Cancel</Button>
-              <button type="button" disabled={noteDialogBusy} onClick={() => void submitNoteRequest()} className="inline-flex min-h-8 items-center gap-1.5 rounded-[6px] bg-[#b42318] px-3 text-[13px] font-medium text-white transition-colors hover:bg-[#8f1d14] disabled:cursor-not-allowed disabled:opacity-50">{noteDialogBusy && <LoaderCircle size={14} className="animate-spin" />}{noteRequest.action === "reject" ? <><XCircle size={14} /> Reject receipt</> : <><RotateCcw size={14} /> Undo verification</>}</button>
+              <button type="button" disabled={noteDialogBusy} onClick={() => void submitNoteRequest()} className="inline-flex min-h-8 items-center gap-1.5 rounded-[6px] bg-[#a76605] px-3 text-[13px] font-medium text-white transition-colors hover:bg-[#8a5a00] disabled:cursor-not-allowed disabled:opacity-50">{noteDialogBusy && <LoaderCircle size={14} className="animate-spin" />}{noteRequest.action === "return" ? <><Undo2 size={14} /> Return for correction</> : <><RotateCcw size={14} /> Undo verification</>}</button>
             </div>
           </section>
         </div>
@@ -9254,6 +9277,7 @@ function PaymentMonitoring({
   const [paymentPage, setPaymentPage] = useState(1);
   const isGeneralManager = memberRole(role);
   const isExternalFinance = role === "external_finance";
+  const isInternalFinance = isInternalFinanceRole(role);
   const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
   const deferredPaymentQuery = useDeferredValue(paymentQuery);
   useEffect(() => {
@@ -9324,7 +9348,8 @@ function PaymentMonitoring({
     .filter(({ matchesSearch, matchesOfficer, matchingRecords }) => matchesSearch && matchesOfficer && (!paymentMonth || matchingRecords.length > 0)),
     [currentUserId, deferredPaymentQuery, paymentMonth, paymentOfficerFilter, store],
   );
-  const rows = approvedQuotes.filter(({ summary, pendingForReview }) => assignedOnly ? pendingForReview.length > 0 : scope === "all" || summary.pending > 0);
+  const effectiveScope = isInternalFinance ? "all" : scope;
+  const rows = approvedQuotes.filter(({ summary, pendingForReview }) => assignedOnly ? pendingForReview.length > 0 : effectiveScope === "all" || summary.pending > 0 || (isExternalFinance && summary.status === "needs_revision"));
   const paymentPageCount = Math.max(1, Math.ceil(rows.length / TABLE_PAGE_SIZE));
   const activePaymentPage = Math.min(paymentPage, paymentPageCount);
   const visiblePaymentRows = rows.slice(
@@ -9336,12 +9361,15 @@ function PaymentMonitoring({
   }, [assignedOnly, paymentMonth, paymentOfficerFilter, paymentQuery, scope]);
   const pendingCount = assignedOnly
     ? approvedQuotes.reduce((count, { pendingForReview }) => count + pendingForReview.length, 0)
-    : approvedQuotes.filter(({ summary }) => summary.pending > 0).length;
+    : approvedQuotes.filter(({ summary }) => summary.pending > 0 || (isExternalFinance && summary.status === "needs_revision")).length;
+  const needsCorrectionCount = isExternalFinance
+    ? approvedQuotes.filter(({ summary }) => summary.status === "needs_revision").length
+    : 0;
   useEffect(() => {
-    if (paymentScopeAutoResolved.current || assignedOnly || isExternalFinance) return;
+    if (paymentScopeAutoResolved.current || assignedOnly || isExternalFinance || isInternalFinance) return;
     setScope(pendingCount > 0 ? "pending" : "all");
     paymentScopeAutoResolved.current = true;
-  }, [assignedOnly, isExternalFinance, pendingCount]);
+  }, [assignedOnly, isExternalFinance, isInternalFinance, pendingCount]);
   const pendingAmount = assignedOnly
     ? approvedQuotes.reduce((sum, { pendingForReview }) => sum + pendingForReview.reduce((total, payment) => total + n(payment.amount), 0), 0)
     : approvedQuotes.reduce((sum, { summary }) => sum + summary.pending, 0);
@@ -9349,22 +9377,24 @@ function PaymentMonitoring({
   const monitoringDetail = assignedOnly
     ? "Payment Reviews is reserved for the future assigned-review workflow."
     : isExternalFinance
-      ? "Record client payment receipts for approved quotations. Internal Finance verifies them before they become Cash In."
+      ? "View each quotation's payment history. Record new receipts in Finance > Transaction history > Record Cash In."
+      : isInternalFinance
+        ? "Browse approved Price Quotations and view payment history. Pending receipts are reviewed in Finance > Pending approvals."
       : isGeneralManager
         ? "Review client payment receipts and reverse verified entries when necessary."
         : "Internal Finance reviews client receipt evidence separately from quotation and production approvals. Only verified collections become Cash In.";
-  const pendingScopeLabel = isExternalFinance ? "Pending confirmation" : "Pending review";
-  const paymentActionLabel = isExternalFinance ? "View or record quotation payments" : "Review quotation payments";
+  const pendingScopeLabel = isExternalFinance ? "Needs attention" : "Pending review";
+  const paymentActionLabel = isExternalFinance ? "View quotation payment history" : isInternalFinance ? "View quotation payments" : "Review quotation payments";
   return (
     <Panel
-      title={assignedOnly ? "Payment Reviews" : "Quotation Payments"}
+      title={assignedOnly ? "Payment Reviews" : isInternalFinance ? "Approved quotations" : "Quotation Payment History"}
       detail={monitoringDetail}
       variant="page"
       hideHeading
     >
       <div className="px-4 py-4 sm:px-5 lg:px-6">
         <div className="grid gap-3 sm:grid-cols-3">
-          <div className="rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3"><p className="text-[11px] uppercase tracking-wide text-[#7b8494]">{assignedOnly ? "Receipts assigned to me" : "Pending receipts"}</p><p className="mt-1 text-[16px] font-semibold text-[#a76605]">{pendingCount}</p><p className="mt-1 text-[11px] text-[#687386]">{peso.format(pendingAmount)} awaiting review</p></div>
+          <div className="rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3"><p className="text-[11px] uppercase tracking-wide text-[#7b8494]">{assignedOnly ? "Receipts assigned to me" : isInternalFinance ? "Pending in Finance queue" : "Pending receipts"}</p><p className="mt-1 text-[16px] font-semibold text-[#a76605]">{pendingCount}</p><p className="mt-1 text-[11px] text-[#687386]">{needsCorrectionCount ? `${needsCorrectionCount} need${needsCorrectionCount === 1 ? "s" : ""} correction` : `${peso.format(pendingAmount)} awaiting review`}</p></div>
           <div className="rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3"><p className="text-[11px] uppercase tracking-wide text-[#7b8494]">Verified paid</p><p className="mt-1 text-[16px] font-semibold text-[#218b55]">{peso.format(verifiedAmount)}</p><p className="mt-1 text-[11px] text-[#687386]">Approved receipt total</p></div>
           <div className="rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3"><p className="text-[11px] uppercase tracking-wide text-[#7b8494]">Approved quotations</p><p className="mt-1 text-[16px] font-semibold text-[#202938]">{approvedQuotes.length}</p><p className="mt-1 text-[11px] text-[#687386]">Price Quotations in the current filters</p></div>
         </div>
@@ -9386,7 +9416,7 @@ function PaymentMonitoring({
           }}
           hasFilters={Boolean(paymentQuery || paymentMonth || paymentOfficerFilter !== "all")}
         />
-        {!assignedOnly && <nav aria-label="Payment monitoring scope" className="app-tabs mt-4">
+        {!assignedOnly && !isInternalFinance && <nav aria-label="Payment monitoring scope" className="app-tabs mt-4">
           <button type="button" onClick={() => setScope("pending")} aria-current={scope === "pending" ? "page" : undefined} className="app-tab">{pendingScopeLabel} ({pendingCount})</button>
           <button type="button" onClick={() => setScope("all")} aria-current={scope === "all" ? "page" : undefined} className="app-tab">Approved quotations ({approvedQuotes.length})</button>
         </nav>}
@@ -9394,7 +9424,7 @@ function PaymentMonitoring({
         {rows.length ? (
           <>
           <div className="modern-table-shell">
-          <Table labels={["Quotation", "Client", "Prepared by", "Payment status", "Pending", "Verified / Total", "Last receipt", isExternalFinance ? "Payments" : "Review"]} minWidth={1120}>
+          <Table labels={["Quotation", "Client", "Prepared by", "Payment status", "Pending", "Verified / Total", "Last receipt", isExternalFinance ? "Payments" : isInternalFinance ? "View" : "Review"]} minWidth={1120}>
             {visiblePaymentRows.map(({ quote, allRecords, pendingForReview, summary }) => {
               const party = quotationParty(quote, store);
               const preparedBy = text(store.profiles.find((profile) => profile.id === (quote.prepared_by_user_id ?? quote.created_by))?.full_name, text(quote.representative, "Sales Executive"));
@@ -9423,10 +9453,10 @@ function PaymentMonitoring({
           />
           </>
         ) : (
-          <Empty>{assignedOnly ? "No payment receipts are currently assigned to you." : scope === "pending" ? (isExternalFinance ? "No quotation payment receipts are awaiting Internal Finance confirmation." : "No quotation payment receipts are awaiting review.") : "No approved Price Quotations match the current filters."}</Empty>
+          <Empty>{assignedOnly ? "No payment receipts are currently assigned to you." : effectiveScope === "pending" ? (isExternalFinance ? "No quotation payment receipts are awaiting confirmation or correction." : "No quotation payment receipts are awaiting review.") : "No approved Price Quotations match the current filters."}</Empty>
         )}
       </div>
-      {paymentQuote && <QuotationPaymentDialog quote={paymentQuote} store={store} orgId={orgId} role={role} close={() => setPaymentQuote(null)} reload={reload} />}
+      {paymentQuote && <QuotationPaymentDialog quote={paymentQuote} store={store} orgId={orgId} role={role} allowReview={!isInternalFinance} historyOnly={isExternalFinance} close={() => setPaymentQuote(null)} reload={reload} />}
     </Panel>
   );
 }
@@ -16171,7 +16201,7 @@ function PriceQuotationWorkspace({
       )}
       {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); notice(message); }} autoExportPdf pdfWindow={pdfWindow} printAfterOpen={printAfterOpen} hidden showInternalCosting={isGeneralManager} />}
       {reviewing && <PriceQuotationReview quotation={reviewing} store={store} saving={saving} showInternalMarkups={isGeneralManager} close={() => setReviewing(null)} notice={notice} reload={reload} />}
-      {paymentQuote && <QuotationPaymentDialog quote={paymentQuote} store={store} orgId={orgId} role={role} close={() => setPaymentQuote(null)} reload={reload} />}
+      {paymentQuote && <QuotationPaymentDialog quote={paymentQuote} store={store} orgId={orgId} role={role} historyOnly={role === "external_finance"} close={() => setPaymentQuote(null)} reload={reload} />}
     </Panel>
   );
 }
@@ -22772,8 +22802,17 @@ export function HuswellWorkspace({
     });
     if (error) return;
     const parsed = parseSidebarQueueCounts(data);
-    if (parsed) setSidebarQueueCounts(parsed);
-  }, [client, organizationId]);
+    if (!parsed) return;
+    if (isInternalFinanceRole(role)) {
+      setSidebarQueueCounts({
+        ...parsed,
+        finance: parsed.finance + parsed.quotation_payments,
+        quotation_payments: 0,
+      });
+      return;
+    }
+    setSidebarQueueCounts(parsed);
+  }, [client, organizationId, role]);
   const canEditOwnProfile = ["owner", "admin", "project_manager", "sales_pricing_officer", "internal_finance", "external_finance", "lead_coordinator"].includes(
     role,
   );
@@ -23302,7 +23341,7 @@ export function HuswellWorkspace({
       items: [
         { view: "Finance Overview", icon: Wallet },
         { view: "Finance", icon: Wallet, badge: sidebarBadge("finance") },
-        { view: "Payment Monitoring", icon: ReceiptText, badge: sidebarBadge("quotation_payments") },
+        { view: "Payment Monitoring", icon: ReceiptText, badge: isInternalFinanceRole(role) ? undefined : sidebarBadge("quotation_payments") },
         { view: "Commissions", icon: PhilippinePeso },
         { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
@@ -23361,7 +23400,7 @@ export function HuswellWorkspace({
       items: [
         { view: "Finance Overview", icon: Wallet },
         { view: "Finance", icon: Wallet, badge: sidebarBadge("finance") },
-        { view: "Payment Monitoring", icon: ReceiptText, badge: sidebarBadge("quotation_payments") },
+        { view: "Payment Monitoring", icon: ReceiptText, badge: isInternalFinanceRole(role) ? undefined : sidebarBadge("quotation_payments") },
         ...(!["external_finance", "internal_finance"].includes(role) ? [{ view: "Commissions" as View, icon: PhilippinePeso }] : []),
       ],
     },
@@ -23517,9 +23556,11 @@ export function HuswellWorkspace({
         : "Review every pending management decision from one queue.",
     },
     "Payment Monitoring": {
-      title: "Quotation Payments",
+      title: isInternalFinanceRole(role) ? "Approved quotations" : "Quotation Payment History",
       detail: role === "external_finance"
-        ? "Record client payment receipts for approved quotations; Internal Finance confirms them before they become Cash In."
+        ? "View each quotation's payment history. Record new receipts in Finance > Transaction history > Record Cash In."
+        : isInternalFinanceRole(role)
+          ? "Browse approved Price Quotations; review pending receipts in Internal Finance > Pending approvals."
         : memberRole(role)
           ? "Review client payment receipts and reverse verified entries when necessary."
           : "Internal Finance confirms client receipts before they become Cash In.",
@@ -23570,11 +23611,11 @@ export function HuswellWorkspace({
     ) : loading ? (
       <Panel
         title={
-          active === "Leads" ? leads.title : active === "Projects" ? projects.title : active === "Price Quotation Review" ? "Price Quotation Review" : active === "PDF Costing" ? "Print Costing" : active === "Approvals" || active === "Submissions" ? (productionApprovalOnly ? "Production Approval Center" : "Management Approval Center") : active === "Payment Monitoring" ? "Quotation Payments" : active === "Payment Reviews" ? "Payment Reviews" : "Loading workspace"
+          active === "Leads" ? leads.title : active === "Projects" ? projects.title : active === "Price Quotation Review" ? "Price Quotation Review" : active === "PDF Costing" ? "Print Costing" : active === "Approvals" || active === "Submissions" ? (productionApprovalOnly ? "Production Approval Center" : "Management Approval Center") : active === "Payment Monitoring" ? (isInternalFinanceRole(role) ? "Approved quotations" : "Quotation Payment History") : active === "Payment Reviews" ? "Payment Reviews" : "Loading workspace"
         }
         detail={
           active === "Leads" || active === "Projects" || active === "Price Quotation Review" || active === "PDF Costing" || active === "Approvals" || active === "Submissions" || active === "Payment Monitoring" || active === "Payment Reviews"
-            ? (active === "Projects" ? projects.detail : active === "Price Quotation Review" ? "Loading Price Quotation review queue." : active === "PDF Costing" ? "Loading Print Costing requests." : active === "Approvals" || active === "Submissions" ? (productionApprovalOnly ? "Loading production approval queue." : "Loading management approval queue.") : active === "Payment Monitoring" ? "Loading quotation payments." : active === "Payment Reviews" ? "Loading assigned payment reviews." : leads.detail)
+            ? (active === "Projects" ? projects.detail : active === "Price Quotation Review" ? "Loading Price Quotation review queue." : active === "PDF Costing" ? "Loading Print Costing requests." : active === "Approvals" || active === "Submissions" ? (productionApprovalOnly ? "Loading production approval queue." : "Loading management approval queue.") : active === "Payment Monitoring" ? (isInternalFinanceRole(role) ? "Loading approved quotations." : "Loading quotation payment history.") : active === "Payment Reviews" ? "Loading assigned payment reviews." : leads.detail)
             : "Loading business data."
         }
       >
@@ -23887,8 +23928,10 @@ export function HuswellWorkspace({
                               ? "Price Quotations"
                               : view === "Approvals"
                                 ? "Approval Center"
+                                : view === "Payment Monitoring" && isInternalFinanceRole(role)
+                                  ? "Approved quotations"
                                 : view === "Payment Monitoring"
-                                  ? "Quotation Payments"
+                                  ? "Quotation Payment History"
                                 : view === "Payment Reviews"
                                   ? "Payment Reviews"
                                 : view;

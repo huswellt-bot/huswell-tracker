@@ -3,7 +3,9 @@
 
 import {
   Check,
+  ChevronDown,
   Download,
+  FileText,
   LoaderCircle,
   Plus,
   ReceiptText,
@@ -21,6 +23,7 @@ import {
   View as PdfView,
   pdf,
 } from "@react-pdf/renderer";
+import { createPortal } from "react-dom";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { FileUploadControl } from "@/components/ui/file-upload-control";
@@ -33,17 +36,36 @@ import { NotificationDialog } from "@/components/ui/notification-dialog";
 
 type Row = { id?: string; [key: string]: unknown };
 type Direction = "income" | "expense";
+type CashInSource = "other_income" | "quotation_payment";
 type ExpenseMode = "regular" | "supplier";
-type Tab = "overview" | "transactions" | "accounts" | "budget" | "supplier_costing" | "payables";
+type Tab = "overview" | "approvals" | "transactions" | "accounts" | "budget" | "supplier_costing" | "payables";
 type PayablesSection = "commission" | "supplier";
 type Period = "all" | "weekly" | "monthly" | "yearly";
 type BudgetDecision = "approved" | "rejected" | "revision_requested";
+type QuotationPaymentDecision = "verified" | "revision_requested" | "rejected";
 type TransactionView = "all" | "income" | "expense";
 type TransactionSourceFilter = "all" | "quotation_payment" | "other_income" | "regular_expense" | "supplier_payment" | "commission_payout";
 type TransactionStatusFilter = "all" | "needs_review" | "completed" | "returned" | "reversed";
+type PendingApprovalFilter = "all" | "income" | "expense";
+
+type PendingApprovalRow = {
+  id: string;
+  kind: "quotation_payment" | "finance_transaction";
+  direction: Direction;
+  date: unknown;
+  description: string;
+  source: string;
+  amount: number;
+  accountId: string;
+  status: string;
+  receiptPath: string;
+  receiptBucket: string;
+  payment?: Row;
+  transaction?: Row;
+};
 
 const transactionViewOptions: Array<{ value: TransactionView; label: string }> = [
-  { value: "all", label: "All transactions" },
+  { value: "all", label: "All" },
   { value: "income", label: "Cash In" },
   { value: "expense", label: "Cash Out" },
 ];
@@ -98,6 +120,13 @@ const financePaymentMethods = [
 const financePaymentMethodLabel = (value: unknown) =>
   financePaymentMethods.find(([key]) => key === String(value ?? ""))?.[1] ?? "Other";
 
+const defaultPaymentMethodForAccountType = (accountType: string) => {
+  if (accountType === "e_wallet") return "gcash";
+  if (accountType === "cash") return "cash";
+  if (accountType === "other") return "other";
+  return "bank_transfer";
+};
+
 const accountFundingSources = [
   ["owner_funding", "Owner funding"],
   ["loan_received", "Loan received"],
@@ -114,6 +143,17 @@ const peso = new Intl.NumberFormat("en-PH", {
 const stringValue = (row: Row | null | undefined, key: string, fallback = "") => {
   const value = row?.[key];
   return value === null || value === undefined ? fallback : String(value);
+};
+
+const uniqueTextParts = (values: string[]) => {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    const trimmed = value.trim();
+    const key = trimmed.toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).map((value) => value.trim());
 };
 
 const numericValue = (row: Row | null | undefined, key: string) => {
@@ -163,9 +203,50 @@ const defaultTransaction = (direction: Direction, categoryId = "") => ({
   payment_status: "unpaid",
   lead_id: "",
   quotation_id: "",
+  payment_kind: "downpayment",
   supplier_payable_id: "",
   commission_allocation_id: "",
 });
+
+const quotationPaymentKindOptions = [
+  ["downpayment", "Downpayment"],
+  ["full_payment", "Full payment"],
+] as const;
+
+type FinanceQuotationPaymentSummary = {
+  total: number;
+  pending: number;
+  verified: number;
+  available: number;
+  downpaymentTarget: number;
+  downpaymentRemaining: number;
+};
+
+const roundFinancePayment = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+
+const financeQuotationPaymentSummary = (quotation: Row, records: Row[]): FinanceQuotationPaymentSummary => {
+  const total = roundFinancePayment(Math.max(0, numericValue(quotation, "total_amount")));
+  const related = records.filter((record) => String(record.quotation_id ?? "") === String(quotation.id ?? ""));
+  const pending = roundFinancePayment(related.filter((record) => stringValue(record, "status") === "pending").reduce((sum, record) => sum + numericValue(record, "amount"), 0));
+  const verified = roundFinancePayment(related.filter((record) => stringValue(record, "status") === "verified").reduce((sum, record) => sum + numericValue(record, "amount"), 0));
+  const downpaymentTarget = roundFinancePayment(total * 0.5);
+  return {
+    total,
+    pending,
+    verified,
+    available: roundFinancePayment(Math.max(total - verified - pending, 0)),
+    downpaymentTarget,
+    downpaymentRemaining: roundFinancePayment(Math.max(downpaymentTarget - verified - pending, 0)),
+  };
+};
+
+const financeQuotationPaymentDefaultKind = (summary: FinanceQuotationPaymentSummary) =>
+  summary.downpaymentRemaining > 0 ? "downpayment" : "full_payment";
+
+const financeQuotationPaymentSuggestedAmount = (kind: string, summary: FinanceQuotationPaymentSummary) => {
+  const amount = kind === "downpayment" ? summary.downpaymentRemaining : kind === "full_payment" ? summary.available : 0;
+  return amount > 0 ? roundFinancePayment(amount).toFixed(2) : "";
+};
 
 const statusClass = (value: string) => {
   if (["rejected", "cancelled", "voided", "reversed"].includes(value)) return "bg-[#fef3f2] text-[#b42318]";
@@ -246,6 +327,7 @@ const secondaryButton =
 type FinanceAction =
   | { kind: "approve_and_pay"; id: string; label: string }
   | { kind: "revision"; id: string; label: string }
+  | { kind: "quotation_payment"; id: string; decision: QuotationPaymentDecision; label: string }
   | { kind: "verify_income"; id: string; label: string }
   | { kind: "income_revision"; id: string; label: string }
   | { kind: "income_void"; id: string; label: string }
@@ -527,7 +609,7 @@ function TransactionTable({
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate text-[12px] font-semibold text-[#202938]">{description}</p>
-                  <p className="mt-1 text-[10px] text-[#7d8797]">{displayDate(transaction.transaction_date)}{stringValue(transaction, "transaction_time") ? ` Â· ${stringValue(transaction, "transaction_time")}` : ""}</p>
+                  <p className="mt-1 text-[10px] text-[#7d8797]">{displayDate(transaction.transaction_date)}{stringValue(transaction, "transaction_time") ? ` · ${stringValue(transaction, "transaction_time")}` : ""}</p>
                 </div>
                 <div className="shrink-0 text-right">
                   <p className={`text-[13px] font-semibold ${type === "income" ? "text-[#218b55]" : "text-[#b42318]"}`}>{type === "income" ? "+" : "−"}{peso.format(amount)}</p>
@@ -543,7 +625,7 @@ function TransactionTable({
               {budgetLabel(transaction.budget_request_id) && <p className="mt-2 text-[10px] text-[#687386]">Budget: {budgetLabel(transaction.budget_request_id)}</p>}
               <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[#edf0f5] pt-3">
                 <button type="button" onClick={() => onSelectTransaction(transaction)} className="button-secondary text-[10px]">Details</button>
-                {canChangeAccount && <select aria-label={type === "income" ? "Receiving account" : "Payment account"} defaultValue={accountId} onChange={(event) => void assignAccount(String(transaction.id), event.target.value)} disabled={saving} className="input min-w-[150px] flex-1 text-[10px]"><option value="">Choose account</option>{accounts.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")} Â· {financePaymentMethodLabel(account.payment_method)}</option>)}</select>}
+                {canChangeAccount && <select aria-label={type === "income" ? "Receiving account" : "Payment account"} defaultValue={accountId} onChange={(event) => void assignAccount(String(transaction.id), event.target.value)} disabled={saving} className="input min-w-[150px] flex-1 text-[10px]"><option value="">Choose account</option>{accounts.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")} · {financePaymentMethodLabel(account.payment_method)}</option>)}</select>}
                 {!canChangeAccount && !accountId && internal && !isVoided && <span className="text-[10px] text-[#a76605]">Needs finance account</span>}
                 {stringValue(transaction, "receipt_storage_path") && <button type="button" onClick={() => void openReceipt(stringValue(transaction, "receipt_storage_path"), receiptBucket)} className="button-secondary text-[10px]" title="View receipt"><ReceiptText size={14} /> Receipt</button>}
                  {canVerifyIncome && <button type="button" disabled={saving} onClick={() => verifyIncome(String(transaction.id))} className="button-secondary text-[10px] text-[#218b55]">Verify Cash In</button>}
@@ -590,7 +672,7 @@ function TransactionTable({
                 <td>{description}{manualIncome && <small>{stringValue(transaction, "reference_number") ? `Ref: ${stringValue(transaction, "reference_number")}` : "Standalone income"}</small>}{transactionNote(transaction) !== "-" && <small>{transactionNote(transaction)}</small>}</td>
                 <td><span className="whitespace-nowrap">{transactionSourceLabel(transaction)}</span>{Boolean(transaction.source_payment_id) && <small>Verified from quotation</small>}</td>
                 <td>{categoryName(transaction.category_id)}{budgetLabel(transaction.budget_request_id) && <small>Budget: {budgetLabel(transaction.budget_request_id)}</small>}</td>
-                <td>{canChangeAccount ? <select aria-label={type === "income" ? "Receiving account" : "Payment account"} defaultValue={accountId} onChange={(event) => void assignAccount(String(transaction.id), event.target.value)} disabled={saving} className="input min-w-[145px] text-[10px]"><option value="">Choose account</option>{accounts.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")} Â· {financePaymentMethodLabel(account.payment_method)}</option>)}</select> : accountName(transaction.account_id)}</td>
+                <td>{canChangeAccount ? <select aria-label={type === "income" ? "Receiving account" : "Payment account"} defaultValue={accountId} onChange={(event) => void assignAccount(String(transaction.id), event.target.value)} disabled={saving} className="input min-w-[145px] text-[10px]"><option value="">Choose account</option>{accounts.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")} · {financePaymentMethodLabel(account.payment_method)}</option>)}</select> : accountName(transaction.account_id)}</td>
                 <td className={`whitespace-nowrap font-semibold ${type === "income" ? "text-[#218b55]" : "text-[#b42318]"}`}>{type === "income" ? "+" : "−"}{peso.format(amount)}</td>
                 <td><StatusPill value={transactionStatusLabel(transaction)} /></td>
                 <td>{stringValue(transaction, "receipt_storage_path") ? <button type="button" onClick={() => void openReceipt(stringValue(transaction, "receipt_storage_path"), receiptBucket)} className="text-[#c43b43]" title="View receipt"><ReceiptText size={15} /></button> : "-"}</td>
@@ -650,7 +732,7 @@ function TransactionDetailDialog({
   return (
     <FinanceDialog
       title={`${transactionSourceLabel(transaction)} details`}
-      detail={`${isIncome ? "Cash In" : "Cash Out"} Â· ${displayDate(transaction.transaction_date)}`}
+      detail={`${isIncome ? "Cash In" : "Cash Out"} · ${displayDate(transaction.transaction_date)}`}
       close={close}
     >
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -659,7 +741,7 @@ function TransactionDetailDialog({
           <p className={`mt-1 text-2xl font-semibold ${isIncome ? "text-[#218b55]" : "text-[#b42318]"}`}>{isIncome ? "+" : "−"}{peso.format(amount)}</p>
           <div className="mt-2"><StatusPill value={transactionStatusLabel(transaction)} /></div>
         </div>
-        <TransactionDetailField label="Date">{displayDate(transaction.transaction_date)}{stringValue(transaction, "transaction_time") ? ` Â· ${stringValue(transaction, "transaction_time")}` : ""}</TransactionDetailField>
+        <TransactionDetailField label="Date">{displayDate(transaction.transaction_date)}{stringValue(transaction, "transaction_time") ? ` · ${stringValue(transaction, "transaction_time")}` : ""}</TransactionDetailField>
         <TransactionDetailField label="Source">{transactionSourceLabel(transaction)}</TransactionDetailField>
         <TransactionDetailField label="Category">{categoryName(transaction.category_id)}</TransactionDetailField>
         <TransactionDetailField label="Account">{accountName(transaction.account_id)}</TransactionDetailField>
@@ -678,6 +760,413 @@ function TransactionDetailDialog({
         <button type="button" onClick={close} className="button-primary">Close</button>
       </div>
     </FinanceDialog>
+  );
+}
+
+// Kept as a compatibility helper for any older local callers while the
+// approval center uses the normalized table below.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function PendingQuotationPaymentTable({
+  rows,
+  quotations,
+  leads,
+  accounts,
+  accountName,
+  openReceipt,
+  assignAccount,
+  review,
+  saving,
+}: {
+  rows: Row[];
+  quotations: Row[];
+  leads: Row[];
+  accounts: Row[];
+  accountName: (id: unknown) => string;
+  openReceipt: (path: string, bucket?: string) => Promise<void>;
+  assignAccount: (paymentId: string, accountId: string) => Promise<void>;
+  review: (paymentId: string, decision: QuotationPaymentDecision) => void;
+  saving: boolean;
+}) {
+  const [page, setPage] = useState(1);
+  const pageCount = Math.max(1, Math.ceil(rows.length / TABLE_PAGE_SIZE));
+  const activePage = Math.min(page, pageCount);
+  const visibleRows = rows.slice(
+    (activePage - 1) * TABLE_PAGE_SIZE,
+    activePage * TABLE_PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [rows.length]);
+
+  const quoteFor = (payment: Row) =>
+    quotations.find((quotation) => quotation.id === payment.quotation_id);
+  const leadFor = (quote: Row | undefined) =>
+    leads.find((lead) => lead.id === quote?.lead_id);
+  const accountOptionsFor = (payment: Row) =>
+    accounts.filter(
+      (account) =>
+        Boolean(account.is_active) &&
+        stringValue(account, "payment_method") === stringValue(payment, "method"),
+    );
+
+  const paymentDetails = (payment: Row) => {
+    const quote = quoteFor(payment);
+    const lead = leadFor(quote);
+    return {
+      quote,
+      quoteNo: stringValue(quote, "quotation_no", "Price Quotation"),
+      project: stringValue(quote, "project_name", "—"),
+      client: stringValue(lead, "client_name", stringValue(quote, "client_name", "—")),
+      accountId: stringValue(payment, "finance_account_id"),
+      accountOptions: accountOptionsFor(payment),
+      date: displayDate(payment.paid_at ?? payment.submitted_at ?? payment.created_at),
+      method: financePaymentMethodLabel(payment.method),
+      kind: stringValue(payment, "payment_kind", "payment").replaceAll("_", " "),
+      amount: peso.format(numericValue(payment, "amount")),
+      receiptPath: stringValue(payment, "receipt_storage_path"),
+    };
+  };
+
+  return (
+    <div className="finance-transaction-table">
+      <div className="space-y-2 md:hidden">
+        {visibleRows.map((payment) => {
+          const details = paymentDetails(payment);
+          return (
+            <article key={String(payment.id)} className="rounded-lg border border-[#d9e0e9] bg-white p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-[12px] font-semibold text-[#202938]">{details.quoteNo}</p>
+                  <p className="mt-1 text-[10px] text-[#7d8797]">{details.client} · {details.project}</p>
+                  <p className="mt-1 text-[10px] text-[#7d8797]">{details.date} · {details.kind}</p>
+                </div>
+                <StatusPill value="pending_confirmation" />
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-3 text-[11px]">
+                <div><span className="block text-[10px] text-[#8b92a1]">Amount</span><span className="font-semibold text-[#218b55]">{details.amount}</span></div>
+                <div><span className="block text-[10px] text-[#8b92a1]">Received into</span><span>{details.accountId ? accountName(details.accountId) : "No account selected"}</span><small className="block">{details.method}</small></div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[#edf0f5] pt-3">
+                {details.receiptPath && <button type="button" disabled={saving} onClick={() => void openReceipt(details.receiptPath, "quotation-payment-receipts")} className="button-secondary text-[10px]"><ReceiptText size={13} /> Receipt</button>}
+                <button type="button" disabled={saving} onClick={() => review(String(payment.id), "revision_requested")} className="button-secondary text-[10px]"><Undo2 size={13} aria-hidden="true" /> Return for correction</button>
+                <button type="button" disabled={saving} onClick={() => review(String(payment.id), "verified")} className="button-secondary text-[10px]"><Check size={13} aria-hidden="true" /> Verify</button>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+      <div className="table-shell hidden overflow-x-auto md:block">
+        <table className="app-table w-full min-w-[1120px]">
+          <thead><tr><th>Paid date</th><th>Quotation</th><th>Client / project</th><th>Type</th><th>Received into</th><th>Amount</th><th>Receipt</th><th>Review</th></tr></thead>
+          <tbody>
+            {visibleRows.map((payment) => {
+              const details = paymentDetails(payment);
+              return (
+                <tr key={String(payment.id)}>
+                  <td>{details.date}</td>
+                  <td>{details.quoteNo}</td>
+                  <td>{details.client}<small>{details.project}</small></td>
+                  <td className="capitalize">{details.kind}</td>
+                  <td>
+                    {details.accountOptions.length ? (
+                      <select
+                        aria-label={`Receiving account for ${details.quoteNo}`}
+                        value={details.accountOptions.some((account) => String(account.id) === details.accountId) ? details.accountId : ""}
+                        onChange={(event) => {
+                          if (event.target.value) void assignAccount(String(payment.id), event.target.value);
+                        }}
+                        disabled={saving}
+                        className="input min-w-[170px] text-[10px]"
+                      >
+                        <option value="">{details.accountId ? `${accountName(details.accountId)} (not eligible)` : "Choose account"}</option>
+                        {details.accountOptions.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")} · {financePaymentMethodLabel(account.payment_method)}</option>)}
+                      </select>
+                    ) : <span>{details.accountId ? accountName(details.accountId) : "No account selected"}</span>}
+                    <small>{details.method}</small>
+                  </td>
+                  <td className="font-semibold text-[#218b55]">{details.amount}</td>
+                  <td>{details.receiptPath ? <button type="button" disabled={saving} onClick={() => void openReceipt(details.receiptPath, "quotation-payment-receipts")} className="button-secondary text-[10px]"><ReceiptText size={13} /> Receipt</button> : "—"}</td>
+                  <td><span className="flex flex-wrap gap-1"><button type="button" disabled={saving} onClick={() => review(String(payment.id), "revision_requested")} className="button-secondary text-[10px]"><Undo2 size={13} aria-hidden="true" /> Return for correction</button><button type="button" disabled={saving} onClick={() => review(String(payment.id), "verified")} className="button-secondary text-[10px]"><Check size={13} aria-hidden="true" /> Verify</button></span></td>
+                </tr>
+              );
+            })}
+            {!rows.length && <tr><td colSpan={8} className="text-center text-[#7d8797]">No quotation payment receipts are awaiting verification.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {rows.length > TABLE_PAGE_SIZE && <TablePagination page={activePage} pageCount={pageCount} total={rows.length} onPageChange={setPage} label="Pending quotation payment pagination" />}
+    </div>
+  );
+}
+
+function FinanceActionsMenu({
+  description,
+  disabled,
+  children,
+}: {
+  description: string;
+  disabled: boolean;
+  children: ReactNode;
+}) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuId = useId().replaceAll(":", "");
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState({ top: -10000, left: -10000 });
+
+  const closeMenu = useCallback((focusTrigger = false) => {
+    setOpen(false);
+    if (focusTrigger) window.requestAnimationFrame(() => triggerRef.current?.focus());
+  }, []);
+
+  const updatePosition = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const menuWidth = 190;
+    const menuHeight = menuRef.current?.offsetHeight ?? 180;
+    const gap = 4;
+    const maxLeft = Math.max(8, window.innerWidth - menuWidth - 8);
+    const left = Math.min(Math.max(8, rect.right - menuWidth), maxLeft);
+    const opensBelow = window.innerHeight - rect.bottom >= menuHeight + gap || rect.top < menuHeight + gap;
+    const rawTop = opensBelow ? rect.bottom + gap : rect.top - menuHeight - gap;
+    const maxTop = Math.max(8, window.innerHeight - menuHeight - 8);
+    const top = Math.min(Math.max(8, rawTop), maxTop);
+    setPosition({ top, left });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    updatePosition();
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) {
+        closeMenu();
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeMenu(true);
+      }
+    };
+    const handleViewportChange = () => updatePosition();
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("resize", handleViewportChange);
+    window.addEventListener("scroll", handleViewportChange, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("resize", handleViewportChange);
+      window.removeEventListener("scroll", handleViewportChange, true);
+    };
+  }, [closeMenu, open, updatePosition]);
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        disabled={disabled}
+        className="button-secondary finance-actions-menu-trigger text-[10px]"
+        aria-label={`Actions for ${description}`}
+        aria-controls={open ? menuId : undefined}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => {
+          setPosition({ top: -10000, left: -10000 });
+          setOpen((current) => !current);
+        }}
+      >
+        Actions <ChevronDown size={13} aria-hidden="true" />
+      </button>
+      {open && typeof document !== "undefined" && createPortal(
+        <div
+          id={menuId}
+          ref={menuRef}
+          className="finance-actions-menu-popover"
+          aria-label={`Actions for ${description}`}
+          style={{ top: position.top, left: position.left }}
+          onClick={(event) => {
+            const target = event.target;
+            if (target instanceof HTMLElement && target.closest("button")) closeMenu();
+          }}
+        >
+          {children}
+        </div>,
+        document.body,
+      )}
+    </>
+  );
+}
+
+function PendingApprovalTable({
+  rows,
+  accounts,
+  accountName,
+  openReceipt,
+  assignAccount,
+  assignQuotationPaymentAccount,
+  requestQuotationPaymentReview,
+  requestApproveAndPay,
+  requestRevision,
+  requestVerifyIncome,
+  requestIncomeRevision,
+  onSelectTransaction,
+  saving,
+}: {
+  rows: PendingApprovalRow[];
+  accounts: Row[];
+  accountName: (id: unknown) => string;
+  openReceipt: (path: string, bucket?: string) => Promise<void>;
+  assignAccount: (transactionId: string, accountId: string) => Promise<void>;
+  assignQuotationPaymentAccount: (paymentId: string, accountId: string) => Promise<void>;
+  requestQuotationPaymentReview: (paymentId: string, decision: QuotationPaymentDecision) => void;
+  requestApproveAndPay: (transactionId: string) => void;
+  requestRevision: (transactionId: string) => void;
+  requestVerifyIncome: (transactionId: string) => void;
+  requestIncomeRevision: (transactionId: string) => void;
+  onSelectTransaction: (transaction: Row) => void;
+  saving: boolean;
+}) {
+  const [page, setPage] = useState(1);
+  const pageCount = Math.max(1, Math.ceil(rows.length / TABLE_PAGE_SIZE));
+  const activePage = Math.min(page, pageCount);
+  const visibleRows = rows.slice(
+    (activePage - 1) * TABLE_PAGE_SIZE,
+    activePage * TABLE_PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [rows.length]);
+
+  const transactionState = (row: PendingApprovalRow) => {
+    const transaction = row.transaction;
+    if (!transaction) return null;
+    const type = stringValue(transaction, "transaction_type");
+    const approval = stringValue(transaction, "approval_status");
+    const paid = stringValue(transaction, "payment_status");
+    const manualIncome = isManualIncomeTransaction(transaction);
+    const incomeReviewStatus = stringValue(transaction, "income_review_status");
+    const isVoided = Boolean(transaction.is_voided);
+    const isRegularExpense = type === "expense"
+      && !transaction.source_payment_id
+      && !transaction.supplier_payable_id
+      && !transaction.commission_summary_id
+      && !transaction.commission_allocation_id;
+    return {
+      canChangeAccount: !isVoided && (
+        (type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval))
+        || (manualIncome && paid === "unpaid" && ["pending", "revision_requested"].includes(incomeReviewStatus))
+      ),
+      canApproveAndPay: !isVoided && isRegularExpense && paid === "unpaid" && ["pending", "approved"].includes(approval),
+      canRequestRevision: !isVoided && type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval) && isRegularExpense,
+      canVerifyIncome: !isVoided && manualIncome && paid === "unpaid" && incomeReviewStatus === "pending" && Boolean(transaction.account_id),
+      canRequestIncomeRevision: !isVoided && manualIncome && paid === "unpaid" && incomeReviewStatus === "pending",
+    };
+  };
+
+  const accountOptionsFor = (row: PendingApprovalRow) => row.kind === "quotation_payment"
+    ? accounts.filter((account) => stringValue(account, "payment_method") === stringValue(row.payment, "method"))
+    : accounts;
+
+  const accountControl = (row: PendingApprovalRow) => {
+    const options = accountOptionsFor(row);
+    const state = transactionState(row);
+    const canChange = row.kind === "quotation_payment" || Boolean(state?.canChangeAccount);
+    if (!canChange) return row.accountId ? accountName(row.accountId) : "Needs finance account";
+    return (
+      <select
+        aria-label={`Account for ${row.description}`}
+        value={options.some((account) => String(account.id) === row.accountId) ? row.accountId : ""}
+        onChange={(event) => {
+          if (!event.target.value) return;
+          if (row.kind === "quotation_payment") void assignQuotationPaymentAccount(row.id, event.target.value);
+          else void assignAccount(row.id, event.target.value);
+        }}
+        disabled={saving}
+        className="input min-w-[145px] text-[10px]"
+      >
+        <option value="">{row.accountId ? `${accountName(row.accountId)} (not eligible)` : "Choose account"}</option>
+        {options.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")} · {financePaymentMethodLabel(account.payment_method)}</option>)}
+      </select>
+    );
+  };
+
+  const actionButtons = (row: PendingApprovalRow) => {
+    if (row.kind === "quotation_payment") {
+      return <>
+        <button type="button" disabled={saving} title="Return quotation receipt for correction" onClick={() => requestQuotationPaymentReview(row.id, "revision_requested")} className="button-secondary text-[10px]"><Undo2 size={13} aria-hidden="true" /> Return for correction</button>
+        <button type="button" disabled={saving} title="Verify quotation receipt" onClick={() => requestQuotationPaymentReview(row.id, "verified")} className="button-secondary text-[10px]"><Check size={13} aria-hidden="true" /> Verify</button>
+      </>;
+    }
+    const state = transactionState(row);
+    if (!state || !row.transaction) return null;
+    return <>
+      <button type="button" disabled={saving} onClick={() => onSelectTransaction(row.transaction!)} className="button-secondary text-[10px]"><FileText size={13} aria-hidden="true" /> Details</button>
+      {state.canVerifyIncome && <button type="button" disabled={saving} title="Verify" onClick={() => requestVerifyIncome(row.id)} className="button-secondary text-[10px]"><Check size={13} aria-hidden="true" /> Verify</button>}
+      {state.canRequestIncomeRevision && <button type="button" disabled={saving} title="Return Cash In for correction" onClick={() => requestIncomeRevision(row.id)} className="button-secondary text-[10px]"><Undo2 size={13} aria-hidden="true" /> Return for correction</button>}
+      {state.canApproveAndPay && <button type="button" disabled={saving || !row.accountId} title="Approve and pay Cash Out" onClick={() => requestApproveAndPay(row.id)} className="button-secondary text-[10px]"><Check size={13} aria-hidden="true" /> Approve and pay</button>}
+      {state.canRequestRevision && <button type="button" disabled={saving} title="Return Cash Out for revision" onClick={() => requestRevision(row.id)} className="button-secondary text-[10px]"><Undo2 size={13} aria-hidden="true" /> Return for revision</button>}
+    </>;
+  };
+
+  const actionMenu = (row: PendingApprovalRow) => {
+    const buttons = actionButtons(row);
+    if (!buttons) return null;
+    return <FinanceActionsMenu description={row.description} disabled={saving}>{buttons}</FinanceActionsMenu>;
+  };
+
+  return (
+    <div className="finance-transaction-table finance-approval-table">
+      <div className="space-y-2 px-4 py-4 md:hidden sm:px-5">
+        {visibleRows.map((row) => (
+          <article key={`${row.kind}-${row.id}`} className="rounded-lg border border-[#d9e0e9] bg-white p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-[12px] font-semibold text-[#202938]">{row.description}</p>
+                <p className="mt-1 text-[10px] text-[#7d8797]">{displayDate(row.date)} · {row.source}</p>
+              </div>
+              <StatusPill value={row.status} />
+            </div>
+            <div className="mt-3 grid grid-cols-2 gap-3 text-[11px]">
+              <div><span className="block text-[10px] text-[#8b92a1]">{row.direction === "income" ? "Cash In" : "Cash Out"}</span><span className={`font-semibold ${row.direction === "income" ? "text-[#218b55]" : "text-[#b42318]"}`}>{row.direction === "income" ? "+" : "−"}{peso.format(row.amount)}</span></div>
+              <div><span className="block text-[10px] text-[#8b92a1]">Account</span><span>{accountControl(row)}</span></div>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[#edf0f5] pt-3">
+              {row.receiptPath && <button type="button" disabled={saving} title="View receipt" onClick={() => void openReceipt(row.receiptPath, row.receiptBucket)} className="button-secondary text-[10px]"><ReceiptText size={13} /> Receipt</button>}
+              {actionButtons(row)}
+            </div>
+          </article>
+        ))}
+        {!visibleRows.length && <p className="rounded-lg border border-dashed border-[#d9e0e9] px-3 py-6 text-center text-[11px] text-[#7d8797]">No Cash In or Cash Out approvals match this filter.</p>}
+      </div>
+      <div className="table-shell hidden overflow-x-auto md:block">
+        <table className="app-table w-full min-w-[1060px]">
+          <thead><tr><th>Date</th><th>Description</th><th>Source</th><th>Account</th><th>Cash In</th><th>Cash Out</th><th>Status</th><th>Receipt</th><th className="finance-action-column">Action</th></tr></thead>
+          <tbody>
+            {visibleRows.map((row) => (
+              <tr key={`${row.kind}-${row.id}`}>
+                <td>{displayDate(row.date)}</td>
+                <td>{row.description}{row.kind === "quotation_payment" && <small>Quotation receipt</small>}</td>
+                <td>{row.source}</td>
+                <td>{accountControl(row)}</td>
+                <td className="whitespace-nowrap font-semibold text-[#218b55]">{row.direction === "income" ? `+${peso.format(row.amount)}` : "—"}</td>
+                <td className="whitespace-nowrap font-semibold text-[#b42318]">{row.direction === "expense" ? `−${peso.format(row.amount)}` : "—"}</td>
+                <td><StatusPill value={row.status} /></td>
+                <td>{row.receiptPath ? <button type="button" disabled={saving} onClick={() => void openReceipt(row.receiptPath, row.receiptBucket)} className="button-secondary text-[10px]"><ReceiptText size={13} /> Receipt</button> : "—"}</td>
+                <td className="finance-action-cell">{actionMenu(row)}</td>
+              </tr>
+            ))}
+            {!visibleRows.length && <tr><td colSpan={9} className="text-center text-[#7d8797]">No Cash In or Cash Out approvals match this filter.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      {rows.length > TABLE_PAGE_SIZE && <TablePagination page={activePage} pageCount={pageCount} total={rows.length} onPageChange={setPage} label="Pending Finance approvals pagination" />}
+    </div>
   );
 }
 
@@ -885,9 +1374,10 @@ function FinanceConfirmDialog({
   close: () => void;
   confirm: () => void | Promise<void>;
 }) {
-  const isDecision = action.kind === "approve_and_pay" || action.kind === "budget" || action.kind === "revision" || action.kind === "verify_income" || action.kind === "income_revision";
-  const isRejection = action.kind === "budget" && action.decision === "rejected";
-  const isRevision = action.kind === "revision" || action.kind === "income_revision" || (action.kind === "budget" && action.decision === "revision_requested");
+  const isDecision = action.kind === "approve_and_pay" || action.kind === "quotation_payment" || action.kind === "budget" || action.kind === "revision" || action.kind === "verify_income" || action.kind === "income_revision";
+  const isRejection = (action.kind === "budget" && action.decision === "rejected") || (action.kind === "quotation_payment" && action.decision === "rejected");
+  const isQuotationRevision = action.kind === "quotation_payment" && action.decision === "revision_requested";
+  const isRevision = action.kind === "revision" || action.kind === "income_revision" || isQuotationRevision || (action.kind === "budget" && action.decision === "revision_requested");
   const isBudgetRevision = action.kind === "budget" && action.decision === "revision_requested";
   const requiresNote = isRejection || isRevision || action.kind === "funding" || action.kind === "income_void";
   const actionLabel = action.kind === "paid"
@@ -898,6 +1388,8 @@ function FinanceConfirmDialog({
         ? action.active ? "Reactivate" : "Deactivate"
       : action.kind === "approve_and_pay"
         ? "Approve and pay"
+      : action.kind === "quotation_payment"
+        ? action.decision === "verified" ? "Verify receipt" : action.decision === "revision_requested" ? "Return for correction" : "Reject receipt"
       : action.kind === "verify_income"
         ? "Verify Cash In"
       : action.kind === "income_void"
@@ -909,13 +1401,13 @@ function FinanceConfirmDialog({
   return (
     <FinanceDialog
       title={`${actionLabel} ${action.label}`}
-      detail={action.kind === "funding" ? "This removes the funding amount from the account balance but preserves the audit record." : action.kind === "account" ? "Deactivation hides the account from new payment selections but preserves its balances, payments, and receipts." : action.kind === "approve_and_pay" ? "This approves the regular Cash Out, records it as paid, and deducts the selected payment account." : action.kind === "verify_income" ? "This confirms the receipt, updates the selected receiving account balance, and includes the amount in Cash In totals." : action.kind === "income_void" ? "This reverses the verified Cash In and removes it from the account balance while preserving the audit record." : isRevision ? isBudgetRevision ? "This sends the budget request back to External Finance for correction and resubmission." : action.kind === "income_revision" ? "This sends the standalone Cash In back to External Finance for correction and resubmission." : "This sends the unpaid Cash Out back to External Finance for correction and resubmission." : isDecision ? "Add a note so the financial decision is clear to the next reviewer." : "This changes the settlement status in the finance ledger."}
+      detail={action.kind === "funding" ? "This removes the funding amount from the account balance but preserves the audit record." : action.kind === "account" ? "Deactivation hides the account from new payment selections but preserves its balances, payments, and receipts." : action.kind === "approve_and_pay" ? "This approves the regular Cash Out, records it as paid, and deducts the selected payment account." : action.kind === "quotation_payment" ? action.decision === "verified" ? "This confirms the client receipt and posts it as Cash In." : action.decision === "revision_requested" ? "This returns the receipt to External Finance for correction. It stays out of Cash In until resubmitted and verified." : "This rejects the receipt and keeps it out of Cash In." : action.kind === "verify_income" ? "This confirms the receipt, updates the selected receiving account balance, and includes the amount in Cash In totals." : action.kind === "income_void" ? "This reverses the verified Cash In and removes it from the account balance while preserving the audit record." : isRevision ? isBudgetRevision ? "This sends the budget request back to External Finance for correction and resubmission." : action.kind === "income_revision" ? "This sends the standalone Cash In back to External Finance for correction and resubmission." : "This sends the unpaid Cash Out back to External Finance for correction and resubmission." : isDecision ? "Add a note so the financial decision is clear to the next reviewer." : "This changes the settlement status in the finance ledger."}
       close={close}
     >
       {(isDecision || action.kind === "funding" || action.kind === "income_void") && (
         <label className="field-label mt-5 block">
-          {action.kind === "funding" ? "Void reason (required)" : action.kind === "income_void" ? "Reversal reason (required)" : isRevision ? action.kind === "income_revision" ? "Correction reason (required)" : "Revision reason (required)" : `Decision note${isRejection ? " (required)" : " (optional)"}`}
-          <textarea value={note} onChange={(event) => setNote(event.target.value)} className="input mt-1 min-h-24" placeholder={action.kind === "funding" ? "Explain why this funding entry is being voided" : action.kind === "income_void" ? "Explain why this Cash In is being reversed" : isRevision ? isBudgetRevision ? "Explain what External Finance must correct in this budget request" : action.kind === "income_revision" ? "Explain what External Finance must correct in this Cash In" : "Explain what External Finance must correct" : isRejection ? "Explain why this request is being rejected" : "Add context for this approval"} />
+          {action.kind === "funding" ? "Void reason (required)" : action.kind === "income_void" ? "Reversal reason (required)" : isRevision ? action.kind === "income_revision" || isQuotationRevision ? "Correction reason (required)" : "Revision reason (required)" : `Decision note${isRejection ? " (required)" : " (optional)"}`}
+          <textarea value={note} onChange={(event) => setNote(event.target.value)} className="input mt-1 min-h-24" placeholder={action.kind === "funding" ? "Explain why this funding entry is being voided" : action.kind === "income_void" ? "Explain why this Cash In is being reversed" : action.kind === "quotation_payment" && action.decision === "revision_requested" ? "Explain what External Finance must correct" : isRevision ? isBudgetRevision ? "Explain what External Finance must correct in this budget request" : action.kind === "income_revision" ? "Explain what External Finance must correct in this Cash In" : "Explain what External Finance must correct" : isRejection ? action.kind === "quotation_payment" ? "Explain why this receipt is being rejected" : "Explain why this request is being rejected" : "Add context for this approval"} />
         </label>
       )}
       <div className="mt-5 flex justify-end gap-2">
@@ -963,7 +1455,8 @@ export function FinanceWorkspace({
   const canRecordSupplierCosting = role === "external_finance";
   const financeTabs = useMemo<[Tab, string][]>(
     () => [
-      ["transactions", "Transactions"],
+      ...(internal ? [["approvals", "Pending approvals"] as [Tab, string]] : []),
+      ["transactions", "Transaction history"],
       ...(internal ? [["accounts", "Accounts"] as [Tab, string]] : []),
       ["budget", "Budget requests"],
       ...(internal || canRecordSupplierCosting ? [["supplier_costing", "Supplier costing"] as [Tab, string]] : []),
@@ -971,7 +1464,7 @@ export function FinanceWorkspace({
     ],
     [canRecordSupplierCosting, internal],
   );
-  const [tab, setTab] = useState<Tab>(overviewOnly ? "overview" : "transactions");
+  const [tab, setTab] = useState<Tab>(overviewOnly ? "overview" : internal ? "approvals" : "transactions");
   const [payablesSection, setPayablesSection] = useState<PayablesSection>("commission");
   const [payablesPage, setPayablesPage] = useState(1);
   const [budgetPage, setBudgetPage] = useState(1);
@@ -984,6 +1477,7 @@ export function FinanceWorkspace({
   const [transactionStatusFilter, setTransactionStatusFilter] = useState<TransactionStatusFilter>("all");
   const [transactionAccountFilter, setTransactionAccountFilter] = useState("all");
   const [transactionCategoryFilter, setTransactionCategoryFilter] = useState("all");
+  const [pendingApprovalFilter, setPendingApprovalFilter] = useState<PendingApprovalFilter>("all");
   const [selectedTransaction, setSelectedTransaction] = useState<Row | null>(null);
   const [transactions, setTransactions] = useState<Row[]>([]);
   const [categories, setCategories] = useState<Row[]>([]);
@@ -997,6 +1491,8 @@ export function FinanceWorkspace({
   const [commissionAllocations, setCommissionAllocations] = useState<Row[]>([]);
   const [profiles, setProfiles] = useState<Row[]>([]);
   const [paymentRecords, setPaymentRecords] = useState<Row[]>([]);
+  const [quotationPaymentRecords, setQuotationPaymentRecords] = useState<Row[]>([]);
+  const [pendingQuotationPayments, setPendingQuotationPayments] = useState<Row[]>([]);
   const [accountFundingEntries, setAccountFundingEntries] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
@@ -1005,9 +1501,11 @@ export function FinanceWorkspace({
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<FinanceAction | null>(null);
   const [decisionNote, setDecisionNote] = useState("");
   const [transactionDirection, setTransactionDirection] = useState<Direction | null>(null);
+  const [cashInSource, setCashInSource] = useState<CashInSource>("other_income");
   const [revisionTransaction, setRevisionTransaction] = useState<Row | null>(null);
   const [expenseMode, setExpenseMode] = useState<ExpenseMode>("regular");
   const [transactionFile, setTransactionFile] = useState<File | null>(null);
@@ -1026,6 +1524,16 @@ export function FinanceWorkspace({
   const [supplierCostOpen, setSupplierCostOpen] = useState(false);
   const [supplierCostValues, setSupplierCostValues] = useState({ supplier_id: "", quotation_id: "", lead_id: "", description: "", amount: "", due_date: "", notes: "" });
   const financeRefreshTimer = useRef<number | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void client.auth.getUser().then(({ data }) => {
+      if (active) setCurrentUserId(data.user?.id ?? null);
+    });
+    return () => {
+      active = false;
+    };
+  }, [client]);
 
   useEffect(() => {
     if (overviewOnly || tab === "overview" || financeTabs.some(([value]) => value === tab)) return;
@@ -1060,6 +1568,23 @@ export function FinanceWorkspace({
         : client.rpc("external_finance_quotation_rows", {
             p_organization_id: organizationId,
           });
+      const pendingQuotationPaymentsRequest = internal
+        ? client
+            .from("quotation_payment_records")
+            .select("*")
+            .eq("organization_id", organizationId)
+            .eq("status", "pending")
+            .order("paid_at", { ascending: false })
+            .order("created_at", { ascending: false })
+        : Promise.resolve({ data: [], error: null });
+      const quotationPaymentRecordsRequest = internal
+        ? Promise.resolve({ data: [], error: null })
+        : client
+            .from("quotation_payment_records")
+            .select("id,quotation_id,status,payment_kind,amount,paid_at,finance_account_id,reference_no,notes,receipt_storage_path,receipt_file_name,receipt_content_type,receipt_file_size,submitted_by,correction_note,submitted_at,created_at")
+            .eq("organization_id", organizationId)
+            .order("paid_at", { ascending: false })
+            .order("created_at", { ascending: false });
       const requests = await Promise.all([
         client.from("finance_transactions").select("*").eq("organization_id", organizationId).order("transaction_date", { ascending: false }).order("created_at", { ascending: false }),
         client.from("finance_categories").select("*").eq("organization_id", organizationId).eq("is_active", true).order("direction").order("name"),
@@ -1074,6 +1599,8 @@ export function FinanceWorkspace({
         client.from("profiles").select("id,full_name"),
         client.from("quotation_payment_records").select("quotation_id,status,amount,verified_at").eq("organization_id", organizationId).eq("status", "verified"),
         accountFundingRequest,
+        pendingQuotationPaymentsRequest,
+        quotationPaymentRecordsRequest,
       ]);
       const failed = requests.find((request) => request.error);
       if (failed?.error) {
@@ -1093,6 +1620,8 @@ export function FinanceWorkspace({
       setProfiles((requests[10].data ?? []) as Row[]);
       setPaymentRecords((requests[11].data ?? []) as Row[]);
       setAccountFundingEntries((requests[12].data ?? []) as Row[]);
+      setPendingQuotationPayments((requests[13].data ?? []) as Row[]);
+      setQuotationPaymentRecords((requests[14].data ?? []) as Row[]);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Finance data could not load.");
     } finally {
@@ -1156,7 +1685,7 @@ export function FinanceWorkspace({
     () => categories.filter((category) => stringValue(category, "direction") === (transactionDirection ?? "income")),
     [categories, transactionDirection],
   );
-  const isStandaloneExternalIncome = role === "external_finance" && transactionDirection === "income" && !revisionTransaction;
+  const isStandaloneExternalIncome = role === "external_finance" && transactionDirection === "income" && !revisionTransaction && cashInSource === "other_income";
   const activeAccounts = useMemo(
     () => accounts.filter((account) => Boolean(account.is_active)),
     [accounts],
@@ -1285,6 +1814,22 @@ export function FinanceWorkspace({
       searchText: [stringValue(quotation, "quotation_no"), stringValue(quotation, "client_name"), stringValue(quotation, "project_name")].join(" "),
     })),
     [quotations],
+  );
+
+  const quotationPaymentOptions = useMemo<SearchableOption[]>(
+    () => quotations
+      .filter((quotation) => stringValue(quotation, "document_type") === "price_quotation" && stringValue(quotation, "status") === "approved")
+      .map((quotation) => {
+        const lead = leads.find((item) => String(item.id) === String(quotation.lead_id));
+        const companyName = stringValue(quotation, "client_name", stringValue(lead, "client_name", "Company not set"));
+        const clientName = stringValue(quotation, "client_contact_name", stringValue(lead, "contact_name", "Client not set"));
+        return {
+          value: String(quotation.id),
+          label: `${companyName} — ${clientName}`,
+          searchText: [companyName, clientName, stringValue(quotation, "quotation_no"), stringValue(quotation, "project_name")].filter(Boolean).join(" "),
+        };
+      }),
+    [leads, quotations],
   );
 
   const eligibleCommissionOptions = useMemo<SearchableOption[]>(
@@ -1425,6 +1970,86 @@ export function FinanceWorkspace({
     activeTransactionsPage * TABLE_PAGE_SIZE,
   );
   const recentTransactions = transactions.slice(0, 8);
+  const pendingApprovalTransactions = useMemo(
+    () => transactions.filter((transaction) => {
+      if (Boolean(transaction.is_voided)) return false;
+      const type = stringValue(transaction, "transaction_type");
+      if (type === "expense") return stringValue(transaction, "approval_status") === "pending";
+      return isManualIncomeTransaction(transaction)
+        && stringValue(transaction, "income_review_status") === "pending"
+        && stringValue(transaction, "payment_status") === "unpaid";
+    }),
+    [transactions],
+  );
+  const pendingQuotationPaymentRows = useMemo(
+    () => pendingQuotationPayments.filter((payment) => {
+      const quotation = quotations.find((item) => item.id === payment.quotation_id);
+      return Boolean(
+        quotation
+        && stringValue(quotation, "document_type") === "price_quotation"
+        && !quotation.costing_source_id
+        && stringValue(quotation, "status") === "approved",
+      );
+    }),
+    [pendingQuotationPayments, quotations],
+  );
+  const pendingBudgetRows = useMemo(
+    () => budgets.filter((budget) => stringValue(budget, "status") === "pending"),
+    [budgets],
+  );
+  const pendingApprovalRows = useMemo<PendingApprovalRow[]>(() => {
+    const quotationRows: PendingApprovalRow[] = pendingQuotationPaymentRows.map((payment) => {
+      const quotation = quotations.find((item) => item.id === payment.quotation_id);
+      const lead = leads.find((item) => item.id === quotation?.lead_id);
+      const quotationNo = stringValue(quotation, "quotation_no", "Price Quotation");
+      const client = stringValue(lead, "client_name", stringValue(quotation, "client_name", "Client"));
+      const project = stringValue(quotation, "project_name", "");
+      return {
+        id: String(payment.id),
+        kind: "quotation_payment",
+        direction: "income",
+        date: payment.paid_at ?? payment.submitted_at ?? payment.created_at,
+        description: uniqueTextParts([quotationNo, client, project]).join(" · "),
+        source: "Quotation payment",
+        amount: numericValue(payment, "amount"),
+        accountId: stringValue(payment, "finance_account_id"),
+        status: "pending_confirmation",
+        receiptPath: stringValue(payment, "receipt_storage_path"),
+        receiptBucket: "quotation-payment-receipts",
+        payment,
+      };
+    });
+    const transactionRows: PendingApprovalRow[] = pendingApprovalTransactions.map((transaction) => {
+      const type = stringValue(transaction, "transaction_type");
+      const manualIncome = isManualIncomeTransaction(transaction);
+      const lead = leads.find((item) => item.id === transaction.lead_id);
+      const description = manualIncome
+        ? "Manual Cash In"
+        : stringValue(lead, "client_name", "") || (type === "expense" ? "Cash Out" : "Cash In");
+      return {
+        id: String(transaction.id),
+        kind: "finance_transaction",
+        direction: type === "income" ? "income" : "expense",
+        date: transaction.transaction_date ?? transaction.created_at,
+        description,
+        source: transactionSourceLabel(transaction),
+        amount: numericValue(transaction, "amount"),
+        accountId: stringValue(transaction, "account_id"),
+        status: transactionStatusValue(transaction),
+        receiptPath: stringValue(transaction, "receipt_storage_path"),
+        receiptBucket: stringValue(transaction, "receipt_bucket", "finance-receipts"),
+        transaction,
+      };
+    });
+    return [...quotationRows, ...transactionRows].sort((left, right) => String(right.date ?? "").localeCompare(String(left.date ?? "")));
+  }, [leads, pendingApprovalTransactions, pendingQuotationPaymentRows, quotations]);
+  const visiblePendingApprovalRows = useMemo(
+    () => pendingApprovalRows.filter((row) => pendingApprovalFilter === "all" || row.direction === pendingApprovalFilter),
+    [pendingApprovalFilter, pendingApprovalRows],
+  );
+  const pendingApprovalCount = pendingApprovalRows.length + pendingBudgetRows.length;
+  const pendingApprovalIncomeCount = pendingApprovalRows.filter((row) => row.direction === "income").length;
+  const pendingApprovalExpenseCount = pendingApprovalRows.filter((row) => row.direction === "expense").length;
 
   const totals = useMemo<{ income: number; expense: number; pending: number }>(
     () =>
@@ -1458,14 +2083,6 @@ export function FinanceWorkspace({
     ),
     [overviewPeriodTransactions],
   );
-  const pendingApprovals = useMemo(
-    () => transactions.filter((transaction) => (
-      !Boolean(transaction.is_voided)
-      && stringValue(transaction, "transaction_type") === "expense"
-      && stringValue(transaction, "approval_status") === "pending"
-    )).length,
-    [transactions],
-  );
   const revisionRequests = useMemo(
     () => transactions.filter((transaction) => (
       !Boolean(transaction.is_voided)
@@ -1474,16 +2091,6 @@ export function FinanceWorkspace({
     )).length,
     [transactions],
   );
-  const pendingIncomeConfirmations = useMemo(
-    () => transactions.filter((transaction) => (
-      !Boolean(transaction.is_voided)
-      && isManualIncomeTransaction(transaction)
-      && stringValue(transaction, "income_review_status") === "pending"
-      && stringValue(transaction, "payment_status") === "unpaid"
-    )).length,
-    [transactions],
-  );
-
   const eligibleCommissionAllocations = useMemo(() => commissionAllocations.filter((allocation) => {
     if (stringValue(allocation, "status") !== "not_yet_paid") return false;
     const quotation = quotations.find((item) => item.id === allocation.quotation_id);
@@ -1596,8 +2203,65 @@ export function FinanceWorkspace({
   const accountBalance = (accountId: string) => numericValue(balances.find((balance) => balance.id === accountId), "current_balance");
   const commissionPayoutMode = internal && Boolean(transactionValues.commission_allocation_id);
   const supplierPaymentMode = !internal && transactionDirection === "expense" && expenseMode === "supplier";
-  const manualIncomeMode = !internal && transactionDirection === "income" && !revisionTransaction;
+  const quotationPaymentMode = !internal && transactionDirection === "income" && !revisionTransaction && cashInSource === "quotation_payment";
+  const manualIncomeMode = !internal && transactionDirection === "income" && !revisionTransaction && cashInSource === "other_income";
   const manualIncomeRevisionMode = Boolean(revisionTransaction && transactionDirection === "income" && isManualIncomeTransaction(revisionTransaction));
+
+  const selectedQuotationPayment = useMemo(
+    () => quotations.find((quotation) => String(quotation.id) === transactionValues.quotation_id) ?? null,
+    [quotations, transactionValues.quotation_id],
+  );
+  const selectedQuotationPaymentSummary = useMemo(
+    () => selectedQuotationPayment ? financeQuotationPaymentSummary(selectedQuotationPayment, quotationPaymentRecords) : null,
+    [quotationPaymentRecords, selectedQuotationPayment],
+  );
+  const selectedQuotationPaymentRevision = useMemo(
+    () => quotationPaymentRecords
+      .filter((record) => String(record.quotation_id ?? "") === String(transactionValues.quotation_id) && stringValue(record, "status") === "revision_requested")
+      .filter((record) => !currentUserId || stringValue(record, "submitted_by") === currentUserId)
+      .sort((left, right) => stringValue(right, "submitted_at", stringValue(right, "created_at")).localeCompare(stringValue(left, "submitted_at", stringValue(left, "created_at"))))[0] ?? null,
+    [currentUserId, quotationPaymentRecords, transactionValues.quotation_id],
+  );
+  const quotationPaymentAccountOptions = useMemo<SearchableOption[]>(
+    () => {
+      const requiresCheck = Boolean(
+        selectedQuotationPayment
+        && transactionValues.payment_kind === "full_payment"
+        && stringValue(selectedQuotationPayment, "payment_terms_option") === "pdc_50_50",
+      );
+      return activeAccounts
+        .filter((account) => !requiresCheck || stringValue(account, "payment_method") === "check")
+        .map((account) => ({
+          value: String(account.id),
+          label: `${stringValue(account, "account_name")} · ${financePaymentMethodLabel(account.payment_method)}`,
+          searchText: [stringValue(account, "account_name"), stringValue(account, "account_type"), financePaymentMethodLabel(account.payment_method)].join(" "),
+        }));
+    }, [activeAccounts, selectedQuotationPayment, transactionValues.payment_kind],
+  );
+  const transactionDialogTitle = quotationPaymentMode
+    ? selectedQuotationPaymentRevision ? "Resubmit quotation receipt" : "Record quotation payment"
+    : manualIncomeMode
+      ? "Record Cash In"
+      : manualIncomeRevisionMode
+        ? "Correct Cash In"
+        : revisionTransaction
+          ? "Revise Cash Out"
+          : commissionPayoutMode
+            ? "Pay commission"
+            : "Submit Cash Out";
+  const transactionDialogDetail = quotationPaymentMode
+    ? "Submit a client receipt for an approved quotation. Internal Finance verifies it before it becomes Cash In."
+    : manualIncomeMode
+      ? "Submit other income for Internal Finance verification. The account balance updates only after verification."
+      : manualIncomeRevisionMode
+        ? "Correct the returned Cash In and resubmit it for Internal Finance verification."
+        : revisionTransaction
+          ? "Correct the returned fields and resubmit this Cash Out for Internal Finance review."
+          : commissionPayoutMode
+            ? "Create a controlled commission payout after full quotation payment and the three-day hold."
+            : supplierPaymentMode
+              ? "Submit a supplier payment for Internal Finance approval."
+              : "Submit a regular expense for Internal Finance approval.";
 
   const chooseExpenseMode = (mode: ExpenseMode) => {
     setExpenseMode(mode);
@@ -1607,6 +2271,59 @@ export function FinanceWorkspace({
       quotation_id: "",
       lead_id: "",
     }));
+  };
+
+  const quotationPaymentAccountIdFor = (quotation: Row | null, kind: string) => {
+    const requiresCheck = Boolean(
+      quotation
+      && kind === "full_payment"
+      && stringValue(quotation, "payment_terms_option") === "pdc_50_50",
+    );
+    const eligibleAccounts = activeAccounts.filter((account) => !requiresCheck || stringValue(account, "payment_method") === "check");
+    return eligibleAccounts.length === 1 ? String(eligibleAccounts[0].id) : "";
+  };
+
+  const chooseCashInSource = (source: CashInSource) => {
+    setCashInSource(source);
+    setTransactionValues((current) => ({
+      ...current,
+      amount: "",
+      category_id: "",
+      account_id: "",
+      reference_number: "",
+      note: "",
+      lead_id: "",
+      quotation_id: "",
+      payment_kind: "downpayment",
+    }));
+    setTransactionFile(null);
+  };
+
+  const chooseQuotationPayment = (quotationId: string) => {
+    const quotation = quotations.find((item) => String(item.id) === quotationId) ?? null;
+    if (!quotation) {
+      setTransactionValues((current) => ({ ...current, quotation_id: "", amount: "", account_id: "" }));
+      return;
+    }
+    const records = quotationPaymentRecords.filter((record) => String(record.quotation_id ?? "") === quotationId);
+    const summary = financeQuotationPaymentSummary(quotation, quotationPaymentRecords);
+    const revision = records
+      .filter((record) => stringValue(record, "status") === "revision_requested")
+      .filter((record) => !currentUserId || stringValue(record, "submitted_by") === currentUserId)
+      .sort((left, right) => stringValue(right, "submitted_at", stringValue(right, "created_at")).localeCompare(stringValue(left, "submitted_at", stringValue(left, "created_at"))))[0] ?? null;
+    const paymentKind = revision ? stringValue(revision, "payment_kind", financeQuotationPaymentDefaultKind(summary)) : financeQuotationPaymentDefaultKind(summary);
+    setTransactionValues((current) => ({
+      ...current,
+      quotation_id: quotationId,
+      payment_kind: paymentKind,
+      amount: revision ? numericValue(revision, "amount").toFixed(2) : financeQuotationPaymentSuggestedAmount(paymentKind, summary),
+      account_id: revision ? stringValue(revision, "finance_account_id") : quotationPaymentAccountIdFor(quotation, paymentKind),
+      reference_number: revision ? stringValue(revision, "reference_no") : "",
+      note: "",
+      category_id: "",
+      lead_id: "",
+    }));
+    setTransactionFile(null);
   };
 
   const chooseSupplierPayable = (payableId: string) => {
@@ -1626,6 +2343,7 @@ export function FinanceWorkspace({
   const setFormDirection = (direction: Direction) => {
     setRevisionTransaction(null);
     setTransactionDirection(direction);
+    setCashInSource("other_income");
     setExpenseMode("regular");
     setTransactionValues(defaultTransaction(direction));
     setTransactionFile(null);
@@ -1634,6 +2352,7 @@ export function FinanceWorkspace({
   const closeTransactionForm = () => {
     setTransactionDirection(null);
     setRevisionTransaction(null);
+    setCashInSource("other_income");
     setTransactionFile(null);
   };
 
@@ -1689,9 +2408,55 @@ export function FinanceWorkspace({
     await client.storage.from("finance-receipts").remove([path]);
   };
 
+  const saveQuotationPayment = async () => {
+    const submittedFile = transactionFile;
+    const quotation = selectedQuotationPayment;
+    const amount = Number(transactionValues.amount);
+    const accountIsEligible = quotationPaymentAccountOptions.some((option) => option.value === transactionValues.account_id);
+    if (!quotation) return setErrorMessage("Choose the approved quotation for this Cash In.");
+    if (!transactionValues.payment_kind || !["downpayment", "full_payment"].includes(transactionValues.payment_kind)) return setErrorMessage("Choose a valid quotation payment type.");
+    if (!Number.isFinite(amount) || amount <= 0) return setErrorMessage("Enter a payment amount greater than zero.");
+    if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(transactionValues.transaction_date)) return setErrorMessage("Choose a valid paid date.");
+    if (!transactionValues.account_id || !accountIsEligible) return setErrorMessage("Choose an active Finance receiving account.");
+    if (!submittedFile) return setErrorMessage(selectedQuotationPaymentRevision ? "Upload the replacement receipt image." : "Upload the payment receipt image.");
+    if (submittedFile.size <= 0 || submittedFile.size > 10 * 1024 * 1024 || !["image/jpeg", "image/png", "image/webp"].includes(submittedFile.type)) return setErrorMessage("Payment receipts must be JPEG, PNG, or WebP files no larger than 10 MB.");
+
+    setSaving(true);
+    try {
+      const form = new FormData();
+      form.set("organization_id", organizationId);
+      form.set("quotation_id", String(quotation.id));
+      if (selectedQuotationPaymentRevision) form.set("payment_id", String(selectedQuotationPaymentRevision.id));
+      form.set("payment_kind", transactionValues.payment_kind);
+      form.set("amount", String(amount));
+      form.set("paid_at", transactionValues.transaction_date);
+      form.set("finance_account_id", transactionValues.account_id);
+      form.set("reference_no", transactionValues.reference_number.trim());
+      form.set("notes", "");
+      form.set("receipt", submittedFile);
+      const response = await fetch("/api/quotation-payments/submit", {
+        method: "POST",
+        body: form,
+      });
+      const payload = await response.json().catch(() => ({} as Record<string, unknown>)) as Record<string, unknown>;
+      if (!response.ok) throw new Error(typeof payload.error === "string" ? payload.error : "The payment receipt could not be submitted.");
+      setMessage(selectedQuotationPaymentRevision ? "Quotation payment receipt resubmitted for Internal Finance verification." : "Quotation payment receipt submitted for Internal Finance verification.");
+      closeTransactionForm();
+      await load();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "The quotation payment receipt could not be submitted.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const saveTransaction = async () => {
     const submittedFile = transactionFile;
     if (!transactionDirection) return setErrorMessage("Choose a finance transaction type.");
+    if (quotationPaymentMode) {
+      await saveQuotationPayment();
+      return;
+    }
     if (!revisionTransaction && !submittedFile) return setErrorMessage("Upload the transaction receipt image.");
     if (revisionTransaction && internal) return setErrorMessage("Only External Finance can resubmit returned Finance records.");
     if (!internal && !manualIncomeMode && !manualIncomeRevisionMode && (transactionDirection !== "expense" || !canSubmitExpense)) return setErrorMessage("External Finance can submit Cash Out or standalone Cash In.");
@@ -1832,12 +2597,15 @@ export function FinanceWorkspace({
   const openAccountEditor = (account?: Row) => {
     setAccountEditing(account ?? null);
     setAccountFile(null);
+    const accountType = account ? stringValue(account, "account_type", "bank") : "bank";
     setAccountValues({
       name: account ? stringValue(account, "account_name") : "",
-      type: account ? stringValue(account, "account_type", "bank") : "bank",
+      type: accountType,
       number: account ? stringValue(account, "account_number") : "",
       opening_balance: account ? numericValue(account, "opening_balance").toFixed(2) : "",
-      payment_method: account ? stringValue(account, "payment_method", "bank_transfer") : "bank_transfer",
+      payment_method: account
+        ? stringValue(account, "payment_method", "bank_transfer")
+        : defaultPaymentMethodForAccountType(accountType),
     });
     setAccountOpen(true);
   };
@@ -1856,6 +2624,9 @@ export function FinanceWorkspace({
 
   const saveAccount = async () => {
     if (!accountValues.name.trim()) return setErrorMessage("Enter an account name.");
+    const paymentMethod = accountEditing
+      ? accountValues.payment_method
+      : defaultPaymentMethodForAccountType(accountValues.type);
     if (accountEditing) {
       setSaving(true);
       try {
@@ -1864,7 +2635,7 @@ export function FinanceWorkspace({
           p_account_name: accountValues.name.trim(),
           p_account_type: accountValues.type,
           p_account_number: accountValues.number.trim() || null,
-          p_payment_method: accountValues.payment_method,
+          p_payment_method: paymentMethod,
         });
         if (error) throw error;
         closeAccountEditor();
@@ -1893,7 +2664,7 @@ export function FinanceWorkspace({
         p_receipt_file_name: accountFile.name,
         p_receipt_content_type: accountFile.type,
         p_receipt_file_size: accountFile.size,
-        p_payment_method: accountValues.payment_method,
+        p_payment_method: paymentMethod,
       });
       if (error) throw error;
       closeAccountEditor();
@@ -2079,6 +2850,27 @@ export function FinanceWorkspace({
     return true;
   };
 
+  const reviewQuotationPayment = async (
+    paymentId: string,
+    decision: QuotationPaymentDecision,
+    decisionNote: string | null = null,
+  ) => {
+    setSaving(true);
+    const { error } = await client.rpc("review_quotation_payment", {
+      p_payment_id: paymentId,
+      p_decision: decision,
+      p_decision_note: decisionNote,
+    });
+    setSaving(false);
+    if (error) {
+      setErrorMessage(error.message);
+      return false;
+    }
+    setMessage(decision === "verified" ? "Quotation payment verified and posted as Cash In." : decision === "revision_requested" ? "Quotation payment returned to External Finance for correction." : "Quotation payment rejected.");
+    await load();
+    return true;
+  };
+
   const voidManualIncome = async (transactionId: string, reason: string) => {
     setSaving(true);
     const { error } = await client.rpc("void_manual_finance_income", {
@@ -2153,6 +2945,19 @@ export function FinanceWorkspace({
     await load();
   };
 
+  const assignQuotationPaymentAccount = async (paymentId: string, accountId: string) => {
+    if (!accountId) return;
+    setSaving(true);
+    const { error } = await client.rpc("update_pending_quotation_payment_account", {
+      p_payment_id: paymentId,
+      p_finance_account_id: accountId,
+    });
+    setSaving(false);
+    if (error) return setErrorMessage(error.message);
+    setMessage("Quotation payment receiving account updated.");
+    await load();
+  };
+
   const reviewBudget = async (requestId: string, decision: BudgetDecision, decisionNote: string | null = null) => {
     setSaving(true);
     const { error } = await client.rpc("review_finance_budget_request", {
@@ -2178,6 +2983,11 @@ export function FinanceWorkspace({
   const requestTransactionRevisionReview = (transactionId: string) => {
     setDecisionNote("");
     setPendingAction({ kind: "revision", id: transactionId, label: "Cash Out" });
+  };
+
+  const requestQuotationPaymentReview = (paymentId: string, decision: QuotationPaymentDecision) => {
+    setDecisionNote("");
+    setPendingAction({ kind: "quotation_payment", id: paymentId, decision, label: "quotation payment receipt" });
   };
 
   const requestVerifyIncome = (transactionId: string) => {
@@ -2225,6 +3035,7 @@ export function FinanceWorkspace({
     const isBudgetRevision = pendingAction.kind === "budget" && pendingAction.decision === "revision_requested";
     const requiresNote = pendingAction.kind === "funding"
       || pendingAction.kind === "revision"
+      || (pendingAction.kind === "quotation_payment" && ["revision_requested", "rejected"].includes(pendingAction.decision))
       || pendingAction.kind === "income_revision"
       || pendingAction.kind === "income_void"
       || isBudgetRevision
@@ -2238,6 +3049,8 @@ export function FinanceWorkspace({
             ? "Add a reason before returning Cash In for correction."
             : pendingAction.kind === "income_void"
               ? "Add a reason before reversing Cash In."
+              : pendingAction.kind === "quotation_payment"
+                ? pendingAction.decision === "revision_requested" ? "Add a correction reason before returning this quotation payment receipt." : "Add a reason before rejecting this quotation payment receipt."
           : isBudgetRevision
             ? "Add a reason before returning this budget request for revision."
             : "Add a decision note before rejecting this request.");
@@ -2248,6 +3061,8 @@ export function FinanceWorkspace({
       succeeded = await approveAndPay(pendingAction.id, decisionNote.trim() || null);
     } else if (pendingAction.kind === "revision") {
       succeeded = await requestTransactionRevision(pendingAction.id, decisionNote.trim());
+    } else if (pendingAction.kind === "quotation_payment") {
+      succeeded = await reviewQuotationPayment(pendingAction.id, pendingAction.decision, decisionNote.trim() || null);
     } else if (pendingAction.kind === "verify_income") {
       succeeded = await verifyManualIncome(pendingAction.id, decisionNote.trim() || null);
     } else if (pendingAction.kind === "income_revision") {
@@ -2355,8 +3170,7 @@ export function FinanceWorkspace({
                   <FinanceOverviewMetricCard label="Total expenses" value={peso.format(periodTotals.expense)} color="text-[var(--color-danger-text)]" detail={periodLabel} />
                   <FinanceOverviewMetricCard label="Open receivables" value={peso.format(receivables.reduce((total, transaction) => total + numericValue(transaction, "amount"), 0))} color="text-[var(--color-success-text)]" detail="Awaiting collection" />
                   <FinanceOverviewMetricCard label="Open payables" value={peso.format(openSupplierBalance + openLedgerPayableBalance)} color="text-[var(--color-danger-text)]" detail="Awaiting settlement" />
-                  <FinanceOverviewMetricCard label="Pending approvals" value={String(pendingApprovals)} color="text-[var(--color-warning-text)]" detail="Needs review" />
-                   <FinanceOverviewMetricCard label="Pending Cash In" value={String(pendingIncomeConfirmations)} color="text-[var(--color-warning-text)]" detail="Needs verification" />
+                  <FinanceOverviewMetricCard label="Pending approvals" value={String(pendingApprovalCount)} color="text-[var(--color-warning-text)]" detail="Open Finance approval queue" />
                   <FinanceOverviewMetricCard label="Revision requests" value={String(revisionRequests)} color="text-[#6941c6]" detail="Returned to External Finance" />
                 </div>
               </div>
@@ -2378,8 +3192,77 @@ export function FinanceWorkspace({
         </>
       )}
 
+      {tab === "approvals" && internal && (
+        <Panel title="Pending approvals" detail="Review every open Cash In and Cash Out decision in one queue. Quotation receipts become Cash In only after verification; posted ledger history is in Transaction history.">
+          <div className="grid gap-3 border-b border-[#edf0f5] px-4 py-4 sm:grid-cols-3 sm:px-5">
+            <FinanceSummaryMetric label="Open approvals" value={pendingApprovalCount} color="text-[#a76605]" detail="Cash In, Cash Out, and budget requests" />
+            <FinanceSummaryMetric label="Quotation receipts" value={pendingQuotationPaymentRows.length} color="text-[#a76605]" detail="Awaiting verification" />
+            <FinanceSummaryMetric label="Finance transactions" value={pendingApprovalTransactions.length} color="text-[#a76605]" detail="Cash In and Cash Out" />
+          </div>
+
+          <nav aria-label="Pending Finance approval type" className="app-tabs border-b border-[#edf0f5] px-4 sm:px-5">
+            {([
+              ["all", "All", pendingApprovalRows.length],
+              ["income", "Cash In", pendingApprovalIncomeCount],
+              ["expense", "Cash Out", pendingApprovalExpenseCount],
+            ] as Array<[PendingApprovalFilter, string, number]>).map(([value, label, count]) => (
+              <button key={value} type="button" onClick={() => setPendingApprovalFilter(value)} aria-current={pendingApprovalFilter === value ? "page" : undefined} className="app-tab">{label} ({count})</button>
+            ))}
+          </nav>
+
+          <section className="border-b border-[#edf0f5]">
+            <div className="px-4 py-4 sm:px-5">
+              <h3 className="text-[13px] font-semibold text-[#202938]">Cash In and Cash Out approvals</h3>
+              <p className="mt-1 text-[11px] text-[#7d8797]">Quotation receipts, manual Cash In, and pending Cash Out submissions use the same approval table while their underlying records remain separate.</p>
+            </div>
+            <PendingApprovalTable
+              rows={visiblePendingApprovalRows}
+              accounts={activeAccounts}
+              accountName={accountName}
+              openReceipt={openReceipt}
+              assignAccount={assignAccount}
+              assignQuotationPaymentAccount={assignQuotationPaymentAccount}
+              requestQuotationPaymentReview={requestQuotationPaymentReview}
+              requestApproveAndPay={requestApproveAndPay}
+              requestRevision={requestTransactionRevisionReview}
+              requestVerifyIncome={requestVerifyIncome}
+              requestIncomeRevision={requestManualIncomeRevisionReview}
+              onSelectTransaction={setSelectedTransaction}
+              saving={saving}
+            />
+          </section>
+
+          {pendingBudgetRows.length > 0 && (
+            <section>
+              <div className="px-4 py-4 sm:px-5">
+                <h3 className="text-[13px] font-semibold text-[#202938]">Budget requests</h3>
+                <p className="mt-1 text-[11px] text-[#7d8797]">Approve, reject, or return pending budget requests from the same queue.</p>
+              </div>
+              <div className="table-shell overflow-x-auto">
+                <table className="app-table w-full min-w-[850px]">
+                  <thead><tr><th>Requested by</th><th>Requested on</th><th>Amount</th><th>Note</th><th>Action</th></tr></thead>
+                  <tbody>
+                    {pendingBudgetRows.map((budget) => (
+                      <tr key={String(budget.id)}>
+                        <td>{financeUserName(budget.requested_by)}</td>
+                        <td>{displayDate(budget.requested_at)}</td>
+                        <td className="font-semibold">{peso.format(numericValue(budget, "amount"))}</td>
+                        <td>{stringValue(budget, "note") || "—"}</td>
+                        <td><span className="flex gap-1"><button type="button" disabled={saving} onClick={() => requestBudgetReview(String(budget.id), "rejected")} className="button-danger text-[10px]"><XCircle size={13} /> Reject</button><button type="button" disabled={saving} onClick={() => requestBudgetReview(String(budget.id), "revision_requested")} className="button-secondary text-[10px] text-[#6941c6]"><Undo2 size={13} /> Return</button><button type="button" disabled={saving} onClick={() => requestBudgetReview(String(budget.id), "approved")} className="button-secondary text-[10px] text-[#218b55]"><Check size={13} /> Approve</button></span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
+          {!pendingApprovalCount && <div className="px-4 py-10 text-center text-[12px] text-[#7d8797]">No Finance approvals are currently waiting for review.</div>}
+        </Panel>
+      )}
+
       {tab === "transactions" && (
-        <Panel title="Transaction history" detail="Review the finance ledger by Cash In, Cash Out, source, and status.">
+        <Panel title="Transaction history" detail={internal ? "Review posted Finance ledger history. Pending approvals are handled in Pending approvals." : "Review the finance ledger by Cash In, Cash Out, source, and status."}>
           <div className="border-b border-[#edf0f5] px-4 pt-4 sm:px-5">
             <div className="app-tabs overflow-x-auto" role="tablist" aria-label="Transaction type">
               {transactionViewOptions.map((option) => {
@@ -2668,8 +3551,63 @@ export function FinanceWorkspace({
       )}
 
       {transactionDirection && (
-        <FinanceDialog title={manualIncomeMode ? "Record Cash In" : manualIncomeRevisionMode ? "Correct Cash In" : revisionTransaction ? "Revise Cash Out" : commissionPayoutMode ? "Pay commission" : "Submit Cash Out"} detail={manualIncomeMode ? "Submit other income for Internal Finance verification. The account balance updates only after verification." : manualIncomeRevisionMode ? "Correct the returned Cash In and resubmit it for Internal Finance verification." : revisionTransaction ? "Correct the returned fields and resubmit this Cash Out for Internal Finance review." : commissionPayoutMode ? "Create a controlled commission payout after full quotation payment and the three-day hold." : supplierPaymentMode ? "Submit a supplier payment for Internal Finance approval." : "Submit a regular expense for Internal Finance approval."} close={closeTransactionForm}>
+        <FinanceDialog title={transactionDialogTitle} detail={transactionDialogDetail} close={closeTransactionForm}>
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            {!internal && transactionDirection === "income" && !revisionTransaction && (
+              <fieldset className="field-label sm:col-span-2">
+                <legend>Cash In source</legend>
+                <div role="group" aria-label="Cash In source" className="mt-1 flex rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-1">
+                  <button type="button" aria-pressed={cashInSource === "quotation_payment"} onClick={() => chooseCashInSource("quotation_payment")} className={cashInSource === "quotation_payment" ? "flex-1 rounded-md bg-[#c43b43] px-3 py-2 text-[11px] font-semibold text-white shadow-sm hover:bg-[#a92f37]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797] hover:bg-white"}>Quotation payment</button>
+                  <button type="button" aria-pressed={cashInSource === "other_income"} onClick={() => chooseCashInSource("other_income")} className={cashInSource === "other_income" ? "flex-1 rounded-md bg-[#c43b43] px-3 py-2 text-[11px] font-semibold text-white shadow-sm hover:bg-[#a92f37]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797] hover:bg-white"}>Other income</button>
+                </div>
+              </fieldset>
+            )}
+            {quotationPaymentMode ? (
+              <>
+                <div className="field-label sm:col-span-2">
+                  <span>Quotation</span>
+                  <SearchableSelect
+                    options={quotationPaymentOptions}
+                    value={transactionValues.quotation_id}
+                    onChange={chooseQuotationPayment}
+                    placeholder={quotationPaymentOptions.length ? "Choose company and client" : "No approved quotations available"}
+                    searchPlaceholder="Search company or client"
+                    noResultsLabel="No approved quotation found."
+                    ariaLabel="Quotation payment source"
+                    required
+                    clearable={false}
+                    disabled={!quotationPaymentOptions.length}
+                    className="mt-1"
+                  />
+                </div>
+                {selectedQuotationPayment && selectedQuotationPaymentSummary && (
+                  <div className="grid gap-2 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[11px] sm:col-span-2 sm:grid-cols-3">
+                    <div><span className="block text-[10px] text-[#8b92a1]">Quotation total</span><strong className="block text-[#344054]">{peso.format(selectedQuotationPaymentSummary.total)}</strong></div>
+                    <div><span className="block text-[10px] text-[#8b92a1]">Verified paid</span><strong className="block text-[#218b55]">{peso.format(selectedQuotationPaymentSummary.verified)}</strong></div>
+                    <div><span className="block text-[10px] text-[#8b92a1]">Available balance</span><strong className="block text-[#344054]">{peso.format(selectedQuotationPaymentSummary.available)}</strong></div>
+                    {selectedQuotationPaymentRevision && <p className="sm:col-span-3 rounded-md border border-[#f0d49b] bg-[#fff8e9] px-3 py-2 text-[11px] leading-[1.45] text-[#8a5a00]">This receipt was returned for correction{stringValue(selectedQuotationPaymentRevision, "correction_note") ? `: ${stringValue(selectedQuotationPaymentRevision, "correction_note")}` : ". Upload the corrected details and receipt image, then resubmit it."}</p>}
+                  </div>
+                )}
+                <label className="field-label">Payment type<select value={transactionValues.payment_kind} onChange={(event) => {
+                  const kind = event.target.value;
+                  setTransactionValues((current) => ({
+                    ...current,
+                    payment_kind: kind,
+                    amount: selectedQuotationPaymentSummary ? financeQuotationPaymentSuggestedAmount(kind, selectedQuotationPaymentSummary) : "",
+                    account_id: quotationPaymentAccountIdFor(selectedQuotationPayment, kind),
+                  }));
+                }} className="input mt-1">{quotationPaymentKindOptions.map(([key, label]) => <option key={key} value={key}>{key === "full_payment" && stringValue(selectedQuotationPayment, "payment_terms_option") === "pdc_50_50" ? "Full balance (PDC)" : label}</option>)}</select></label>
+                <label className="field-label">Amount<NumberInput min="0.01" step="0.01" value={transactionValues.amount} onChange={(value) => setTransactionValues((current) => ({ ...current, amount: value }))} className="input mt-1" placeholder="0.00" /><span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">{selectedQuotationPaymentSummary ? transactionValues.payment_kind === "downpayment" ? `Required remaining downpayment: ${peso.format(selectedQuotationPaymentSummary.downpaymentRemaining)}` : `Must equal available balance: ${peso.format(selectedQuotationPaymentSummary.available)}` : "Choose a quotation first"}</span></label>
+                <label className="field-label">Paid date<input type="date" value={transactionValues.transaction_date} onClick={(event) => event.currentTarget.showPicker?.()} onChange={(event) => setTransactionValues((current) => ({ ...current, transaction_date: event.target.value }))} className="input mt-1" /></label>
+                <label className="field-label">Received into account
+                  <SearchableSelect options={quotationPaymentAccountOptions} value={transactionValues.account_id} onChange={(value) => setTransactionValues((current) => ({ ...current, account_id: value }))} placeholder={activeAccounts.length ? "Choose receiving account" : "No active account available"} searchPlaceholder="Search receiving accounts" noResultsLabel={transactionValues.payment_kind === "full_payment" && stringValue(selectedQuotationPayment, "payment_terms_option") === "pdc_50_50" ? "No active Check/PDC account found." : "No matching receiving account."} ariaLabel="Receiving Finance account" required clearable={false} disabled={!quotationPaymentAccountOptions.length} className="mt-1" />
+                  <small className="mt-1 block text-[#7d8797]">Only active accounts added by Internal Finance are shown.</small>
+                </label>
+                <label className="field-label sm:col-span-2">Reference number (optional)<input value={transactionValues.reference_number} onChange={(event) => setTransactionValues((current) => ({ ...current, reference_number: event.target.value }))} className="input mt-1" placeholder="Receipt or transaction reference" maxLength={200} /></label>
+                <div className="field-label sm:col-span-2"><span>{selectedQuotationPaymentRevision ? "Replacement receipt image" : "Receipt image"}</span><FileUploadControl accept="image/jpeg,image/png,image/webp" ariaLabel={selectedQuotationPaymentRevision ? "Choose replacement payment receipt image" : "Choose payment receipt image"} className="mt-1" emptyLabel={selectedQuotationPaymentRevision ? "Choose replacement receipt image" : "Choose receipt image"} files={transactionFile ? [transactionFile] : []} onFilesSelected={(files) => setTransactionFile(files[0] ?? null)} /></div>
+              </>
+            ) : (
+            <>
             {!internal && transactionDirection === "expense" && (
               <fieldset className="field-label sm:col-span-2">
                 <legend>Expense type</legend>
@@ -2738,11 +3676,13 @@ export function FinanceWorkspace({
               </label>}
 
             </>}
+            </>
+            )}
           </div>
           {internal && (
           <div className="mt-4 rounded-lg border border-[#edf0f5] bg-[#fafbfc] p-3"><p className="text-[11px] font-semibold text-[#344054]">Add a custom {transactionDirection} category</p><div className="mt-2 flex flex-wrap gap-2"><input value={categoryDraft.name} onChange={(event) => setCategoryDraft((current) => ({ ...current, name: event.target.value }))} className="input min-w-[200px] flex-1 text-[12px]" placeholder="Category name" />{transactionDirection === "expense" && <select value={categoryDraft.expense_class} onChange={(event) => setCategoryDraft((current) => ({ ...current, expense_class: event.target.value }))} className="input text-[12px]"><option value="operating">Operating Expense</option><option value="non_operating">Non Operating Expense</option></select>}<button type="button" onClick={() => void saveCategory()} disabled={saving} className="button-secondary">Add category</button></div><div className="mt-3 flex flex-wrap gap-1.5">{activeCategories.filter((category) => !Boolean(category.is_system)).map((category) => <button key={String(category.id)} type="button" onClick={() => void archiveCategory(category)} className="inline-flex items-center gap-1 rounded-full border border-[#d9e0e9] px-2 py-1 text-[10px] text-[#687386] hover:border-[#f2b8b5] hover:text-[#b42318]">{stringValue(category, "name")} <X size={11} /></button>)}</div></div>
           )}
-            <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={closeTransactionForm} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveTransaction()} disabled={saving || (!revisionTransaction && !internal && !manualIncomeMode && !commissionPayoutMode && transactionDirection === "expense" && approvedBudgetRemainingTotal <= 0) || ((transactionDirection === "expense" || manualIncomeMode || manualIncomeRevisionMode) && (!activeAccounts.length || !transactionValues.account_id)) || (supplierPaymentMode && !transactionValues.supplier_payable_id) || (internal && !transactionValues.commission_allocation_id)} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} {saving ? "Saving..." : manualIncomeMode ? "Submit Cash In" : manualIncomeRevisionMode ? "Resubmit Cash In" : revisionTransaction ? "Resubmit Cash Out" : commissionPayoutMode ? "Create commission payout" : supplierPaymentMode ? "Submit supplier payment" : "Submit regular expense"}</button></div>
+            <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={closeTransactionForm} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveTransaction()} disabled={saving || (quotationPaymentMode && (!transactionValues.quotation_id || !transactionValues.account_id || !transactionFile || !quotationPaymentAccountOptions.length)) || (!revisionTransaction && !internal && !manualIncomeMode && !commissionPayoutMode && transactionDirection === "expense" && approvedBudgetRemainingTotal <= 0) || ((transactionDirection === "expense" || manualIncomeMode || manualIncomeRevisionMode) && (!activeAccounts.length || !transactionValues.account_id)) || (supplierPaymentMode && !transactionValues.supplier_payable_id) || (internal && !transactionValues.commission_allocation_id)} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} {saving ? "Saving..." : quotationPaymentMode ? selectedQuotationPaymentRevision ? "Resubmit receipt" : "Submit receipt" : manualIncomeMode ? "Submit Cash In" : manualIncomeRevisionMode ? "Resubmit Cash In" : revisionTransaction ? "Resubmit Cash Out" : commissionPayoutMode ? "Create commission payout" : supplierPaymentMode ? "Submit supplier payment" : "Submit regular expense"}</button></div>
         </FinanceDialog>
       )}
 
@@ -2817,13 +3757,12 @@ export function FinanceWorkspace({
       {accountOpen && (
         <FinanceDialog
           title={accountEditing ? "Edit Finance account" : "Add bank or e-wallet account"}
-          detail={accountEditing ? "Update the account details used for payment routing. Opening balances remain fixed; record later deposits as account funding." : "Internal Finance owns the account directory and opening balances."}
+          detail={accountEditing ? "Update the account details. Existing receipt routing is preserved. Opening balances remain fixed; record later deposits as account funding." : "Internal Finance owns the account directory and opening balances. Payment routing is set automatically from the account type."}
           close={closeAccountEditor}
         >
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
             <label className="field-label">Account name<input value={accountValues.name} onChange={(event) => setAccountValues((current) => ({ ...current, name: event.target.value }))} className="input mt-1" placeholder="Example: BDO Operating Account" /></label>
             <label className="field-label">Account type<select value={accountValues.type} onChange={(event) => setAccountValues((current) => ({ ...current, type: event.target.value }))} className="input mt-1"><option value="bank">Bank</option><option value="e_wallet">E-wallet</option><option value="cash">Cash</option><option value="other">Other</option></select></label>
-            <label className="field-label">Payment method mapping<select value={accountValues.payment_method} onChange={(event) => setAccountValues((current) => ({ ...current, payment_method: event.target.value }))} className="input mt-1">{financePaymentMethods.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
             <label className="field-label">Account number / identifier<input value={accountValues.number} onChange={(event) => setAccountValues((current) => ({ ...current, number: event.target.value }))} className="input mt-1" /></label>
             <label className="field-label">Opening amount<NumberInput min="0" step="0.01" disabled={Boolean(accountEditing)} value={accountValues.opening_balance} onChange={(value) => setAccountValues((current) => ({ ...current, opening_balance: value }))} className="input mt-1" />{accountEditing && <span className="mt-1 block text-[10px] text-[#7d8797]">Fixed after account creation.</span>}</label>
             {!accountEditing && <div className="field-label sm:col-span-2"><span>Receipt image</span><FileUploadControl accept="image/jpeg,image/png,image/webp" ariaLabel="Choose account receipt image" className="mt-1" emptyLabel="Choose receipt image" files={accountFile ? [accountFile] : []} onFilesSelected={(files) => setAccountFile(files[0] ?? null)} /></div>}
