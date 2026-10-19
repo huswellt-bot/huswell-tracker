@@ -556,6 +556,7 @@ function TransactionTable({
   openReceipt,
   onSelectTransaction,
   saving,
+  allowActions = true,
 }: {
   rows: Row[];
   categoryName: (id: unknown) => string;
@@ -575,6 +576,7 @@ function TransactionTable({
   openReceipt: (path: string, bucket?: string) => Promise<void>;
   onSelectTransaction: (transaction: Row) => void;
   saving: boolean;
+  allowActions?: boolean;
 }) {
   return (
     <div className="finance-transaction-table">
@@ -587,16 +589,16 @@ function TransactionTable({
           const incomeReviewStatus = stringValue(transaction, "income_review_status");
           const isVoided = Boolean(transaction.is_voided);
           const isRegularExpense = type === "expense" && !transaction.source_payment_id && !transaction.supplier_payable_id && !transaction.commission_summary_id && !transaction.commission_allocation_id;
-          const canApproveAndPay = internal && !isVoided && isRegularExpense && paid === "unpaid" && ["pending", "approved"].includes(approval);
-          const canMarkPaid = internal && !isVoided && type === "expense" && !isRegularExpense && paid === "unpaid" && approval === "approved";
-          const canRequestRevision = internal && !isVoided && type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval) && !transaction.source_payment_id && !transaction.commission_summary_id && !transaction.commission_allocation_id;
-          const canEditRevision = !internal && !isVoided && type === "expense" && paid === "unpaid" && approval === "revision_requested";
-          const canVerifyIncome = internal && manualIncome && !isVoided && paid === "unpaid" && incomeReviewStatus === "pending" && Boolean(transaction.account_id);
-          const canRequestIncomeRevision = internal && manualIncome && !isVoided && paid === "unpaid" && incomeReviewStatus === "pending";
-          const canEditIncomeRevision = !internal && manualIncome && !isVoided && paid === "unpaid" && incomeReviewStatus === "revision_requested";
-          const canVoidIncome = internal && manualIncome && !isVoided && paid === "paid" && incomeReviewStatus === "verified";
+          const canApproveAndPay = allowActions && internal && !isVoided && isRegularExpense && paid === "unpaid" && ["pending", "approved"].includes(approval);
+          const canMarkPaid = allowActions && internal && !isVoided && type === "expense" && !isRegularExpense && paid === "unpaid" && approval === "approved";
+          const canRequestRevision = allowActions && internal && !isVoided && type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval) && !transaction.source_payment_id && !transaction.commission_summary_id && !transaction.commission_allocation_id;
+          const canEditRevision = allowActions && !internal && !isVoided && type === "expense" && paid === "unpaid" && approval === "revision_requested";
+          const canVerifyIncome = allowActions && internal && manualIncome && !isVoided && paid === "unpaid" && incomeReviewStatus === "pending" && Boolean(transaction.account_id);
+          const canRequestIncomeRevision = allowActions && internal && manualIncome && !isVoided && paid === "unpaid" && incomeReviewStatus === "pending";
+          const canEditIncomeRevision = allowActions && !internal && manualIncome && !isVoided && paid === "unpaid" && incomeReviewStatus === "revision_requested";
+          const canVoidIncome = allowActions && internal && manualIncome && !isVoided && paid === "paid" && incomeReviewStatus === "verified";
           const accountId = stringValue(transaction, "account_id");
-          const canChangeAccount = internal && !isVoided && (
+          const canChangeAccount = allowActions && internal && !isVoided && (
             (type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval))
             || (!accountId && Boolean(transaction.source_payment_id))
             || (manualIncome && paid === "unpaid" && ["pending", "revision_requested"].includes(incomeReviewStatus))
@@ -654,16 +656,16 @@ function TransactionTable({
               const incomeReviewStatus = stringValue(transaction, "income_review_status");
               const isVoided = Boolean(transaction.is_voided);
               const isRegularExpense = type === "expense" && !transaction.source_payment_id && !transaction.supplier_payable_id && !transaction.commission_summary_id && !transaction.commission_allocation_id;
-              const canApproveAndPay = internal && !isVoided && isRegularExpense && paid === "unpaid" && ["pending", "approved"].includes(approval);
-              const canMarkPaid = internal && !isVoided && type === "expense" && !isRegularExpense && paid === "unpaid" && approval === "approved";
-              const canRequestRevision = internal && !isVoided && type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval) && !transaction.source_payment_id && !transaction.commission_summary_id && !transaction.commission_allocation_id;
-              const canEditRevision = !internal && !isVoided && type === "expense" && paid === "unpaid" && approval === "revision_requested";
-              const canVerifyIncome = internal && manualIncome && !isVoided && paid === "unpaid" && incomeReviewStatus === "pending" && Boolean(transaction.account_id);
-              const canRequestIncomeRevision = internal && manualIncome && !isVoided && paid === "unpaid" && incomeReviewStatus === "pending";
-              const canEditIncomeRevision = !internal && manualIncome && !isVoided && paid === "unpaid" && incomeReviewStatus === "revision_requested";
-              const canVoidIncome = internal && manualIncome && !isVoided && paid === "paid" && incomeReviewStatus === "verified";
+              const canApproveAndPay = allowActions && internal && !isVoided && isRegularExpense && paid === "unpaid" && ["pending", "approved"].includes(approval);
+              const canMarkPaid = allowActions && internal && !isVoided && type === "expense" && !isRegularExpense && paid === "unpaid" && approval === "approved";
+              const canRequestRevision = allowActions && internal && !isVoided && type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval) && !transaction.source_payment_id && !transaction.commission_summary_id && !transaction.commission_allocation_id;
+              const canEditRevision = allowActions && !internal && !isVoided && type === "expense" && paid === "unpaid" && approval === "revision_requested";
+              const canVerifyIncome = allowActions && internal && manualIncome && !isVoided && paid === "unpaid" && incomeReviewStatus === "pending" && Boolean(transaction.account_id);
+              const canRequestIncomeRevision = allowActions && internal && manualIncome && !isVoided && paid === "unpaid" && incomeReviewStatus === "pending";
+              const canEditIncomeRevision = allowActions && !internal && manualIncome && !isVoided && paid === "unpaid" && incomeReviewStatus === "revision_requested";
+              const canVoidIncome = allowActions && internal && manualIncome && !isVoided && paid === "paid" && incomeReviewStatus === "verified";
               const accountId = stringValue(transaction, "account_id");
-              const canChangeAccount = internal && !isVoided && ((type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval)) || (!accountId && Boolean(transaction.source_payment_id)) || (manualIncome && paid === "unpaid" && ["pending", "revision_requested"].includes(incomeReviewStatus)));
+              const canChangeAccount = allowActions && internal && !isVoided && ((type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval)) || (!accountId && Boolean(transaction.source_payment_id)) || (manualIncome && paid === "unpaid" && ["pending", "revision_requested"].includes(incomeReviewStatus)));
               const receiptBucket = stringValue(transaction, "receipt_bucket", "finance-receipts");
               const description = manualIncome ? "Manual Cash In" : leadName(transaction.lead_id) !== "—" ? leadName(transaction.lead_id) : type === "income" ? "Quotation payment" : "Cash Out";
               const amount = numericValue(transaction, "amount");
@@ -3187,7 +3189,7 @@ export function FinanceWorkspace({
             </div>
           )}
           <Panel title="Recent transactions">
-            <TransactionTable rows={recentTransactions} categoryName={categoryName} accountName={accountName} leadName={leadName} budgetLabel={budgetLabel} accounts={activeAccounts} internal={internal} approveAndPay={requestApproveAndPay} requestRevision={requestTransactionRevisionReview} verifyIncome={requestVerifyIncome} requestIncomeRevision={requestManualIncomeRevisionReview} voidIncome={requestVoidManualIncome} editRevision={openRevisionEditor} markPaid={requestMarkPaid} assignAccount={assignAccount} openReceipt={openReceipt} onSelectTransaction={setSelectedTransaction} saving={saving} />
+            <TransactionTable rows={recentTransactions} categoryName={categoryName} accountName={accountName} leadName={leadName} budgetLabel={budgetLabel} accounts={activeAccounts} internal={internal} allowActions={false} approveAndPay={requestApproveAndPay} requestRevision={requestTransactionRevisionReview} verifyIncome={requestVerifyIncome} requestIncomeRevision={requestManualIncomeRevisionReview} voidIncome={requestVoidManualIncome} editRevision={openRevisionEditor} markPaid={requestMarkPaid} assignAccount={assignAccount} openReceipt={openReceipt} onSelectTransaction={setSelectedTransaction} saving={saving} />
           </Panel>
         </>
       )}
@@ -3306,7 +3308,7 @@ export function FinanceWorkspace({
               {canSubmitExpense && <button type="button" onClick={() => setFormDirection("expense")} className={primaryButton}><Plus size={13} /> Submit Cash Out</button>}
             </div>
           </div>
-          <TransactionTable rows={visibleTransactions} categoryName={categoryName} accountName={accountName} leadName={leadName} budgetLabel={budgetLabel} accounts={activeAccounts} internal={internal} approveAndPay={requestApproveAndPay} requestRevision={requestTransactionRevisionReview} verifyIncome={requestVerifyIncome} requestIncomeRevision={requestManualIncomeRevisionReview} voidIncome={requestVoidManualIncome} editRevision={openRevisionEditor} markPaid={requestMarkPaid} assignAccount={assignAccount} openReceipt={openReceipt} onSelectTransaction={setSelectedTransaction} saving={saving} />
+          <TransactionTable rows={visibleTransactions} categoryName={categoryName} accountName={accountName} leadName={leadName} budgetLabel={budgetLabel} accounts={activeAccounts} internal={internal} allowActions={true} approveAndPay={requestApproveAndPay} requestRevision={requestTransactionRevisionReview} verifyIncome={requestVerifyIncome} requestIncomeRevision={requestManualIncomeRevisionReview} voidIncome={requestVoidManualIncome} editRevision={openRevisionEditor} markPaid={requestMarkPaid} assignAccount={assignAccount} openReceipt={openReceipt} onSelectTransaction={setSelectedTransaction} saving={saving} />
           <TablePagination page={activeTransactionsPage} pageCount={transactionPageCount} total={filteredTransactions.length} onPageChange={setTransactionsPage} label="Finance transactions pagination" />
         </Panel>
       )}
