@@ -3,9 +3,8 @@
 
 import {
   Check,
-  ChevronDown,
+  ClipboardCheck,
   Download,
-  FileText,
   LoaderCircle,
   Plus,
   ReceiptText,
@@ -23,7 +22,6 @@ import {
   View as PdfView,
   pdf,
 } from "@react-pdf/renderer";
-import { createPortal } from "react-dom";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { FileUploadControl } from "@/components/ui/file-upload-control";
@@ -61,6 +59,8 @@ type PendingApprovalRow = {
   receiptPath: string;
   receiptBucket: string;
   payment?: Row;
+  quotation?: Row;
+  lead?: Row;
   transaction?: Row;
 };
 
@@ -614,7 +614,7 @@ function TransactionTable({
                   <p className="mt-1 text-[10px] text-[#7d8797]">{displayDate(transaction.transaction_date)}{stringValue(transaction, "transaction_time") ? ` · ${stringValue(transaction, "transaction_time")}` : ""}</p>
                 </div>
                 <div className="shrink-0 text-right">
-                  <p className={`text-[13px] font-semibold ${type === "income" ? "text-[#218b55]" : "text-[#b42318]"}`}>{type === "income" ? "+" : "−"}{peso.format(amount)}</p>
+                  <p className={`text-[13px] font-semibold ${type === "income" ? "text-[#218b55]" : "text-[#b42318]"}`}>{peso.format(amount)}</p>
                   <div className="mt-1"><StatusPill value={transactionStatusLabel(transaction)} /></div>
                 </div>
               </div>
@@ -675,7 +675,7 @@ function TransactionTable({
                 <td><span className="whitespace-nowrap">{transactionSourceLabel(transaction)}</span>{Boolean(transaction.source_payment_id) && <small>Verified from quotation</small>}</td>
                 <td>{categoryName(transaction.category_id)}{budgetLabel(transaction.budget_request_id) && <small>Budget: {budgetLabel(transaction.budget_request_id)}</small>}</td>
                 <td>{canChangeAccount ? <select aria-label={type === "income" ? "Receiving account" : "Payment account"} defaultValue={accountId} onChange={(event) => void assignAccount(String(transaction.id), event.target.value)} disabled={saving} className="input min-w-[145px] text-[10px]"><option value="">Choose account</option>{accounts.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")}</option>)}</select> : accountName(transaction.account_id)}</td>
-                <td className={`whitespace-nowrap font-semibold ${type === "income" ? "text-[#218b55]" : "text-[#b42318]"}`}>{type === "income" ? "+" : "−"}{peso.format(amount)}</td>
+                <td className={`whitespace-nowrap font-semibold ${type === "income" ? "text-[#218b55]" : "text-[#b42318]"}`}>{peso.format(amount)}</td>
                 <td><StatusPill value={transactionStatusLabel(transaction)} /></td>
                 <td>{stringValue(transaction, "receipt_storage_path") ? <button type="button" onClick={() => void openReceipt(stringValue(transaction, "receipt_storage_path"), receiptBucket)} className="text-[#c43b43]" title="View receipt"><ReceiptText size={15} /></button> : "-"}</td>
                 <td className="finance-action-cell"><span className="finance-action-group"><button type="button" onClick={() => onSelectTransaction(transaction)} className="button-secondary text-[10px]">Details</button>{canVerifyIncome && <button type="button" disabled={saving} onClick={() => verifyIncome(String(transaction.id))} className="button-secondary text-[10px] text-[#218b55]">Verify</button>}{canRequestIncomeRevision && <button type="button" disabled={saving} onClick={() => requestIncomeRevision(String(transaction.id))} className="button-secondary text-[10px]">Return</button>}{canEditIncomeRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[10px]">Edit</button>}{canVoidIncome && <button type="button" disabled={saving} onClick={() => voidIncome(String(transaction.id))} className="button-danger text-[10px]">Reverse</button>}{canApproveAndPay && <button type="button" disabled={saving || !accountId} onClick={() => approveAndPay(String(transaction.id))} className="button-secondary text-[10px]">{approval === "pending" ? "Approve and pay" : "Pay now"}</button>}{canRequestRevision && <button type="button" disabled={saving} onClick={() => requestRevision(String(transaction.id))} className="button-secondary text-[10px]">Return</button>}{canEditRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[10px]">Edit</button>}{canMarkPaid && <button type="button" disabled={saving} onClick={() => markPaid(String(transaction.id), "Cash Out")} className="button-secondary text-[10px]">Mark paid</button>}</span></td>
@@ -740,7 +740,7 @@ function TransactionDetailDialog({
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
         <div className="rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3 sm:col-span-2">
           <p className="text-[10px] font-semibold uppercase tracking-[.06em] text-[#7d8797]">Amount</p>
-          <p className={`mt-1 text-2xl font-semibold ${isIncome ? "text-[#218b55]" : "text-[#b42318]"}`}>{isIncome ? "+" : "−"}{peso.format(amount)}</p>
+          <p className={`mt-1 text-2xl font-semibold ${isIncome ? "text-[#218b55]" : "text-[#b42318]"}`}>{peso.format(amount)}</p>
           <div className="mt-2"><StatusPill value={transactionStatusLabel(transaction)} /></div>
         </div>
         <TransactionDetailField label="Date">{displayDate(transaction.transaction_date)}{stringValue(transaction, "transaction_time") ? ` · ${stringValue(transaction, "transaction_time")}` : ""}</TransactionDetailField>
@@ -760,6 +760,165 @@ function TransactionDetailDialog({
       <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-[#edf0f5] pt-4">
         {receiptPath && <button type="button" onClick={() => void openReceipt(receiptPath, receiptBucket)} className="button-secondary"><ReceiptText size={14} /> View receipt</button>}
         <button type="button" onClick={close} className="button-primary">Close</button>
+      </div>
+    </FinanceDialog>
+  );
+}
+
+const pendingTransactionReviewState = (transaction: Row) => {
+  const type = stringValue(transaction, "transaction_type");
+  const approval = stringValue(transaction, "approval_status");
+  const paid = stringValue(transaction, "payment_status");
+  const manualIncome = isManualIncomeTransaction(transaction);
+  const incomeReviewStatus = stringValue(transaction, "income_review_status");
+  const isVoided = Boolean(transaction.is_voided);
+  const isRegularExpense = type === "expense"
+    && !transaction.source_payment_id
+    && !transaction.supplier_payable_id
+    && !transaction.commission_summary_id
+    && !transaction.commission_allocation_id;
+
+  return {
+    manualIncome,
+    canVerifyIncome: !isVoided && manualIncome && paid === "unpaid" && incomeReviewStatus === "pending" && Boolean(transaction.account_id),
+    canRequestIncomeRevision: !isVoided && manualIncome && paid === "unpaid" && incomeReviewStatus === "pending",
+    canApproveAndPay: !isVoided && isRegularExpense && paid === "unpaid" && ["pending", "approved"].includes(approval),
+    canRequestRevision: !isVoided && type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval) && isRegularExpense,
+  };
+};
+
+function FinanceApprovalReviewDialog({
+  row,
+  accounts,
+  accountName,
+  categoryName,
+  quotationName,
+  budgetLabel,
+  profileName,
+  openReceipt,
+  assignAccount,
+  assignQuotationPaymentAccount,
+  requestQuotationPaymentReview,
+  requestApproveAndPay,
+  requestRevision,
+  requestVerifyIncome,
+  requestIncomeRevision,
+  close,
+  saving,
+}: {
+  row: PendingApprovalRow;
+  accounts: Row[];
+  accountName: (id: unknown) => string;
+  categoryName: (id: unknown) => string;
+  quotationName: (id: unknown) => string;
+  budgetLabel: (id: unknown) => string;
+  profileName: (id: unknown) => string;
+  openReceipt: (path: string, bucket?: string) => Promise<void>;
+  assignAccount: (transactionId: string, accountId: string) => Promise<void>;
+  assignQuotationPaymentAccount: (paymentId: string, accountId: string) => Promise<void>;
+  requestQuotationPaymentReview: (paymentId: string, decision: QuotationPaymentDecision) => void;
+  requestApproveAndPay: (transactionId: string) => void;
+  requestRevision: (transactionId: string) => void;
+  requestVerifyIncome: (transactionId: string) => void;
+  requestIncomeRevision: (transactionId: string) => void;
+  close: () => void;
+  saving: boolean;
+}) {
+  const transaction = row.transaction;
+  const payment = row.payment;
+  const quotation = row.quotation;
+  const lead = row.lead;
+  const isIncome = row.direction === "income";
+  const state = transaction ? pendingTransactionReviewState(transaction) : null;
+  const accountOptions = row.kind === "quotation_payment"
+    ? accounts.filter((account) => stringValue(account, "payment_method") === stringValue(payment, "method"))
+    : accounts;
+  const accountIsEligible = accountOptions.some((account) => String(account.id) === row.accountId);
+  const showVerify = row.kind === "quotation_payment" || Boolean(state?.canVerifyIncome) || Boolean(state?.manualIncome && !row.accountId);
+  const verifyNeedsAccount = row.kind === "finance_transaction" && Boolean(state?.manualIncome) && !row.accountId;
+  const showIncomeRevision = row.kind === "quotation_payment" || Boolean(state?.canRequestIncomeRevision);
+  const showCashOutApproval = Boolean(state?.canApproveAndPay);
+  const showCashOutRevision = Boolean(state?.canRequestRevision);
+  const quotationNo = stringValue(quotation, "quotation_no");
+  const clientName = stringValue(lead, "client_name", stringValue(quotation, "client_name"));
+  const projectName = stringValue(quotation, "project_name", stringValue(lead, "project_name"));
+  const paymentKind = stringValue(payment, "payment_kind").replaceAll("_", " ");
+  const paymentMethod = financePaymentMethodLabel(payment?.method);
+  const paymentNote = stringValue(payment, "notes") || stringValue(payment, "correction_note");
+  const receiptFileName = stringValue(payment, "receipt_file_name") || stringValue(transaction, "receipt_file_name");
+  const sourceLabel = row.kind === "quotation_payment" ? "Quotation payment" : row.source;
+
+  return (
+    <FinanceDialog
+      title={`${sourceLabel} review`}
+      detail={`${isIncome ? "Cash In" : "Cash Out"} · ${displayDate(row.date)}`}
+      close={close}
+    >
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3 sm:col-span-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[.06em] text-[#7d8797]">{isIncome ? "Cash In amount" : "Cash Out amount"}</p>
+          <p className={`mt-1 text-2xl font-semibold ${isIncome ? "text-[#218b55]" : "text-[#b42318]"}`}>{peso.format(row.amount)}</p>
+          <div className="mt-2"><StatusPill value={row.status} /></div>
+        </div>
+        <TransactionDetailField label="Date">{displayDate(row.date)}{transaction && stringValue(transaction, "transaction_time") ? ` · ${stringValue(transaction, "transaction_time")}` : ""}</TransactionDetailField>
+        <TransactionDetailField label="Source">{sourceLabel}</TransactionDetailField>
+        <TransactionDetailField label={isIncome ? "Receiving account" : "Payment account"} className="sm:col-span-2">
+          <select
+            aria-label={isIncome ? "Receiving account" : "Payment account"}
+            value={accountIsEligible ? row.accountId : ""}
+            onChange={(event) => {
+              if (!event.target.value) return;
+              if (row.kind === "quotation_payment") void assignQuotationPaymentAccount(row.id, event.target.value);
+              else void assignAccount(row.id, event.target.value);
+            }}
+            disabled={saving}
+            className="input mt-1 w-full max-w-sm text-[12px]"
+          >
+            <option value="">{row.accountId && !accountIsEligible ? `${accountName(row.accountId)} (not eligible)` : "Choose account"}</option>
+            {accountOptions.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")}</option>)}
+          </select>
+        </TransactionDetailField>
+        {row.kind === "quotation_payment" ? (
+          <>
+            {quotationNo && <TransactionDetailField label="Quotation">{quotationNo}</TransactionDetailField>}
+            {clientName && <TransactionDetailField label="Client">{clientName}</TransactionDetailField>}
+            {projectName && <TransactionDetailField label="Project">{projectName}</TransactionDetailField>}
+            {paymentKind && <TransactionDetailField label="Payment type">{paymentKind}</TransactionDetailField>}
+            <TransactionDetailField label="Payment method">{paymentMethod}</TransactionDetailField>
+            {stringValue(payment, "reference_no") && <TransactionDetailField label="Reference number">{stringValue(payment, "reference_no")}</TransactionDetailField>}
+            {stringValue(payment, "submitted_by") && <TransactionDetailField label="Submitted by">{profileName(stringValue(payment, "submitted_by"))}</TransactionDetailField>}
+            {receiptFileName && <TransactionDetailField label="Receipt file">{receiptFileName}</TransactionDetailField>}
+            {paymentNote && <TransactionDetailField label="Notes" className="sm:col-span-2"><span className="whitespace-pre-wrap">{paymentNote}</span></TransactionDetailField>}
+          </>
+        ) : (
+          <>
+            {transaction && !state?.manualIncome && row.description && <TransactionDetailField label="Payee / company">{row.description}</TransactionDetailField>}
+            {transaction && transaction.category_id && <TransactionDetailField label="Category">{categoryName(transaction.category_id)}</TransactionDetailField>}
+            {transaction && transaction.quotation_id && <TransactionDetailField label="Quotation">{quotationName(transaction.quotation_id)}</TransactionDetailField>}
+            {transaction && transaction.budget_request_id && <TransactionDetailField label="Budget">{budgetLabel(transaction.budget_request_id)}</TransactionDetailField>}
+            {transaction && stringValue(transaction, "reference_number") && <TransactionDetailField label="Reference number">{stringValue(transaction, "reference_number")}</TransactionDetailField>}
+            {transaction && stringValue(transaction, "payment_status") && <TransactionDetailField label="Payment status"><StatusPill value={stringValue(transaction, "payment_status")} /></TransactionDetailField>}
+            {transaction && stringValue(transaction, "income_review_status") && <TransactionDetailField label="Review status"><StatusPill value={stringValue(transaction, "income_review_status")} /></TransactionDetailField>}
+            {transaction && stringValue(transaction, "submitted_by") && <TransactionDetailField label="Submitted by">{profileName(stringValue(transaction, "submitted_by"))}</TransactionDetailField>}
+            {transaction && stringValue(transaction, "approved_by") && <TransactionDetailField label="Approved by">{profileName(stringValue(transaction, "approved_by"))}</TransactionDetailField>}
+            {transaction && stringValue(transaction, "paid_by") && <TransactionDetailField label="Paid by">{profileName(stringValue(transaction, "paid_by"))}</TransactionDetailField>}
+            {transaction && transactionNote(transaction) !== "-" && <TransactionDetailField label="Note" className="sm:col-span-2"><span className="whitespace-pre-wrap">{transactionNote(transaction)}</span></TransactionDetailField>}
+            {transaction && stringValue(transaction, "decision_note") && <TransactionDetailField label="Reviewer note" className="sm:col-span-2"><span className="whitespace-pre-wrap">{stringValue(transaction, "decision_note")}</span></TransactionDetailField>}
+          </>
+        )}
+      </div>
+      {verifyNeedsAccount && <p className="mt-4 rounded-md border border-[#f0d49b] bg-[#fff8e9] px-3 py-2 text-[11px] text-[#8a5a00]">Choose a receiving account before verifying this Cash In.</p>}
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-[#edf0f5] pt-4">
+        <div>
+          {row.receiptPath && <button type="button" disabled={saving} onClick={() => void openReceipt(row.receiptPath, row.receiptBucket)} className="button-secondary"><ReceiptText size={14} /> View receipt</button>}
+        </div>
+        <div className="flex flex-wrap justify-end gap-2">
+          <button type="button" onClick={close} className="button-secondary">Close</button>
+          {showIncomeRevision && <button type="button" disabled={saving} onClick={() => { close(); if (row.kind === "quotation_payment") requestQuotationPaymentReview(row.id, "revision_requested"); else requestIncomeRevision(row.id); }} className="button-secondary"><Undo2 size={14} aria-hidden="true" /> Return for correction</button>}
+          {showCashOutRevision && <button type="button" disabled={saving} onClick={() => { close(); requestRevision(row.id); }} className="button-secondary"><Undo2 size={14} aria-hidden="true" /> Return for revision</button>}
+          {showCashOutApproval && <button type="button" disabled={saving || !row.accountId} onClick={() => { close(); requestApproveAndPay(row.id); }} className="button-success"><Check size={14} aria-hidden="true" /> Approve and pay</button>}
+          {showVerify && <button type="button" disabled={saving || verifyNeedsAccount} onClick={() => { close(); if (row.kind === "quotation_payment") requestQuotationPaymentReview(row.id, "verified"); else requestVerifyIncome(row.id); }} className="button-success"><Check size={14} aria-hidden="true" /> Verify</button>}
+        </div>
       </div>
     </FinanceDialog>
   );
@@ -902,135 +1061,15 @@ function PendingQuotationPaymentTable({
   );
 }
 
-function FinanceActionsMenu({
-  description,
-  disabled,
-  children,
-}: {
-  description: string;
-  disabled: boolean;
-  children: ReactNode;
-}) {
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const menuId = useId().replaceAll(":", "");
-  const [open, setOpen] = useState(false);
-  const [position, setPosition] = useState({ top: -10000, left: -10000 });
-
-  const closeMenu = useCallback((focusTrigger = false) => {
-    setOpen(false);
-    if (focusTrigger) window.requestAnimationFrame(() => triggerRef.current?.focus());
-  }, []);
-
-  const updatePosition = useCallback(() => {
-    const trigger = triggerRef.current;
-    if (!trigger) return;
-    const rect = trigger.getBoundingClientRect();
-    const menuWidth = 190;
-    const menuHeight = menuRef.current?.offsetHeight ?? 180;
-    const gap = 4;
-    const maxLeft = Math.max(8, window.innerWidth - menuWidth - 8);
-    const left = Math.min(Math.max(8, rect.right - menuWidth), maxLeft);
-    const opensBelow = window.innerHeight - rect.bottom >= menuHeight + gap || rect.top < menuHeight + gap;
-    const rawTop = opensBelow ? rect.bottom + gap : rect.top - menuHeight - gap;
-    const maxTop = Math.max(8, window.innerHeight - menuHeight - 8);
-    const top = Math.min(Math.max(8, rawTop), maxTop);
-    setPosition({ top, left });
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    updatePosition();
-    const handlePointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (target instanceof Node && !triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) {
-        closeMenu();
-      }
-    };
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        closeMenu(true);
-      }
-    };
-    const handleViewportChange = () => updatePosition();
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("resize", handleViewportChange);
-    window.addEventListener("scroll", handleViewportChange, true);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("resize", handleViewportChange);
-      window.removeEventListener("scroll", handleViewportChange, true);
-    };
-  }, [closeMenu, open, updatePosition]);
-
-  return (
-    <>
-      <button
-        ref={triggerRef}
-        type="button"
-        disabled={disabled}
-        className="button-secondary finance-actions-menu-trigger text-[10px]"
-        aria-label={`Actions for ${description}`}
-        aria-controls={open ? menuId : undefined}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        onClick={() => {
-          setPosition({ top: -10000, left: -10000 });
-          setOpen((current) => !current);
-        }}
-      >
-        Actions <ChevronDown size={13} aria-hidden="true" />
-      </button>
-      {open && typeof document !== "undefined" && createPortal(
-        <div
-          id={menuId}
-          ref={menuRef}
-          className="finance-actions-menu-popover"
-          aria-label={`Actions for ${description}`}
-          style={{ top: position.top, left: position.left }}
-          onClick={(event) => {
-            const target = event.target;
-            if (target instanceof HTMLElement && target.closest("button")) closeMenu();
-          }}
-        >
-          {children}
-        </div>,
-        document.body,
-      )}
-    </>
-  );
-}
-
 function PendingApprovalTable({
   rows,
-  accounts,
   accountName,
-  openReceipt,
-  assignAccount,
-  assignQuotationPaymentAccount,
-  requestQuotationPaymentReview,
-  requestApproveAndPay,
-  requestRevision,
-  requestVerifyIncome,
-  requestIncomeRevision,
-  onSelectTransaction,
+  onSelectReview,
   saving,
 }: {
   rows: PendingApprovalRow[];
-  accounts: Row[];
   accountName: (id: unknown) => string;
-  openReceipt: (path: string, bucket?: string) => Promise<void>;
-  assignAccount: (transactionId: string, accountId: string) => Promise<void>;
-  assignQuotationPaymentAccount: (paymentId: string, accountId: string) => Promise<void>;
-  requestQuotationPaymentReview: (paymentId: string, decision: QuotationPaymentDecision) => void;
-  requestApproveAndPay: (transactionId: string) => void;
-  requestRevision: (transactionId: string) => void;
-  requestVerifyIncome: (transactionId: string) => void;
-  requestIncomeRevision: (transactionId: string) => void;
-  onSelectTransaction: (transaction: Row) => void;
+  onSelectReview: (row: PendingApprovalRow) => void;
   saving: boolean;
 }) {
   const [page, setPage] = useState(1);
@@ -1045,83 +1084,6 @@ function PendingApprovalTable({
     setPage(1);
   }, [rows.length]);
 
-  const transactionState = (row: PendingApprovalRow) => {
-    const transaction = row.transaction;
-    if (!transaction) return null;
-    const type = stringValue(transaction, "transaction_type");
-    const approval = stringValue(transaction, "approval_status");
-    const paid = stringValue(transaction, "payment_status");
-    const manualIncome = isManualIncomeTransaction(transaction);
-    const incomeReviewStatus = stringValue(transaction, "income_review_status");
-    const isVoided = Boolean(transaction.is_voided);
-    const isRegularExpense = type === "expense"
-      && !transaction.source_payment_id
-      && !transaction.supplier_payable_id
-      && !transaction.commission_summary_id
-      && !transaction.commission_allocation_id;
-    return {
-      canChangeAccount: !isVoided && (
-        (type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval))
-        || (manualIncome && paid === "unpaid" && ["pending", "revision_requested"].includes(incomeReviewStatus))
-      ),
-      canApproveAndPay: !isVoided && isRegularExpense && paid === "unpaid" && ["pending", "approved"].includes(approval),
-      canRequestRevision: !isVoided && type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval) && isRegularExpense,
-      canVerifyIncome: !isVoided && manualIncome && paid === "unpaid" && incomeReviewStatus === "pending" && Boolean(transaction.account_id),
-      canRequestIncomeRevision: !isVoided && manualIncome && paid === "unpaid" && incomeReviewStatus === "pending",
-    };
-  };
-
-  const accountOptionsFor = (row: PendingApprovalRow) => row.kind === "quotation_payment"
-    ? accounts.filter((account) => stringValue(account, "payment_method") === stringValue(row.payment, "method"))
-    : accounts;
-
-  const accountControl = (row: PendingApprovalRow) => {
-    const options = accountOptionsFor(row);
-    const state = transactionState(row);
-    const canChange = row.kind === "quotation_payment" || Boolean(state?.canChangeAccount);
-    if (!canChange) return row.accountId ? accountName(row.accountId) : "Needs finance account";
-    return (
-      <select
-        aria-label={`Account for ${row.description}`}
-        value={options.some((account) => String(account.id) === row.accountId) ? row.accountId : ""}
-        onChange={(event) => {
-          if (!event.target.value) return;
-          if (row.kind === "quotation_payment") void assignQuotationPaymentAccount(row.id, event.target.value);
-          else void assignAccount(row.id, event.target.value);
-        }}
-        disabled={saving}
-        className="input min-w-[145px] text-[10px]"
-      >
-        <option value="">{row.accountId ? `${accountName(row.accountId)} (not eligible)` : "Choose account"}</option>
-        {options.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")}</option>)}
-      </select>
-    );
-  };
-
-  const actionButtons = (row: PendingApprovalRow) => {
-    if (row.kind === "quotation_payment") {
-      return <>
-        <button type="button" disabled={saving} title="Return quotation receipt for correction" onClick={() => requestQuotationPaymentReview(row.id, "revision_requested")} className="button-secondary text-[10px]"><Undo2 size={13} aria-hidden="true" /> Return for correction</button>
-        <button type="button" disabled={saving} title="Verify quotation receipt" onClick={() => requestQuotationPaymentReview(row.id, "verified")} className="button-secondary text-[10px]"><Check size={13} aria-hidden="true" /> Verify</button>
-      </>;
-    }
-    const state = transactionState(row);
-    if (!state || !row.transaction) return null;
-    return <>
-      <button type="button" disabled={saving} onClick={() => onSelectTransaction(row.transaction!)} className="button-secondary text-[10px]"><FileText size={13} aria-hidden="true" /> Details</button>
-      {state.canVerifyIncome && <button type="button" disabled={saving} title="Verify" onClick={() => requestVerifyIncome(row.id)} className="button-secondary text-[10px]"><Check size={13} aria-hidden="true" /> Verify</button>}
-      {state.canRequestIncomeRevision && <button type="button" disabled={saving} title="Return Cash In for correction" onClick={() => requestIncomeRevision(row.id)} className="button-secondary text-[10px]"><Undo2 size={13} aria-hidden="true" /> Return for correction</button>}
-      {state.canApproveAndPay && <button type="button" disabled={saving || !row.accountId} title="Approve and pay Cash Out" onClick={() => requestApproveAndPay(row.id)} className="button-secondary text-[10px]"><Check size={13} aria-hidden="true" /> Approve and pay</button>}
-      {state.canRequestRevision && <button type="button" disabled={saving} title="Return Cash Out for revision" onClick={() => requestRevision(row.id)} className="button-secondary text-[10px]"><Undo2 size={13} aria-hidden="true" /> Return for revision</button>}
-    </>;
-  };
-
-  const actionMenu = (row: PendingApprovalRow) => {
-    const buttons = actionButtons(row);
-    if (!buttons) return null;
-    return <FinanceActionsMenu description={row.description} disabled={saving}>{buttons}</FinanceActionsMenu>;
-  };
-
   return (
     <div className="finance-transaction-table finance-approval-table">
       <div className="space-y-2 px-4 py-4 md:hidden sm:px-5">
@@ -1135,12 +1097,11 @@ function PendingApprovalTable({
               <StatusPill value={row.status} />
             </div>
             <div className="mt-3 grid grid-cols-2 gap-3 text-[11px]">
-              <div><span className="block text-[10px] text-[#8b92a1]">{row.direction === "income" ? "Cash In" : "Cash Out"}</span><span className={`font-semibold ${row.direction === "income" ? "text-[#218b55]" : "text-[#b42318]"}`}>{row.direction === "income" ? "+" : "−"}{peso.format(row.amount)}</span></div>
-              <div><span className="block text-[10px] text-[#8b92a1]">Account</span><span>{accountControl(row)}</span></div>
+              <div><span className="block text-[10px] text-[#8b92a1]">{row.direction === "income" ? "Cash In" : "Cash Out"}</span><span className={`font-semibold ${row.direction === "income" ? "text-[#218b55]" : "text-[#b42318]"}`}>{peso.format(row.amount)}</span></div>
+              <div><span className="block text-[10px] text-[#8b92a1]">Account</span><span>{row.accountId ? accountName(row.accountId) : "Needs finance account"}</span></div>
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[#edf0f5] pt-3">
-              {row.receiptPath && <button type="button" disabled={saving} title="View receipt" onClick={() => void openReceipt(row.receiptPath, row.receiptBucket)} className="button-secondary text-[10px]"><ReceiptText size={13} /> Receipt</button>}
-              {actionButtons(row)}
+              <button type="button" disabled={saving} title={`Review ${row.description}`} aria-label={`Review ${row.description}`} onClick={() => onSelectReview(row)} className="button-secondary h-8 w-8 p-0"><ClipboardCheck size={15} aria-hidden="true" /></button>
             </div>
           </article>
         ))}
@@ -1148,22 +1109,21 @@ function PendingApprovalTable({
       </div>
       <div className="table-shell hidden overflow-x-auto md:block">
         <table className="app-table w-full min-w-[1060px]">
-          <thead><tr><th>Date</th><th>Description</th><th>Source</th><th>Account</th><th>Cash In</th><th>Cash Out</th><th>Status</th><th>Receipt</th><th className="finance-action-column">Action</th></tr></thead>
+          <thead><tr><th>Date</th><th>Description</th><th>Source</th><th>Account</th><th>Cash In</th><th>Cash Out</th><th>Status</th><th className="finance-action-column">Review</th></tr></thead>
           <tbody>
             {visibleRows.map((row) => (
               <tr key={`${row.kind}-${row.id}`}>
                 <td>{displayDate(row.date)}</td>
                 <td>{row.description}{row.kind === "quotation_payment" && <small>Quotation receipt</small>}</td>
                 <td>{row.source}</td>
-                <td>{accountControl(row)}</td>
-                <td className="whitespace-nowrap font-semibold text-[#218b55]">{row.direction === "income" ? `+${peso.format(row.amount)}` : "—"}</td>
-                <td className="whitespace-nowrap font-semibold text-[#b42318]">{row.direction === "expense" ? `−${peso.format(row.amount)}` : "—"}</td>
+                <td>{row.accountId ? accountName(row.accountId) : <span className="text-[#a76605]">Needs finance account</span>}</td>
+                <td className="whitespace-nowrap">{row.direction === "income" ? <span className="font-semibold text-[#218b55]">{peso.format(row.amount)}</span> : "—"}</td>
+                <td className="whitespace-nowrap">{row.direction === "expense" ? <span className="font-semibold text-[#b42318]">{peso.format(row.amount)}</span> : "—"}</td>
                 <td><StatusPill value={row.status} /></td>
-                <td>{row.receiptPath ? <button type="button" disabled={saving} onClick={() => void openReceipt(row.receiptPath, row.receiptBucket)} className="button-secondary text-[10px]"><ReceiptText size={13} /> Receipt</button> : "—"}</td>
-                <td className="finance-action-cell">{actionMenu(row)}</td>
+                <td className="finance-action-cell"><button type="button" disabled={saving} title={`Review ${row.description}`} aria-label={`Review ${row.description}`} onClick={() => onSelectReview(row)} className="button-secondary h-8 w-8 p-0"><ClipboardCheck size={15} aria-hidden="true" /></button></td>
               </tr>
             ))}
-            {!visibleRows.length && <tr><td colSpan={9} className="text-center text-[#7d8797]">No Cash In or Cash Out approvals match this filter.</td></tr>}
+            {!visibleRows.length && <tr><td colSpan={8} className="text-center text-[#7d8797]">No Cash In or Cash Out approvals match this filter.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1481,6 +1441,7 @@ export function FinanceWorkspace({
   const [transactionCategoryFilter, setTransactionCategoryFilter] = useState("all");
   const [pendingApprovalFilter, setPendingApprovalFilter] = useState<PendingApprovalFilter>("all");
   const [selectedTransaction, setSelectedTransaction] = useState<Row | null>(null);
+  const [selectedApprovalKey, setSelectedApprovalKey] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<Row[]>([]);
   const [categories, setCategories] = useState<Row[]>([]);
   const [accounts, setAccounts] = useState<Row[]>([]);
@@ -2019,6 +1980,8 @@ export function FinanceWorkspace({
         receiptPath: stringValue(payment, "receipt_storage_path"),
         receiptBucket: "quotation-payment-receipts",
         payment,
+        quotation,
+        lead,
       };
     });
     const transactionRows: PendingApprovalRow[] = pendingApprovalTransactions.map((transaction) => {
@@ -2048,6 +2011,12 @@ export function FinanceWorkspace({
   const visiblePendingApprovalRows = useMemo(
     () => pendingApprovalRows.filter((row) => pendingApprovalFilter === "all" || row.direction === pendingApprovalFilter),
     [pendingApprovalFilter, pendingApprovalRows],
+  );
+  const selectedApprovalRow = useMemo(
+    () => selectedApprovalKey
+      ? pendingApprovalRows.find((row) => `${row.kind}:${row.id}` === selectedApprovalKey) ?? null
+      : null,
+    [pendingApprovalRows, selectedApprovalKey],
   );
   const pendingApprovalCount = pendingApprovalRows.length + pendingBudgetRows.length;
   const pendingApprovalIncomeCount = pendingApprovalRows.filter((row) => row.direction === "income").length;
@@ -3083,6 +3052,7 @@ export function FinanceWorkspace({
     if (succeeded) {
       setPendingAction(null);
       setDecisionNote("");
+      setSelectedApprovalKey(null);
     }
   };
 
@@ -3219,17 +3189,11 @@ export function FinanceWorkspace({
             </div>
             <PendingApprovalTable
               rows={visiblePendingApprovalRows}
-              accounts={activeAccounts}
               accountName={accountName}
-              openReceipt={openReceipt}
-              assignAccount={assignAccount}
-              assignQuotationPaymentAccount={assignQuotationPaymentAccount}
-              requestQuotationPaymentReview={requestQuotationPaymentReview}
-              requestApproveAndPay={requestApproveAndPay}
-              requestRevision={requestTransactionRevisionReview}
-              requestVerifyIncome={requestVerifyIncome}
-              requestIncomeRevision={requestManualIncomeRevisionReview}
-              onSelectTransaction={setSelectedTransaction}
+              onSelectReview={(row) => {
+                setSelectedTransaction(null);
+                setSelectedApprovalKey(`${row.kind}:${row.id}`);
+              }}
               saving={saving}
             />
           </section>
@@ -3524,6 +3488,28 @@ export function FinanceWorkspace({
       )}
 
       </>}
+
+      {selectedApprovalRow && (
+        <FinanceApprovalReviewDialog
+          row={selectedApprovalRow}
+          accounts={activeAccounts}
+          accountName={accountName}
+          categoryName={categoryName}
+          quotationName={quotationName}
+          budgetLabel={budgetLabel}
+          profileName={profileName}
+          openReceipt={openReceipt}
+          assignAccount={assignAccount}
+          assignQuotationPaymentAccount={assignQuotationPaymentAccount}
+          requestQuotationPaymentReview={requestQuotationPaymentReview}
+          requestApproveAndPay={requestApproveAndPay}
+          requestRevision={requestTransactionRevisionReview}
+          requestVerifyIncome={requestVerifyIncome}
+          requestIncomeRevision={requestManualIncomeRevisionReview}
+          close={() => setSelectedApprovalKey(null)}
+          saving={saving}
+        />
+      )}
 
       {selectedTransaction && (
         <TransactionDetailDialog
