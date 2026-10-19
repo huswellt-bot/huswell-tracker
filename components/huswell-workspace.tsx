@@ -9115,7 +9115,7 @@ function QuotationPaymentDialog({
                         ) : canReviewAsManager && status === "verified" ? (
                           <button type="button" disabled={working} onClick={() => openNoteRequest(payment, "reverse")} className="inline-flex min-h-7 items-center gap-1 rounded-[6px] border border-[#e3a7a2] bg-white px-2.5 text-[11px] font-semibold text-[#b42318] transition-colors hover:bg-[#fff5f4] disabled:cursor-not-allowed disabled:opacity-50"><RotateCcw size={13} /> Undo verification</button>
                         ) : (
-                          <span className="text-[11px] text-[#8b92a1]">{status === "pending" ? (canReviewAsFinance ? "Awaiting Internal Finance confirmation" : reviewerId ? (reviewerId === text(payment.submitted_by, "") ? "Awaiting General Manager exception review" : "Awaiting Internal Finance confirmation") : "Awaiting General Manager") : text(payment.verified_at ?? payment.reversed_at, "-")}</span>
+                          <span className="text-[11px] text-[#8b92a1]">{status === "pending" ? (canReviewAsFinance ? "Awaiting Internal Finance confirmation" : reviewerId ? (reviewerId === text(payment.submitted_by, "") ? "Awaiting General Manager exception review" : "Awaiting Internal Finance confirmation") : "Awaiting Internal Finance confirmation") : text(payment.verified_at ?? payment.reversed_at, "-")}</span>
                         )}
                       </td>
                     </tr>;
