@@ -8691,12 +8691,12 @@ function QuotationPaymentDialog({
   const paymentAccountOptions = paymentAccountsForKind(paymentValues.payment_kind);
   const paymentAccountSelectOptions = paymentAccountOptions.map((account) => ({
     value: account.id,
-    label: `${account.account_name} · ${quotationPaymentMethodLabel(account.payment_method)}`,
+    label: account.account_name,
     searchText: `${account.account_name} ${account.account_type} ${quotationPaymentMethodLabel(account.payment_method)}`,
   }));
   const paymentAccountSelectOptionsForKind = (kind: string) => paymentAccountsForKind(kind).map((account) => ({
     value: account.id,
-    label: `${account.account_name} · ${quotationPaymentMethodLabel(account.payment_method)}`,
+    label: account.account_name,
     searchText: `${account.account_name} ${account.account_type} ${quotationPaymentMethodLabel(account.payment_method)}`,
   }));
 
