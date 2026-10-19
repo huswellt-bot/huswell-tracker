@@ -1156,7 +1156,7 @@ export function FinanceWorkspace({
     () => categories.filter((category) => stringValue(category, "direction") === (transactionDirection ?? "income")),
     [categories, transactionDirection],
   );
-  const isStandaloneExternalIncome = !internal && transactionDirection === "income" && !revisionTransaction;
+  const isStandaloneExternalIncome = role === "external_finance" && transactionDirection === "income" && !revisionTransaction;
   const activeAccounts = useMemo(
     () => accounts.filter((account) => Boolean(account.is_active)),
     [accounts],
