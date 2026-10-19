@@ -853,14 +853,13 @@ function FinanceApprovalReviewDialog({
       title={`${sourceLabel} review`}
       detail={`${isIncome ? "Cash In" : "Cash Out"} · ${displayDate(row.date)}`}
       close={close}
+      status={<StatusPill value={row.status} />}
     >
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        <div className="rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3 sm:col-span-2">
+        <div className="sm:col-span-2">
           <p className="text-[10px] font-semibold uppercase tracking-[.06em] text-[#7d8797]">{isIncome ? "Cash In amount" : "Cash Out amount"}</p>
-          <p className={`mt-1 text-2xl font-semibold ${isIncome ? "text-[#218b55]" : "text-[#b42318]"}`}>{peso.format(row.amount)}</p>
-          <div className="mt-2"><StatusPill value={row.status} /></div>
+          <p className={`mt-1 text-3xl font-semibold ${isIncome ? "text-[#218b55]" : "text-[#b42318]"}`}>{peso.format(row.amount)}</p>
         </div>
-        <TransactionDetailField label="Date">{displayDate(row.date)}{transaction && stringValue(transaction, "transaction_time") ? ` · ${stringValue(transaction, "transaction_time")}` : ""}</TransactionDetailField>
         <TransactionDetailField label="Source">{sourceLabel}</TransactionDetailField>
         <TransactionDetailField label={isIncome ? "Receiving account" : "Payment account"} className="sm:col-span-2">
           <select
@@ -872,7 +871,7 @@ function FinanceApprovalReviewDialog({
               else void assignAccount(row.id, event.target.value);
             }}
             disabled={saving}
-            className="input mt-1 w-full max-w-sm text-[12px]"
+            className="input mt-1 w-full max-w-[280px] text-[12px]"
           >
             <option value="">{row.accountId && !accountIsEligible ? `${accountName(row.accountId)} (not eligible)` : "Choose account"}</option>
             {accountOptions.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")}</option>)}
@@ -1245,6 +1244,7 @@ function FinanceDialog({
   children,
   compact = false,
   layer = "base",
+  status,
 }: {
   title: string;
   detail?: string;
@@ -1252,6 +1252,7 @@ function FinanceDialog({
   children: ReactNode;
   compact?: boolean;
   layer?: "base" | "top";
+  status?: ReactNode;
 }) {
   const titleId = useId();
   const detailId = useId();
@@ -1313,7 +1314,10 @@ function FinanceDialog({
             <h2 id={titleId} className="text-[17px] font-semibold text-[#202938]">{title}</h2>
             {detail && <p id={detailId} className="mt-1 text-[12px] text-[#7d8797]">{detail}</p>}
           </div>
-          <button type="button" onClick={close} aria-label="Close" className="text-[#687386] hover:text-[#202938]"><X size={18} /></button>
+          <div className="flex shrink-0 items-center gap-2">
+            {status}
+            <button type="button" onClick={close} aria-label="Close" className="text-[#687386] hover:text-[#202938]"><X size={18} /></button>
+          </div>
         </div>
         {children}
       </div>
