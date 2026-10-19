@@ -153,6 +153,7 @@ type View =
   | "Sales"
   | "Expenses"
   | "Finance Overview"
+  | "Finance Reports"
   | "Finance"
   | "Payroll & Leave"
   | "Letter Request"
@@ -23200,6 +23201,7 @@ export function HuswellWorkspace({
       "PDF Costing",
       "Approvals",
       "Finance Overview",
+      "Finance Reports",
       "Finance",
       "Payment Monitoring",
       "Commissions",
@@ -23215,6 +23217,7 @@ export function HuswellWorkspace({
       "PDF Costing",
       "Approvals",
       "Finance Overview",
+      "Finance Reports",
       "Finance",
       "Payment Monitoring",
       "Commissions",
@@ -23233,6 +23236,7 @@ export function HuswellWorkspace({
       "PDF Costing",
       "Approvals",
       "Finance Overview",
+      "Finance Reports",
       "Finance",
       "Payment Monitoring",
       "Commissions",
@@ -23265,9 +23269,9 @@ export function HuswellWorkspace({
     ],
     sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Announcements", "Policy"],
     warehouse: ["Dashboard", "Catalog", "Inventory", "Production", "Announcements", "Policy"],
-    accountant: ["Finance Overview", "Finance", "Payment Monitoring", "Commissions", "Announcements", "Policy"],
-    internal_finance: ["Finance Overview", "Finance", "Payment Monitoring", "Announcements", "Policy"],
-    external_finance: ["Finance Overview", "Finance", "Payment Monitoring", "Announcements", "Policy"],
+    accountant: ["Finance Overview", "Finance Reports", "Finance", "Payment Monitoring", "Commissions", "Announcements", "Policy"],
+    internal_finance: ["Finance Overview", "Finance Reports", "Finance", "Payment Monitoring", "Announcements", "Policy"],
+    external_finance: ["Finance Overview", "Finance Reports", "Finance", "Payment Monitoring", "Announcements", "Policy"],
     lead_coordinator: ["Leads", "Announcements", "Policy"],
     payroll: ["Dashboard", "Payroll & Leave", "Letter Request", "Directory", "Announcements", "Policy"],
     production: ["Dashboard", "Production", "Inventory", "Announcements", "Policy"],
@@ -23526,6 +23530,10 @@ export function HuswellWorkspace({
         ? "Track submitted money movements, budget requests, and supplier obligations."
         : "Monitor cash, approvals, receivables, and payables.",
     },
+    "Finance Reports": {
+      title: "Monthly Finance Report",
+      detail: "Review verified Cash In, Cash Out, and Net Earnings by month.",
+    },
     Finance: {
       title: role === "external_finance" ? "External Finance" : isInternalFinanceRole(role) ? "Internal Finance" : "Finance",
       detail: "Manage finance transactions, accounts, budget requests, and supplier costing.",
@@ -23767,6 +23775,8 @@ export function HuswellWorkspace({
       />
     ) : active === "Finance Overview" ? (
       <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={role} overviewOnly />
+    ) : active === "Finance Reports" ? (
+      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={role} reportOnly />
     ) : active === "Finance" ? (
       <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={role} />
     ) : active === "Commissions" ? (
