@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -78,6 +79,12 @@ export async function POST(request: Request) {
     error: userError,
   } = await supabase.auth.getUser();
   if (userError || !user) return json({ error: "Your session has expired. Sign in again and retry." }, 401);
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session?.access_token || session.user?.id !== user.id) {
+    return json({ error: "Your session could not be used for the receipt upload. Sign in again and retry." }, 401);
+  }
 
   const { data: membership, error: membershipError } = await supabase
     .from("organization_members")
@@ -101,13 +108,21 @@ export async function POST(request: Request) {
 
   const paymentId = crypto.randomUUID();
   const path = `${organizationId}/${quotationId}/${paymentId}.${extension}`;
-  const { error: uploadError } = await supabase.storage
+  const storageClient = createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers: { Authorization: `Bearer ${session.access_token}` } },
+    },
+  );
+  const { error: uploadError } = await storageClient.storage
     .from(RECEIPT_BUCKET)
     .upload(path, Buffer.from(await receipt.arrayBuffer()), {
       contentType: receipt.type,
       upsert: false,
     });
-  if (uploadError) return json({ error: uploadError.message }, 500);
+  if (uploadError) return json({ error: `Receipt upload failed: ${uploadError.message}` }, 500);
 
   try {
     const { error: registerError } = await supabase.rpc("register_quotation_payment_with_account", {
@@ -126,10 +141,10 @@ export async function POST(request: Request) {
     });
     if (!registerError) return json({ ok: true });
 
-    await supabase.storage.from(RECEIPT_BUCKET).remove([path]);
-    return json({ error: registerError.message }, 400);
+    await storageClient.storage.from(RECEIPT_BUCKET).remove([path]);
+    return json({ error: `Payment registration failed: ${registerError.message}` }, 400);
   } catch (error) {
-    await supabase.storage.from(RECEIPT_BUCKET).remove([path]);
-    return json({ error: error instanceof Error ? error.message : "Payment receipt could not be registered." }, 500);
+    await storageClient.storage.from(RECEIPT_BUCKET).remove([path]);
+    return json({ error: `Payment registration failed: ${error instanceof Error ? error.message : "Payment receipt could not be registered."}` }, 500);
   }
 }
