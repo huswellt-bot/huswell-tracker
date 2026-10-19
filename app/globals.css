@@ -1610,6 +1610,25 @@ select option[value=""] {
   display: block;
 }
 
+.finance-transaction-table .finance-action-column,
+.finance-transaction-table .finance-action-cell {
+  width: 210px;
+  min-width: 210px;
+  white-space: nowrap;
+}
+
+.finance-transaction-table .finance-action-cell {
+  overflow: visible;
+}
+
+.finance-transaction-table .finance-action-group {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 4px;
+  white-space: nowrap;
+}
+
 @media (max-width: 767px) {
   .finance-transaction-table > .overflow-x-auto {
     display: none;
