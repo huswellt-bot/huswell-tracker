@@ -3170,12 +3170,6 @@ export function FinanceWorkspace({
 
       {tab === "approvals" && internal && (
         <Panel title="Pending approvals" detail="Review every open Cash In and Cash Out decision in one queue. Quotation receipts become Cash In only after verification; posted ledger history is in Transaction history.">
-          <div className="grid gap-3 border-b border-[#edf0f5] px-4 py-4 sm:grid-cols-3 sm:px-5">
-            <FinanceSummaryMetric label="Open approvals" value={pendingApprovalCount} color="text-[#a76605]" detail="Cash In, Cash Out, and budget requests" />
-            <FinanceSummaryMetric label="Quotation receipts" value={pendingQuotationPaymentRows.length} color="text-[#a76605]" detail="Awaiting verification" />
-            <FinanceSummaryMetric label="Finance transactions" value={pendingApprovalTransactions.length} color="text-[#a76605]" detail="Cash In and Cash Out" />
-          </div>
-
           <nav aria-label="Pending Finance approval type" className="app-tabs border-b border-[#edf0f5] px-4 sm:px-5">
             {([
               ["all", "All", pendingApprovalRows.length],
