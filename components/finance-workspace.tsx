@@ -1156,6 +1156,7 @@ export function FinanceWorkspace({
     () => categories.filter((category) => stringValue(category, "direction") === (transactionDirection ?? "income")),
     [categories, transactionDirection],
   );
+  const isStandaloneExternalIncome = !internal && transactionDirection === "income" && !revisionTransaction;
   const activeAccounts = useMemo(
     () => accounts.filter((account) => Boolean(account.is_active)),
     [accounts],
@@ -1163,7 +1164,10 @@ export function FinanceWorkspace({
 
   const categoryOptions = useMemo<SearchableOption[]>(
     () => {
-      const options = activeCategories.map((category) => {
+      const visibleCategories = isStandaloneExternalIncome
+        ? activeCategories.filter((category) => !stringValue(category, "name").trim().toLowerCase().startsWith("customer payment"))
+        : activeCategories;
+      const options = visibleCategories.map((category) => {
         const expenseClass = stringValue(category, "expense_class");
         const groupLabel = expenseClass === "non_operating"
           ? "Non-operating expenses"
@@ -1188,7 +1192,7 @@ export function FinanceWorkspace({
 
       return options.sort((left, right) => (groupOrder[left.groupLabel ?? ""] ?? 2) - (groupOrder[right.groupLabel ?? ""] ?? 2));
     },
-    [activeCategories, transactionDirection],
+    [activeCategories, isStandaloneExternalIncome, transactionDirection],
   );
 
   const leadOptions = useMemo(
