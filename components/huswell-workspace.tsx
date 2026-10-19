@@ -8889,35 +8889,28 @@ function QuotationPaymentDialog({
       return setError("Payment receipts must be JPEG, PNG, or WebP files no larger than 10 MB.");
     }
     setSaving(true);
-    const client = createClient();
-    const paymentId = crypto.randomUUID();
-    const extension = paymentFile.type === "image/png" ? "png" : paymentFile.type === "image/webp" ? "webp" : "jpg";
-    const path = `${orgId}/${liveQuote.id}/${paymentId}.${extension}`;
     try {
-      const { error: uploadError } = await client.storage
-        .from("quotation-payment-receipts")
-        .upload(path, paymentFile, { contentType: paymentFile.type, upsert: false });
-      if (uploadError) throw uploadError;
-      const { error: registerError } = await client.rpc("register_quotation_payment_with_account", {
-        p_payment_id: paymentId,
-        p_quotation_id: liveQuote.id,
-        p_payment_kind: paymentValues.payment_kind,
-        p_amount: amount,
-        p_paid_at: paymentValues.paid_at,
-        p_finance_account_id: selectedPaymentAccount.id,
-        p_reference_no: paymentValues.reference_no.trim() || null,
-        p_notes: paymentValues.notes.trim() || null,
-        p_receipt_storage_path: path,
-        p_receipt_file_name: paymentFile.name,
-        p_receipt_content_type: paymentFile.type,
-        p_receipt_file_size: paymentFile.size,
+      const form = new FormData();
+      form.set("organization_id", orgId);
+      form.set("quotation_id", text(liveQuote.id));
+      form.set("payment_kind", paymentValues.payment_kind);
+      form.set("amount", String(amount));
+      form.set("paid_at", paymentValues.paid_at);
+      form.set("finance_account_id", selectedPaymentAccount.id);
+      form.set("reference_no", paymentValues.reference_no.trim());
+      form.set("notes", paymentValues.notes.trim());
+      form.set("receipt", paymentFile, paymentFile.name);
+      const response = await fetch("/api/quotation-payments/submit", {
+        method: "POST",
+        body: form,
+        credentials: "same-origin",
       });
-      if (registerError) throw registerError;
+      const payload = await response.json().catch(() => null) as { error?: string } | null;
+      if (!response.ok) throw new Error(payload?.error || "Payment receipt could not be saved.");
       resetPaymentForm();
       setSuccess("Payment receipt submitted for review.");
       await reload();
     } catch (error) {
-      await client.storage.from("quotation-payment-receipts").remove([path]);
       setError(error instanceof Error ? error.message : "Payment receipt could not be saved.");
     } finally {
       setSaving(false);
