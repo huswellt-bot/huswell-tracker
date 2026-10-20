@@ -169,6 +169,8 @@ type View =
   | "Commissions"
   | "Profile";
 
+type FinanceActionRequest = "income" | "expense";
+
 type SidebarQueueCountKey =
   | "management_approvals"
   | "pdf_costing"
@@ -22781,6 +22783,8 @@ export function HuswellWorkspace({
   const [backgroundLoading, setBackgroundLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [policyAction, setPolicyAction] = useState<"announcement" | "policy" | null>(null);
+  const [financeActionRequest, setFinanceActionRequest] = useState<FinanceActionRequest | null>(null);
+  const clearFinanceActionRequest = useCallback(() => setFinanceActionRequest(null), []);
   const [signOutOpen, setSignOutOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [navigationDate, setNavigationDate] = useState(() => new Date());
@@ -23778,7 +23782,13 @@ export function HuswellWorkspace({
     ) : active === "Finance Reports" ? (
       <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={role} reportOnly />
     ) : active === "Finance" ? (
-      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={role} />
+      <DynamicFinanceWorkspace
+        key={active}
+        organizationId={organizationId}
+        role={role}
+        openAction={financeActionRequest}
+        onOpenActionHandled={clearFinanceActionRequest}
+      />
     ) : active === "Commissions" ? (
       <CommissionSummaryView
         store={store}
@@ -24062,6 +24072,16 @@ export function HuswellWorkspace({
               <div className="flex min-w-0 items-center gap-1.5">
                 <Button compact onClick={() => setPolicyAction("policy")}>
                   <Plus size={13} /> Add Policy
+                </Button>
+              </div>
+            )}
+            {active === "Finance" && role === "external_finance" && (
+              <div className="flex min-w-0 items-center gap-1.5">
+                <Button compact secondary onClick={() => setFinanceActionRequest("income")}>
+                  <Plus size={13} /> <span className="hidden sm:inline">Cash In</span><span className="sr-only sm:hidden">Cash In</span>
+                </Button>
+                <Button compact onClick={() => setFinanceActionRequest("expense")}>
+                  <Plus size={13} /> <span className="hidden sm:inline">Cash Out</span><span className="sr-only sm:hidden">Cash Out</span>
                 </Button>
               </div>
             )}

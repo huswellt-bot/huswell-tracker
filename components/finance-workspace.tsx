@@ -1903,11 +1903,15 @@ export function FinanceWorkspace({
   role,
   overviewOnly = false,
   reportOnly = false,
+  openAction = null,
+  onOpenActionHandled,
 }: {
   organizationId: string;
   role: string;
   overviewOnly?: boolean;
   reportOnly?: boolean;
+  openAction?: Direction | null;
+  onOpenActionHandled?: () => void;
 }) {
   const client = useMemo(() => createClient(), []);
   const internal = isInternalRole(role);
@@ -3059,14 +3063,21 @@ export function FinanceWorkspace({
     }));
   };
 
-  const setFormDirection = (direction: Direction) => {
+  const setFormDirection = useCallback((direction: Direction) => {
     setRevisionTransaction(null);
     setTransactionDirection(direction);
     setCashInSource("other_income");
     setExpenseMode("regular");
     setTransactionValues(defaultTransaction(direction));
     setTransactionFile(null);
-  };
+  }, []);
+
+  useEffect(() => {
+    const canOpenAction = openAction === "income" ? canRecordIncome : openAction === "expense" && canSubmitExpense;
+    if (!openAction || !canOpenAction) return;
+    setFormDirection(openAction);
+    onOpenActionHandled?.();
+  }, [canRecordIncome, canSubmitExpense, onOpenActionHandled, openAction, setFormDirection]);
 
   const closeTransactionForm = () => {
     setTransactionDirection(null);
@@ -4045,8 +4056,6 @@ export function FinanceWorkspace({
             {internal ? <span>Showing {projectHistoryRows.length ? (activeProjectHistoryPage - 1) * TABLE_PAGE_SIZE + 1 : 0}-{Math.min(activeProjectHistoryPage * TABLE_PAGE_SIZE, projectHistoryRows.length)} of {projectHistoryRows.length} projects</span> : <span>Showing {filteredTransactions.length ? (activeTransactionsPage - 1) * TABLE_PAGE_SIZE + 1 : 0}-{Math.min(activeTransactionsPage * TABLE_PAGE_SIZE, filteredTransactions.length)} of {filteredTransactions.length} transactions</span>}
             <div className="flex flex-wrap gap-2">
               {!internal && <button type="button" onClick={downloadReport} disabled={saving || loading} className={secondaryButton}><Download size={13} /> Download view</button>}
-              {!internal && canRecordIncome && <button type="button" onClick={() => setFormDirection("income")} className={secondaryButton}><Plus size={13} /> Record Cash In</button>}
-              {!internal && canSubmitExpense && <button type="button" onClick={() => setFormDirection("expense")} className={primaryButton}><Plus size={13} /> Submit Cash Out</button>}
             </div>
           </div>
           {internal ? <>
@@ -4338,11 +4347,21 @@ export function FinanceWorkspace({
       {transactionDirection && (
         <FinanceDialog title={transactionDialogTitle} detail={transactionDialogDetail} close={closeTransactionForm}>
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
+            {transactionDirection === "expense" && !commissionPayoutMode && !internal && <div className="field-label sm:col-span-2">
+              <span>Budget</span>
+              <div className="mt-1 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <strong className="text-xl font-semibold text-[#202938]">{peso.format(approvedBudgetRemainingTotal)}</strong>
+                  <span className="text-[10px] font-semibold uppercase tracking-[.1em] text-[#218b55]">Available</span>
+                </div>
+                {!approvedBudgetRemainingTotal && <p className="mt-2 text-[11px] font-semibold text-[#b42318]">No available approved budget. Request a budget before submitting Cash Out.</p>}
+              </div>
+            </div>}
             {!internal && transactionDirection === "income" && !revisionTransaction && (
               <fieldset className="field-label sm:col-span-2">
                 <legend>Cash In source</legend>
                 <div role="group" aria-label="Cash In source" className="mt-1 flex rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-1">
-                  <button type="button" aria-pressed={cashInSource === "quotation_payment"} onClick={() => chooseCashInSource("quotation_payment")} className={cashInSource === "quotation_payment" ? "flex-1 rounded-md bg-[#c43b43] px-3 py-2 text-[11px] font-semibold text-white shadow-sm hover:bg-[#a92f37]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797] hover:bg-white"}>Quotation payment</button>
+                  <button type="button" aria-pressed={cashInSource === "quotation_payment"} onClick={() => chooseCashInSource("quotation_payment")} className={cashInSource === "quotation_payment" ? "flex-1 rounded-md bg-[#c43b43] px-3 py-2 text-[11px] font-semibold text-white shadow-sm hover:bg-[#a92f37]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797] hover:bg-white"}>Project payment</button>
                   <button type="button" aria-pressed={cashInSource === "other_income"} onClick={() => chooseCashInSource("other_income")} className={cashInSource === "other_income" ? "flex-1 rounded-md bg-[#c43b43] px-3 py-2 text-[11px] font-semibold text-white shadow-sm hover:bg-[#a92f37]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797] hover:bg-white"}>Other income</button>
                 </div>
               </fieldset>
@@ -4398,7 +4417,7 @@ export function FinanceWorkspace({
               <fieldset className="field-label sm:col-span-2">
                 <legend>Expense type</legend>
                 <div role="group" aria-label="Expense type" className="mt-1 flex rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-1">
-                  <button type="button" aria-pressed={expenseMode === "regular"} onClick={() => chooseExpenseMode("regular")} className={expenseMode === "regular" ? "flex-1 rounded-md bg-[#c43b43] px-3 py-2 text-[11px] font-semibold text-white shadow-sm hover:bg-[#a92f37]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797] hover:bg-white"}>Regular expense</button>
+                  <button type="button" aria-pressed={expenseMode === "regular"} onClick={() => chooseExpenseMode("regular")} className={expenseMode === "regular" ? "flex-1 rounded-md bg-[#c43b43] px-3 py-2 text-[11px] font-semibold text-white shadow-sm hover:bg-[#a92f37]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797] hover:bg-white"}>Non-Project Expense</button>
                   <button type="button" aria-pressed={expenseMode === "project"} onClick={() => chooseExpenseMode("project")} className={expenseMode === "project" ? "flex-1 rounded-md bg-[#c43b43] px-3 py-2 text-[11px] font-semibold text-white shadow-sm hover:bg-[#a92f37]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797] hover:bg-white"}>Project expense</button>
                   <button type="button" aria-pressed={expenseMode === "supplier"} onClick={() => chooseExpenseMode("supplier")} className={expenseMode === "supplier" ? "flex-1 rounded-md bg-[#c43b43] px-3 py-2 text-[11px] font-semibold text-white shadow-sm hover:bg-[#a92f37]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797] hover:bg-white"}>Supplier payment</button>
                 </div>
@@ -4470,16 +4489,6 @@ export function FinanceWorkspace({
             {internal && !commissionPayoutMode && <div className="field-label"><span>Payment status</span><div className="mt-1 flex rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-1"><button type="button" onClick={() => setTransactionValues((current) => ({ ...current, payment_status: "paid" }))} className={transactionValues.payment_status === "paid" ? "flex-1 rounded-md bg-[#edf9f2] px-3 py-2 text-[11px] font-semibold text-[#218b55]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797]"}>Paid</button><button type="button" onClick={() => setTransactionValues((current) => ({ ...current, payment_status: "unpaid" }))} className={transactionValues.payment_status === "unpaid" ? "flex-1 rounded-md bg-[#fff8e9] px-3 py-2 text-[11px] font-semibold text-[#a76605]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797]"}>Unpaid</button></div></div>}
               <div className="field-label"><span>{revisionTransaction ? "Replacement proof (optional)" : manualIncomeMode ? "Receipt or proof" : "Receipt image"}</span><FileUploadControl accept="image/jpeg,image/png,image/webp" ariaLabel={revisionTransaction ? "Choose replacement finance receipt image" : "Choose finance receipt image"} className="mt-1" emptyLabel={revisionTransaction ? "Keep current proof or choose replacement" : manualIncomeMode ? "Choose receipt or proof" : "Choose receipt image"} files={transactionFile ? [transactionFile] : []} onFilesSelected={(files) => setTransactionFile(files[0] ?? null)} /></div>
             {transactionDirection === "expense" && <>
-              {!commissionPayoutMode && !internal && <div className="field-label sm:col-span-2">
-                <span>Budget</span>
-                <div className="mt-1 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <strong className="text-xl font-semibold text-[#202938]">{peso.format(approvedBudgetRemainingTotal)}</strong>
-                    <span className="text-[10px] font-semibold uppercase tracking-[.1em] text-[#218b55]">Available</span>
-                  </div>
-                  {!approvedBudgetRemainingTotal && <p className="mt-2 text-[11px] font-semibold text-[#b42318]">No available approved budget. Request a budget before submitting Cash Out.</p>}
-                </div>
-              </div>}
               {internal && <label className="field-label">
                 Commission payout allocation
                 <SearchableSelect options={eligibleCommissionOptions} value={transactionValues.commission_allocation_id} onChange={(value) => setTransactionValues((current) => ({ ...current, commission_allocation_id: value }))} placeholder="Choose eligible commission" searchPlaceholder="Search commission allocations" ariaLabel="Commission payout allocation" disabled={commissionPayoutMode} clearable={!commissionPayoutMode} className="mt-1" />
