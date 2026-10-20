@@ -349,6 +349,14 @@ const transactionNote = (row: Row) => {
   return stringValue(row, "note", "-");
 };
 
+const transactionReference = (row: Row, quotationName: (id: unknown) => string) => {
+  const reference = stringValue(row, "reference_number");
+  if (reference) return reference;
+  if (!row.source_payment_id) return "-";
+  const quotation = quotationName(row.quotation_id);
+  return quotation === "—" ? "-" : quotation;
+};
+
 const transactionStatusValue = (row: Row) => {
   if (Boolean(row.is_voided)) return "voided";
   if (isManualIncomeTransaction(row)) {
@@ -597,6 +605,7 @@ function TransactionTable({
   categoryName,
   accountName,
   leadName,
+  quotationName,
   budgetLabel,
   accounts,
   internal,
@@ -617,6 +626,7 @@ function TransactionTable({
   categoryName: (id: unknown) => string;
   accountName: (id: unknown) => string;
   leadName: (id: unknown) => string;
+  quotationName: (id: unknown) => string;
   budgetLabel: (id: unknown) => string;
   accounts: Row[];
   internal: boolean;
@@ -660,6 +670,7 @@ function TransactionTable({
           );
           const receiptBucket = stringValue(transaction, "receipt_bucket", "finance-receipts");
           const description = manualIncome ? "Manual Cash In" : leadName(transaction.lead_id) !== "—" ? leadName(transaction.lead_id) : type === "income" ? "Quotation payment" : "Cash Out";
+          const reference = transactionReference(transaction, quotationName);
           const amount = numericValue(transaction, "amount");
           return (
             <article key={String(transaction.id)} className={`rounded-lg border border-[#d9e0e9] bg-white p-3 ${isVoided ? "opacity-60" : ""}`}>
@@ -677,10 +688,10 @@ function TransactionTable({
                 <div><span className="block text-[10px] text-[#8b92a1]">Source</span><span className="font-medium text-[#344054]">{transactionSourceLabel(transaction)}</span></div>
                 <div><span className="block text-[10px] text-[#8b92a1]">Category</span><span className="font-medium text-[#344054]">{categoryName(transaction.category_id)}</span></div>
                 <div><span className="block text-[10px] text-[#8b92a1]">Account</span><span className="font-medium text-[#344054]">{accountName(transaction.account_id)}</span></div>
-                <div><span className="block text-[10px] text-[#8b92a1]">Reference</span><span className="font-medium text-[#344054]">{stringValue(transaction, "reference_number") || "-"}</span></div>
-                <div><span className="block text-[10px] text-[#8b92a1]">Note</span><span className="line-clamp-2 text-[#344054]">{transactionNote(transaction)}</span></div>
+                <div><span className="block text-[10px] text-[#8b92a1]">Reference</span><span className="font-medium text-[#344054]">{reference}</span></div>
+                {internal && <div><span className="block text-[10px] text-[#8b92a1]">Note</span><span className="line-clamp-2 text-[#344054]">{transactionNote(transaction)}</span></div>}
               </div>
-              {budgetLabel(transaction.budget_request_id) && <p className="mt-2 text-[10px] text-[#687386]">Budget: {budgetLabel(transaction.budget_request_id)}</p>}
+              {internal && budgetLabel(transaction.budget_request_id) && <p className="mt-2 text-[10px] text-[#687386]">Budget: {budgetLabel(transaction.budget_request_id)}</p>}
               {allowActions && <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-[#edf0f5] pt-3">
                 <button type="button" onClick={() => onSelectTransaction(transaction)} className="button-secondary text-[10px]">Details</button>
                 {canChangeAccount && <select aria-label={type === "income" ? "Receiving account" : "Payment account"} defaultValue={accountId} onChange={(event) => void assignAccount(String(transaction.id), event.target.value)} disabled={saving} className="input min-w-[150px] flex-1 text-[10px]"><option value="">Choose account</option>{accounts.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")}</option>)}</select>}
@@ -701,8 +712,8 @@ function TransactionTable({
         {!rows.length && <p className="rounded-lg border border-dashed border-[#d9e0e9] px-3 py-6 text-center text-[11px] text-[#7d8797]">No transactions match the current filters.</p>}
       </div>
       <div className="table-shell hidden overflow-x-auto md:block">
-        <table className={`app-table w-full ${allowActions ? "min-w-[1320px]" : "min-w-[1000px]"}`}>
-          <thead><tr><th>Date</th><th>Description</th><th>Reference</th><th>Source</th><th>Category</th><th>Budget</th><th>Account</th><th>Amount</th><th>Note</th><th>Status</th>{allowActions && <><th>Receipt</th><th className="finance-action-column">Action</th></>}</tr></thead>
+        <table className={`app-table w-full ${internal ? (allowActions ? "min-w-[1320px]" : "min-w-[1000px]") : (allowActions ? "min-w-[1080px]" : "min-w-[820px]")}`}>
+          <thead><tr><th>Date</th><th>Description</th><th>Reference</th><th>Source</th><th>Category</th>{internal && <th>Budget</th>}<th>Account</th><th>Amount</th>{internal && <th>Note</th>}<th>Status</th>{allowActions && <><th>Receipt</th><th className="finance-action-column">Action</th></>}</tr></thead>
           <tbody>
             {rows.map((transaction) => {
               const type = stringValue(transaction, "transaction_type");
@@ -724,22 +735,23 @@ function TransactionTable({
               const canChangeAccount = allowActions && internal && !isVoided && ((type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval)) || (!accountId && Boolean(transaction.source_payment_id)) || (manualIncome && paid === "unpaid" && ["pending", "revision_requested"].includes(incomeReviewStatus)));
               const receiptBucket = stringValue(transaction, "receipt_bucket", "finance-receipts");
               const description = manualIncome ? "Manual Cash In" : leadName(transaction.lead_id) !== "—" ? leadName(transaction.lead_id) : type === "income" ? "Quotation payment" : "Cash Out";
+              const reference = transactionReference(transaction, quotationName);
               const amount = numericValue(transaction, "amount");
               return <tr key={String(transaction.id)} className={isVoided ? "opacity-60" : undefined}>
                 <td>{displayDate(transaction.transaction_date)}</td>
                 <td>{description}</td>
-                <td>{stringValue(transaction, "reference_number") || "-"}</td>
+                <td>{reference}</td>
                 <td>{transactionSourceLabel(transaction)}</td>
                 <td>{categoryName(transaction.category_id)}</td>
-                <td>{budgetLabel(transaction.budget_request_id) || "-"}</td>
+                {internal && <td>{budgetLabel(transaction.budget_request_id) || "-"}</td>}
                 <td>{canChangeAccount ? <select aria-label={type === "income" ? "Receiving account" : "Payment account"} defaultValue={accountId} onChange={(event) => void assignAccount(String(transaction.id), event.target.value)} disabled={saving} className="input min-w-[145px] text-[10px]"><option value="">Choose account</option>{accounts.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")}</option>)}</select> : accountName(transaction.account_id)}</td>
                 <td className={`whitespace-nowrap font-semibold ${type === "income" ? "text-[#218b55]" : "text-[#b42318]"}`}>{peso.format(amount)}</td>
-                <td>{transactionNote(transaction)}</td>
+                {internal && <td>{transactionNote(transaction)}</td>}
                 <td><StatusPill value={transactionStatusLabel(transaction)} /></td>
                  {allowActions && <><td>{stringValue(transaction, "receipt_storage_path") ? <button type="button" onClick={() => void openReceipt(stringValue(transaction, "receipt_storage_path"), receiptBucket)} className="text-[#c43b43]" title="View receipt"><ReceiptText size={15} /></button> : "-"}</td><td className="finance-action-cell"><span className="finance-action-group"><button type="button" onClick={() => onSelectTransaction(transaction)} className="button-secondary text-[10px]">Details</button>{canVerifyIncome && <button type="button" disabled={saving} onClick={() => verifyIncome(String(transaction.id))} className="button-secondary text-[10px] text-[#218b55]">Verify</button>}{canRequestIncomeRevision && <button type="button" disabled={saving} onClick={() => requestIncomeRevision(String(transaction.id))} className="button-secondary text-[10px]">Return</button>}{canEditIncomeRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[10px]">Edit</button>}{canVoidIncome && <button type="button" disabled={saving} onClick={() => voidIncome(String(transaction.id))} className="button-danger text-[10px]">Reverse</button>}{canApproveAndPay && <button type="button" disabled={saving || !accountId} onClick={() => approveAndPay(String(transaction.id))} className="button-secondary text-[10px]">{approval === "pending" ? "Approve and pay" : "Pay now"}</button>}{canRequestRevision && <button type="button" disabled={saving} onClick={() => requestRevision(String(transaction.id))} className="button-secondary text-[10px]">Return</button>}{canEditRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[10px]">Edit</button>}{canMarkPaid && <button type="button" disabled={saving} onClick={() => markPaid(String(transaction.id), "Cash Out")} className="button-secondary text-[10px]">Mark paid</button>}</span></td></>}
               </tr>;
             })}
-             {!rows.length && <tr><td colSpan={allowActions ? 12 : 10} className="text-center text-[#7d8797]">No transactions match the current filters.</td></tr>}
+             {!rows.length && <tr><td colSpan={8 + (internal ? 2 : 0) + (allowActions ? 2 : 0)} className="text-center text-[#7d8797]">No transactions match the current filters.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -819,6 +831,7 @@ function TransactionDetailDialog({
   categoryName,
   accountName,
   quotationName,
+  quotationPaymentRecords,
   budgetLabel,
   profileName,
   openReceipt,
@@ -828,6 +841,7 @@ function TransactionDetailDialog({
   categoryName: (id: unknown) => string;
   accountName: (id: unknown) => string;
   quotationName: (id: unknown) => string;
+  quotationPaymentRecords: Row[];
   budgetLabel: (id: unknown) => string;
   profileName: (id: unknown) => string;
   openReceipt: (path: string, bucket?: string) => Promise<void>;
@@ -838,18 +852,27 @@ function TransactionDetailDialog({
   const quotationId = stringValue(transaction, "quotation_id");
   const receiptPath = stringValue(transaction, "receipt_storage_path");
   const receiptBucket = stringValue(transaction, "receipt_bucket", "finance-receipts");
+  const sourcePaymentId = stringValue(transaction, "source_payment_id");
+  const payment = sourcePaymentId
+    ? quotationPaymentRecords.find((record) => String(record.id ?? "") === sourcePaymentId)
+    : null;
+  const note = Boolean(transaction.is_voided) || transactionStatusFilterValue(transaction) === "returned"
+    ? transactionNote(transaction)
+    : sourcePaymentId
+      ? stringValue(payment, "notes", "-")
+      : transactionNote(transaction);
   const isIncome = type === "income";
   return (
     <FinanceDialog
       title={`${transactionSourceLabel(transaction)} details`}
       detail={`${isIncome ? "Cash In" : "Cash Out"} · ${displayDate(transaction.transaction_date)}`}
       close={close}
+      status={<StatusPill value={transactionStatusLabel(transaction)} />}
     >
       <div className="mt-5 grid gap-3 sm:grid-cols-2">
-        <div className="rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3 sm:col-span-2">
-          <p className="text-[10px] font-semibold uppercase tracking-[.06em] text-[#7d8797]">Amount</p>
-          <p className={`mt-1 text-2xl font-semibold ${isIncome ? "text-[#218b55]" : "text-[#b42318]"}`}>{peso.format(amount)}</p>
-          <div className="mt-2"><StatusPill value={transactionStatusLabel(transaction)} /></div>
+        <div className="sm:col-span-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[.06em] text-[#7d8797]">{isIncome ? "Cash In amount" : "Cash Out amount"}</p>
+          <p className={`mt-1 text-3xl font-semibold ${isIncome ? "text-[#218b55]" : "text-[#b42318]"}`}>{peso.format(amount)}</p>
         </div>
         <TransactionDetailField label="Date">{displayDate(transaction.transaction_date)}{stringValue(transaction, "transaction_time") ? ` · ${stringValue(transaction, "transaction_time")}` : ""}</TransactionDetailField>
         <TransactionDetailField label="Source">{transactionSourceLabel(transaction)}</TransactionDetailField>
@@ -861,7 +884,7 @@ function TransactionDetailDialog({
         {stringValue(transaction, "submitted_by") && <TransactionDetailField label="Submitted by">{profileName(stringValue(transaction, "submitted_by"))}</TransactionDetailField>}
         {stringValue(transaction, "approved_by") && <TransactionDetailField label="Approved by">{profileName(stringValue(transaction, "approved_by"))}</TransactionDetailField>}
         {stringValue(transaction, "paid_by") && <TransactionDetailField label="Verified / paid by">{profileName(stringValue(transaction, "paid_by"))}</TransactionDetailField>}
-        <TransactionDetailField label="Note" className="sm:col-span-2"><span className="whitespace-pre-wrap">{transactionNote(transaction)}</span></TransactionDetailField>
+        {note !== "-" && <TransactionDetailField label="Note" className="sm:col-span-2"><span className="whitespace-pre-wrap">{note}</span></TransactionDetailField>}
         {stringValue(transaction, "decision_note") && <TransactionDetailField label="Reviewer note" className="sm:col-span-2"><span className="whitespace-pre-wrap">{stringValue(transaction, "decision_note")}</span></TransactionDetailField>}
         {stringValue(transaction, "void_reason") && <TransactionDetailField label="Reversal reason" className="sm:col-span-2"><span className="whitespace-pre-wrap">{stringValue(transaction, "void_reason")}</span></TransactionDetailField>}
       </div>
@@ -3015,7 +3038,7 @@ export function FinanceWorkspace({
       amount: revision ? numericValue(revision, "amount").toFixed(2) : financeQuotationPaymentSuggestedAmount(paymentKind, summary),
       account_id: revision ? stringValue(revision, "finance_account_id") : quotationPaymentAccountIdFor(quotation, paymentKind),
       reference_number: revision ? stringValue(revision, "reference_no") : "",
-      note: "",
+      note: revision ? stringValue(revision, "notes") : "",
       category_id: "",
       lead_id: "",
     }));
@@ -3129,7 +3152,7 @@ export function FinanceWorkspace({
       form.set("paid_at", transactionValues.transaction_date);
       form.set("finance_account_id", transactionValues.account_id);
       form.set("reference_no", transactionValues.reference_number.trim());
-      form.set("notes", "");
+      form.set("notes", transactionValues.note.trim());
       form.set("receipt", submittedFile);
       const response = await fetch("/api/quotation-payments/submit", {
         method: "POST",
@@ -3914,7 +3937,7 @@ export function FinanceWorkspace({
             </Link>
           </div>
           <Panel title={internal ? "Recent finance activity" : "Recent submissions"} detail={internal ? "Posted and pending finance activity. Pending approvals are handled in Pending approvals." : "Recent Cash In and Cash Out submissions. Confirmation is handled in Internal Finance."}>
-            <TransactionTable rows={recentTransactions} categoryName={categoryName} accountName={accountName} leadName={leadName} budgetLabel={budgetLabel} accounts={activeAccounts} internal={internal} allowActions={false} approveAndPay={requestApproveAndPay} requestRevision={requestTransactionRevisionReview} verifyIncome={requestVerifyIncome} requestIncomeRevision={requestManualIncomeRevisionReview} voidIncome={requestVoidManualIncome} editRevision={openRevisionEditor} markPaid={requestMarkPaid} assignAccount={assignAccount} openReceipt={openReceipt} onSelectTransaction={setSelectedTransaction} saving={saving} />
+            <TransactionTable rows={recentTransactions} categoryName={categoryName} accountName={accountName} leadName={leadName} quotationName={quotationName} budgetLabel={budgetLabel} accounts={activeAccounts} internal={internal} allowActions={false} approveAndPay={requestApproveAndPay} requestRevision={requestTransactionRevisionReview} verifyIncome={requestVerifyIncome} requestIncomeRevision={requestManualIncomeRevisionReview} voidIncome={requestVoidManualIncome} editRevision={openRevisionEditor} markPaid={requestMarkPaid} assignAccount={assignAccount} openReceipt={openReceipt} onSelectTransaction={setSelectedTransaction} saving={saving} />
           </Panel>
         </>
       )}
@@ -4030,7 +4053,7 @@ export function FinanceWorkspace({
             <ProjectHistoryTable rows={visibleProjectHistoryRows} onSelectProject={(project) => { setSelectedTransaction(null); setSelectedProjectHistory(project); }} />
             <TablePagination page={activeProjectHistoryPage} pageCount={projectHistoryPageCount} total={projectHistoryRows.length} onPageChange={setTransactionsPage} label="Project transaction history pagination" />
           </> : <>
-            <TransactionTable rows={visibleTransactions} categoryName={categoryName} accountName={accountName} leadName={leadName} budgetLabel={budgetLabel} accounts={activeAccounts} internal={internal} allowActions={true} approveAndPay={requestApproveAndPay} requestRevision={requestTransactionRevisionReview} verifyIncome={requestVerifyIncome} requestIncomeRevision={requestManualIncomeRevisionReview} voidIncome={requestVoidManualIncome} editRevision={openRevisionEditor} markPaid={requestMarkPaid} assignAccount={assignAccount} openReceipt={openReceipt} onSelectTransaction={setSelectedTransaction} saving={saving} />
+            <TransactionTable rows={visibleTransactions} categoryName={categoryName} accountName={accountName} leadName={leadName} quotationName={quotationName} budgetLabel={budgetLabel} accounts={activeAccounts} internal={internal} allowActions={true} approveAndPay={requestApproveAndPay} requestRevision={requestTransactionRevisionReview} verifyIncome={requestVerifyIncome} requestIncomeRevision={requestManualIncomeRevisionReview} voidIncome={requestVoidManualIncome} editRevision={openRevisionEditor} markPaid={requestMarkPaid} assignAccount={assignAccount} openReceipt={openReceipt} onSelectTransaction={setSelectedTransaction} saving={saving} />
             <TablePagination page={activeTransactionsPage} pageCount={transactionPageCount} total={filteredTransactions.length} onPageChange={setTransactionsPage} label="Finance transactions pagination" />
           </>}
         </Panel>
@@ -4277,6 +4300,7 @@ export function FinanceWorkspace({
           categoryName={categoryName}
           accountName={accountName}
           quotationName={quotationName}
+          quotationPaymentRecords={quotationPaymentRecords}
           budgetLabel={budgetLabel}
           profileName={profileName}
           openReceipt={openReceipt}
@@ -4365,6 +4389,7 @@ export function FinanceWorkspace({
                   <small className="mt-1 block text-[#7d8797]">Only active accounts added by Internal Finance are shown.</small>
                 </label>
                 <label className="field-label sm:col-span-2">Reference number (optional)<input value={transactionValues.reference_number} onChange={(event) => setTransactionValues((current) => ({ ...current, reference_number: event.target.value }))} className="input mt-1" placeholder="Receipt or transaction reference" maxLength={200} /></label>
+                <label className="field-label sm:col-span-2">Note (optional)<textarea value={transactionValues.note} onChange={(event) => setTransactionValues((current) => ({ ...current, note: event.target.value }))} className="input mt-1 min-h-20" placeholder="Add extra context about this payment" maxLength={1000} /></label>
                 <div className="field-label sm:col-span-2"><span>{selectedQuotationPaymentRevision ? "Replacement receipt image" : "Receipt image"}</span><FileUploadControl accept="image/jpeg,image/png,image/webp" ariaLabel={selectedQuotationPaymentRevision ? "Choose replacement payment receipt image" : "Choose payment receipt image"} className="mt-1" emptyLabel={selectedQuotationPaymentRevision ? "Choose replacement receipt image" : "Choose receipt image"} files={transactionFile ? [transactionFile] : []} onFilesSelected={(files) => setTransactionFile(files[0] ?? null)} /></div>
               </>
             ) : (
@@ -4441,7 +4466,7 @@ export function FinanceWorkspace({
             <label className="field-label">Date<input type="date" value={transactionValues.transaction_date} onClick={(event) => event.currentTarget.showPicker?.()} onChange={(event) => setTransactionValues((current) => ({ ...current, transaction_date: event.target.value }))} className="input mt-1" /></label>
             {internal && <label className="field-label">Time<input type="time" value={transactionValues.transaction_time} onClick={(event) => event.currentTarget.showPicker?.()} onChange={(event) => setTransactionValues((current) => ({ ...current, transaction_time: event.target.value }))} className="input mt-1" /></label>}
             {(manualIncomeMode || manualIncomeRevisionMode) && <label className="field-label">Reference number (optional)<input value={transactionValues.reference_number} onChange={(event) => setTransactionValues((current) => ({ ...current, reference_number: event.target.value }))} className="input mt-1" placeholder="Receipt or transaction reference" maxLength={200} /></label>}
-            <label className="field-label sm:col-span-2">{projectExpenseMode ? "Purpose / details" : "Note"}<textarea value={transactionValues.note} onChange={(event) => setTransactionValues((current) => ({ ...current, note: event.target.value }))} className="input mt-1 min-h-20" placeholder={projectExpenseMode ? "Explain what this project expense is for" : "Add a note"} /></label>
+            <label className="field-label sm:col-span-2">{projectExpenseMode ? "Purpose / details" : "Note (optional)"}<textarea value={transactionValues.note} onChange={(event) => setTransactionValues((current) => ({ ...current, note: event.target.value }))} className="input mt-1 min-h-20" placeholder={projectExpenseMode ? "Explain what this project expense is for" : "Add a note"} /></label>
             {internal && !commissionPayoutMode && <div className="field-label"><span>Payment status</span><div className="mt-1 flex rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-1"><button type="button" onClick={() => setTransactionValues((current) => ({ ...current, payment_status: "paid" }))} className={transactionValues.payment_status === "paid" ? "flex-1 rounded-md bg-[#edf9f2] px-3 py-2 text-[11px] font-semibold text-[#218b55]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797]"}>Paid</button><button type="button" onClick={() => setTransactionValues((current) => ({ ...current, payment_status: "unpaid" }))} className={transactionValues.payment_status === "unpaid" ? "flex-1 rounded-md bg-[#fff8e9] px-3 py-2 text-[11px] font-semibold text-[#a76605]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797]"}>Unpaid</button></div></div>}
               <div className="field-label"><span>{revisionTransaction ? "Replacement proof (optional)" : manualIncomeMode ? "Receipt or proof" : "Receipt image"}</span><FileUploadControl accept="image/jpeg,image/png,image/webp" ariaLabel={revisionTransaction ? "Choose replacement finance receipt image" : "Choose finance receipt image"} className="mt-1" emptyLabel={revisionTransaction ? "Keep current proof or choose replacement" : manualIncomeMode ? "Choose receipt or proof" : "Choose receipt image"} files={transactionFile ? [transactionFile] : []} onFilesSelected={(files) => setTransactionFile(files[0] ?? null)} /></div>
             {transactionDirection === "expense" && <>

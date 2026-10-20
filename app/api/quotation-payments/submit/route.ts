@@ -6,6 +6,7 @@ export const runtime = "nodejs";
 
 const RECEIPT_BUCKET = "quotation-payment-receipts";
 const MAX_RECEIPT_BYTES = 10 * 1024 * 1024;
+const MAX_NOTES_LENGTH = 1000;
 const receiptExtensions: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
@@ -67,6 +68,9 @@ export async function POST(request: Request) {
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(paidAt)) {
     return json({ error: "Choose a valid payment date." }, 400);
+  }
+  if (notes.length > MAX_NOTES_LENGTH) {
+    return json({ error: "Payment note must be 1,000 characters or fewer." }, 400);
   }
 
   const extension = receiptExtensions[receipt.type];
