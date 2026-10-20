@@ -26,6 +26,11 @@ import {
 } from "@react-pdf/renderer";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
+import {
+  exceedsProjectExpenseLimit,
+  isActiveProjectExpenseCommitment,
+  remainingProjectExpense,
+} from "@/lib/finance-project-expense";
 import { FileUploadControl } from "@/components/ui/file-upload-control";
 import { LoadingState } from "@/components/ui/loading-state";
 import { NumberInput } from "@/components/ui/number-input";
@@ -1882,6 +1887,7 @@ export function FinanceWorkspace({
   const [leads, setLeads] = useState<Row[]>([]);
   const [quotations, setQuotations] = useState<Row[]>([]);
   const [quotationDirectCosts, setQuotationDirectCosts] = useState<Row[]>([]);
+  const [projectExpenseRows, setProjectExpenseRows] = useState<Row[]>([]);
   const [payables, setPayables] = useState<Row[]>([]);
   const [suppliers, setSuppliers] = useState<Row[]>([]);
   const [commissionAllocations, setCommissionAllocations] = useState<Row[]>([]);
@@ -1969,6 +1975,9 @@ export function FinanceWorkspace({
             p_organization_id: organizationId,
           })
         : Promise.resolve({ data: [], error: null });
+      const projectExpenseRowsRequest = client.rpc("finance_project_expense_rows", {
+        p_organization_id: organizationId,
+      });
       const pendingQuotationPaymentsRequest = internal
         ? client
             .from("quotation_payment_records")
@@ -2003,8 +2012,9 @@ export function FinanceWorkspace({
         pendingQuotationPaymentsRequest,
         quotationPaymentRecordsRequest,
         quotationDirectCostsRequest,
+        projectExpenseRowsRequest,
       ]);
-      const failed = requests.slice(0, 15).find((request) => request.error);
+      const failed = requests.find((request) => request.error);
       if (failed?.error) {
         setLoadError(`Finance data could not load: ${failed.error.message}`);
       }
@@ -2016,6 +2026,7 @@ export function FinanceWorkspace({
       setLeads((requests[5].data ?? []) as Row[]);
       setQuotations((requests[6].data ?? []) as Row[]);
       setQuotationDirectCosts((requests[15].data ?? []) as Row[]);
+      setProjectExpenseRows((requests[16].data ?? []) as Row[]);
       setPayables((requests[7].data ?? []) as Row[]);
       setSuppliers((requests[8].data ?? []) as Row[]);
       const loadedAllocations = (requests[9].data ?? []) as Row[];
@@ -2229,47 +2240,19 @@ export function FinanceWorkspace({
     [leads, quotationOptions, quotations],
   );
 
-  const projectExpenseOptions = useMemo<SearchableOption[]>(() => {
-    const approvedQuotations = quotations.filter((quotation) => (
-      stringValue(quotation, "document_type") === "price_quotation"
-      && stringValue(quotation, "status") === "approved"
-    ));
-    const quotationLeadIds = new Set(approvedQuotations.map((quotation) => String(quotation.lead_id ?? "")).filter(Boolean));
-    const quotationProjectOptions = approvedQuotations.map((quotation) => {
-      const projectName = stringValue(quotation, "project_name") || stringValue(quotation, "client_name", "Unnamed project");
-      const clientName = stringValue(quotation, "client_name", "Client not set");
-      const quotationNo = stringValue(quotation, "quotation_no", "Quotation");
+  const projectExpenseOptions = useMemo<SearchableOption[]>(
+    () => projectExpenseRows.map((project) => {
+      const projectName = stringValue(project, "project_name") || stringValue(project, "client_name", "Unnamed project");
+      const clientName = stringValue(project, "client_name", "Client not set");
+      const clientContactName = stringValue(project, "client_contact_name");
+      const quotationNo = stringValue(project, "quotation_no", "Quotation");
       return {
-        value: `quotation:${String(quotation.id)}`,
+        value: `quotation:${String(project.quotation_id)}`,
         label: `${projectName} · ${quotationNo}`,
-        searchText: [projectName, clientName, quotationNo, stringValue(quotation, "lead_id")].join(" "),
+        searchText: [projectName, clientName, clientContactName, quotationNo, stringValue(project, "lead_id")].join(" "),
       };
-    });
-    const leadProjectOptions = leads
-      .filter((lead) => Boolean(stringValue(lead, "project_name")) && !quotationLeadIds.has(String(lead.id)))
-      .map((lead) => {
-        const projectName = stringValue(lead, "project_name");
-        const clientName = stringValue(lead, "client_name", "Client not set");
-        return {
-          value: `lead:${String(lead.id)}`,
-          label: `${projectName} · Project`,
-          searchText: [projectName, clientName, stringValue(lead, "lead_no"), stringValue(lead, "contact_name")].join(" "),
-        };
-      });
-    return [...quotationProjectOptions, ...leadProjectOptions];
-  }, [leads, quotations]);
-
-  const normalizedProjectExpenseOptions = useMemo<SearchableOption[]>(
-    () => projectExpenseOptions.map((option) => {
-      const [kind, id] = option.value.split(":");
-      const quotation = kind === "quotation" ? quotations.find((item) => String(item.id) === id) : null;
-      const lead = kind === "lead"
-        ? leads.find((item) => String(item.id) === id)
-        : leads.find((item) => String(item.id) === String(quotation?.lead_id));
-      const label = financeProjectLabel(quotation, lead);
-      return { ...option, label, searchText: [label, option.searchText].join(" ") };
     }),
-    [leads, projectExpenseOptions, quotations],
+    [projectExpenseRows],
   );
 
   const quotationPaymentOptions = useMemo<SearchableOption[]>(
@@ -2817,9 +2800,38 @@ export function FinanceWorkspace({
   const manualIncomeRevisionMode = Boolean(revisionTransaction && transactionDirection === "income" && isManualIncomeTransaction(revisionTransaction));
   const projectExpenseSelection = transactionValues.quotation_id
     ? `quotation:${transactionValues.quotation_id}`
-    : transactionValues.lead_id
-      ? `lead:${transactionValues.lead_id}`
-      : "";
+    : "";
+
+  const selectedProjectExpense = useMemo(
+    () => projectExpenseRows.find((project) => String(project.quotation_id) === String(transactionValues.quotation_id)) ?? null,
+    [projectExpenseRows, transactionValues.quotation_id],
+  );
+  const selectedProjectExpenseCapacity = useMemo(() => {
+    if (!selectedProjectExpense) return null;
+    const totalDirectCost = Math.max(0, numericValue(selectedProjectExpense, "total_direct_cost"));
+    const committedProjectExpense = Math.max(0, numericValue(selectedProjectExpense, "committed_project_expense"));
+    const currentProjectExpenseAmount = revisionTransaction
+      && String(revisionTransaction.quotation_id) === String(selectedProjectExpense.quotation_id)
+      && isActiveProjectExpenseCommitment(revisionTransaction)
+      ? numericValue(revisionTransaction, "amount")
+      : 0;
+    return {
+      totalDirectCost,
+      committedProjectExpense,
+      remainingDirectCost: remainingProjectExpense(totalDirectCost, committedProjectExpense),
+      availableToExpense: remainingProjectExpense(
+        totalDirectCost,
+        Math.max(0, committedProjectExpense - currentProjectExpenseAmount),
+      ),
+    };
+  }, [revisionTransaction, selectedProjectExpense]);
+  const projectExpenseAmount = Number(transactionValues.amount);
+  const projectExpenseAmountError = projectExpenseMode
+    && selectedProjectExpenseCapacity
+    && Number.isFinite(projectExpenseAmount)
+    && exceedsProjectExpenseLimit(projectExpenseAmount, selectedProjectExpenseCapacity.availableToExpense)
+    ? `Enter ${peso.format(selectedProjectExpenseCapacity.availableToExpense)} or less for this quotation.`
+    : null;
 
   const selectedQuotationPayment = useMemo(
     () => quotations.find((quotation) => String(quotation.id) === transactionValues.quotation_id) ?? null,
@@ -2876,7 +2888,7 @@ export function FinanceWorkspace({
           : commissionPayoutMode
             ? "Create a controlled commission payout after full quotation payment and the three-day hold."
             : projectExpenseMode
-              ? "Link this Cash Out to a quotation or project so Internal Finance can track its verified project transactions."
+              ? "Link this Cash Out to an approved quotation; the remaining direct-cost capacity limits the amount you can submit."
             : supplierPaymentMode
               ? "Submit a supplier payment for Internal Finance approval."
               : "Submit a regular expense for Internal Finance approval.";
@@ -2894,19 +2906,11 @@ export function FinanceWorkspace({
   const chooseProjectExpense = (selection: string) => {
     if (selection.startsWith("quotation:")) {
       const quotationId = selection.slice("quotation:".length);
-      const quotation = quotations.find((item) => String(item.id) === quotationId);
+      const project = projectExpenseRows.find((item) => String(item.quotation_id) === quotationId);
       setTransactionValues((current) => ({
         ...current,
         quotation_id: quotationId,
-        lead_id: quotation ? String(quotation.lead_id ?? "") : "",
-      }));
-      return;
-    }
-    if (selection.startsWith("lead:")) {
-      setTransactionValues((current) => ({
-        ...current,
-        quotation_id: "",
-        lead_id: selection.slice("lead:".length),
+        lead_id: project ? String(project.lead_id ?? "") : "",
       }));
       return;
     }
@@ -3002,6 +3006,10 @@ export function FinanceWorkspace({
     if (internal || (!manualIncomeRevision && stringValue(transaction, "approval_status") !== "revision_requested")) return;
     const supplierPayableId = stringValue(transaction, "supplier_payable_id");
     const projectLinked = Boolean(stringValue(transaction, "quotation_id") || stringValue(transaction, "lead_id"));
+    if (!manualIncomeRevision && !supplierPayableId && projectLinked && !stringValue(transaction, "quotation_id")) {
+      setErrorMessage("This returned project expense needs an approved quotation before it can be resubmitted.");
+      return;
+    }
     setRevisionTransaction(transaction);
     setTransactionDirection(manualIncomeRevision ? "income" : "expense");
     setExpenseMode(manualIncomeRevision ? "regular" : supplierPayableId ? "supplier" : projectLinked ? "project" : "regular");
@@ -3103,8 +3111,12 @@ export function FinanceWorkspace({
     if (!internal && !manualIncomeMode && !manualIncomeRevisionMode && (transactionDirection !== "expense" || !canSubmitExpense)) return setErrorMessage("External Finance can submit Cash Out or standalone Cash In.");
     if (!internal && transactionValues.payment_status !== "unpaid") return setErrorMessage("External Finance submissions must remain unpaid until Internal Finance confirms the payment.");
     if (supplierPaymentMode && !transactionValues.supplier_payable_id) return setErrorMessage("Choose an open supplier payable.");
-    if (projectExpenseMode && !transactionValues.quotation_id && !transactionValues.lead_id) return setErrorMessage("Choose the quotation or project this expense belongs to.");
-    if (!transactionValues.amount || Number(transactionValues.amount) <= 0) return setErrorMessage("Enter an amount greater than zero.");
+    if (projectExpenseMode && (!transactionValues.quotation_id || !selectedProjectExpense || !selectedProjectExpenseCapacity)) return setErrorMessage("Choose an approved quotation with direct-cost capacity for this project expense.");
+    const enteredAmount = Number(transactionValues.amount);
+    if (!transactionValues.amount || !Number.isFinite(enteredAmount) || enteredAmount <= 0) return setErrorMessage("Enter an amount greater than zero.");
+    if (projectExpenseMode && selectedProjectExpenseCapacity && exceedsProjectExpenseLimit(enteredAmount, selectedProjectExpenseCapacity.availableToExpense)) {
+      return setErrorMessage(`This project expense exceeds the available direct-cost capacity of ${peso.format(selectedProjectExpenseCapacity.availableToExpense)}.`);
+    }
     if (!transactionValues.category_id || ((transactionDirection === "expense" || manualIncomeMode || manualIncomeRevisionMode) && !transactionValues.account_id)) return setErrorMessage(transactionDirection === "income" ? "Choose an income category and receiving account." : "Choose an expense category and payment account.");
     const selectedAllocation = eligibleCommissionAllocations.find((allocation) => allocation.id === transactionValues.commission_allocation_id);
     if (revisionTransaction && selectedAllocation) return setErrorMessage("Commission payouts cannot be resubmitted through this workflow.");
@@ -4319,21 +4331,28 @@ export function FinanceWorkspace({
             {projectExpenseMode && <div className="field-label sm:col-span-2">
               <span>Project / quotation</span>
               <SearchableSelect
-                options={normalizedProjectExpenseOptions}
+                options={projectExpenseOptions}
                 value={projectExpenseSelection}
                 onChange={chooseProjectExpense}
-                placeholder={projectExpenseOptions.length ? "Choose project or quotation" : "No project or quotation available"}
+                placeholder={projectExpenseOptions.length ? "Choose an approved project quotation" : "No approved project quotations available"}
                 searchPlaceholder="Search project, client, or quotation"
-                noResultsLabel="No matching project or quotation found."
+                noResultsLabel="No matching approved project quotation found."
                 ariaLabel="Project or quotation for expense"
                 required
                 clearable={false}
-                disabled={!normalizedProjectExpenseOptions.length}
+                disabled={!projectExpenseOptions.length}
                 className="mt-1"
               />
-              <small className="mt-1 block text-[#7d8797]">This links the Cash Out to the project for Internal Finance history.</small>
+              {selectedProjectExpenseCapacity ? (
+                <div aria-live="polite" className="mt-2 grid gap-2 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[11px] sm:grid-cols-3">
+                  <div><span className="block text-[10px] text-[#8b92a1]">Total direct cost</span><strong className="block text-[#344054]">{peso.format(selectedProjectExpenseCapacity.totalDirectCost)}</strong></div>
+                  <div><span className="block text-[10px] text-[#8b92a1]">Committed expenses</span><strong className="block text-[#a76605]">{peso.format(selectedProjectExpenseCapacity.committedProjectExpense)}</strong></div>
+                  <div><span className="block text-[10px] text-[#8b92a1]">Available to expense</span><strong className={`block ${(selectedProjectExpenseCapacity.availableToExpense ?? 0) > 0 ? "text-[#218b55]" : "text-[#b42318]"}`}>{peso.format(selectedProjectExpenseCapacity.availableToExpense ?? 0)}</strong></div>
+                  {(selectedProjectExpenseCapacity.availableToExpense ?? 0) <= 0 && <p className="sm:col-span-3 rounded-md border border-[#f2b8b5] bg-[#fef3f2] px-3 py-2 text-[11px] leading-[1.45] text-[#b42318]">This quotation has no remaining direct-cost capacity for another project expense.</p>}
+                </div>
+              ) : <small className="mt-1 block text-[#7d8797]">Only approved direct quotations can receive a capped project expense.</small>}
             </div>}
-            <label className="field-label">Amount<NumberInput min="0.01" step="0.01" value={transactionValues.amount} onChange={(value) => setTransactionValues((current) => ({ ...current, amount: value }))} className="input mt-1" /></label>
+            <label className="field-label">Amount<NumberInput min="0.01" max={projectExpenseMode ? selectedProjectExpenseCapacity?.availableToExpense : undefined} step="0.01" value={transactionValues.amount} onChange={(value) => setTransactionValues((current) => ({ ...current, amount: value }))} aria-invalid={Boolean(projectExpenseAmountError)} className="input mt-1" />{projectExpenseMode && selectedProjectExpenseCapacity && <span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">Maximum for this quotation: {peso.format(selectedProjectExpenseCapacity.availableToExpense ?? 0)}</span>}{projectExpenseAmountError && <span role="alert" className="mt-1 block text-[11px] font-semibold text-[#b42318]">{projectExpenseAmountError}</span>}</label>
             <label className="field-label">
               {transactionDirection === "income" ? "Income category" : "Expense category"}
               <SearchableSelect options={categoryOptions} value={transactionValues.category_id} onChange={(value) => setTransactionValues((current) => ({ ...current, category_id: value }))} placeholder="Choose category" searchPlaceholder="Search categories" ariaLabel={transactionDirection === "income" ? "Income category" : "Expense category"} required clearable={false} className="mt-1" />
@@ -4398,7 +4417,7 @@ export function FinanceWorkspace({
           {internal && (
           <div className="mt-4 rounded-lg border border-[#edf0f5] bg-[#fafbfc] p-3"><p className="text-[11px] font-semibold text-[#344054]">Add a custom {transactionDirection} category</p><div className="mt-2 flex flex-wrap gap-2"><input value={categoryDraft.name} onChange={(event) => setCategoryDraft((current) => ({ ...current, name: event.target.value }))} className="input min-w-[200px] flex-1 text-[12px]" placeholder="Category name" />{transactionDirection === "expense" && <select value={categoryDraft.expense_class} onChange={(event) => setCategoryDraft((current) => ({ ...current, expense_class: event.target.value }))} className="input text-[12px]"><option value="operating">Operating Expense</option><option value="non_operating">Non Operating Expense</option></select>}<button type="button" onClick={() => void saveCategory()} disabled={saving} className="button-secondary">Add category</button></div><div className="mt-3 flex flex-wrap gap-1.5">{activeCategories.filter((category) => !Boolean(category.is_system)).map((category) => <button key={String(category.id)} type="button" onClick={() => void archiveCategory(category)} className="inline-flex items-center gap-1 rounded-full border border-[#d9e0e9] px-2 py-1 text-[10px] text-[#687386] hover:border-[#f2b8b5] hover:text-[#b42318]">{stringValue(category, "name")} <X size={11} /></button>)}</div></div>
           )}
-            <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={closeTransactionForm} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveTransaction()} disabled={saving || (quotationPaymentMode && (!transactionValues.quotation_id || !transactionValues.account_id || !transactionFile || !quotationPaymentAccountOptions.length)) || (!revisionTransaction && !internal && !manualIncomeMode && !commissionPayoutMode && transactionDirection === "expense" && approvedBudgetRemainingTotal <= 0) || ((transactionDirection === "expense" || manualIncomeMode || manualIncomeRevisionMode) && (!activeAccounts.length || !transactionValues.account_id)) || (supplierPaymentMode && !transactionValues.supplier_payable_id) || (projectExpenseMode && !transactionValues.quotation_id && !transactionValues.lead_id) || (internal && !transactionValues.commission_allocation_id)} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} {saving ? "Saving..." : quotationPaymentMode ? selectedQuotationPaymentRevision ? "Resubmit receipt" : "Submit receipt" : manualIncomeMode ? "Submit Cash In" : manualIncomeRevisionMode ? "Resubmit Cash In" : revisionTransaction ? "Resubmit Cash Out" : commissionPayoutMode ? "Create commission payout" : projectExpenseMode ? "Submit project expense" : supplierPaymentMode ? "Submit supplier payment" : "Submit regular expense"}</button></div>
+            <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={closeTransactionForm} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveTransaction()} disabled={saving || (quotationPaymentMode && (!transactionValues.quotation_id || !transactionValues.account_id || !transactionFile || !quotationPaymentAccountOptions.length)) || (!revisionTransaction && !internal && !manualIncomeMode && !commissionPayoutMode && transactionDirection === "expense" && approvedBudgetRemainingTotal <= 0) || ((transactionDirection === "expense" || manualIncomeMode || manualIncomeRevisionMode) && (!activeAccounts.length || !transactionValues.account_id)) || (supplierPaymentMode && !transactionValues.supplier_payable_id) || (projectExpenseMode && (!transactionValues.quotation_id || !selectedProjectExpense || !((selectedProjectExpenseCapacity?.availableToExpense ?? 0) > 0))) || (internal && !transactionValues.commission_allocation_id)} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} {saving ? "Saving..." : quotationPaymentMode ? selectedQuotationPaymentRevision ? "Resubmit receipt" : "Submit receipt" : manualIncomeMode ? "Submit Cash In" : manualIncomeRevisionMode ? "Resubmit Cash In" : revisionTransaction ? "Resubmit Cash Out" : commissionPayoutMode ? "Create commission payout" : projectExpenseMode ? "Submit project expense" : supplierPaymentMode ? "Submit supplier payment" : "Submit regular expense"}</button></div>
         </FinanceDialog>
       )}
 
