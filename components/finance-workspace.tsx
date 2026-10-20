@@ -2839,6 +2839,15 @@ export function FinanceWorkspace({
   const quotationPaymentMode = !internal && transactionDirection === "income" && !revisionTransaction && cashInSource === "quotation_payment";
   const manualIncomeMode = !internal && transactionDirection === "income" && !revisionTransaction && cashInSource === "other_income";
   const manualIncomeRevisionMode = Boolean(revisionTransaction && transactionDirection === "income" && isManualIncomeTransaction(revisionTransaction));
+  const legacyLeadOnlyRevision = Boolean(
+    revisionTransaction
+    && !manualIncomeRevisionMode
+    && transactionDirection === "expense"
+    && expenseMode === "regular"
+    && !stringValue(revisionTransaction, "quotation_id")
+    && Boolean(stringValue(revisionTransaction, "lead_id"))
+    && !stringValue(revisionTransaction, "supplier_payable_id"),
+  );
   const projectExpenseSelection = transactionValues.quotation_id
     ? `quotation:${transactionValues.quotation_id}`
     : "";
@@ -2925,7 +2934,9 @@ export function FinanceWorkspace({
       : manualIncomeRevisionMode
         ? "Correct the returned Cash In and resubmit it for Internal Finance verification."
         : revisionTransaction
-          ? "Correct the returned fields and resubmit this Cash Out for Internal Finance review."
+          ? legacyLeadOnlyRevision
+            ? "This returned lead-linked Cash Out will be resubmitted as a regular expense unless you choose an approved project quotation."
+            : "Correct the returned fields and resubmit this Cash Out for Internal Finance review."
           : commissionPayoutMode
             ? "Create a controlled commission payout after full quotation payment and the three-day hold."
             : projectExpenseMode
@@ -3046,14 +3057,10 @@ export function FinanceWorkspace({
       && stringValue(transaction, "income_review_status") === "revision_requested";
     if (internal || (!manualIncomeRevision && stringValue(transaction, "approval_status") !== "revision_requested")) return;
     const supplierPayableId = stringValue(transaction, "supplier_payable_id");
-    const projectLinked = Boolean(stringValue(transaction, "quotation_id") || stringValue(transaction, "lead_id"));
-    if (!manualIncomeRevision && !supplierPayableId && projectLinked && !stringValue(transaction, "quotation_id")) {
-      setErrorMessage("This returned project expense needs an approved quotation before it can be resubmitted.");
-      return;
-    }
+    const quotationId = stringValue(transaction, "quotation_id");
     setRevisionTransaction(transaction);
     setTransactionDirection(manualIncomeRevision ? "income" : "expense");
-    setExpenseMode(manualIncomeRevision ? "regular" : supplierPayableId ? "supplier" : projectLinked ? "project" : "regular");
+    setExpenseMode(manualIncomeRevision ? "regular" : supplierPayableId ? "supplier" : quotationId ? "project" : "regular");
     setTransactionValues({
       ...defaultTransaction(manualIncomeRevision ? "income" : "expense"),
       amount: numericValue(transaction, "amount").toFixed(2),
@@ -3173,6 +3180,22 @@ export function FinanceWorkspace({
     try {
       if (submittedFile && path) await uploadReceipt(submittedFile, path);
       if (revisionTransaction) {
+        const cashOutResubmissionPayload = {
+          p_transaction_id: revisionTransaction.id,
+          p_amount: Number(transactionValues.amount),
+          p_category_id: transactionValues.category_id,
+          p_account_id: transactionValues.account_id,
+          p_note: transactionValues.note.trim() || null,
+          p_transaction_date: transactionValues.transaction_date,
+          p_transaction_time: transactionTime,
+          p_lead_id: transactionValues.lead_id || null,
+          p_quotation_id: transactionValues.quotation_id || null,
+          p_supplier_payable_id: supplierPaymentMode ? transactionValues.supplier_payable_id || null : null,
+          p_receipt_storage_path: path,
+          p_receipt_file_name: submittedFile?.name ?? null,
+          p_receipt_content_type: submittedFile?.type ?? null,
+          p_receipt_file_size: submittedFile?.size ?? null,
+        };
         const result = manualIncomeRevisionMode
           ? await client.rpc("resubmit_manual_finance_income", {
               p_transaction_id: revisionTransaction.id,
@@ -3188,22 +3211,10 @@ export function FinanceWorkspace({
               p_receipt_content_type: submittedFile?.type ?? null,
               p_receipt_file_size: submittedFile?.size ?? null,
             })
-          : await client.rpc("resubmit_finance_transaction", {
-              p_transaction_id: revisionTransaction.id,
-              p_amount: Number(transactionValues.amount),
-              p_category_id: transactionValues.category_id,
-              p_account_id: transactionValues.account_id,
-              p_note: transactionValues.note.trim() || null,
-              p_transaction_date: transactionValues.transaction_date,
-              p_transaction_time: transactionTime,
-              p_lead_id: transactionValues.lead_id || null,
-              p_quotation_id: transactionValues.quotation_id || null,
-              p_supplier_payable_id: supplierPaymentMode ? transactionValues.supplier_payable_id || null : null,
-              p_receipt_storage_path: path,
-              p_receipt_file_name: submittedFile?.name ?? null,
-              p_receipt_content_type: submittedFile?.type ?? null,
-              p_receipt_file_size: submittedFile?.size ?? null,
-            });
+          : await client.rpc(
+              legacyLeadOnlyRevision ? "resubmit_finance_transaction_as_regular" : "resubmit_finance_transaction",
+              cashOutResubmissionPayload,
+            );
         if (result.error) throw result.error;
         setMessage(manualIncomeRevisionMode ? "Cash In resubmitted for Internal Finance verification." : "Cash Out resubmitted for Internal Finance review.");
         closeTransactionForm();

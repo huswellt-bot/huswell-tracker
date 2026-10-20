@@ -97,8 +97,10 @@ declare
   v_quotation public.quotations%rowtype;
   v_total_direct_cost numeric;
   v_committed_project_expense numeric;
+  v_payable_quotation_id uuid;
   v_commission_context boolean;
   v_external boolean;
+  v_regular_lead_resubmission_context boolean;
 begin
   v_commission_context := coalesce(
     current_setting('huswell.allow_commission_allocation_insert', true),
@@ -106,6 +108,10 @@ begin
   ) = 'on';
   v_external := private.has_text_role(new.organization_id, array['external_finance'])
     and not private.finance_is_internal(new.organization_id);
+  v_regular_lead_resubmission_context := coalesce(
+    current_setting('huswell.allow_regular_lead_resubmission', true),
+    ''
+  ) = 'on';
 
   if v_commission_context or new.transaction_type <> 'expense' then
     return new;
@@ -114,10 +120,24 @@ begin
   if tg_op = 'UPDATE'
     and old.approval_status::text = 'revision_requested'
     and new.approval_status::text = 'pending'
-    and old.lead_id is not null
-    and old.quotation_id is null
     and new.quotation_id is null then
-    raise exception 'This returned project expense needs an approved quotation before resubmission';
+    if old.quotation_id is not null
+      or (v_external and old.lead_id is not null and not v_regular_lead_resubmission_context) then
+      raise exception 'This returned project expense needs an approved quotation before resubmission';
+    end if;
+  end if;
+
+  if new.supplier_payable_id is not null then
+    select payable.quotation_id
+    into v_payable_quotation_id
+    from public.supplier_payables payable
+    where payable.id = new.supplier_payable_id
+      and payable.organization_id = new.organization_id
+    for share;
+
+    if not found or v_payable_quotation_id is distinct from new.quotation_id then
+      raise exception 'The supplier payable quotation must match the selected project quotation';
+    end if;
   end if;
 
   if new.quotation_id is null then
@@ -184,8 +204,78 @@ drop trigger if exists finance_transactions_project_expense_guard
   on public.finance_transactions;
 create trigger finance_transactions_project_expense_guard
 before insert or update of amount, transaction_type, approval_status,
-  quotation_id, commission_summary_id, commission_allocation_id, is_voided
+  quotation_id, supplier_payable_id, commission_summary_id,
+  commission_allocation_id, is_voided
 on public.finance_transactions
 for each row execute function private.finance_project_expense_guard();
+
+create or replace function public.resubmit_finance_transaction_as_regular(
+  p_transaction_id uuid,
+  p_amount numeric,
+  p_category_id uuid,
+  p_account_id uuid,
+  p_note text,
+  p_transaction_date date,
+  p_transaction_time time,
+  p_lead_id uuid,
+  p_quotation_id uuid,
+  p_supplier_payable_id uuid,
+  p_receipt_storage_path text default null,
+  p_receipt_file_name text default null,
+  p_receipt_content_type text default null,
+  p_receipt_file_size bigint default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, private
+as $$
+declare
+  v_transaction public.finance_transactions%rowtype;
+begin
+  select * into v_transaction
+  from public.finance_transactions
+  where id = p_transaction_id
+  for update;
+
+  if not found
+    or not private.has_text_role(v_transaction.organization_id, array['external_finance'])
+    or private.finance_is_internal(v_transaction.organization_id)
+    or v_transaction.transaction_type <> 'expense'
+    or v_transaction.quotation_id is not null
+    or v_transaction.lead_id is null
+    or p_quotation_id is not null
+    or p_supplier_payable_id is not null then
+    raise exception 'Only a returned lead-linked regular expense can use this resubmission path';
+  end if;
+
+  perform set_config('huswell.allow_regular_lead_resubmission', 'on', true);
+  return public.resubmit_finance_transaction(
+    p_transaction_id,
+    p_amount,
+    p_category_id,
+    p_account_id,
+    p_note,
+    p_transaction_date,
+    p_transaction_time,
+    p_lead_id,
+    p_quotation_id,
+    p_supplier_payable_id,
+    p_receipt_storage_path,
+    p_receipt_file_name,
+    p_receipt_content_type,
+    p_receipt_file_size
+  );
+end;
+$$;
+
+revoke all on function public.resubmit_finance_transaction_as_regular(
+  uuid, numeric, uuid, uuid, text, date, time, uuid, uuid, uuid,
+  text, text, text, bigint
+) from public, anon;
+grant execute on function public.resubmit_finance_transaction_as_regular(
+  uuid, numeric, uuid, uuid, text, date, time, uuid, uuid, uuid,
+  text, text, text, bigint
+) to authenticated;
 
 commit;
