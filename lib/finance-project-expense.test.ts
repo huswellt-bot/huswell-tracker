@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import {
-  exceedsProjectExpenseLimit,
-  isActiveProjectExpenseCommitment,
-  remainingProjectExpense,
-} from "./finance-project-expense.ts";
+// @ts-expect-error Node's strip-types test runner resolves the .ts suffix directly.
+import { exceedsProjectExpenseLimit, isActiveProjectExpenseCommitment, remainingProjectExpense } from "./finance-project-expense.ts";
 
 const expenseRow = (overrides: Record<string, unknown> = {}) => ({
   transaction_type: "expense",

@@ -1,4 +1,5 @@
 export type ProjectExpenseTransactionLike = {
+  [key: string]: unknown;
   transaction_type?: unknown;
   approval_status?: unknown;
   is_voided?: unknown;
