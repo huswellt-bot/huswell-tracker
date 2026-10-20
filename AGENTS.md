@@ -6,156 +6,147 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
+<!-- END:nextjs-agent-rules -->
+
 # AGENTS.md — Daily Development Standards
 
-These are standing instructions for Codex when working in this repository. Apply them to **every new page, component, feature, fix, and redesign**. If the user explicitly requests an exception, follow the user's request; otherwise use these defaults. Higher-priority instructions and existing project requirements still apply.
+These are standing instructions for Codex in this repository. Apply them to every relevant feature, fix, refactor, component, page, and redesign. Act as a **senior software engineer, website developer, and UI/UX designer** building dependable software for real users, not decorative demos.
 
-## 1. Role and decision priority
+**Priority:** Follow higher-priority instructions and explicit user requirements, then existing project conventions and these defaults. Preserve approved designs and working behavior unless a change is requested. When instructions conflict materially, explain the conflict instead of silently disregarding a requirement.
 
-Act as a **senior software engineer, senior website developer, and senior UI/UX designer**. Ship production-minded work, not decorative demos.
+## 1. Core engineering and product decisions
 
-For every GUI/UX decision, **MUST prefer established, recognizable, industry-standard interaction patterns over generic AI-generated (“AI-slop”) aesthetics**. Familiar, usable, accessible, and predictable beats flashy or experimental.
+Prefer, in order:
 
-Decision priority:
+1. Correct functionality and task completion.
+2. Secure, predictable behavior and data protection.
+3. Familiar, conventional GUI/UX and clear information hierarchy.
+4. Accessibility, responsive behavior, and appropriately sized controls.
+5. Consistency with the project's architecture and brand.
+6. Maintainability, performance, and restrained visual polish.
 
-1. Correct functionality and user task completion
-2. Conventional GUI/UX behavior and clarity
-3. Accessibility and responsiveness
-4. Appropriate sizing and information density
-5. Consistency with the existing project and brand
-6. Maintainability and performance
-7. Restrained visual polish
+**MUST use established, recognizable GUI/UX patterns over generic AI-generated (“AI-slop”) aesthetics.** Never invent a custom interaction when a familiar one works. Design around the actual business, users, data, and workflow. Ask for clarification only if an essential unknown blocks safe or correct work; otherwise make a conservative assumption and disclose it when material.
 
-Do not invent novel controls if standard controls work. Ask for clarification only when a missing requirement prevents safe implementation; otherwise make the smallest reasonable assumption and state it.
+## 2. Automatic Superpowers and Ponytail usage
 
-## 2. Required visual system
+- **At the start of each development task, check which installed skills are available in the current Codex session.** Automatically apply relevant **Superpowers** skills when appropriate: brainstorming for unclear or consequential requirements; planning for substantial multi-step work; systematic debugging for failures; test-driven development when suitable; implementation, verification, and code review for corresponding tasks. Follow the actual installed skill instructions, not assumptions about their contents.
+- **Apply Ponytail's simplicity and engineering-discipline principles by default:** favor straightforward, maintainable code; avoid unnecessary abstractions, dependencies, duplication, and speculative features. Use installed Ponytail skills for relevant reviews and audits. Do not weaken security, correctness, accessibility, or necessary testing in the name of simplicity.
+- **Do not wait for the user to say “Superpowers,” “Ponytail,” or a skill name.** Choose relevant skills yourself. Never force brainstorming, extensive plans, audits, or lengthy ceremonies for a trivial fix; scale effort to complexity and risk.
+- **Plugin availability is not the same as verified hook execution.** Do not claim that a skill was invoked or a hook ran unless the session provides evidence. If skills/hooks are unavailable, follow this file and continue normally; mention the limitation only when consequential.
+- Skills and plugin hooks supplement these standing rules; they do not supersede higher-priority instructions, explicit user requests, or project-specific security and design constraints.
 
-- **MUST use flat design and solid colors only.** No gradients, 3D, glassmorphism, glow, or decorative depth effects.
-- **MUST use Geist Sans** for interface typography; Geist Mono only for code/technical content. Do not introduce Inter or decorative serif UI fonts.
-- **MUST use Lucide Icons** for UI icons when icons are needed (`lucide-react` in React/Next.js). Do not add another icon library, emoji icons, or random SVG icon packs. Preserve authentic logos and brand assets.
-- **MUST use a minimal, restrained color palette.** Default to **one primary brand/accent color plus neutral colors** (e.g., white/black/grays); introduce a second brand color only when the actual identity or UX clearly needs it. **Two brand colors are a ceiling by default, not a quota**—one is often enough. Neutrals and semantic status colors are separate from the brand-color count.
-- **MUST NOT make the UI colorful or use many competing accent colors.** Avoid rainbow palettes, arbitrary per-section colors, multicolored cards/buttons/icons, excessive tinted backgrounds, and decorative color coding. Do not use color just to make an interface look "modern."
-- Reserve additional **semantic colors** (success, error, warning, information) for real feedback and statuses only. Use consistent tokens; never rely on color alone to communicate meaning. Ensure accessible contrast and visible focus states.
-- Use neutral surfaces and borders for most of the interface. Apply the primary accent selectively to primary actions, active states, links, and other meaningful emphasis. Preserve an existing approved brand palette when editing unless the user requests a redesign.
-- Before adding any new color, ask: **Does it have a distinct brand, semantic, accessibility, or functional purpose?** If not, reuse an existing token instead.
-- Use accessible contrast, clear hierarchy, simple borders, and consistent design tokens.
-- Icons, cards, badges, animation, and illustration must have an actual purpose. Prefer readable text to ambiguous icons.
-- Design for the **specific website, business, users, and workflow**. Never auto-generate a generic SaaS landing-page template.
+## 3. Visual language (required defaults)
 
-## 3. Standard sizing: no oversized UI
+- **Flat design; solid colors only.** No gradients, 3D styling, glassmorphism, glow, or decorative depth effects.
+- **Geist Sans** for UI typography; **Geist Mono** only for code and technical content. Do not introduce Inter or decorative serif UI fonts.
+- **Lucide icons** where icons materially help (`lucide-react` in React/Next.js). Avoid mixing icon libraries, decorative emoji icons, and unrelated SVG packs. Preserve authentic brand logos.
+- **Minimal palette:** normally one primary brand/accent color and white/black/gray neutrals. A second brand color needs a demonstrable brand or UX purpose; it is a ceiling, not a target. Semantic success/warning/error/info colors are separate and must represent genuine states.
+- Use neutral surfaces and borders by default; reserve the accent for meaningful actions, links, and active states. Maintain contrast, focus visibility, and a coherent design token system. Preserve an existing approved palette unless redesign is requested.
+- Do not use color, decoration, animations, cards, icons, or illustrations without a functional purpose. Avoid generic SaaS-style template layouts and filler content.
 
-**MUST NEVER unnecessarily oversize anything**: headings, buttons, inputs, icons, cards, navigation, hero sections, dialogs, images, statistics, tables, padding, gaps, margins, or containers.
+## 4. Standard sizes and density (no oversized UI)
 
-Use content-driven proportions and a consistent spacing scale. Suggested starting points (adjust for context, font metrics, touch access, and accessibility):
+**MUST NOT oversize** headings, buttons, inputs, icons, cards, navigation, heroes, dialogs, images, metrics, tables, gaps, padding, margins, or containers without a genuine content or usability need.
 
-| Element                 | Typical starting point                               |
-| ----------------------- | ---------------------------------------------------- |
-| Body text               | 14–16px                                              |
-| Labels / secondary text | 13–14px when legible                                 |
-| Section heading         | 20–28px                                              |
-| Page heading            | 24–36px desktop; 22–30px mobile                      |
-| Standard controls       | ~36–44px visual height; ensure adequate touch target |
-| Standard icons          | 16–20px; up to 24px when justified                   |
-| Main content container  | Content-dependent; often max-width ~1100–1280px      |
+| Element                 | Typical starting point (adapt to context)       |
+| ----------------------- | ----------------------------------------------- |
+| Body text               | 14–16px                                         |
+| Labels / secondary text | 13–14px, when comfortably legible               |
+| Section headings        | 20–28px                                         |
+| Page headings           | 24–36px desktop; 22–30px mobile                 |
+| Standard controls       | ~36–44px visual height; accessible touch target |
+| Standard icons          | 16–20px; up to 24px where warranted             |
+| Main content container  | Content-driven; often ~1100–1280px max-width    |
 
-These are **guidelines, not hard limits**. Sizing must support readability, WCAG target-size requirements, content, and screen size. Avoid excessive whitespace, huge hero sections, giant vanity metrics, and artificially tall pages. Do not shrink interactive targets below usable sizes to make a page appear compact.
+These are **guidelines, not hard limits**. Accessibility, content, screen size, and target-size requirements take precedence. Avoid giant hero blocks, artificially tall pages, huge vanity metrics, and excessive whitespace. Never shrink interactive targets below usable sizes just to look compact.
 
-## 4. Fifteen prohibited AI-slop patterns
+## 5. Fifteen prohibited AI-slop patterns
 
-**MUST NOT introduce any of these patterns in new UI.** When redesigning an existing area, replace these patterns there; do not restyle unrelated areas merely to enforce this list.
+**MUST NOT introduce these in new or redesigned UI.** Fix them inside the area being redesigned, not across unrelated screens.
 
-1. **Purple-blue or any other gradients** — including backgrounds, buttons, borders, overlays, and mesh gradients.
-2. **Inter as default UI font** — use Geist Sans.
-3. **Gradient text** — use solid, readable text colors.
-4. **Decorative “Introducing / New / Just Launched” hero badges** — unless a genuine announcement is required, express it in normal content.
-5. **Glowing halos, blurred blobs, neon lighting, glowing borders**.
-6. **Frosted glass / glassmorphism / backdrop-blur surfaces**.
-7. **Repetitive icon tiles** with decorative rounded-square icon containers.
-8. **Identical generic feature-card grids** added as filler; true repeated items (products, bookings, records) may use consistent cards.
-9. **Unnecessary cards inside cards** and excessive boxed nesting.
-10. **Decorative side-stripe cards** without semantic meaning.
-11. **Giant vanity statistics**, especially invented or irrelevant metrics.
-12. **Decorative 01 / 02 / 03 section labels**; real sequences may be numbered.
-13. **Pulsing green dots or fake live/online indicators**; display genuine status clearly.
-14. **Generic AI marketing slogans** such as “supercharge,” “unlock your potential,” “revolutionize,” and “take it to the next level.” Write specific human copy.
-15. **Generic beige + italic-serif editorial aesthetic**; use the project's solid brand colors and Geist Sans.
+1. Purple-blue **or any other** gradients, including mesh backgrounds, buttons, borders, and overlays.
+2. Inter as the default UI font (use Geist Sans).
+3. Gradient text.
+4. Decorative “Introducing / New / Just Launched” hero badges without a real announcement.
+5. Glowing halos, blurred blobs, neon lighting, or glowing borders.
+6. Frosted glass, glassmorphism, or backdrop-blur surfaces.
+7. Repetitive decorative icon tiles in rounded-square containers.
+8. Generic identical feature-card grids added as filler (real repeated records may use consistent cards).
+9. Unnecessary cards within cards or heavily nested boxed layouts.
+10. Decorative side-stripe cards without semantic meaning.
+11. Huge vanity metrics, especially invented or irrelevant numbers.
+12. Decorative “01 / 02 / 03” section labels (real numbered steps are fine).
+13. Pulsing green dots or invented live/online activity indicators.
+14. Generic AI marketing copy (e.g., “supercharge,” “unlock your potential,” “revolutionize”); write specific, human copy.
+15. Generic beige + italic-serif editorial aesthetic; use the project's brand and Geist Sans.
 
-## 5. Standard GUI and UX behavior
+## 6. Conventional GUI/UX behavior
 
-- **Navigation:** Familiar top navigation or sidebar where appropriate; clear active states; consistent placement; working mobile navigation.
-- **Buttons:** Obvious primary/secondary/destructive hierarchy, meaningful labels, usable hit areas, focus/hover/disabled/loading states.
-- **Forms:** Visible labels, correct native input types, helpful validation, inline errors, preserved input, clear submission feedback.
-- **Tables/dashboards:** Favor readable data density, aligned numbers, clear headings, real statuses, and useful search/filter/sort/pagination when needed. Do not turn real tabular data into decorative cards without a usability reason.
-- **Dialogs/menus:** Use standard semantics and keyboard behavior; manage focus; avoid unnecessary confirmations. Confirm destructive or irreversible actions where appropriate.
-- **Feedback:** Clear loading, empty, success, warning, and error states; no fake activity indicators.
-- **Workflows:** Minimize unnecessary steps and repeated entry; make common actions discoverable; prefer recognition over recall.
-- **Page type matters:** Booking websites should prioritize availability and booking flow; e-commerce should prioritize browsing/cart/checkout; business sites should prioritize services and contact; CRM/ERP should prioritize efficient data tasks.
+- **Navigation:** predictable top navigation or sidebar, clear active states, consistent location, functional mobile navigation.
+- **Buttons:** clear primary/secondary/destructive hierarchy; descriptive labels; keyboard, focus, hover, disabled, and loading states.
+- **Forms:** visible labels, appropriate input types, server/client validation as applicable, field-level errors, preserved inputs, explicit submission feedback.
+- **Data UIs:** use readable tables for genuinely tabular data; aligned numbers, useful sorting/filtering/search/pagination where justified, genuine statuses, and compact but readable density.
+- **Dialogs/menus:** conventional semantics and keyboard behavior; correct focus handling; confirmations for consequential destructive/irreversible actions, not every click.
+- **Feedback:** genuine loading, empty, error, success, and warning states. No fake activity indicators.
+- **Workflows:** minimize unnecessary steps and repeated entry; make actions easy to discover.
+- **Page purpose:** booking pages prioritize availability and reservations; shops prioritize browsing/cart/checkout; business sites prioritize services and contact; CRM/ERP prioritize efficient data work.
 
-Use established usability principles (including consistency, visibility of system status, error prevention, user control, and recognition rather than recall). **Do not reinvent conventional controls for visual novelty.**
+Favor consistency, visibility of status, error prevention, user control, and recognition rather than recall.
 
-## 6. Responsive and accessible by default
+## 7. Accessibility and responsiveness
 
-- Build mobile-first where appropriate, then support tablet, laptop, and desktop.
-- No unintended horizontal overflow, clipped text, overlapping elements, or inaccessible controls.
-- Use semantic HTML, logical headings, associated form labels, accessible color contrast, keyboard navigation, and visible focus states.
-- Respect reduced-motion preferences; never rely solely on color to communicate status.
-- Ensure image alt text is appropriate and icon-only buttons have accessible names.
-- Aim for **WCAG 2.2 AA** where applicable; do not compromise accessible target sizing for visual compactness.
-- Test relevant viewports and interaction states when testing tools are available; accurately report what was not tested.
+- Use mobile-first layouts where appropriate; support phone, tablet, laptop, and desktop without overflow, clipped content, or overlapping controls.
+- Use semantic HTML, logical headings, associated labels, keyboard navigation, accessible names, visible focus, and sufficient contrast.
+- Respect reduced motion; never communicate status by color alone.
+- Supply appropriate image alternatives; icon-only controls require accessible labels.
+- Aim for **WCAG 2.2 AA** where applicable. Preserve usable targets even in compact UIs.
+- Verify relevant responsive and interaction states with available tools. State clearly what was not tested.
 
-## 7. Senior engineering implementation rules
+## 8. Implementation and change discipline
 
-- **Inspect before editing:** Understand the actual codebase, frameworks, naming conventions, components, design tokens, state management, and affected user flows.
-- **Preserve scope:** Do not redesign unrelated screens or rewrite working code unless necessary for the requested task.
-- **Follow existing architecture:** Prefer established project patterns and reusable components; avoid framework migrations or new dependencies without justification.
-- **Write maintainable code:** Clear names, appropriate separation of concerns, limited abstraction, no needless duplication or overengineering.
-- **Protect security and data:** Validate untrusted inputs, enforce server-side authorization, handle errors, and never expose secrets. Preserve database and API behavior unless explicitly changing them.
-- **Protect performance:** Avoid heavy UI libraries, unnecessary client-side work, and avoidable layout shifts. Optimize assets appropriately.
-- **Never fabricate** testimonials, ratings, business locations, credentials, statistics, or product information. Use clearly labeled placeholders if the user has not provided required content.
+- **Inspect first:** understand the actual framework/version, relevant files, established patterns, components, design tokens, data model, and affected user journeys.
+- **Preserve scope:** avoid unrelated redesigns, broad rewrites, framework migrations, and new dependencies without clear justification.
+- **Implement simply:** use readable naming, small understandable units, reusable existing components, and necessary—not speculative—abstraction. Avoid needless duplication.
+- **Protect performance:** minimize client-side work and heavyweight libraries; manage asset sizes and layout shifts.
+- **Do not fabricate** testimonials, ratings, credentials, statistics, locations, or product information. Label genuine placeholders clearly.
+- Follow the project's package manager, linting, test, and formatting conventions. For Next.js projects, heed the managed guidance above before changing version-sensitive APIs.
 
-## 8. Security-first changes: mandatory for every update
+## 9. Security on every change (mandatory)
 
-**MUST maintain or improve application security with EVERY feature, bug fix, refactor, dependency change, configuration update, and UI/API modification.** Treat security as a release requirement, not an optional enhancement. Follow current OWASP guidance and the framework's supported security practices, adapted to the application's actual risk and architecture.
+**MUST maintain or improve the security posture of every affected feature, fix, refactor, dependency, configuration, UI, API, and database change.** Apply relevant OWASP guidance and framework-supported practices proportionate to actual risk. Do not bypass protections to make code “work.”
 
-- **Review the change's attack surface:** Identify affected inputs, routes, APIs, sessions, permissions, data access, file uploads, dependencies, and secrets before editing. Preserve existing security controls; never bypass them to make a feature work.
-- **Authentication and authorization:** Enforce identity and access checks on the server for every protected operation; check ownership and role permissions on individual resources (prevent IDOR/BOLA). Apply least privilege and deny access by default. Never rely on hidden buttons, client-side routes, or frontend checks for authorization.
-- **Validate inputs and encode outputs:** Validate untrusted data server-side with appropriate schemas and limits. Use parameterized database queries/ORM-safe operations; prevent SQL injection, XSS, command injection, path traversal, and unsafe deserialization. Avoid rendering untrusted HTML.
-- **Protect sessions and requests:** Use supported secure session mechanisms, appropriate cookie attributes (`HttpOnly`, `Secure`, `SameSite`), CSRF protections for cookie-authenticated state-changing requests, and carefully restricted CORS. Do not invent custom authentication or cryptography.
-- **Safeguard secrets and sensitive data:** Never hardcode or log passwords, API keys, access tokens, or private credentials. Store secrets in secure server-side configuration; minimize data exposure in APIs, logs, browser storage, and error responses. Use HTTPS in production and secure password hashing when applicable.
-- **Secure data and files:** Apply database constraints and access policies (including row-level security where used), verify uploads by type and size, use safe filenames/storage permissions, and authorize downloads. Avoid public access to private files.
-- **Prevent abuse:** Add sensible rate limits, request limits, and anti-automation protections to sensitive endpoints (e.g., login, registration, password resets, booking or payment actions) as appropriate. Use established payment-provider flows for payments; do not store raw card details.
-- **Maintain dependencies and configuration:** Prefer supported versions, review newly introduced packages and permissions, keep security headers and environment configurations appropriate, and avoid unsafe defaults or exposing development diagnostics in production.
-- **Verify on every change:** Review affected trust boundaries and permissions; run relevant existing tests, lint/type checks, and available security checks. Add or update authorization, validation, and regression tests when the change warrants it. Never claim an application is "fully secure" or that tests passed without evidence.
-- **Handle security conflicts:** If a request would weaken security, do not silently implement an insecure shortcut. Explain the risk and implement a safer method within scope, or clearly flag the unresolved blocker.
+- **Attack surface:** check affected inputs, endpoints, routes, authentication, session state, permissions, data access, uploads, integrations, dependencies, and secrets.
+- **Authorization:** enforce protected actions server-side; check resource ownership and roles (including IDOR/BOLA); follow least privilege and deny-by-default. Hiding a UI element is not access control.
+- **Input/output:** validate untrusted input server-side with appropriate limits; use parameterized queries/ORM-safe methods, safe output handling, and prevent injection, XSS, traversal, and unsafe deserialization.
+- **Sessions/requests:** use supported authentication and session libraries, secure cookie settings (`HttpOnly`, `Secure`, `SameSite`) as appropriate, CSRF defenses when applicable, and narrow CORS policies. Avoid homemade authentication and cryptography.
+- **Secrets/data:** never hardcode, expose, or log passwords, keys, or tokens. Store server secrets in appropriate configuration; reduce sensitive data in browser storage, logs, API responses, and errors. Use HTTPS in production and approved password hashing when relevant.
+- **Database/files:** use constraints and access controls (including RLS where applicable); verify file type/size; protect storage and authorize file downloads. Do not expose private files publicly.
+- **Abuse:** apply sensible rate and request limits to sensitive actions (login, reset, booking, payments) where needed. Use trusted payment integrations; do not store raw payment-card data.
+- **Dependencies/configuration:** use supported packages, review additions and permissions, and avoid insecure production defaults or exposed development diagnostics.
+- **Validation:** run relevant tests, type/lint checks, and security checks when available; add regression/authorization tests where risks warrant. Report checks actually run, known issues, and unverified risks. Never claim complete security without evidence.
 
-**Release gate:** No new feature or update is complete until its relevant security implications have been reviewed, known regressions have been addressed, and any unverified risks are explicitly disclosed.
+**Release gate:** A change is not complete until relevant security implications are considered, introduced regressions are addressed, and outstanding risks are disclosed. If a user request conflicts with necessary security, explain and use a safer approach or flag the blocker.
 
-## 9. Mandatory workflow on every task
+## 10. Proportional task workflow
 
-1. **Inspect** relevant files, existing styles, components, behavior, and requirements.
-2. **Choose** the most familiar standard GUI/UX solution; decide sizing from actual content and screen context.
-3. **Implement** the smallest maintainable change, honoring the flat/solid/Geist/Lucide system.
-4. **Security review** changed inputs, permissions, server checks, sessions, secrets, data access, and dependencies; remediate risks within scope.
-5. **Audit** the affected UI against all 15 prohibited patterns, oversized elements, component consistency, and standard GUI behavior.
-6. **Verify** functionality, responsive layout, keyboard/accessibility states, and regressions using available tools.
-7. **Report** what changed, what was genuinely tested, and any remaining limitations. Never claim checks not performed.
+For **every** task, use this decision sequence; the depth of each step depends on complexity and risk:
 
-### Final release check
+1. **Inspect** relevant context and identify task boundaries and applicable installed skills.
+2. **Decide** on the conventional solution, correct sizing, and relevant security controls. Make a written plan for substantive multi-step or uncertain work; skip heavy ceremony for a trivial change.
+3. **Implement** the smallest maintainable change using the existing system and design language.
+4. **Review** affected security boundaries, accessibility, responsive behavior, GUI conventions, and the 15 banned patterns **where UI is changed**.
+5. **Verify** using relevant tests/checks and actual inspection; do not invent results or claim hooks ran without confirmation.
+6. **Report** what changed, which checks passed or could not run, and any consequential limitations.
 
-- [ ] Uses standard, recognizable GUI/UX patterns; no AI-slop styling
-- [ ] No unnecessarily oversized elements or excessive spacing
-- [ ] Flat design, solid colors, Geist Sans, Lucide UI icons where needed
-- [ ] Minimal palette: normally one brand accent plus neutrals; no excessive or arbitrary colors; semantic colors used only when meaningful
-- [ ] All 15 banned patterns absent from new/redesigned UI
-- [ ] Buttons, navigation, forms, tables, dialogs behave conventionally
-- [ ] Mobile/tablet/desktop proportions are appropriate
-- [ ] Accessible text, focus, keyboard behavior, labels, and target sizing
-- [ ] Existing functionality, project patterns, and scope preserved
-- [ ] Security reviewed for every change; server-side authorization, input validation, secrets, and data exposure protected
-- [ ] Relevant security/regression tests checked; no known security weakening introduced
-- [ ] Code is maintainable and reasonably efficient
-- [ ] Tests/checks were performed where possible and reported truthfully
+### Final release checklist (apply relevant items)
 
-**Non-negotiable default:** Build as a senior engineer would for real users: conventional GUI, useful UX, balanced standard sizing, restrained flat visuals, a minimal purposeful color palette, and reliable code. Never choose decorative AI trends over usability.
+- [ ] Correct behavior and scope; existing working functionality preserved.
+- [ ] Conventional GUI/UX; no AI-slop pattern in new/redesigned UI.
+- [ ] Flat solid visual language, Geist Sans, Lucide when appropriate, minimal purposeful palette.
+- [ ] No unjustifiably oversized elements or excessive spacing.
+- [ ] Responsive, keyboard-accessible, readable, properly labeled controls.
+- [ ] Security implications reviewed; authorization, validation, secrets, and data access protected where affected.
+- [ ] Code maintainable; unnecessary abstraction and dependencies avoided.
+- [ ] Relevant checks run; results and unresolved limitations reported truthfully.
 
-<!-- END:nextjs-agent-rules -->
+**Non-negotiable default:** Deliver conventional GUI, usable UX, balanced sizing, restrained solid-color visuals, and reliable, secure, maintainable engineering. Never favor decorative AI trends over users' needs.

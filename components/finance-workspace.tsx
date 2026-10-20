@@ -875,6 +875,7 @@ function ProjectFinanceDialog({
   quotations,
   verifiedPaymentTotalsByQuotation,
   pendingQuotationPaymentTotalsByQuotation,
+  directCostTotalsByQuotation,
   openReceipt,
   close,
 }: {
@@ -884,6 +885,7 @@ function ProjectFinanceDialog({
   quotations: Row[];
   verifiedPaymentTotalsByQuotation: Map<string, number>;
   pendingQuotationPaymentTotalsByQuotation: Map<string, number>;
+  directCostTotalsByQuotation: Map<string, number>;
   openReceipt: (path: string, bucket?: string) => Promise<void>;
   close: () => void;
 }) {
@@ -899,6 +901,14 @@ function ProjectFinanceDialog({
   ));
   const quotationTotal = projectQuotations.length
     ? projectQuotations.reduce((total, quotation) => total + numericValue(quotation, "total_amount"), 0)
+    : null;
+  const hasDirectCostTotals = projectQuotations.length > 0
+    && projectQuotations.every((quotation) => directCostTotalsByQuotation.has(String(quotation.id ?? "")));
+  const directCostTotal = hasDirectCostTotals
+    ? projectQuotations.reduce(
+        (total, quotation) => total + (directCostTotalsByQuotation.get(String(quotation.id ?? "")) ?? 0),
+        0,
+      )
     : null;
   const remainingBalance = projectQuotations.length
     ? projectQuotations.reduce((total, quotation) => {
@@ -948,6 +958,9 @@ function ProjectFinanceDialog({
         <TransactionDetailField label="Quotation">{quotationLabel}</TransactionDetailField>
         <TransactionDetailField label="Quotation total">
           {quotationTotal === null ? "-" : <span className="font-semibold text-[#202938]">{peso.format(quotationTotal)}</span>}
+        </TransactionDetailField>
+        <TransactionDetailField label="Total direct cost">
+          {directCostTotal === null ? "-" : <span className="font-semibold text-[#202938]">{peso.format(directCostTotal)}</span>}
         </TransactionDetailField>
         <TransactionDetailField label="Remaining balance">
           {remainingBalance === null
@@ -1868,6 +1881,7 @@ export function FinanceWorkspace({
   const [budgets, setBudgets] = useState<Row[]>([]);
   const [leads, setLeads] = useState<Row[]>([]);
   const [quotations, setQuotations] = useState<Row[]>([]);
+  const [quotationDirectCosts, setQuotationDirectCosts] = useState<Row[]>([]);
   const [payables, setPayables] = useState<Row[]>([]);
   const [suppliers, setSuppliers] = useState<Row[]>([]);
   const [commissionAllocations, setCommissionAllocations] = useState<Row[]>([]);
@@ -1950,6 +1964,11 @@ export function FinanceWorkspace({
         : client.rpc("external_finance_quotation_rows", {
             p_organization_id: organizationId,
           });
+      const quotationDirectCostsRequest = internal
+        ? client.rpc("finance_quotation_direct_cost_rows", {
+            p_organization_id: organizationId,
+          })
+        : Promise.resolve({ data: [], error: null });
       const pendingQuotationPaymentsRequest = internal
         ? client
             .from("quotation_payment_records")
@@ -1983,8 +2002,9 @@ export function FinanceWorkspace({
         accountFundingRequest,
         pendingQuotationPaymentsRequest,
         quotationPaymentRecordsRequest,
+        quotationDirectCostsRequest,
       ]);
-      const failed = requests.find((request) => request.error);
+      const failed = requests.slice(0, 15).find((request) => request.error);
       if (failed?.error) {
         setLoadError(`Finance data could not load: ${failed.error.message}`);
       }
@@ -1995,6 +2015,7 @@ export function FinanceWorkspace({
       setBudgets((requests[4].data ?? []) as Row[]);
       setLeads((requests[5].data ?? []) as Row[]);
       setQuotations((requests[6].data ?? []) as Row[]);
+      setQuotationDirectCosts((requests[15].data ?? []) as Row[]);
       setPayables((requests[7].data ?? []) as Row[]);
       setSuppliers((requests[8].data ?? []) as Row[]);
       const loadedAllocations = (requests[9].data ?? []) as Row[];
@@ -2523,6 +2544,14 @@ export function FinanceWorkspace({
     });
     return map;
   }, [overviewQuotationPaymentRows]);
+  const quotationDirectCostTotalsByQuotation = useMemo(() => {
+    const map = new Map<string, number>();
+    quotationDirectCosts.forEach((row) => {
+      const quotationId = stringValue(row, "quotation_id");
+      if (quotationId) map.set(quotationId, numericValue(row, "total_direct_cost"));
+    });
+    return map;
+  }, [quotationDirectCosts]);
   const awaitingConfirmationCount = pendingApprovalTransactions.length
     + overviewQuotationPaymentRows.filter((payment) => stringValue(payment, "status") === "pending").length;
   const awaitingConfirmationAmount = pendingApprovalTransactions.reduce((total, transaction) => total + numericValue(transaction, "amount"), 0)
@@ -4199,6 +4228,7 @@ export function FinanceWorkspace({
           quotations={quotations}
           verifiedPaymentTotalsByQuotation={verifiedPaymentTotalsByQuotation}
           pendingQuotationPaymentTotalsByQuotation={pendingQuotationPaymentTotalsByQuotation}
+          directCostTotalsByQuotation={quotationDirectCostTotalsByQuotation}
           openReceipt={openReceipt}
           close={() => setSelectedProjectHistory(null)}
         />
