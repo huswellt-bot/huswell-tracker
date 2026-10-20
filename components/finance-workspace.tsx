@@ -878,9 +878,8 @@ function ProjectFinanceDialog({
   accountName,
   categoryName,
   quotations,
-  verifiedPaymentTotalsByQuotation,
-  pendingQuotationPaymentTotalsByQuotation,
   directCostTotalsByQuotation,
+  projectExpenseRows,
   openReceipt,
   close,
 }: {
@@ -888,9 +887,8 @@ function ProjectFinanceDialog({
   accountName: (id: unknown) => string;
   categoryName: (id: unknown) => string;
   quotations: Row[];
-  verifiedPaymentTotalsByQuotation: Map<string, number>;
-  pendingQuotationPaymentTotalsByQuotation: Map<string, number>;
   directCostTotalsByQuotation: Map<string, number>;
+  projectExpenseRows: Row[];
   openReceipt: (path: string, bucket?: string) => Promise<void>;
   close: () => void;
 }) {
@@ -907,35 +905,43 @@ function ProjectFinanceDialog({
   const quotationTotal = projectQuotations.length
     ? projectQuotations.reduce((total, quotation) => total + numericValue(quotation, "total_amount"), 0)
     : null;
+  const projectExpenseCapacityRows = projectExpenseRows.filter((row) => projectQuotationIds.has(String(row.quotation_id ?? "")));
   const hasDirectCostTotals = projectQuotations.length > 0
     && projectQuotations.every((quotation) => directCostTotalsByQuotation.has(String(quotation.id ?? "")));
-  const directCostTotal = hasDirectCostTotals
+  const directCostTotal = projectExpenseCapacityRows.length
+    ? projectExpenseCapacityRows.reduce((total, row) => total + numericValue(row, "total_direct_cost"), 0)
+    : hasDirectCostTotals
     ? projectQuotations.reduce(
         (total, quotation) => total + (directCostTotalsByQuotation.get(String(quotation.id ?? "")) ?? 0),
         0,
       )
     : null;
-  const remainingBalance = projectQuotations.length
-    ? projectQuotations.reduce((total, quotation) => {
-        const quotationId = String(quotation.id ?? "");
-        const remaining = numericValue(quotation, "total_amount")
-          - (verifiedPaymentTotalsByQuotation.get(quotationId) ?? 0)
-          - (pendingQuotationPaymentTotalsByQuotation.get(quotationId) ?? 0);
-        return total + Math.max(remaining, 0);
-      }, 0)
+  const committedProjectExpense = projectExpenseCapacityRows.length
+    ? projectExpenseCapacityRows.reduce((total, row) => total + numericValue(row, "committed_project_expense"), 0)
+    : null;
+  const remainingDirectCost = projectExpenseCapacityRows.length
+    ? projectExpenseCapacityRows.reduce((total, row) => total + numericValue(row, "remaining_direct_cost"), 0)
     : null;
   const transactions = [...project.transactions].sort((left, right) => {
     const dateCompare = stringValue(right, "transaction_date").localeCompare(stringValue(left, "transaction_date"));
     return dateCompare || stringValue(right, "created_at").localeCompare(stringValue(left, "created_at"));
   });
   const [transactionQuery, setTransactionQuery] = useState("");
+  const [transactionDirection, setTransactionDirection] = useState<Direction>(() => (
+    project.transactions.some((transaction) => stringValue(transaction, "transaction_type") === "income")
+      ? "income"
+      : "expense"
+  ));
 
   const transactionDescription = (transaction: Row) => {
     if (Boolean(transaction.source_payment_id)) return "Quotation payment";
     return transactionSourceLabel(transaction);
   };
   const normalizedTransactionQuery = transactionQuery.trim().toLowerCase();
-  const visibleTransactions = transactions.filter((transaction) => {
+  const directionTransactions = transactions.filter((transaction) => stringValue(transaction, "transaction_type") === transactionDirection);
+  const directionTotal = directionTransactions.reduce((total, transaction) => total + numericValue(transaction, "amount"), 0);
+  const directionLabel = transactionDirection === "income" ? "Cash In" : "Cash Out";
+  const visibleTransactions = directionTransactions.filter((transaction) => {
     if (!normalizedTransactionQuery) return true;
     return [
       displayDate(transaction.transaction_date),
@@ -967,22 +973,50 @@ function ProjectFinanceDialog({
         <TransactionDetailField label="Total direct cost">
           {directCostTotal === null ? "-" : <span className="font-semibold text-[#202938]">{peso.format(directCostTotal)}</span>}
         </TransactionDetailField>
-        <TransactionDetailField label="Remaining balance">
-          {remainingBalance === null
+        <TransactionDetailField label="Committed project expenses">
+          {committedProjectExpense === null ? "-" : <span className="font-semibold text-[#a76605]">{peso.format(committedProjectExpense)}</span>}
+        </TransactionDetailField>
+        <TransactionDetailField label="Remaining Direct Cost">
+          {remainingDirectCost === null
             ? "-"
-            : <span className={remainingBalance > 0 ? "font-semibold text-[#b42318]" : "font-semibold text-[#218b55]"}>{peso.format(remainingBalance)}</span>}
+            : <span className={remainingDirectCost > 0 ? "font-semibold text-[#218b55]" : "font-semibold text-[#b42318]"}>{peso.format(remainingDirectCost)}</span>}
         </TransactionDetailField>
       </div>
       <div className="mt-5">
         <div className="flex items-baseline justify-between gap-3">
           <h3 className="text-[13px] font-semibold text-[#202938]">Verified transaction history</h3>
-          <span className="text-[11px] text-[#7d8797]">{normalizedTransactionQuery ? `${visibleTransactions.length} of ${transactions.length} records` : `${transactions.length} record${transactions.length === 1 ? "" : "s"}`}</span>
+          <span className="text-[11px] text-[#7d8797]">{normalizedTransactionQuery ? `${visibleTransactions.length} of ${directionTransactions.length} records` : `${directionTransactions.length} ${directionLabel} record${directionTransactions.length === 1 ? "" : "s"}`}</span>
+        </div>
+        <div role="tablist" aria-label="Project transaction direction" className="mt-4 flex max-w-md rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-1">
+          <button
+            id="project-cash-in-tab"
+            type="button"
+            role="tab"
+            aria-selected={transactionDirection === "income"}
+            aria-controls="project-transaction-panel"
+            onClick={() => setTransactionDirection("income")}
+            className={transactionDirection === "income" ? "flex-1 rounded-md bg-[#edf9f2] px-3 py-2 text-[11px] font-semibold text-[#218b55]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797] hover:bg-white"}
+          >
+            Cash In ({transactions.filter((transaction) => stringValue(transaction, "transaction_type") === "income").length})
+          </button>
+          <button
+            id="project-cash-out-tab"
+            type="button"
+            role="tab"
+            aria-selected={transactionDirection === "expense"}
+            aria-controls="project-transaction-panel"
+            onClick={() => setTransactionDirection("expense")}
+            className={transactionDirection === "expense" ? "flex-1 rounded-md bg-[#fef3f2] px-3 py-2 text-[11px] font-semibold text-[#b42318]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797] hover:bg-white"}
+          >
+            Cash Out ({transactions.filter((transaction) => stringValue(transaction, "transaction_type") === "expense").length})
+          </button>
         </div>
         <label className="relative mt-3 block max-w-md">
           <Search size={15} className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]" />
-          <input type="search" value={transactionQuery} onChange={(event) => setTransactionQuery(event.target.value)} className="input mt-0 w-full search-input text-[12px]" placeholder="Search verified transactions" aria-label="Search verified transactions" />
+          <input type="search" value={transactionQuery} onChange={(event) => setTransactionQuery(event.target.value)} className="input mt-0 w-full search-input text-[12px]" placeholder={`Search verified ${directionLabel.toLowerCase()} transactions`} aria-label={`Search verified ${directionLabel} transactions`} />
         </label>
-        <div className="mt-3 space-y-2 md:hidden">
+        <div id="project-transaction-panel" role="tabpanel" aria-labelledby={transactionDirection === "income" ? "project-cash-in-tab" : "project-cash-out-tab"}>
+          <div className="mt-3 space-y-2 md:hidden">
           {visibleTransactions.map((transaction) => {
             const isIncome = stringValue(transaction, "transaction_type") === "income";
             const receiptPath = stringValue(transaction, "receipt_storage_path");
@@ -1004,9 +1038,9 @@ function ProjectFinanceDialog({
               </article>
             );
           })}
-          {!visibleTransactions.length && <p className="rounded-lg border border-dashed border-[#d9e0e9] px-3 py-4 text-center text-[11px] text-[#7d8797]">{normalizedTransactionQuery ? "No verified transactions match your search." : "No verified transactions are linked to this project."}</p>}
+          {!visibleTransactions.length && <p className="rounded-lg border border-dashed border-[#d9e0e9] px-3 py-4 text-center text-[11px] text-[#7d8797]">{normalizedTransactionQuery ? `No verified ${directionLabel.toLowerCase()} transactions match your search.` : `No verified ${directionLabel.toLowerCase()} transactions are linked to this project.`}</p>}
         </div>
-        <div className="table-shell mt-3 hidden overflow-x-auto md:block">
+          <div className="table-shell mt-3 hidden overflow-x-auto md:block">
           <table className="app-table finance-project-transaction-table w-full min-w-[820px]">
             <thead><tr><th>Date</th><th>Description</th><th>Note</th><th>Source</th><th>Account</th><th>Amount</th><th>Receipt</th></tr></thead>
             <tbody>
@@ -1025,9 +1059,16 @@ function ProjectFinanceDialog({
                   </tr>
                 );
               })}
-              {!visibleTransactions.length && <tr><td colSpan={7} className="text-center text-[#7d8797]">{normalizedTransactionQuery ? "No verified transactions match your search." : "No verified transactions are linked to this project."}</td></tr>}
+              {!visibleTransactions.length && <tr><td colSpan={7} className="text-center text-[#7d8797]">{normalizedTransactionQuery ? `No verified ${directionLabel.toLowerCase()} transactions match your search.` : `No verified ${directionLabel.toLowerCase()} transactions are linked to this project.`}</td></tr>}
             </tbody>
           </table>
+        </div>
+          <div className="mt-3 flex justify-end border-t border-[#edf0f5] pt-3">
+          <div className="text-right">
+            <span className="block text-[10px] font-semibold uppercase tracking-[.06em] text-[#7d8797]">{directionLabel} total</span>
+            <strong className={`block text-[15px] ${transactionDirection === "income" ? "text-[#218b55]" : "text-[#b42318]"}`}>{peso.format(directionTotal)}</strong>
+          </div>
+          </div>
         </div>
       </div>
       <div className="mt-5 flex justify-end border-t border-[#edf0f5] pt-4"><button type="button" onClick={close} className="button-primary">Close</button></div>
@@ -4238,9 +4279,8 @@ export function FinanceWorkspace({
           accountName={accountName}
           categoryName={categoryName}
           quotations={quotations}
-          verifiedPaymentTotalsByQuotation={verifiedPaymentTotalsByQuotation}
-          pendingQuotationPaymentTotalsByQuotation={pendingQuotationPaymentTotalsByQuotation}
           directCostTotalsByQuotation={quotationDirectCostTotalsByQuotation}
+          projectExpenseRows={projectExpenseRows}
           openReceipt={openReceipt}
           close={() => setSelectedProjectHistory(null)}
         />
