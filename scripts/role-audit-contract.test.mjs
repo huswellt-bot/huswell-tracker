@@ -15,6 +15,18 @@ const financeCapabilityMigration = readFileSync(
   join(repoRoot, "supabase", "237_internal_finance_member_capability.sql"),
   "utf8",
 );
+const financeQuotationReadMigration = readFileSync(
+  join(repoRoot, "supabase", "240_quotation_finance_capability_read.sql"),
+  "utf8",
+);
+const financePaymentReadMigration = readFileSync(
+  join(repoRoot, "supabase", "241_quotation_payment_capability_read.sql"),
+  "utf8",
+);
+const financeQuotationBoundaryMigration = readFileSync(
+  join(repoRoot, "supabase", "242_quotation_capability_read_boundary.sql"),
+  "utf8",
+);
 
 test("malformed costing uploads return a controlled client error", () => {
   assert.match(costingRoute, /request\.formData\(\)\.catch\(\(\) => null\)/);
@@ -93,6 +105,26 @@ test("Dianne's existing Sales and Pricing account receives Finance as a capabili
   assert.match(financeCapabilityMigration, /private\.finance_is_internal/);
   assert.match(workspace, /internalFinanceEnabled = false/);
   assert.match(workspace, /role === "internal_finance"/);
+});
+
+test("capability-enabled Internal Finance can read quotations needed for payment approvals", () => {
+  assert.match(financeQuotationReadMigration, /drop policy if exists "quotations: finance read"/);
+  assert.match(financeQuotationReadMigration, /private\.has_text_role\(organization_id, array\[/);
+  assert.match(financeQuotationReadMigration, /'super_admin', 'owner', 'admin', 'accountant'/);
+  assert.match(financeQuotationReadMigration, /private\.finance_is_external_or_internal\(organization_id\)/);
+  assert.doesNotMatch(financeQuotationReadMigration, /'internal_finance'\s*,\s*'external_finance'/);
+});
+
+test("capability-enabled Internal Finance can read the organization-wide payment queue", () => {
+  assert.match(financePaymentReadMigration, /as restrictive/);
+  assert.match(financePaymentReadMigration, /private\.finance_is_internal\(organization_id\)/);
+  assert.match(financePaymentReadMigration, /private\.has_text_role\(organization_id, array\['sales_pricing_officer'\]\)/);
+});
+
+test("capability-enabled Internal Finance can read the quotation joined to a payment queue row", () => {
+  assert.match(financeQuotationBoundaryMigration, /as restrictive/);
+  assert.match(financeQuotationBoundaryMigration, /private\.finance_is_internal\(organization_id\)/);
+  assert.match(financeQuotationBoundaryMigration, /private\.is_assigned_pricing_officer_quotation_visible/);
 });
 
 test("combined Sales and Pricing accounts use separate sidebar workspaces", () => {

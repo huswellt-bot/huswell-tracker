@@ -15554,6 +15554,13 @@ function PriceQuotationWorkspace({
     })),
     [availableLeads],
   );
+  const selectedQuotationLead = useMemo(
+    () => store.leads.find((lead) => text(lead.id, "") === text(leadId, "").split("|")[0]),
+    [leadId, store.leads],
+  );
+  const transferCommissionOriginId = text(selectedQuotationLead?.transfer_se_origin_user_id, "");
+  const transferCommissionCoWorkerId = text(selectedQuotationLead?.transfer_co_worker_user_id, "");
+  const transferCommissionLocked = Boolean(transferCommissionOriginId);
   useEffect(() => {
     let active = true;
     setCommissionOfficerDirectory([]);
@@ -15580,7 +15587,16 @@ function PriceQuotationWorkspace({
     const fallbackOptions = projectOfficerOptions(store);
     const options = directoryOptions.length ? directoryOptions : fallbackOptions;
     const selected = options.find((officer) => officer.id === commissionOriginId)
-      ?? fallbackOptions.find((officer) => officer.id === commissionOriginId);
+      ?? fallbackOptions.find((officer) => officer.id === commissionOriginId)
+      ?? (transferCommissionOriginId
+        ? {
+            id: transferCommissionOriginId,
+            name: text(
+              store.profiles.find((profile) => text(profile.id, "") === transferCommissionOriginId)?.full_name,
+              "Sales & Pricing Officer",
+            ),
+          }
+        : undefined);
     const withSelected = selected && !options.some((officer) => officer.id === selected.id)
       ? [selected, ...options]
       : options;
@@ -15589,7 +15605,7 @@ function PriceQuotationWorkspace({
       label: officer.name,
       searchText: officer.name,
     }));
-  }, [commissionOfficerDirectory, commissionOriginId, store]);
+  }, [commissionOfficerDirectory, commissionOriginId, store, transferCommissionOriginId]);
   const eligibleCommissionOfficers = useMemo(() => {
     const directoryOptions = commissionOfficerDirectory
       .filter((officer) => officer.can_be_co_worker === true)
@@ -15609,11 +15625,20 @@ function PriceQuotationWorkspace({
     );
     const assigned = directoryOptions.length ? directoryOptions : fallbackOptions;
     const selected = pricingOfficerOptions(store).find((officer) => officer.id === commissionCoWorkerId)
-      ?? directoryOptions.find((officer) => officer.id === commissionCoWorkerId);
+      ?? directoryOptions.find((officer) => officer.id === commissionCoWorkerId)
+      ?? (transferCommissionCoWorkerId
+        ? {
+            id: transferCommissionCoWorkerId,
+            name: text(
+              store.profiles.find((profile) => text(profile.id, "") === transferCommissionCoWorkerId)?.full_name,
+              "Sales & Pricing Officer",
+            ),
+          }
+        : undefined);
     return selected && selected.id !== commissionOriginId && !assigned.some((officer) => officer.id === selected.id)
       ? [selected, ...assigned]
       : assigned;
-  }, [commissionCoWorkerId, commissionOfficerDirectory, commissionOriginId, projectType, store]);
+  }, [commissionCoWorkerId, commissionOfficerDirectory, commissionOriginId, projectType, store, transferCommissionCoWorkerId]);
   const commissionOfficerSelectOptions = useMemo(
     () => eligibleCommissionOfficers.map((officer) => ({
         value: officer.id,
@@ -15623,9 +15648,21 @@ function PriceQuotationWorkspace({
     [eligibleCommissionOfficers],
   );
   const canChooseSelfHandled = role === "sales_pricing_officer";
+  const handleLeadChange = (value: string) => {
+    const nextLeadId = value.split("|")[0];
+    const nextLead = store.leads.find((lead) => text(lead.id, "") === nextLeadId);
+    setLeadId(nextLeadId);
+    const transferOriginId = text(nextLead?.transfer_se_origin_user_id, "");
+    const transferCoWorkerId = text(nextLead?.transfer_co_worker_user_id, "");
+    if (transferOriginId) {
+      setCommissionOriginId(transferOriginId);
+      setCommissionHandlingMode("shared");
+      setCommissionCoWorkerId(transferCoWorkerId);
+    }
+  };
   const setEditorProjectType = (value: string) => {
     setProjectType(value);
-    if (value !== projectType) setCommissionCoWorkerId("");
+    if (value !== projectType && !transferCommissionLocked) setCommissionCoWorkerId("");
   };
   const resetEditor = () => {
     setEditorOpen(false);
@@ -15658,10 +15695,13 @@ function PriceQuotationWorkspace({
     setEditing(quote);
     setLeadId(text(quote.lead_id));
     setProjectType(text(quote.project_types));
-    setCommissionOriginId(text(quote.se_origin_user_id, text(quote.created_by, text(quote.prepared_by_user_id, ""))));
-    const editMode = quotationCommissionHandlingMode(quote.commission_handling_mode);
+    const quoteLead = store.leads.find((lead) => text(lead.id, "") === text(quote.lead_id, ""));
+    const transferOriginId = text(quoteLead?.transfer_se_origin_user_id, "");
+    const transferCoWorkerId = text(quoteLead?.transfer_co_worker_user_id, "");
+    setCommissionOriginId(transferOriginId || text(quote.se_origin_user_id, text(quote.created_by, text(quote.prepared_by_user_id, ""))));
+    const editMode = transferOriginId ? "shared" : quotationCommissionHandlingMode(quote.commission_handling_mode);
     setCommissionHandlingMode(editMode);
-    setCommissionCoWorkerId(text(quote.commission_co_worker_user_id, ""));
+    setCommissionCoWorkerId(transferCoWorkerId || text(quote.commission_co_worker_user_id, ""));
     setCommissionSplitOption(quotationCommissionSplitOption(quote.commission_split_option, editMode));
     setItems(
       quoteItems.length
@@ -15690,26 +15730,29 @@ function PriceQuotationWorkspace({
   const saveDraft = async (submitAfterSave = false) => {
     if (!leadId) return notice("Select a lead before saving the quotation.");
     if (!projectType.trim()) return notice("Enter the project type before saving the quotation.");
-    if (!commissionOriginId) return notice("Choose the S.E. Origin before saving the quotation.");
-    if (commissionHandlingMode === "self_handled" && !canChooseSelfHandled) {
+    const effectiveOriginId = transferCommissionLocked ? transferCommissionOriginId : commissionOriginId;
+    const effectiveHandlingMode: CommissionHandlingMode = transferCommissionLocked ? "shared" : commissionHandlingMode;
+    const effectiveCoWorkerId = transferCommissionLocked ? transferCommissionCoWorkerId : commissionCoWorkerId;
+    if (!effectiveOriginId) return notice("Choose the S.E. Origin before saving the quotation.");
+    if (effectiveHandlingMode === "self_handled" && !canChooseSelfHandled) {
       return notice("Only a Sales & Pricing Officer can choose self-handled mode.");
     }
-    if (commissionHandlingMode === "self_handled") {
+    if (effectiveHandlingMode === "self_handled") {
       const originDirectoryRow = commissionOfficerDirectory.find(
-        (officer) => text(officer.user_id, "") === commissionOriginId,
+        (officer) => text(officer.user_id, "") === effectiveOriginId,
       );
       const originAssigned = originDirectoryRow
         ? originDirectoryRow.can_be_co_worker === true
         : store.pricing_officer_project_types.some(
           (assignment) =>
-            text(assignment.pricing_officer_user_id, "") === commissionOriginId &&
+            text(assignment.pricing_officer_user_id, "") === effectiveOriginId &&
             pricingProjectTypeKey(assignment.project_type) === pricingProjectTypeKey(projectType),
         );
       if (!originAssigned) {
         return notice("The selected S.E. Origin is not assigned to the selected project type, so this quotation must be shared with an assigned Pricing Officer.");
       }
     }
-    if (commissionHandlingMode === "shared" && !commissionCoWorkerId) {
+    if (effectiveHandlingMode === "shared" && !effectiveCoWorkerId) {
       return notice("Choose the Co-Worker who will prepare this quotation.");
     }
     if (items.filter((item) => item.imageUrl || item.imageFile).length > 5) {
@@ -15769,9 +15812,9 @@ function PriceQuotationWorkspace({
       // persisted by the six-argument wrapper in migration 093.
       p_has_illustrations: savedItems.some((item) => Boolean(item.imageUrl)),
       p_quotation_illustrations: savedQuotationIllustrations,
-      p_se_origin_user_id: commissionOriginId,
-      p_commission_handling_mode: commissionHandlingMode,
-      p_commission_co_worker_user_id: commissionHandlingMode === "shared" ? commissionCoWorkerId : null,
+      p_se_origin_user_id: effectiveOriginId,
+      p_commission_handling_mode: effectiveHandlingMode,
+      p_commission_co_worker_user_id: effectiveHandlingMode === "shared" ? effectiveCoWorkerId : null,
     });
     if (error) {
       setSaving(false);
@@ -16094,7 +16137,7 @@ function PriceQuotationWorkspace({
         <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/30 p-4">
           <section className="mx-auto my-4 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
             <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">{editing ? "Edit Price Quotation" : "Prepare Price Quotation"}</h2><p className="mt-1 text-[12px] text-[#687386]">Add the requested materials and quantities. Selling prices are entered by the assigned Sales & Pricing Officer.</p></div><button type="button" onClick={resetEditor} aria-label="Close" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div>
-            <label className="mt-5 block text-[12px] font-medium text-[#202938]">Company Name - Contact Name<SearchableLeadSelect options={leadOptions} value={leadId} onChange={setLeadId} required clearable={false} placeholder="Select a lead" searchPlaceholder="Search name, contact, project, or lead number" ariaLabel="Company Name - Contact Name" className="mt-1" /></label>
+            <label className="mt-5 block text-[12px] font-medium text-[#202938]">Company Name - Contact Name<SearchableLeadSelect options={leadOptions} value={leadId} onChange={handleLeadChange} required clearable={false} placeholder="Select a lead" searchPlaceholder="Search name, contact, project, or lead number" ariaLabel="Company Name - Contact Name" className="mt-1" /></label>
             <label className="mt-4 block text-[12px] font-medium text-[#202938]">Project Type<select value={projectType} onChange={(event) => setEditorProjectType(event.target.value)} className={`input mt-1 ${projectType ? "text-[#151922]" : "text-[#8b92a1]"}`} required><option value="">Select project type</option>{quotationProjectTypes.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
             <section className="mt-5 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-4">
               <div>
@@ -16116,10 +16159,10 @@ function PriceQuotationWorkspace({
                     ariaLabel="S.E. Origin"
                     required
                     clearable={false}
-                    disabled={commissionOriginSelectOptions.length === 0}
+                    disabled={transferCommissionLocked || commissionOriginSelectOptions.length === 0}
                     className="mt-1"
                   />
-                  <span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">Choose the officer who originated this commission assignment.</span>
+                  <span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">{transferCommissionLocked ? "Fixed by the Lead Coordinator transfer." : "Choose the officer who originated this commission assignment."}</span>
                 </label>
                 {commissionHandlingMode === "shared" && <label className="block text-[12px] font-medium text-[#202938]">Co-Worker
                 <SearchableSelect
@@ -16132,10 +16175,10 @@ function PriceQuotationWorkspace({
                   ariaLabel="Co-Worker"
                   required
                   clearable={false}
-                  disabled={!projectType || commissionOfficerSelectOptions.length === 0}
+                  disabled={transferCommissionLocked || !projectType || commissionOfficerSelectOptions.length === 0}
                   className="mt-1"
                 />
-                <span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">Only active Sales &amp; Pricing Officers assigned to the selected project type are listed.</span>
+                <span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">{transferCommissionLocked ? "The receiving Sales &amp; Pricing Officer is fixed as Co-Worker." : "Only active Sales &amp; Pricing Officers assigned to the selected project type are listed."}</span>
               </label>}
               </div>
               <label className="mt-3 block text-[12px] font-medium text-[#202938]">Handling mode
@@ -16155,6 +16198,7 @@ function PriceQuotationWorkspace({
                       setCommissionSplitOption("60_40");
                     }
                   }}
+                  disabled={transferCommissionLocked}
                   className="mt-1 w-full"
                 />
                 {!canChooseSelfHandled && <span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">Sales Executives route the quotation to a Sales &amp; Pricing Officer.</span>}
@@ -17075,8 +17119,12 @@ function PriceQuotationReview({
   const pricingRevision = !finalApproval && isPricingOfficerRevision(quotation);
   const documentLabel = "Price Quotation";
   const commissionAssignmentVisible = Boolean(text(quotation.commission_handling_mode, ""));
+  const quotationLead = store.leads.find((lead) => text(lead.id, "") === text(quotation.lead_id, ""));
+  const transferCommissionOriginId = text(quotationLead?.transfer_se_origin_user_id, "");
+  const transferCommissionCoWorkerId = text(quotationLead?.transfer_co_worker_user_id, "");
+  const transferCommissionLocked = Boolean(transferCommissionOriginId);
   const initialCommissionOriginUserId = text(
-    quotation.se_origin_user_id,
+    transferCommissionOriginId || quotation.se_origin_user_id,
     text(quotation.created_by, text(quotation.prepared_by_user_id, "")),
   );
   const [sensitiveValuesHidden, setSensitiveValuesHidden] = useState(false);
@@ -17108,11 +17156,11 @@ function PriceQuotationReview({
     quotationPaymentTermDays(quotation.pdc_term_days),
   );
   const [commissionHandlingMode, setCommissionHandlingMode] = useState<CommissionHandlingMode>(() =>
-    quotationCommissionHandlingMode(quotation.commission_handling_mode),
+    transferCommissionLocked ? "shared" : quotationCommissionHandlingMode(quotation.commission_handling_mode),
   );
   const [commissionOriginUserId, setCommissionOriginUserId] = useState(initialCommissionOriginUserId);
   const [commissionCoWorkerUserId, setCommissionCoWorkerUserId] = useState(() =>
-    text(quotation.commission_co_worker_user_id, ""),
+    transferCommissionCoWorkerId || text(quotation.commission_co_worker_user_id, ""),
   );
   const [commissionSplitOption, setCommissionSplitOption] = useState<CommissionSplitSelection>(() =>
     quotationCommissionSplitSelection(
@@ -17150,7 +17198,16 @@ function PriceQuotationReview({
     const fallbackOptions = projectOfficerOptions(store);
     const options = directoryOptions.length ? directoryOptions : fallbackOptions;
     const selected = options.find((officer) => officer.id === commissionOriginUserId)
-      ?? fallbackOptions.find((officer) => officer.id === commissionOriginUserId);
+      ?? fallbackOptions.find((officer) => officer.id === commissionOriginUserId)
+      ?? (transferCommissionOriginId
+        ? {
+            id: transferCommissionOriginId,
+            name: text(
+              store.profiles.find((profile) => text(profile.id, "") === transferCommissionOriginId)?.full_name,
+              "Sales & Pricing Officer",
+            ),
+          }
+        : undefined);
     const withSelected = selected && !options.some((officer) => officer.id === selected.id)
       ? [selected, ...options]
       : options;
@@ -17159,7 +17216,7 @@ function PriceQuotationReview({
       label: officer.name,
       searchText: officer.name,
     }));
-  }, [commissionOfficerDirectory, commissionOriginUserId, store]);
+  }, [commissionOfficerDirectory, commissionOriginUserId, store, transferCommissionOriginId]);
   const commissionOfficerOptions = useMemo(() => {
     const directoryOptions = commissionOfficerDirectory
       .filter((officer) => officer.can_be_co_worker === true)
@@ -17178,7 +17235,16 @@ function PriceQuotationReview({
     );
     const eligible = directoryOptions.length ? directoryOptions : fallbackOptions;
     const selected = pricingOfficerOptions(store).find((officer) => officer.id === commissionCoWorkerUserId)
-      ?? directoryOptions.find((officer) => officer.id === commissionCoWorkerUserId);
+      ?? directoryOptions.find((officer) => officer.id === commissionCoWorkerUserId)
+      ?? (transferCommissionCoWorkerId
+        ? {
+            id: transferCommissionCoWorkerId,
+            name: text(
+              store.profiles.find((profile) => text(profile.id, "") === transferCommissionCoWorkerId)?.full_name,
+              "Sales & Pricing Officer",
+            ),
+          }
+        : undefined);
     const options = selected && selected.id !== commissionOriginUserId && !eligible.some((officer) => officer.id === selected.id)
       ? [selected, ...eligible]
       : eligible;
@@ -17187,7 +17253,7 @@ function PriceQuotationReview({
       label: officer.name,
       searchText: officer.name,
     }));
-  }, [commissionCoWorkerUserId, commissionOfficerDirectory, commissionOriginUserId, quotation.project_types, store]);
+  }, [commissionCoWorkerUserId, commissionOfficerDirectory, commissionOriginUserId, quotation.project_types, store, transferCommissionCoWorkerId]);
   const [terms, setTerms] = useState(
     quotationTermsWithPaymentOption(quotation.terms_conditions, quotation)
       .split(/\r?\n+/)
@@ -17588,8 +17654,8 @@ function PriceQuotationReview({
           commissionCoWorkerUserId={commissionCoWorkerUserId}
           commissionSplitOption={commissionSplitOption}
           commissionOfficerOptions={commissionOfficerOptions}
-          commissionOriginEditable={finalApproval}
-          commissionHandlingEditable={finalApproval}
+          commissionOriginEditable={finalApproval && !transferCommissionLocked}
+          commissionHandlingEditable={finalApproval && !transferCommissionLocked}
           commissionSplitEditable={finalApproval && !readOnly}
           onCommissionOriginChange={changeCommissionOrigin}
           onCommissionHandlingModeChange={changeCommissionHandlingMode}

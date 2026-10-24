@@ -9,6 +9,10 @@ const migration = readFileSync(
   join(repoRoot, "supabase", "238_commission_summary_internal_finance_scope.sql"),
   "utf8",
 ).toLowerCase();
+const paymentGateMigration = readFileSync(
+  join(repoRoot, "supabase", "239_commission_visibility_after_verified_payment.sql"),
+  "utf8",
+).toLowerCase();
 const workspace = readFileSync(
   join(repoRoot, "components", "huswell-workspace.tsx"),
   "utf8",
@@ -34,6 +38,16 @@ test("combined accounts keep personal Pricing Officer summaries", () => {
   assert.match(financeWorkspace, /const commissionSummaryForQuotation = useCallback/);
   assert.match(financeWorkspace, /stringValue\(summary, "quotation_no"\) \|\| "—"/);
   assert.match(financeWorkspace, /commissionSummariesRequest/);
+});
+
+test("Pricing Officer commission summaries require a verified quotation payment", () => {
+  assert.match(paymentGateMigration, /from public\.quotation_payment_records payment/);
+  assert.match(paymentGateMigration, /payment\.quotation_id = summary\.quotation_id/);
+  assert.match(paymentGateMigration, /payment\.status = 'verified'/);
+  assert.match(
+    paymentGateMigration,
+    /access\.can_view_all\s+or exists\s*\(\s*select 1\s+from public\.quotation_payment_records payment/s,
+  );
 });
 
 test("Pricing Officer commission rows do not duplicate allocation rates and amounts", () => {
