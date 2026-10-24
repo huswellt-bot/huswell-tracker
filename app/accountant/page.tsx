@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 export default async function AccountantPage() {
   const access = await requireWorkspaceAccess();
 
-  if (!["accountant", "internal_finance"].includes(access.role)) redirect("/");
+  if (access.role !== "accountant") redirect("/");
 
-  return <HuswellWorkspace {...access} />;
+  return <HuswellWorkspace {...access} initialView="Announcements" />;
 }

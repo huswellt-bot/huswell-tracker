@@ -213,7 +213,10 @@ async function extractDocxContext(file: File) {
 }
 
 export async function POST(request: Request) {
-  const formData = await request.formData();
+  const formData = await request.formData().catch(() => null);
+  if (!formData) {
+    return Response.json({ error: "The costing document form could not be read." }, { status: 400 });
+  }
   const file = formData.get("file");
   const organizationId = formData.get("organization_id");
   const leadId = formData.get("lead_id");

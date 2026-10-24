@@ -2,7 +2,7 @@
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
-export const TABLE_PAGE_SIZE = 10;
+export const TABLE_PAGE_SIZE = 50;
 
 export function TablePagination({
   page,

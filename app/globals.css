@@ -489,6 +489,9 @@ textarea {
   overflow-wrap: normal;
   white-space: nowrap;
 }
+table tbody td {
+  text-align: center !important;
+}
 .app-table tbody td > :is(a, b, p, small):not([class*="whitespace-normal"]):not([class*="whitespace-pre"]),
 .app-table tbody td > .lead-cell-value,
 .app-table tbody td > .lead-cell-value :is(b, small, span) {

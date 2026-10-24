@@ -2,7 +2,6 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import {
-  CalendarDays,
   Check,
   ClipboardCheck,
   Download,
@@ -15,7 +14,6 @@ import {
   X,
   XCircle,
 } from "lucide-react";
-import Link from "next/link";
 import {
   Document as PdfDocument,
   Page as PdfPage,
@@ -68,8 +66,6 @@ type MonthlyFinanceReportRow = {
   cashIn: number;
   cashOut: number;
   netEarnings: number;
-  verifiedTransactions: number;
-  pendingOrReturned: number;
 };
 
 type PendingApprovalRow = {
@@ -98,7 +94,7 @@ const transactionViewOptions: Array<{ value: TransactionView; label: string }> =
 ];
 
 const transactionSourceFilterOptions: Array<{ value: TransactionSourceFilter; label: string; direction: TransactionView }> = [
-  { value: "quotation_payment", label: "Quotation payments", direction: "income" },
+  { value: "quotation_payment", label: "Project payments", direction: "income" },
   { value: "other_income", label: "Other income", direction: "income" },
   { value: "regular_expense", label: "Regular expenses", direction: "expense" },
   { value: "project_expense", label: "Project expenses", direction: "expense" },
@@ -219,17 +215,24 @@ const displayDate = (value: unknown) => {
 const extensionFor = (file: File) =>
   file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
 
-const isInternalRole = (role: string) =>
-  ["super_admin", "owner", "admin", "accountant", "internal_finance"].includes(role);
+const isGeneralManagerRole = (role: string) =>
+  ["super_admin", "owner", "admin"].includes(role);
+
+const isInternalRole = (role: string) => role === "internal_finance";
 
 const canUseFinance = (role: string) =>
-  isInternalRole(role) || role === "external_finance";
+  isGeneralManagerRole(role) || isInternalRole(role) || role === "external_finance";
+
+const emptyFinanceRequest = () => Promise.resolve({ data: [] as Row[], error: null });
+
+const addCategoryOptionValue = "__add_finance_category__";
 
 const defaultTransaction = (direction: Direction, categoryId = "") => ({
   amount: "",
   category_id: categoryId,
   account_id: "",
   budget_request_id: "",
+  account_budget_allocation_id: "",
   note: "",
   reference_number: "",
   transaction_date: localDate(),
@@ -394,7 +397,7 @@ type FinanceAction =
   | { kind: "verify_income"; id: string; label: string }
   | { kind: "income_revision"; id: string; label: string }
   | { kind: "income_void"; id: string; label: string }
-  | { kind: "budget"; id: string; decision: BudgetDecision; label: string }
+  | { kind: "funding_request"; id: string; decision: BudgetDecision; label: string }
   | { kind: "paid"; id: string; label: string }
   | { kind: "funding"; id: string; label: string }
   | { kind: "account"; id: string; active: boolean; label: string };
@@ -590,7 +593,7 @@ function LegacyTransactionTableV2({
               const reviewDisplay = manualIncome ? incomeReviewStatus === "pending" ? "pending_confirmation" : incomeReviewStatus : approval;
               const receiptBucket = stringValue(transaction, "receipt_bucket", "finance-receipts");
               const note = isVoided ? `Voided: ${stringValue(transaction, "void_reason", "Reversed source payment")}` : reviewDisplay === "revision_requested" ? `Correction requested: ${stringValue(transaction, "decision_note", "See reviewer note")}` : stringValue(transaction, "note", "-");
-              return <tr key={String(transaction.id)} className={isVoided ? "opacity-60" : undefined}><td>{displayDate(transaction.transaction_date)}<small>{stringValue(transaction, "transaction_time")}</small></td><td>{manualIncome ? "Manual Cash In" : leadName(transaction.lead_id)}{manualIncome && <small>Standalone income{stringValue(transaction, "reference_number") ? ` · Ref: ${stringValue(transaction, "reference_number")}` : ""}</small>}{Boolean(transaction.source_payment_id) && <small>Automatic quotation payment</small>}</td><td>{categoryName(transaction.category_id)}<small>{note}</small></td><td>{canChangeAccount ? <select aria-label={type === "income" ? "Receiving account" : "Payment account"} defaultValue={accountId} onChange={(event) => void assignAccount(String(transaction.id), event.target.value)} disabled={saving} className="input min-w-[150px] text-[10px]"><option value="">Choose account</option>{accounts.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")}</option>)}</select> : accountName(transaction.account_id)}</td><td className="font-semibold text-[#218b55]">{type === "income" ? peso.format(numericValue(transaction, "amount")) : "-"}</td><td className="font-semibold text-[#b42318]">{type === "expense" ? peso.format(numericValue(transaction, "amount")) : "-"}</td><td><StatusPill value={paymentDisplay} /></td><td><StatusPill value={reviewDisplay} /></td><td>{stringValue(transaction, "receipt_storage_path") ? <button type="button" onClick={() => void openReceipt(stringValue(transaction, "receipt_storage_path"), receiptBucket)} className="text-[#c43b43]" title="View receipt"><ReceiptText size={15} /></button> : "-"}</td><td><span className="flex flex-wrap gap-1">{canVerifyIncome && <button type="button" disabled={saving} onClick={() => verifyIncome(String(transaction.id))} className="button-secondary text-[10px] text-[#218b55]">Verify</button>}{canRequestIncomeRevision && <button type="button" disabled={saving} onClick={() => requestIncomeRevision(String(transaction.id))} className="button-secondary text-[10px] text-[#6941c6]">Return</button>}{canEditIncomeRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[10px] text-[#6941c6]">Edit &amp; resubmit</button>}{canVoidIncome && <button type="button" disabled={saving} onClick={() => voidIncome(String(transaction.id))} className="button-danger text-[10px]">Reverse</button>}{canApproveAndPay && <button type="button" disabled={saving || !accountId} onClick={() => approveAndPay(String(transaction.id))} className="button-secondary text-[10px]" title={approval === "pending" ? "Approve and pay Cash Out" : "Pay approved Cash Out"}>{approval === "pending" ? "Approve and pay" : "Pay now"}</button>}{canRequestRevision && <button type="button" disabled={saving} onClick={() => requestRevision(String(transaction.id))} className="button-secondary text-[10px]" title="Return Cash Out for revision">Return</button>}{canEditRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[10px] text-[#6941c6]">Edit &amp; resubmit</button>}{canMarkPaid && <button type="button" disabled={saving} onClick={() => markPaid(String(transaction.id), "Cash Out")} className="button-secondary text-[10px]">Mark paid</button>}{!canVerifyIncome && !canRequestIncomeRevision && !canEditIncomeRevision && !canVoidIncome && !canApproveAndPay && !canRequestRevision && !canEditRevision && !canMarkPaid && "-"}</span></td></tr>;
+              return <tr key={String(transaction.id)} className={isVoided ? "opacity-60" : undefined}><td>{displayDate(transaction.transaction_date)}<small>{stringValue(transaction, "transaction_time")}</small></td><td>{manualIncome ? "Manual Cash In" : leadName(transaction.lead_id)}{manualIncome && <small>Standalone income{stringValue(transaction, "reference_number") ? ` · Ref: ${stringValue(transaction, "reference_number")}` : ""}</small>}{Boolean(transaction.source_payment_id) && <small>Automatic project payment</small>}</td><td>{categoryName(transaction.category_id)}<small>{note}</small></td><td>{canChangeAccount ? <select aria-label={type === "income" ? "Receiving account" : "Payment account"} defaultValue={accountId} onChange={(event) => void assignAccount(String(transaction.id), event.target.value)} disabled={saving} className="input min-w-[150px] text-[10px]"><option value="">Choose account</option>{accounts.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")}</option>)}</select> : accountName(transaction.account_id)}</td><td className="font-semibold text-[#218b55]">{type === "income" ? peso.format(numericValue(transaction, "amount")) : "-"}</td><td className="font-semibold text-[#b42318]">{type === "expense" ? peso.format(numericValue(transaction, "amount")) : "-"}</td><td><StatusPill value={paymentDisplay} /></td><td><StatusPill value={reviewDisplay} /></td><td>{stringValue(transaction, "receipt_storage_path") ? <button type="button" onClick={() => void openReceipt(stringValue(transaction, "receipt_storage_path"), receiptBucket)} className="text-[#c43b43]" title="View receipt"><ReceiptText size={15} /></button> : "-"}</td><td><span className="flex flex-wrap gap-1">{canVerifyIncome && <button type="button" disabled={saving} onClick={() => verifyIncome(String(transaction.id))} className="button-secondary text-[10px] text-[#218b55]">Verify</button>}{canRequestIncomeRevision && <button type="button" disabled={saving} onClick={() => requestIncomeRevision(String(transaction.id))} className="button-secondary text-[10px] text-[#6941c6]">Return</button>}{canEditIncomeRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[10px] text-[#6941c6]">Edit &amp; resubmit</button>}{canVoidIncome && <button type="button" disabled={saving} onClick={() => voidIncome(String(transaction.id))} className="button-danger text-[10px]">Reverse</button>}{canApproveAndPay && <button type="button" disabled={saving || !accountId} onClick={() => approveAndPay(String(transaction.id))} className="button-secondary text-[10px]" title={approval === "pending" ? "Approve and pay Cash Out" : "Pay approved Cash Out"}>{approval === "pending" ? "Approve and pay" : "Pay now"}</button>}{canRequestRevision && <button type="button" disabled={saving} onClick={() => requestRevision(String(transaction.id))} className="button-secondary text-[10px]" title="Return Cash Out for revision">Return</button>}{canEditRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[10px] text-[#6941c6]">Edit &amp; resubmit</button>}{canMarkPaid && <button type="button" disabled={saving} onClick={() => markPaid(String(transaction.id), "Cash Out")} className="button-secondary text-[10px]">Mark paid</button>}{!canVerifyIncome && !canRequestIncomeRevision && !canEditIncomeRevision && !canVoidIncome && !canApproveAndPay && !canRequestRevision && !canEditRevision && !canMarkPaid && "-"}</span></td></tr>;
             })}
             {!rows.length && <tr><td colSpan={10} className="text-center text-[#7d8797]">No transactions match the current filter.</td></tr>}
           </tbody>
@@ -669,7 +672,7 @@ function TransactionTable({
             || (manualIncome && paid === "unpaid" && ["pending", "revision_requested"].includes(incomeReviewStatus))
           );
           const receiptBucket = stringValue(transaction, "receipt_bucket", "finance-receipts");
-          const description = manualIncome ? "Manual Cash In" : leadName(transaction.lead_id) !== "—" ? leadName(transaction.lead_id) : type === "income" ? "Quotation payment" : "Cash Out";
+          const description = manualIncome ? "Manual Cash In" : leadName(transaction.lead_id) !== "—" ? leadName(transaction.lead_id) : type === "income" ? "Project payment" : "Cash Out";
           const reference = transactionReference(transaction, quotationName);
           const amount = numericValue(transaction, "amount");
           return (
@@ -734,7 +737,7 @@ function TransactionTable({
               const accountId = stringValue(transaction, "account_id");
               const canChangeAccount = allowActions && internal && !isVoided && ((type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval)) || (!accountId && Boolean(transaction.source_payment_id)) || (manualIncome && paid === "unpaid" && ["pending", "revision_requested"].includes(incomeReviewStatus)));
               const receiptBucket = stringValue(transaction, "receipt_bucket", "finance-receipts");
-              const description = manualIncome ? "Manual Cash In" : leadName(transaction.lead_id) !== "—" ? leadName(transaction.lead_id) : type === "income" ? "Quotation payment" : "Cash Out";
+              const description = manualIncome ? "Manual Cash In" : leadName(transaction.lead_id) !== "—" ? leadName(transaction.lead_id) : type === "income" ? "Project payment" : "Cash Out";
               const reference = transactionReference(transaction, quotationName);
               const amount = numericValue(transaction, "amount");
               return <tr key={String(transaction.id)} className={isVoided ? "opacity-60" : undefined}>
@@ -780,7 +783,7 @@ function ProjectHistoryTable({
               </button>
             </div>
             <div className="mt-3 grid grid-cols-2 gap-3 text-[11px]">
-              <div><span className="block text-[10px] text-[#8b92a1]">Quotation</span><span className="text-[#344054]">{project.quotationNumbers.length ? project.quotationNumbers.join(", ") : "—"}</span></div>
+              <div><span className="block text-[10px] text-[#8b92a1]">Project</span><span className="text-[#344054]">{project.quotationNumbers.length ? project.quotationNumbers.join(", ") : "—"}</span></div>
               <div><span className="block text-[10px] text-[#8b92a1]">Transactions</span><span className="text-[#344054]">{project.transactions.length}</span></div>
               <div className="col-span-2"><span className="block text-[10px] text-[#8b92a1]">Last verified activity</span><span className="text-[#344054]">{displayDate(project.latestDate)}</span></div>
             </div>
@@ -790,7 +793,7 @@ function ProjectHistoryTable({
       </div>
       <div className="table-shell hidden overflow-x-auto md:block">
         <table className="app-table w-full min-w-[760px] text-left">
-          <thead><tr><th>Project</th><th>Quotation</th><th>Last verified activity</th><th>Transactions</th><th className="finance-action-column">Review</th></tr></thead>
+          <thead><tr><th>Project</th><th>Project</th><th>Last verified activity</th><th>Transactions</th><th className="finance-action-column">Review</th></tr></thead>
           <tbody>
             {rows.map((project) => (
               <tr key={project.key}>
@@ -878,7 +881,7 @@ function TransactionDetailDialog({
         <TransactionDetailField label="Source">{transactionSourceLabel(transaction)}</TransactionDetailField>
         <TransactionDetailField label="Category">{categoryName(transaction.category_id)}</TransactionDetailField>
         <TransactionDetailField label="Account">{accountName(transaction.account_id)}</TransactionDetailField>
-        {quotationId && <TransactionDetailField label="Quotation">{quotationName(quotationId)}</TransactionDetailField>}
+        {quotationId && <TransactionDetailField label="Project">{quotationName(quotationId)}</TransactionDetailField>}
         {stringValue(transaction, "budget_request_id") && <TransactionDetailField label="Budget">{budgetLabel(stringValue(transaction, "budget_request_id"))}</TransactionDetailField>}
         {stringValue(transaction, "reference_number") && <TransactionDetailField label="Reference number">{stringValue(transaction, "reference_number")}</TransactionDetailField>}
         {stringValue(transaction, "submitted_by") && <TransactionDetailField label="Submitted by">{profileName(stringValue(transaction, "submitted_by"))}</TransactionDetailField>}
@@ -957,7 +960,7 @@ function ProjectFinanceDialog({
   ));
 
   const transactionDescription = (transaction: Row) => {
-    if (Boolean(transaction.source_payment_id)) return "Quotation payment";
+    if (Boolean(transaction.source_payment_id)) return "Project payment";
     return transactionSourceLabel(transaction);
   };
   const normalizedTransactionQuery = transactionQuery.trim().toLowerCase();
@@ -989,8 +992,8 @@ function ProjectFinanceDialog({
       <div className="mt-5 grid gap-3 border-b border-[#edf0f5] pb-4 sm:grid-cols-2">
         <TransactionDetailField label="Project">{project.projectName}</TransactionDetailField>
         <TransactionDetailField label="Client">{project.clientName}</TransactionDetailField>
-        <TransactionDetailField label="Quotation">{quotationLabel}</TransactionDetailField>
-        <TransactionDetailField label="Quotation total">
+        <TransactionDetailField label="Project">{quotationLabel}</TransactionDetailField>
+        <TransactionDetailField label="Project total">
           {quotationTotal === null ? "-" : <span className="font-semibold text-[#202938]">{peso.format(quotationTotal)}</span>}
         </TransactionDetailField>
         <TransactionDetailField label="Total direct cost">
@@ -1180,7 +1183,7 @@ function FinanceApprovalReviewDialog({
   const paymentMethod = financePaymentMethodLabel(payment?.method);
   const paymentNote = stringValue(payment, "notes") || stringValue(payment, "correction_note");
   const receiptFileName = stringValue(payment, "receipt_file_name") || stringValue(transaction, "receipt_file_name");
-  const sourceLabel = row.kind === "quotation_payment" ? "Quotation payment" : row.source;
+  const sourceLabel = row.kind === "quotation_payment" ? "Project payment" : row.source;
 
   return (
     <FinanceDialog
@@ -1213,7 +1216,7 @@ function FinanceApprovalReviewDialog({
         </TransactionDetailField>
         {row.kind === "quotation_payment" ? (
           <>
-            {quotationNo && <TransactionDetailField label="Quotation">{quotationNo}</TransactionDetailField>}
+            {quotationNo && <TransactionDetailField label="Project">{quotationNo}</TransactionDetailField>}
             {clientName && <TransactionDetailField label="Client">{clientName}</TransactionDetailField>}
             {projectName && <TransactionDetailField label="Project">{projectName}</TransactionDetailField>}
             {paymentKind && <TransactionDetailField label="Payment type">{paymentKind}</TransactionDetailField>}
@@ -1227,7 +1230,7 @@ function FinanceApprovalReviewDialog({
           <>
             {transaction && !state?.manualIncome && row.description && <TransactionDetailField label="Payee / company">{row.description}</TransactionDetailField>}
             {transaction && transaction.category_id && <TransactionDetailField label="Category">{categoryName(transaction.category_id)}</TransactionDetailField>}
-            {transaction && transaction.quotation_id && <TransactionDetailField label="Quotation">{quotationName(transaction.quotation_id)}</TransactionDetailField>}
+            {transaction && transaction.quotation_id && <TransactionDetailField label="Project">{quotationName(transaction.quotation_id)}</TransactionDetailField>}
             {transaction && transaction.budget_request_id && <TransactionDetailField label="Budget">{budgetLabel(transaction.budget_request_id)}</TransactionDetailField>}
             {transaction && stringValue(transaction, "reference_number") && <TransactionDetailField label="Reference number">{stringValue(transaction, "reference_number")}</TransactionDetailField>}
             {transaction && stringValue(transaction, "payment_status") && <TransactionDetailField label="Payment status"><StatusPill value={stringValue(transaction, "payment_status")} /></TransactionDetailField>}
@@ -1308,7 +1311,7 @@ function PendingQuotationPaymentTable({
     const lead = leadFor(quote);
     return {
       quote,
-      quoteNo: stringValue(quote, "quotation_no", "Price Quotation"),
+      quoteNo: stringValue(quote, "quotation_no", "Project"),
       project: stringValue(quote, "project_name", "—"),
       client: stringValue(lead, "client_name", stringValue(quote, "client_name", "—")),
       accountId: stringValue(payment, "finance_account_id"),
@@ -1354,7 +1357,7 @@ function PendingQuotationPaymentTable({
       </div>
       <div className="table-shell hidden overflow-x-auto md:block">
         <table className="app-table w-full min-w-[1220px]">
-          <thead><tr><th>Paid date</th><th>Quotation</th><th>Client</th><th>Project</th><th>Type</th><th>Received into</th><th>Payment method</th><th>Amount</th><th>Receipt</th><th>Review</th></tr></thead>
+          <thead><tr><th>Paid date</th><th>Project</th><th>Client</th><th>Project</th><th>Type</th><th>Received into</th><th>Payment method</th><th>Amount</th><th>Receipt</th><th>Review</th></tr></thead>
           <tbody>
             {visibleRows.map((payment) => {
               const details = paymentDetails(payment);
@@ -1388,11 +1391,11 @@ function PendingQuotationPaymentTable({
                 </tr>
               );
             })}
-            {!rows.length && <tr><td colSpan={10} className="text-center text-[#7d8797]">No quotation payment receipts are awaiting verification.</td></tr>}
+            {!rows.length && <tr><td colSpan={10} className="text-center text-[#7d8797]">No project payment receipts are awaiting verification.</td></tr>}
           </tbody>
         </table>
       </div>
-      {rows.length > TABLE_PAGE_SIZE && <TablePagination page={activePage} pageCount={pageCount} total={rows.length} onPageChange={setPage} label="Pending quotation payment pagination" />}
+      {rows.length > TABLE_PAGE_SIZE && <TablePagination page={activePage} pageCount={pageCount} total={rows.length} onPageChange={setPage} label="Pending project payment pagination" />}
     </div>
   );
 }
@@ -1565,10 +1568,8 @@ const financeMonthLabel = (key: string) => {
 
 function MonthlyFinanceReport({
   transactions,
-  quotationPayments,
 }: {
   transactions: Row[];
-  quotationPayments: Row[];
 }) {
   const [reportYear, setReportYear] = useState("all");
   const reportRows = useMemo<MonthlyFinanceReportRow[]>(() => {
@@ -1582,8 +1583,6 @@ function MonthlyFinanceReport({
         cashIn: 0,
         cashOut: 0,
         netEarnings: 0,
-        verifiedTransactions: 0,
-        pendingOrReturned: 0,
       };
       grouped.set(key, row);
       return row;
@@ -1597,27 +1596,13 @@ function MonthlyFinanceReport({
         const row = getRow(key);
         if (type === "income") row.cashIn += numericValue(transaction, "amount");
         if (type === "expense") row.cashOut += numericValue(transaction, "amount");
-        row.verifiedTransactions += 1;
-        return;
       }
-      const pending = type === "expense"
-        ? ["pending", "revision_requested"].includes(stringValue(transaction, "approval_status"))
-        : isManualIncomeTransaction(transaction)
-          && ["pending", "revision_requested"].includes(stringValue(transaction, "income_review_status"));
-      if (pending) getRow(key).pendingOrReturned += 1;
-    });
-
-    quotationPayments.forEach((payment) => {
-      if (!["pending", "revision_requested"].includes(stringValue(payment, "status"))) return;
-      const key = financeMonthKey(payment.paid_at ?? payment.submitted_at ?? payment.created_at);
-      if (!key) return;
-      getRow(key).pendingOrReturned += 1;
     });
 
     return [...grouped.values()]
       .map((row) => ({ ...row, netEarnings: row.cashIn - row.cashOut }))
       .sort((left, right) => right.key.localeCompare(left.key));
-  }, [quotationPayments, transactions]);
+  }, [transactions]);
   const reportYears = useMemo(
     () => [...new Set(reportRows.map((row) => row.key.slice(0, 4)))].sort((left, right) => right.localeCompare(left)),
     [reportRows],
@@ -1631,10 +1616,8 @@ function MonthlyFinanceReport({
         cashIn: result.cashIn + row.cashIn,
         cashOut: result.cashOut + row.cashOut,
         netEarnings: result.netEarnings + row.netEarnings,
-        verifiedTransactions: result.verifiedTransactions + row.verifiedTransactions,
-        pendingOrReturned: result.pendingOrReturned + row.pendingOrReturned,
       }),
-      { cashIn: 0, cashOut: 0, netEarnings: 0, verifiedTransactions: 0, pendingOrReturned: 0 },
+      { cashIn: 0, cashOut: 0, netEarnings: 0 },
     ),
     [visibleRows],
   );
@@ -1642,7 +1625,7 @@ function MonthlyFinanceReport({
   return (
     <Panel
       title="Monthly finance report"
-      detail="Verified Cash In and Cash Out grouped by transaction date. Pending and returned records are excluded from Net Earnings."
+      detail="Verified Cash In and Cash Out grouped by transaction date. Only verified records are included."
       action={
         <label className="flex items-center gap-2 text-[11px] text-[#687386]">
           <span>Year</span>
@@ -1658,37 +1641,28 @@ function MonthlyFinanceReport({
           <table className="app-table w-full min-w-[760px]">
             <thead>
               <tr>
-                <th className="text-left">Month</th>
-                <th className="text-right">Amount</th>
-                <th className="text-right">Net Earnings</th>
-                <th className="text-right">Verified Transactions</th>
-                <th className="text-right">Pending / Returned</th>
+                <th className="text-center">Month</th>
+                <th className="text-center">Cash In</th>
+                <th className="text-center">Cash Out</th>
+                <th className="text-center">Net Earnings</th>
               </tr>
             </thead>
             <tbody>
               {visibleRows.map((row) => (
                 <tr key={row.key}>
-                  <td className="text-left font-medium">{row.label}</td>
-                  <td className="text-right">
-                    <span className="block text-[var(--color-success-text)]" aria-label={`Cash In ${peso.format(row.cashIn)}`}>Cash In · {peso.format(row.cashIn)}</span>
-                    <span className="mt-1 block text-[var(--color-danger-text)]" aria-label={`Cash Out ${peso.format(row.cashOut)}`}>Cash Out · {peso.format(row.cashOut)}</span>
-                  </td>
-                  <td className={`text-right font-semibold ${row.netEarnings >= 0 ? "text-[var(--color-success-text)]" : "text-[var(--color-danger-text)]"}`}>{peso.format(row.netEarnings)}</td>
-                  <td className="text-right">{row.verifiedTransactions}</td>
-                  <td className={`text-right ${row.pendingOrReturned ? "font-semibold text-[var(--color-warning-text)]" : "text-[#687386]"}`}>{row.pendingOrReturned}</td>
+                  <td className="text-center font-medium">{row.label}</td>
+                  <td className="text-center font-semibold text-[var(--color-success-text)]" aria-label={`Cash In ${peso.format(row.cashIn)}`}>{peso.format(row.cashIn)}</td>
+                  <td className="text-center font-semibold text-[var(--color-danger-text)]" aria-label={`Cash Out ${peso.format(row.cashOut)}`}>{peso.format(row.cashOut)}</td>
+                  <td className={`text-center font-semibold ${row.netEarnings >= 0 ? "text-[var(--color-success-text)]" : "text-[var(--color-danger-text)]"}`}>{peso.format(row.netEarnings)}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot className="border-t-2 border-[#d9e0e9]">
               <tr>
-                <td className="px-3 pb-3 pt-4 text-left font-semibold">Total</td>
-                <td className="px-3 pb-3 pt-4 text-right">
-                  <span className="block text-[var(--color-success-text)]" aria-label={`Total Cash In ${peso.format(totals.cashIn)}`}>Cash In · {peso.format(totals.cashIn)}</span>
-                  <span className="mt-1 block text-[var(--color-danger-text)]" aria-label={`Total Cash Out ${peso.format(totals.cashOut)}`}>Cash Out · {peso.format(totals.cashOut)}</span>
-                </td>
-                <td className={`px-3 pb-3 pt-4 text-right font-semibold ${totals.netEarnings >= 0 ? "text-[var(--color-success-text)]" : "text-[var(--color-danger-text)]"}`}>{peso.format(totals.netEarnings)}</td>
-                <td className="px-3 pb-3 pt-4 text-right font-semibold">{totals.verifiedTransactions}</td>
-                <td className={`px-3 pb-3 pt-4 text-right font-semibold ${totals.pendingOrReturned ? "text-[var(--color-warning-text)]" : "text-[#687386]"}`}>{totals.pendingOrReturned}</td>
+                <td className="px-3 pb-3 pt-4 text-center font-semibold">Total</td>
+                <td className="px-3 pb-3 pt-4 text-center font-semibold text-[var(--color-success-text)]" aria-label={`Total Cash In ${peso.format(totals.cashIn)}`}>{peso.format(totals.cashIn)}</td>
+                <td className="px-3 pb-3 pt-4 text-center font-semibold text-[var(--color-danger-text)]" aria-label={`Total Cash Out ${peso.format(totals.cashOut)}`}>{peso.format(totals.cashOut)}</td>
+                <td className={`px-3 pb-3 pt-4 text-center font-semibold ${totals.netEarnings >= 0 ? "text-[var(--color-success-text)]" : "text-[var(--color-danger-text)]"}`}>{peso.format(totals.netEarnings)}</td>
               </tr>
             </tfoot>
           </table>
@@ -1769,6 +1743,7 @@ function FinanceDialog({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (!dialogRef.current?.contains(document.activeElement)) return;
       if (event.key === "Escape") close();
       if (event.key !== "Tab" || !dialogRef.current) return;
 
@@ -1834,11 +1809,10 @@ function FinanceConfirmDialog({
   close: () => void;
   confirm: () => void | Promise<void>;
 }) {
-  const isDecision = action.kind === "approve_and_pay" || action.kind === "quotation_payment" || action.kind === "budget" || action.kind === "revision" || action.kind === "verify_income" || action.kind === "income_revision";
-  const isRejection = (action.kind === "budget" && action.decision === "rejected") || (action.kind === "quotation_payment" && action.decision === "rejected");
+  const isDecision = action.kind === "approve_and_pay" || action.kind === "quotation_payment" || action.kind === "funding_request" || action.kind === "revision" || action.kind === "verify_income" || action.kind === "income_revision";
+  const isRejection = (action.kind === "funding_request" && action.decision === "rejected") || (action.kind === "quotation_payment" && action.decision === "rejected");
   const isQuotationRevision = action.kind === "quotation_payment" && action.decision === "revision_requested";
-  const isRevision = action.kind === "revision" || action.kind === "income_revision" || isQuotationRevision || (action.kind === "budget" && action.decision === "revision_requested");
-  const isBudgetRevision = action.kind === "budget" && action.decision === "revision_requested";
+  const isRevision = action.kind === "revision" || action.kind === "income_revision" || isQuotationRevision || (action.kind === "funding_request" && action.decision === "revision_requested");
   const requiresNote = isRejection || isRevision || action.kind === "funding" || action.kind === "income_void";
   const actionLabel = action.kind === "paid"
     ? "Mark paid"
@@ -1854,20 +1828,22 @@ function FinanceConfirmDialog({
         ? "Verify Cash In"
       : action.kind === "income_void"
         ? "Reverse Cash In"
+      : action.kind === "funding_request"
+        ? action.decision === "revision_requested" ? "Return for revision" : "Reject"
       : isRevision
         ? action.kind === "income_revision" ? "Return for correction" : "Return for revision"
-      : action.decision === "approved" ? "Approve" : "Reject";
+      : isDecision ? "Approve" : "Review";
 
   return (
     <FinanceDialog
       title={`${actionLabel} ${action.label}`}
-      detail={action.kind === "funding" ? "This removes the funding amount from the account balance but preserves the audit record." : action.kind === "account" ? "Deactivation hides the account from new payment selections but preserves its balances, payments, and receipts." : action.kind === "approve_and_pay" ? "This approves the regular Cash Out, records it as paid, and deducts the selected payment account." : action.kind === "quotation_payment" ? action.decision === "verified" ? "This confirms the client receipt and posts it as Cash In." : action.decision === "revision_requested" ? "This returns the receipt to External Finance for correction. It stays out of Cash In until resubmitted and verified." : "This rejects the receipt and keeps it out of Cash In." : action.kind === "verify_income" ? "This confirms the receipt, updates the selected receiving account balance, and includes the amount in Cash In totals." : action.kind === "income_void" ? "This reverses the verified Cash In and removes it from the account balance while preserving the audit record." : isRevision ? isBudgetRevision ? "This sends the budget request back to External Finance for correction and resubmission." : action.kind === "income_revision" ? "This sends the standalone Cash In back to External Finance for correction and resubmission." : "This sends the unpaid Cash Out back to External Finance for correction and resubmission." : isDecision ? "Add a note so the financial decision is clear to the next reviewer." : "This changes the settlement status in the finance ledger."}
+      detail={action.kind === "funding" ? "This removes the funding amount from the account balance but preserves the audit record." : action.kind === "account" ? "Deactivation hides the account from new payment selections but preserves its balances, payments, and receipts." : action.kind === "approve_and_pay" ? "This approves the regular Cash Out, records it as paid, and deducts the selected payment account." : action.kind === "quotation_payment" ? action.decision === "verified" ? "This confirms the client receipt and posts it as Cash In." : action.decision === "revision_requested" ? "This returns the receipt to External Finance for correction. It stays out of Cash In until resubmitted and verified." : "This rejects the receipt and keeps it out of Cash In." : action.kind === "verify_income" ? "This confirms the receipt, updates the selected receiving account balance, and includes the amount in Cash In totals." : action.kind === "income_void" ? "This reverses the verified Cash In and removes it from the account balance while preserving the audit record." : action.kind === "funding_request" ? action.decision === "revision_requested" ? "This returns the account funding request to External Finance for correction." : "This rejects the account funding request." : isRevision ? action.kind === "income_revision" ? "This sends the standalone Cash In back to External Finance for correction and resubmission." : "This sends the unpaid Cash Out back to External Finance for correction and resubmission." : isDecision ? "Add a note so the financial decision is clear to the next reviewer." : "This changes the settlement status in the finance ledger."}
       close={close}
     >
       {(isDecision || action.kind === "funding" || action.kind === "income_void") && (
         <label className="field-label mt-5 block">
           {action.kind === "funding" ? "Void reason (required)" : action.kind === "income_void" ? "Reversal reason (required)" : isRevision ? action.kind === "income_revision" || isQuotationRevision ? "Correction reason (required)" : "Revision reason (required)" : `Decision note${isRejection ? " (required)" : " (optional)"}`}
-          <textarea value={note} onChange={(event) => setNote(event.target.value)} className="input mt-1 min-h-24" placeholder={action.kind === "funding" ? "Explain why this funding entry is being voided" : action.kind === "income_void" ? "Explain why this Cash In is being reversed" : action.kind === "quotation_payment" && action.decision === "revision_requested" ? "Explain what External Finance must correct" : isRevision ? isBudgetRevision ? "Explain what External Finance must correct in this budget request" : action.kind === "income_revision" ? "Explain what External Finance must correct in this Cash In" : "Explain what External Finance must correct" : isRejection ? action.kind === "quotation_payment" ? "Explain why this receipt is being rejected" : "Explain why this request is being rejected" : "Add context for this approval"} />
+          <textarea value={note} onChange={(event) => setNote(event.target.value)} className="input mt-1 min-h-24" placeholder={action.kind === "funding" ? "Explain why this funding entry is being voided" : action.kind === "income_void" ? "Explain why this Cash In is being reversed" : action.kind === "quotation_payment" && action.decision === "revision_requested" ? "Explain what External Finance must correct" : isRevision ? action.kind === "income_revision" ? "Explain what External Finance must correct in this Cash In" : "Explain what External Finance must correct" : isRejection ? action.kind === "quotation_payment" ? "Explain why this receipt is being rejected" : "Explain why this request is being rejected" : "Add context for this approval"} />
         </label>
       )}
       <div className="mt-5 flex justify-end gap-2">
@@ -1903,6 +1879,7 @@ export function FinanceWorkspace({
   role,
   overviewOnly = false,
   reportOnly = false,
+  initialTab,
   openAction = null,
   onOpenActionHandled,
 }: {
@@ -1910,27 +1887,35 @@ export function FinanceWorkspace({
   role: string;
   overviewOnly?: boolean;
   reportOnly?: boolean;
+  initialTab?: Tab;
   openAction?: Direction | null;
   onOpenActionHandled?: () => void;
 }) {
   const client = useMemo(() => createClient(), []);
+  const budgetOnly = isGeneralManagerRole(role);
+  const canGrantBudget = budgetOnly;
   const internal = isInternalRole(role);
+  const canViewBudget = internal || canGrantBudget;
+  const canCreateCategory = internal || role === "external_finance";
   const canRequestBudget = role === "external_finance";
+  const canManageBudget = role === "internal_finance";
   const canSubmitExpense = role === "external_finance";
   const canRecordIncome = role === "external_finance";
   const canRecordSupplierCosting = role === "external_finance";
   const financeTabs = useMemo<[Tab, string][]>(
-    () => [
-      ...(internal ? [["approvals", "Pending approvals"] as [Tab, string]] : []),
-      ["transactions", "Transaction history"],
-      ...(internal ? [["accounts", "Accounts"] as [Tab, string]] : []),
-      ["budget", "Budget requests"],
-      ...(internal || canRecordSupplierCosting ? [["supplier_costing", "Supplier costing"] as [Tab, string]] : []),
-      ...(internal ? [["payables", "Payables"] as [Tab, string]] : []),
-    ],
-    [canRecordSupplierCosting, internal],
+    () => budgetOnly
+      ? [["budget", "Budget & allocations"]]
+      : [
+          ...(internal ? [["approvals", "Pending approvals"] as [Tab, string]] : []),
+          ["transactions", role === "external_finance" ? "Transaction" : "Transaction history"],
+          ...(internal ? [["accounts", "Accounts"] as [Tab, string]] : []),
+          ["budget", internal ? "Budget & allocations" : "Funding requests"],
+          ...(internal || canRecordSupplierCosting ? [["supplier_costing", "Supplier costing"] as [Tab, string]] : []),
+          ...(internal ? [["payables", "Payables"] as [Tab, string]] : []),
+        ],
+    [budgetOnly, canRecordSupplierCosting, internal, role],
   );
-  const [tab, setTab] = useState<Tab>(reportOnly ? "reports" : overviewOnly ? "overview" : internal ? "approvals" : "transactions");
+  const [tab, setTab] = useState<Tab>(initialTab ?? (budgetOnly ? "budget" : reportOnly ? "reports" : overviewOnly ? "overview" : internal ? "approvals" : "transactions"));
   const [payablesSection, setPayablesSection] = useState<PayablesSection>("commission");
   const [payablesPage, setPayablesPage] = useState(1);
   const [budgetPage, setBudgetPage] = useState(1);
@@ -1950,8 +1935,15 @@ export function FinanceWorkspace({
   const [transactions, setTransactions] = useState<Row[]>([]);
   const [categories, setCategories] = useState<Row[]>([]);
   const [accounts, setAccounts] = useState<Row[]>([]);
+  const [expenseAccounts, setExpenseAccounts] = useState<Row[]>([]);
+  const [fundingRequestAccounts, setFundingRequestAccounts] = useState<Row[]>([]);
   const [balances, setBalances] = useState<Row[]>([]);
   const [budgets, setBudgets] = useState<Row[]>([]);
+  const [budgetSnapshot, setBudgetSnapshot] = useState<Row | null>(null);
+  const [budgetPeriods, setBudgetPeriods] = useState<Row[]>([]);
+  const [budgetGrants, setBudgetGrants] = useState<Row[]>([]);
+  const [accountBudgetAllocations, setAccountBudgetAllocations] = useState<Row[]>([]);
+  const [accountFundingRequests, setAccountFundingRequests] = useState<Row[]>([]);
   const [leads, setLeads] = useState<Row[]>([]);
   const [quotations, setQuotations] = useState<Row[]>([]);
   const [quotationDirectCosts, setQuotationDirectCosts] = useState<Row[]>([]);
@@ -1981,6 +1973,8 @@ export function FinanceWorkspace({
   const [transactionFile, setTransactionFile] = useState<File | null>(null);
   const [transactionValues, setTransactionValues] = useState(defaultTransaction("income"));
   const [categoryDraft, setCategoryDraft] = useState({ name: "", expense_class: "operating" });
+  const [categoryCreateOpen, setCategoryCreateOpen] = useState(false);
+  const [categoryCreateMessage, setCategoryCreateMessage] = useState<string | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountEditing, setAccountEditing] = useState<Row | null>(null);
   const [accountFile, setAccountFile] = useState<File | null>(null);
@@ -1990,7 +1984,15 @@ export function FinanceWorkspace({
   const [accountFundingValues, setAccountFundingValues] = useState({ account_id: "", amount: "", funding_source: "owner_funding", funding_date: localDate(), note: "" });
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [budgetRevision, setBudgetRevision] = useState<Row | null>(null);
-  const [budgetValues, setBudgetValues] = useState({ amount: "", note: "" });
+  const [budgetValues, setBudgetValues] = useState({ account_id: "", amount: "", note: "" });
+  const [grantOpen, setGrantOpen] = useState(false);
+  const [grantValues, setGrantValues] = useState({ amount: "", note: "" });
+  const [allocationOpen, setAllocationOpen] = useState(false);
+  const [allocationMode, setAllocationMode] = useState<"allocate" | "reallocate">("allocate");
+  const [allocationValues, setAllocationValues] = useState({ from_account_id: "", to_account_id: "", amount: "", note: "" });
+  const [fundingReviewRequest, setFundingReviewRequest] = useState<Row | null>(null);
+  const [fundingApprovedAmount, setFundingApprovedAmount] = useState("");
+  const [fundingReviewNote, setFundingReviewNote] = useState("");
   const [supplierCostOpen, setSupplierCostOpen] = useState(false);
   const [supplierCostValues, setSupplierCostValues] = useState({ supplier_id: "", quotation_id: "", lead_id: "", description: "", amount: "", due_date: "", notes: "" });
   const financeRefreshTimer = useRef<number | null>(null);
@@ -2014,21 +2016,35 @@ export function FinanceWorkspace({
     setLoading(true);
     setLoadError(null);
     try {
-      const accountsRequest = internal
-        ? client.from("finance_accounts").select("*").eq("organization_id", organizationId).order("account_name")
-        : client.rpc("list_finance_payment_accounts", {
+      const accountsRequest = budgetOnly
+        ? client.rpc("list_finance_funding_request_accounts", { p_organization_id: organizationId })
+        : internal
+          ? client.from("finance_accounts").select("*").eq("organization_id", organizationId).order("account_name")
+          : client.rpc("list_finance_payment_accounts", {
+              p_organization_id: organizationId,
+            });
+      const expenseAccountsRequest = budgetOnly || internal
+        ? emptyFinanceRequest()
+        : client.rpc("list_finance_expense_accounts", {
+            p_organization_id: organizationId,
+          });
+      const fundingRequestAccountsRequest = budgetOnly || internal
+        ? emptyFinanceRequest()
+        : client.rpc("list_finance_funding_request_accounts", {
             p_organization_id: organizationId,
           });
       const balancesRequest = internal
         ? client.from("finance_account_balances").select("*").eq("organization_id", organizationId).order("account_name")
-        : Promise.resolve({ data: [], error: null });
+        : emptyFinanceRequest();
       const accountFundingRequest = internal
         ? client.from("finance_account_funding_entries").select("*").eq("organization_id", organizationId).order("funding_date", { ascending: false }).order("created_at", { ascending: false })
-        : Promise.resolve({ data: [], error: null });
+        : emptyFinanceRequest();
       const commissionAllocationsRequest = internal
         ? client.from("commission_summary_allocations").select("*").eq("organization_id", organizationId).order("created_at", { ascending: false })
-        : Promise.resolve({ data: [], error: null });
-      const quotationsRequest = internal
+        : emptyFinanceRequest();
+      const quotationsRequest = budgetOnly
+        ? emptyFinanceRequest()
+        : internal
         ? client
             .from("quotations")
             .select("*")
@@ -2042,10 +2058,12 @@ export function FinanceWorkspace({
         ? client.rpc("finance_quotation_direct_cost_rows", {
             p_organization_id: organizationId,
           })
-        : Promise.resolve({ data: [], error: null });
-      const projectExpenseRowsRequest = client.rpc("finance_project_expense_rows", {
-        p_organization_id: organizationId,
-      });
+        : emptyFinanceRequest();
+      const projectExpenseRowsRequest = budgetOnly
+        ? emptyFinanceRequest()
+        : client.rpc("finance_project_expense_rows", {
+            p_organization_id: organizationId,
+          });
       const pendingQuotationPaymentsRequest = internal
         ? client
             .from("quotation_payment_records")
@@ -2054,9 +2072,9 @@ export function FinanceWorkspace({
             .in("status", ["pending", "revision_requested"])
             .order("paid_at", { ascending: false })
             .order("created_at", { ascending: false })
-        : Promise.resolve({ data: [], error: null });
-      const quotationPaymentRecordsRequest = internal
-        ? Promise.resolve({ data: [], error: null })
+        : emptyFinanceRequest();
+      const quotationPaymentRecordsRequest = budgetOnly || internal
+        ? emptyFinanceRequest()
         : client
             .from("quotation_payment_records")
             .select("id,quotation_id,status,payment_kind,amount,paid_at,finance_account_id,reference_no,notes,receipt_storage_path,receipt_file_name,receipt_content_type,receipt_file_size,submitted_by,correction_note,submitted_at,created_at")
@@ -2064,23 +2082,54 @@ export function FinanceWorkspace({
             .order("paid_at", { ascending: false })
             .order("created_at", { ascending: false });
       const requests = await Promise.all([
-        client.from("finance_transactions").select("*").eq("organization_id", organizationId).order("transaction_date", { ascending: false }).order("created_at", { ascending: false }),
-        client.from("finance_categories").select("*").eq("organization_id", organizationId).eq("is_active", true).order("direction").order("name"),
+        budgetOnly
+          ? emptyFinanceRequest()
+          : client.from("finance_transactions").select("*").eq("organization_id", organizationId).order("transaction_date", { ascending: false }).order("created_at", { ascending: false }),
+        budgetOnly
+          ? emptyFinanceRequest()
+          : client.from("finance_categories").select("*").eq("organization_id", organizationId).eq("is_active", true).order("direction").order("name"),
         accountsRequest,
         balancesRequest,
-        client.from("finance_budget_requests").select("*").eq("organization_id", organizationId).order("requested_at", { ascending: false }),
-        client.from("leads").select("id,lead_no,client_name,contact_name,phone,email,project_name").eq("organization_id", organizationId).order("created_at", { ascending: false }),
+        budgetOnly
+          ? emptyFinanceRequest()
+          : client.from("finance_budget_requests").select("*").eq("organization_id", organizationId).order("requested_at", { ascending: false }),
+        budgetOnly
+          ? emptyFinanceRequest()
+          : client.from("leads").select("id,lead_no,client_name,contact_name,phone,email,project_name").eq("organization_id", organizationId).order("created_at", { ascending: false }),
         quotationsRequest,
-        client.from("supplier_payables").select("*").eq("organization_id", organizationId).order("due_date", { ascending: true }),
-        client.from("suppliers").select("id,company_name").eq("organization_id", organizationId).order("company_name"),
+        budgetOnly
+          ? emptyFinanceRequest()
+          : client.from("supplier_payables").select("*").eq("organization_id", organizationId).order("due_date", { ascending: true }),
+        budgetOnly
+          ? emptyFinanceRequest()
+          : client.from("suppliers").select("id,company_name").eq("organization_id", organizationId).order("company_name"),
         commissionAllocationsRequest,
         client.from("profiles").select("id,full_name"),
-        client.from("quotation_payment_records").select("quotation_id,status,amount,verified_at").eq("organization_id", organizationId).eq("status", "verified"),
+        budgetOnly
+          ? emptyFinanceRequest()
+          : client.from("quotation_payment_records").select("quotation_id,status,amount,verified_at").eq("organization_id", organizationId).eq("status", "verified"),
         accountFundingRequest,
         pendingQuotationPaymentsRequest,
         quotationPaymentRecordsRequest,
         quotationDirectCostsRequest,
         projectExpenseRowsRequest,
+        canViewBudget
+          ? client.rpc("get_finance_budget_snapshot", { p_organization_id: organizationId })
+          : emptyFinanceRequest(),
+        canViewBudget
+          ? client.from("finance_budget_periods").select("*").eq("organization_id", organizationId).order("period_start", { ascending: false })
+          : emptyFinanceRequest(),
+        canViewBudget
+          ? client.from("finance_budget_grants").select("*").eq("organization_id", organizationId).order("granted_at", { ascending: false })
+          : emptyFinanceRequest(),
+        canViewBudget
+          ? client.from("finance_account_budget_summary").select("*").eq("organization_id", organizationId).order("account_name")
+          : emptyFinanceRequest(),
+        canViewBudget || canRequestBudget
+          ? client.from("finance_account_funding_requests").select("*").eq("organization_id", organizationId).order("requested_at", { ascending: false })
+          : emptyFinanceRequest(),
+        expenseAccountsRequest,
+        fundingRequestAccountsRequest,
       ]);
       const failed = requests.find((request) => request.error);
       if (failed?.error) {
@@ -2104,33 +2153,53 @@ export function FinanceWorkspace({
       setAccountFundingEntries((requests[12].data ?? []) as Row[]);
       setPendingQuotationPayments((requests[13].data ?? []) as Row[]);
       setQuotationPaymentRecords((requests[14].data ?? []) as Row[]);
+      setBudgetSnapshot(((requests[17].data ?? []) as Row[])[0] ?? null);
+      setBudgetPeriods((requests[18].data ?? []) as Row[]);
+      setBudgetGrants((requests[19].data ?? []) as Row[]);
+      setAccountBudgetAllocations((requests[20].data ?? []) as Row[]);
+      setAccountFundingRequests((requests[21].data ?? []) as Row[]);
+      setExpenseAccounts((requests[22].data ?? []) as Row[]);
+      setFundingRequestAccounts((requests[23].data ?? []) as Row[]);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Finance data could not load.");
     } finally {
       setHasLoadedOnce(true);
       setLoading(false);
     }
-  }, [client, internal, organizationId]);
+  }, [budgetOnly, canRequestBudget, canViewBudget, client, internal, organizationId]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
   useEffect(() => {
-    const realtimeTables = [
-      "finance_transactions",
-      "finance_categories",
-      "finance_accounts",
-      "finance_account_funding_entries",
-      "finance_budget_requests",
-      "supplier_payables",
-      "commission_summary_allocations",
-      "quotation_payment_records",
-      "leads",
-      "quotations",
-      "suppliers",
-      "profiles",
-    ];
+    const realtimeTables = budgetOnly
+      ? [
+          "finance_budget_periods",
+          "finance_budget_grants",
+          "finance_account_budget_allocations",
+          "finance_account_funding_requests",
+          "finance_account_budget_allocation_events",
+          "profiles",
+        ]
+      : [
+          "finance_transactions",
+          "finance_categories",
+          "finance_accounts",
+          "finance_account_funding_entries",
+          "finance_budget_periods",
+          "finance_budget_grants",
+          "finance_account_budget_allocations",
+          "finance_account_funding_requests",
+          "finance_account_budget_allocation_events",
+          "supplier_payables",
+          "commission_summary_allocations",
+          "quotation_payment_records",
+          "leads",
+          "quotations",
+          "suppliers",
+          "profiles",
+        ];
     const scheduleRefresh = () => {
       if (financeRefreshTimer.current) {
         window.clearTimeout(financeRefreshTimer.current);
@@ -2156,7 +2225,7 @@ export function FinanceWorkspace({
       }
       void client.removeChannel(channel);
     };
-  }, [client, load, organizationId]);
+  }, [budgetOnly, client, load, organizationId]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setCurrentTime(Date.now()), 60_000);
@@ -2171,6 +2240,14 @@ export function FinanceWorkspace({
   const activeAccounts = useMemo(
     () => accounts.filter((account) => Boolean(account.is_active)),
     [accounts],
+  );
+  const availableExpenseAccountIds = useMemo(
+    () => new Set(expenseAccounts.map((account) => String(account.id))),
+    [expenseAccounts],
+  );
+  const availableExpenseAccounts = useMemo(
+    () => activeAccounts.filter((account) => availableExpenseAccountIds.has(String(account.id))),
+    [activeAccounts, availableExpenseAccountIds],
   );
 
   const categoryOptions = useMemo<SearchableOption[]>(
@@ -2194,16 +2271,19 @@ export function FinanceWorkspace({
         };
       });
 
-      if (transactionDirection !== "expense") return options;
+      if (transactionDirection === "expense") {
+        const groupOrder: Record<string, number> = {
+          "Operating expenses": 0,
+          "Non-operating expenses": 1,
+        };
+        options.sort((left, right) => (groupOrder[left.groupLabel ?? ""] ?? 2) - (groupOrder[right.groupLabel ?? ""] ?? 2));
+      }
 
-      const groupOrder: Record<string, number> = {
-        "Operating expenses": 0,
-        "Non-operating expenses": 1,
-      };
-
-      return options.sort((left, right) => (groupOrder[left.groupLabel ?? ""] ?? 2) - (groupOrder[right.groupLabel ?? ""] ?? 2));
+      return canCreateCategory
+        ? [...options, { value: addCategoryOptionValue, label: "+ Add new category", searchText: "add create category", groupLabel: "Actions" }]
+        : options;
     },
-    [activeCategories, isStandaloneExternalIncome, transactionDirection],
+    [activeCategories, canCreateCategory, isStandaloneExternalIncome, transactionDirection],
   );
 
   const leadOptions = useMemo(
@@ -2223,7 +2303,12 @@ export function FinanceWorkspace({
   );
 
   const categoryName = useCallback((categoryId: unknown) => stringValue(categories.find((category) => category.id === categoryId), "name", "Uncategorized"), [categories]);
-  const accountName = useCallback((accountId: unknown) => stringValue(accounts.find((account) => account.id === accountId), "account_name", "—"), [accounts]);
+  const accountName = useCallback((accountId: unknown) => {
+    const account = accounts.find((row) => String(row.id) === String(accountId))
+      ?? fundingRequestAccounts.find((row) => String(row.id) === String(accountId))
+      ?? accountBudgetAllocations.find((row) => String(row.account_id) === String(accountId));
+    return stringValue(account, "account_name", "—");
+  }, [accountBudgetAllocations, accounts, fundingRequestAccounts]);
   const leadName = useCallback((leadId: unknown) => stringValue(leads.find((lead) => lead.id === leadId), "client_name", "—"), [leads]);
   const supplierName = useCallback((supplierId: unknown) => stringValue(suppliers.find((supplier) => supplier.id === supplierId), "company_name", "—"), [suppliers]);
   const quotationName = useCallback((quotationId: unknown) => stringValue(quotations.find((quotation) => quotation.id === quotationId), "quotation_no", "—"), [quotations]);
@@ -2272,12 +2357,12 @@ export function FinanceWorkspace({
   }), [commissionAllocations, currentTime, quotations, verifiedPaymentByQuotation, verifiedPaymentTotalsByQuotation]);
 
   const accountOptions = useMemo<SearchableOption[]>(
-    () => activeAccounts.map((account) => ({
+    () => (transactionDirection === "expense" && !internal ? availableExpenseAccounts : activeAccounts).map((account) => ({
       value: String(account.id),
       label: stringValue(account, "account_name"),
       searchText: [stringValue(account, "account_name"), stringValue(account, "account_number"), stringValue(account, "account_type"), financePaymentMethodLabel(account.payment_method)].join(" "),
     })),
-    [activeAccounts],
+    [activeAccounts, availableExpenseAccounts, internal, transactionDirection],
   );
 
   const supplierOptions = useMemo<SearchableOption[]>(
@@ -2302,7 +2387,7 @@ export function FinanceWorkspace({
     () => quotationOptions.map((option) => {
       const quotation = quotations.find((item) => String(item.id) === option.value);
       const lead = leads.find((item) => String(item.id) === String(quotation?.lead_id));
-      const label = financeProjectLabel(quotation, lead, "Quotation");
+      const label = financeProjectLabel(quotation, lead, "Project");
       return { ...option, label, searchText: [label, option.searchText].join(" ") };
     }),
     [leads, quotationOptions, quotations],
@@ -2313,7 +2398,7 @@ export function FinanceWorkspace({
       const projectName = stringValue(project, "project_name") || stringValue(project, "client_name", "Unnamed project");
       const clientName = stringValue(project, "client_name", "Client not set");
       const clientContactName = stringValue(project, "client_contact_name");
-      const quotationNo = stringValue(project, "quotation_no", "Quotation");
+      const quotationNo = stringValue(project, "quotation_no", "Project");
       return {
         value: `quotation:${String(project.quotation_id)}`,
         label: `${projectName} · ${quotationNo}`,
@@ -2343,7 +2428,7 @@ export function FinanceWorkspace({
     () => quotationPaymentOptions.map((option) => {
       const quotation = quotations.find((item) => String(item.id) === option.value);
       const lead = leads.find((item) => String(item.id) === String(quotation?.lead_id));
-      const label = financeProjectLabel(quotation, lead, "Quotation");
+      const label = financeProjectLabel(quotation, lead, "Project");
       return { ...option, label, searchText: [label, option.searchText].join(" ") };
     }),
     [leads, quotationPaymentOptions, quotations],
@@ -2529,9 +2614,13 @@ export function FinanceWorkspace({
     [transactionView],
   );
 
-  const budgetPageCount = Math.max(1, Math.ceil(budgets.length / TABLE_PAGE_SIZE));
+  const currentBudgetPeriodId = String(budgetSnapshot?.period_id ?? "");
+  const currentBudgetPeriod = budgetPeriods.find((period) => String(period.id) === currentBudgetPeriodId) ?? null;
+  const currentBudgetGrants = budgetGrants.filter((grant) => !currentBudgetPeriodId || String(grant.period_id) === currentBudgetPeriodId);
+  const currentAccountAllocations = accountBudgetAllocations.filter((allocation) => !currentBudgetPeriodId || String(allocation.period_id) === currentBudgetPeriodId);
+  const budgetPageCount = Math.max(1, Math.ceil(accountFundingRequests.length / TABLE_PAGE_SIZE));
   const activeBudgetPage = Math.min(budgetPage, budgetPageCount);
-  const visibleBudgets = budgets.slice(
+  const visibleFundingRequests = accountFundingRequests.slice(
     (activeBudgetPage - 1) * TABLE_PAGE_SIZE,
     activeBudgetPage * TABLE_PAGE_SIZE,
   );
@@ -2608,14 +2697,14 @@ export function FinanceWorkspace({
   const awaitingConfirmationAmount = pendingApprovalTransactions.reduce((total, transaction) => total + numericValue(transaction, "amount"), 0)
     + overviewQuotationPaymentRows.reduce((total, payment) => stringValue(payment, "status") === "pending" ? total + numericValue(payment, "amount") : total, 0);
   const pendingBudgetRows = useMemo(
-    () => budgets.filter((budget) => stringValue(budget, "status") === "pending"),
-    [budgets],
+    () => accountFundingRequests.filter((request) => stringValue(request, "status") === "pending"),
+    [accountFundingRequests],
   );
   const pendingApprovalRows = useMemo<PendingApprovalRow[]>(() => {
     const quotationRows: PendingApprovalRow[] = pendingQuotationPaymentRows.map((payment) => {
       const quotation = quotations.find((item) => item.id === payment.quotation_id);
       const lead = leads.find((item) => item.id === quotation?.lead_id);
-      const quotationNo = stringValue(quotation, "quotation_no", "Price Quotation");
+      const quotationNo = stringValue(quotation, "quotation_no", "Project");
       const client = stringValue(lead, "client_name", stringValue(quotation, "client_name", "Client"));
       const project = stringValue(quotation, "project_name", "");
       return {
@@ -2625,7 +2714,7 @@ export function FinanceWorkspace({
         date: payment.paid_at ?? payment.submitted_at ?? payment.created_at,
         description: uniqueTextParts([quotationNo, client, project]).join(" · "),
         note: stringValue(payment, "notes") || stringValue(payment, "correction_note") || "-",
-        source: "Quotation payment",
+        source: "Project payment",
         amount: numericValue(payment, "amount"),
         accountId: stringValue(payment, "finance_account_id"),
         status: "pending_confirmation",
@@ -2671,7 +2760,7 @@ export function FinanceWorkspace({
       : null,
     [pendingApprovalRows, selectedApprovalKey],
   );
-  const pendingApprovalCount = pendingApprovalRows.length + pendingBudgetRows.length;
+  const pendingApprovalCount = pendingApprovalRows.length + (canManageBudget ? pendingBudgetRows.length : 0);
   const pendingApprovalIncomeCount = pendingApprovalRows.filter((row) => row.direction === "income").length;
   const pendingApprovalExpenseCount = pendingApprovalRows.filter((row) => row.direction === "expense").length;
 
@@ -2811,47 +2900,24 @@ export function FinanceWorkspace({
     [transactionPayables],
   );
   const approvedBudgetTotal = useMemo(
-    () => budgets.reduce((total, budget) => stringValue(budget, "status") === "approved" ? total + numericValue(budget, "amount") : total, 0),
-    [budgets],
+    () => numericValue(budgetSnapshot, "total_granted"),
+    [budgetSnapshot],
   );
-  const budgetMetrics = useMemo(() => {
-    const map = new Map<string, { used: number; committed: number; remaining: number }>();
-    budgets.forEach((budget) => {
-      let used = 0;
-      let committed = 0;
-      transactions.forEach((transaction) => {
-        if (
-          transaction.budget_request_id !== budget.id
-          || Boolean(transaction.is_voided)
-          || stringValue(transaction, "transaction_type") !== "expense"
-          || ["rejected", "revision_requested", "cancelled"].includes(stringValue(transaction, "approval_status"))
-        ) return;
-        if (stringValue(transaction, "payment_status") === "paid" && stringValue(transaction, "approval_status") === "approved") {
-          used += numericValue(transaction, "amount");
-        } else {
-          committed += numericValue(transaction, "amount");
-        }
-      });
-      const remaining = Math.max(numericValue(budget, "amount") - used - committed, 0);
-      map.set(String(budget.id), { used, committed, remaining });
-    });
-    return map;
-  }, [budgets, transactions]);
   const approvedBudgetRemainingTotal = useMemo(
-    () => budgets.reduce((total, budget) => stringValue(budget, "status") === "approved" ? total + (budgetMetrics.get(String(budget.id))?.remaining ?? numericValue(budget, "amount")) : total, 0),
-    [budgetMetrics, budgets],
+    () => numericValue(budgetSnapshot, "remaining_amount"),
+    [budgetSnapshot],
   );
   const approvedBudgetUsedTotal = useMemo(
-    () => [...budgetMetrics.values()].reduce((total, metric) => total + metric.used, 0),
-    [budgetMetrics],
+    () => numericValue(budgetSnapshot, "used_amount"),
+    [budgetSnapshot],
   );
   const approvedBudgetCommittedTotal = useMemo(
-    () => [...budgetMetrics.values()].reduce((total, metric) => total + metric.committed, 0),
-    [budgetMetrics],
+    () => numericValue(budgetSnapshot, "committed_amount"),
+    [budgetSnapshot],
   );
   const approvedBudgetConsumedTotal = approvedBudgetUsedTotal + approvedBudgetCommittedTotal;
   const approvedBudgetUsagePercent = approvedBudgetTotal > 0
-    ? Math.min(100, Math.round((approvedBudgetConsumedTotal / approvedBudgetTotal) * 100))
+    ? Math.min(100, Math.round((approvedBudgetConsumedTotal / Math.max(numericValue(budgetSnapshot, "total_allocated"), 0.01)) * 100))
     : 0;
   const budgetLabel = useCallback((budgetId: unknown) => {
     if (!budgetId) return "";
@@ -2942,7 +3008,7 @@ export function FinanceWorkspace({
     }, [activeAccounts, selectedQuotationPayment, transactionValues.payment_kind],
   );
   const transactionDialogTitle = quotationPaymentMode
-    ? selectedQuotationPaymentRevision ? "Resubmit quotation receipt" : "Record quotation payment"
+    ? selectedQuotationPaymentRevision ? "Resubmit project receipt" : "Record project payment"
     : manualIncomeMode
       ? "Record Cash In"
       : manualIncomeRevisionMode
@@ -2955,19 +3021,19 @@ export function FinanceWorkspace({
                 ? "Submit project expense"
             : "Submit Cash Out";
   const transactionDialogDetail = quotationPaymentMode
-    ? "Submit a client receipt for an approved quotation. Internal Finance verifies it before it becomes Cash In."
+    ? "Submit a client receipt for an approved project. Internal Finance verifies it before it becomes Cash In."
     : manualIncomeMode
       ? "Submit other income for Internal Finance verification. The account balance updates only after verification."
       : manualIncomeRevisionMode
         ? "Correct the returned Cash In and resubmit it for Internal Finance verification."
         : revisionTransaction
           ? legacyLeadOnlyRevision
-            ? "This returned lead-linked Cash Out will be resubmitted as a regular expense unless you choose an approved project quotation."
+            ? "This returned lead-linked Cash Out will be resubmitted as a regular expense unless you choose an approved project."
             : "Correct the returned fields and resubmit this Cash Out for Internal Finance review."
           : commissionPayoutMode
-            ? "Create a controlled commission payout after full quotation payment and the three-day hold."
+            ? "Create a controlled commission payout after full project payment and the three-day hold."
             : projectExpenseMode
-              ? "Link this Cash Out to an approved quotation; the remaining direct-cost capacity limits the amount you can submit."
+              ? "Link this Cash Out to an approved project; the remaining direct-cost capacity limits the amount you can submit."
             : supplierPaymentMode
               ? "Submit a supplier payment for Internal Finance approval."
               : "Submit a regular expense for Internal Finance approval.";
@@ -3084,6 +3150,8 @@ export function FinanceWorkspace({
     setRevisionTransaction(null);
     setCashInSource("other_income");
     setTransactionFile(null);
+    setCategoryCreateOpen(false);
+    setCategoryCreateMessage(null);
   };
 
   const openRevisionEditor = (transaction: Row) => {
@@ -3144,8 +3212,8 @@ export function FinanceWorkspace({
     const quotation = selectedQuotationPayment;
     const amount = Number(transactionValues.amount);
     const accountIsEligible = quotationPaymentAccountOptions.some((option) => option.value === transactionValues.account_id);
-    if (!quotation) return setErrorMessage("Choose the approved quotation for this Cash In.");
-    if (!transactionValues.payment_kind || !["downpayment", "full_payment"].includes(transactionValues.payment_kind)) return setErrorMessage("Choose a valid quotation payment type.");
+    if (!quotation) return setErrorMessage("Choose the approved project for this Cash In.");
+    if (!transactionValues.payment_kind || !["downpayment", "full_payment"].includes(transactionValues.payment_kind)) return setErrorMessage("Choose a valid project payment type.");
     if (!Number.isFinite(amount) || amount <= 0) return setErrorMessage("Enter a payment amount greater than zero.");
     if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(transactionValues.transaction_date)) return setErrorMessage("Choose a valid paid date.");
     if (!transactionValues.account_id || !accountIsEligible) return setErrorMessage("Choose an active Finance receiving account.");
@@ -3171,11 +3239,11 @@ export function FinanceWorkspace({
       });
       const payload = await response.json().catch(() => ({} as Record<string, unknown>)) as Record<string, unknown>;
       if (!response.ok) throw new Error(typeof payload.error === "string" ? payload.error : "The payment receipt could not be submitted.");
-      setMessage(selectedQuotationPaymentRevision ? "Quotation payment receipt resubmitted for Internal Finance verification." : "Quotation payment receipt submitted for Internal Finance verification.");
+      setMessage(selectedQuotationPaymentRevision ? "Project payment receipt resubmitted for Internal Finance verification." : "Project payment receipt submitted for Internal Finance verification.");
       closeTransactionForm();
       await load();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "The quotation payment receipt could not be submitted.");
+      setErrorMessage(error instanceof Error ? error.message : "The project payment receipt could not be submitted.");
     } finally {
       setSaving(false);
     }
@@ -3193,7 +3261,7 @@ export function FinanceWorkspace({
     if (!internal && !manualIncomeMode && !manualIncomeRevisionMode && (transactionDirection !== "expense" || !canSubmitExpense)) return setErrorMessage("External Finance can submit Cash Out or standalone Cash In.");
     if (!internal && transactionValues.payment_status !== "unpaid") return setErrorMessage("External Finance submissions must remain unpaid until Internal Finance confirms the payment.");
     if (supplierPaymentMode && !transactionValues.supplier_payable_id) return setErrorMessage("Choose an open supplier payable.");
-    if (projectExpenseMode && (!transactionValues.quotation_id || !selectedProjectExpense || !selectedProjectExpenseCapacity)) return setErrorMessage("Choose an approved quotation with direct-cost capacity for this project expense.");
+    if (projectExpenseMode && (!transactionValues.quotation_id || !selectedProjectExpense || !selectedProjectExpenseCapacity)) return setErrorMessage("Choose an approved project with direct-cost capacity for this project expense.");
     const enteredAmount = Number(transactionValues.amount);
     if (!transactionValues.amount || !Number.isFinite(enteredAmount) || enteredAmount <= 0) return setErrorMessage("Enter an amount greater than zero.");
     if (projectExpenseMode && selectedProjectExpenseCapacity && exceedsProjectExpenseLimit(enteredAmount, selectedProjectExpenseCapacity.availableToExpense)) {
@@ -3204,7 +3272,7 @@ export function FinanceWorkspace({
     if (revisionTransaction && selectedAllocation) return setErrorMessage("Commission payouts cannot be resubmitted through this workflow.");
     if (internal && (!selectedAllocation || transactionDirection !== "expense")) return setErrorMessage("Internal Finance can create Cash Out only through an eligible commission payout.");
     if (transactionValues.commission_allocation_id && !selectedAllocation) return setErrorMessage("That commission allocation is not yet eligible for payment.");
-    if (!revisionTransaction && !internal && transactionDirection === "expense" && !selectedAllocation && Number(transactionValues.amount) > approvedBudgetRemainingTotal + 0.001) return setErrorMessage(`This expense is higher than the available budget of ${peso.format(approvedBudgetRemainingTotal)}. Request a new budget before submitting it.`);
+    if (!revisionTransaction && !internal && transactionDirection === "expense" && !selectedAllocation && !availableExpenseAccountIds.has(transactionValues.account_id)) return setErrorMessage("This account has no available budget. Ask Internal Finance to fund or reallocate this account.");
     setSaving(true);
     const transactionId = crypto.randomUUID();
     const receiptRevisionId = submittedFile ? crypto.randomUUID() : null;
@@ -3311,19 +3379,37 @@ export function FinanceWorkspace({
     }
   };
 
+  const openCategoryCreate = () => {
+    setCategoryCreateMessage(null);
+    setCategoryCreateOpen(true);
+  };
+
+  const closeCategoryCreate = () => {
+    setCategoryCreateOpen(false);
+    setCategoryCreateMessage(null);
+    setCategoryDraft({ name: "", expense_class: "operating" });
+  };
+
+  const handleCategoryChange = (value: string) => {
+    if (value === addCategoryOptionValue) return openCategoryCreate();
+    setTransactionValues((current) => ({ ...current, category_id: value }));
+  };
+
   const saveCategory = async () => {
-    if (!internal) return setErrorMessage("Only Internal Finance can manage finance categories.");
+    if (!canCreateCategory) return setErrorMessage("Only Internal or External Finance can manage finance categories.");
     if (!transactionDirection || !categoryDraft.name.trim()) return setErrorMessage("Enter a category name.");
+    setCategoryCreateMessage(null);
     setSaving(true);
-    const { error } = await client.rpc("create_finance_category", {
+    const { data, error } = await client.rpc("create_finance_category", {
       p_direction: transactionDirection,
       p_name: categoryDraft.name.trim(),
       p_expense_class: transactionDirection === "expense" ? categoryDraft.expense_class : null,
     });
     setSaving(false);
     if (error) return setErrorMessage(error.message);
-    setCategoryDraft({ name: "", expense_class: "operating" });
-    setMessage("Category added.");
+    setCategoryDraft((current) => ({ ...current, name: "" }));
+    setCategoryCreateMessage("Category added. You can add another.");
+    if (data) setTransactionValues((current) => ({ ...current, category_id: String(data) }));
     await load();
   };
 
@@ -3479,18 +3565,19 @@ export function FinanceWorkspace({
     await load();
   };
 
-  const openBudgetRequest = () => {
+  const openFundingRequest = () => {
     setBudgetRevision(null);
-    setBudgetValues({ amount: "", note: "" });
+    setBudgetValues({ account_id: "", amount: "", note: "" });
     setBudgetOpen(true);
   };
 
-  const openBudgetRevision = (budget: Row) => {
-    if (internal || stringValue(budget, "status") !== "revision_requested") return;
-    setBudgetRevision(budget);
+  const openFundingRequestRevision = (request: Row) => {
+    if (internal || stringValue(request, "status") !== "revision_requested") return;
+    setBudgetRevision(request);
     setBudgetValues({
-      amount: numericValue(budget, "amount").toFixed(2),
-      note: stringValue(budget, "note"),
+      account_id: String(request.account_id ?? ""),
+      amount: numericValue(request, "requested_amount").toFixed(2),
+      note: stringValue(request, "note"),
     });
     setBudgetOpen(true);
   };
@@ -3498,33 +3585,91 @@ export function FinanceWorkspace({
   const closeBudgetForm = () => {
     setBudgetOpen(false);
     setBudgetRevision(null);
-    setBudgetValues({ amount: "", note: "" });
+    setBudgetValues({ account_id: "", amount: "", note: "" });
   };
 
-  const saveBudget = async () => {
-    if (!budgetValues.amount || Number(budgetValues.amount) <= 0) return setErrorMessage("Enter a budget amount greater than zero.");
+  const saveFundingRequest = async () => {
+    if (!budgetValues.account_id) return setErrorMessage("Choose the Finance account that needs funding.");
+    if (!budgetValues.amount || Number(budgetValues.amount) <= 0) return setErrorMessage("Enter a funding request amount greater than zero.");
     setSaving(true);
     try {
       const result = budgetRevision
-        ? await client.rpc("resubmit_finance_budget_request", {
+        ? await client.rpc("resubmit_finance_account_funding_request", {
             p_request_id: budgetRevision.id,
-            p_amount: Number(budgetValues.amount),
+            p_account_id: budgetValues.account_id,
+            p_requested_amount: Number(budgetValues.amount),
             p_note: budgetValues.note.trim() || null,
+            p_organization_id: organizationId,
           })
-        : await client.rpc("create_finance_budget_request", {
-            p_amount: Number(budgetValues.amount),
+        : await client.rpc("create_finance_account_funding_request", {
+            p_account_id: budgetValues.account_id,
+            p_requested_amount: Number(budgetValues.amount),
             p_note: budgetValues.note.trim() || null,
+            p_organization_id: organizationId,
           });
       if (result.error) throw result.error;
       const wasRevision = Boolean(budgetRevision);
       closeBudgetForm();
-      setMessage(wasRevision ? "Budget request resubmitted for Internal Finance review." : "Budget request submitted.");
+      setMessage(wasRevision ? "Account funding request resubmitted for Internal Finance review." : "Account funding request submitted.");
       await load();
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "The budget request could not be saved.");
+      setErrorMessage(error instanceof Error ? error.message : "The account funding request could not be saved.");
     } finally {
       setSaving(false);
     }
+  };
+
+  const openBudgetGrant = () => {
+    setGrantValues({ amount: "", note: "" });
+    setGrantOpen(true);
+  };
+
+  const saveBudgetGrant = async () => {
+    if (!grantValues.amount || Number(grantValues.amount) <= 0) return setErrorMessage("Enter a budget amount greater than zero.");
+    setSaving(true);
+    const { error } = await client.rpc("create_finance_budget_grant", {
+      p_amount: Number(grantValues.amount),
+      p_grant_type: currentBudgetGrants.length ? "top_up" : "initial",
+      p_note: grantValues.note.trim() || null,
+      p_organization_id: organizationId,
+    });
+    setSaving(false);
+    if (error) return setErrorMessage(error.message);
+    setGrantOpen(false);
+    setGrantValues({ amount: "", note: "" });
+    setMessage(currentBudgetGrants.length ? "GM budget top-up added to this month." : "GM monthly budget approved.");
+    await load();
+  };
+
+  const openBudgetAllocation = (mode: "allocate" | "reallocate" = "allocate", fromAccountId = "") => {
+    setAllocationMode(mode);
+    setAllocationValues({ from_account_id: fromAccountId, to_account_id: "", amount: "", note: "" });
+    setAllocationOpen(true);
+  };
+
+  const saveBudgetAllocation = async () => {
+    if (!canManageBudget) return setErrorMessage("Only Internal Finance can allocate or reallocate budget.");
+    if (!allocationValues.amount || Number(allocationValues.amount) <= 0) return setErrorMessage("Enter an allocation amount greater than zero.");
+    setSaving(true);
+    const result = allocationMode === "reallocate"
+      ? await client.rpc("reallocate_finance_account_budget", {
+          p_from_account_id: allocationValues.from_account_id,
+          p_to_account_id: allocationValues.to_account_id,
+          p_amount: Number(allocationValues.amount),
+          p_note: allocationValues.note.trim() || null,
+          p_organization_id: organizationId,
+        })
+      : await client.rpc("allocate_finance_account_budget", {
+          p_account_id: allocationValues.to_account_id,
+          p_amount: Number(allocationValues.amount),
+          p_note: allocationValues.note.trim() || null,
+          p_organization_id: organizationId,
+        });
+    setSaving(false);
+    if (result.error) return setErrorMessage(result.error.message);
+    setAllocationOpen(false);
+    setMessage(allocationMode === "reallocate" ? "Budget reallocated between active accounts." : "Budget allocated to the Finance account.");
+    await load();
   };
 
   const approveAndPay = async (transactionId: string, decisionNote: string | null = null) => {
@@ -3607,7 +3752,7 @@ export function FinanceWorkspace({
       setErrorMessage(error.message);
       return false;
     }
-    setMessage(decision === "verified" ? "Quotation payment verified and posted as Cash In." : decision === "revision_requested" ? "Quotation payment returned to External Finance for correction." : "Quotation payment rejected.");
+    setMessage(decision === "verified" ? "Project payment verified and posted as Cash In." : decision === "revision_requested" ? "Project payment returned to External Finance for correction." : "Project payment rejected.");
     await load();
     return true;
   };
@@ -3695,15 +3840,20 @@ export function FinanceWorkspace({
     });
     setSaving(false);
     if (error) return setErrorMessage(error.message);
-    setMessage("Quotation payment receiving account updated.");
+    setMessage("Project payment receiving account updated.");
     await load();
   };
 
-  const reviewBudget = async (requestId: string, decision: BudgetDecision, decisionNote: string | null = null) => {
+  const reviewFundingRequest = async (requestId: string, decision: BudgetDecision, approvedAmount: number | null = null, decisionNote: string | null = null) => {
+    if (!canManageBudget) {
+      setErrorMessage("Only Internal Finance can review account funding requests.");
+      return false;
+    }
     setSaving(true);
-    const { error } = await client.rpc("review_finance_budget_request", {
+    const { error } = await client.rpc("review_finance_account_funding_request", {
       p_request_id: requestId,
       p_decision: decision,
+      p_approved_amount: approvedAmount,
       p_decision_note: decisionNote,
     });
     setSaving(false);
@@ -3711,9 +3861,34 @@ export function FinanceWorkspace({
       setErrorMessage(error.message);
       return false;
     }
-    setMessage(decision === "revision_requested" ? "Budget request returned for revision." : `Budget request ${decision}.`);
+    setMessage(decision === "revision_requested" ? "Account funding request returned for revision." : `Account funding request ${decision}.`);
     await load();
     return true;
+  };
+
+  const requestFundingReview = (request: Row, decision: BudgetDecision) => {
+    if (!canManageBudget) return;
+    if (decision === "approved") {
+      setFundingReviewRequest(request);
+      setFundingApprovedAmount(numericValue(request, "requested_amount").toFixed(2));
+      setFundingReviewNote("");
+      return;
+    }
+    setDecisionNote("");
+    setPendingAction({ kind: "funding_request", id: String(request.id), decision, label: "account funding request" });
+  };
+
+  const submitFundingApproval = async () => {
+    if (!fundingReviewRequest) return;
+    const approvedAmount = Number(fundingApprovedAmount);
+    if (!Number.isFinite(approvedAmount) || approvedAmount <= 0) return setErrorMessage("Enter an approved amount greater than zero.");
+    if (approvedAmount > numericValue(fundingReviewRequest, "requested_amount") + 0.001) return setErrorMessage("The approved amount cannot exceed the requested amount.");
+    const succeeded = await reviewFundingRequest(String(fundingReviewRequest.id), "approved", approvedAmount, fundingReviewNote.trim() || null);
+    if (succeeded) {
+      setFundingReviewRequest(null);
+      setFundingApprovedAmount("");
+      setFundingReviewNote("");
+    }
   };
 
   const requestApproveAndPay = (transactionId: string) => {
@@ -3728,7 +3903,7 @@ export function FinanceWorkspace({
 
   const requestQuotationPaymentReview = (paymentId: string, decision: QuotationPaymentDecision) => {
     setDecisionNote("");
-    setPendingAction({ kind: "quotation_payment", id: paymentId, decision, label: "quotation payment receipt" });
+    setPendingAction({ kind: "quotation_payment", id: paymentId, decision, label: "project payment receipt" });
   };
 
   const requestVerifyIncome = (transactionId: string) => {
@@ -3744,11 +3919,6 @@ export function FinanceWorkspace({
   const requestVoidManualIncome = (transactionId: string) => {
     setDecisionNote("");
     setPendingAction({ kind: "income_void", id: transactionId, label: "Cash In" });
-  };
-
-  const requestBudgetReview = (requestId: string, decision: BudgetDecision) => {
-    setDecisionNote("");
-    setPendingAction({ kind: "budget", id: requestId, decision, label: "budget request" });
   };
 
   const requestMarkPaid = (transactionId: string, label = "transaction") => {
@@ -3773,14 +3943,13 @@ export function FinanceWorkspace({
 
   const confirmPendingAction = async () => {
     if (!pendingAction) return;
-    const isBudgetRevision = pendingAction.kind === "budget" && pendingAction.decision === "revision_requested";
+    const isFundingRequestDecision = pendingAction.kind === "funding_request";
     const requiresNote = pendingAction.kind === "funding"
       || pendingAction.kind === "revision"
       || (pendingAction.kind === "quotation_payment" && ["revision_requested", "rejected"].includes(pendingAction.decision))
       || pendingAction.kind === "income_revision"
       || pendingAction.kind === "income_void"
-      || isBudgetRevision
-      || (pendingAction.kind === "budget" && pendingAction.decision === "rejected");
+      || (isFundingRequestDecision && pendingAction.decision !== "approved");
     if (requiresNote && !decisionNote.trim()) {
       setErrorMessage(pendingAction.kind === "funding"
         ? "Add a reason before voiding this funding entry."
@@ -3791,9 +3960,9 @@ export function FinanceWorkspace({
             : pendingAction.kind === "income_void"
               ? "Add a reason before reversing Cash In."
               : pendingAction.kind === "quotation_payment"
-                ? pendingAction.decision === "revision_requested" ? "Add a correction reason before returning this quotation payment receipt." : "Add a reason before rejecting this quotation payment receipt."
-          : isBudgetRevision
-            ? "Add a reason before returning this budget request for revision."
+                ? pendingAction.decision === "revision_requested" ? "Add a correction reason before returning this project payment receipt." : "Add a reason before rejecting this project payment receipt."
+          : isFundingRequestDecision
+            ? pendingAction.decision === "revision_requested" ? "Add a reason before returning this account funding request for revision." : "Add a reason before rejecting this account funding request."
             : "Add a decision note before rejecting this request.");
       return;
     }
@@ -3810,8 +3979,8 @@ export function FinanceWorkspace({
       succeeded = await requestManualIncomeRevision(pendingAction.id, decisionNote.trim());
     } else if (pendingAction.kind === "income_void") {
       succeeded = await voidManualIncome(pendingAction.id, decisionNote.trim());
-    } else if (pendingAction.kind === "budget") {
-      succeeded = await reviewBudget(pendingAction.id, pendingAction.decision, decisionNote.trim() || null);
+    } else if (pendingAction.kind === "funding_request") {
+      succeeded = await reviewFundingRequest(pendingAction.id, pendingAction.decision, null, decisionNote.trim() || null);
     } else if (pendingAction.kind === "funding") {
       succeeded = await voidAccountFunding(pendingAction.id, decisionNote.trim());
     } else if (pendingAction.kind === "account") {
@@ -3824,6 +3993,18 @@ export function FinanceWorkspace({
       setDecisionNote("");
       setSelectedApprovalKey(null);
     }
+  };
+
+  // Compatibility bindings keep the historical markup below inert while the
+  // rendered Budget panel uses account funding requests.
+  const visibleBudgets = budgets.slice(
+    (activeBudgetPage - 1) * TABLE_PAGE_SIZE,
+    activeBudgetPage * TABLE_PAGE_SIZE,
+  );
+  const openBudgetRevision = openFundingRequestRevision;
+  const requestBudgetReview = (requestId: string, decision: BudgetDecision) => {
+    const request = accountFundingRequests.find((item) => String(item.id) === requestId);
+    if (request) requestFundingReview(request, decision);
   };
 
   const openReceipt = async (path: string, bucket = "finance-receipts") => {
@@ -3870,7 +4051,7 @@ export function FinanceWorkspace({
 
   return (
     <div className="space-y-5">
-      {!overviewOnly && !reportOnly && (
+      {!overviewOnly && !reportOnly && !initialTab && !budgetOnly && !["internal_finance", "external_finance"].includes(role) && (
         <div className="flex flex-wrap items-center gap-3">
           <nav className="app-tabs min-w-0 flex-1" aria-label="Finance sections">
             {financeTabs.map(([value, label]) => (
@@ -3897,10 +4078,10 @@ export function FinanceWorkspace({
       )}
 
       {loading && !hasLoadedOnce ? <FinanceLoadingState cardCount={internal ? 5 : 4} /> : <>
-      {tab === "reports" && reportOnly && (
-        <MonthlyFinanceReport transactions={transactions} quotationPayments={overviewQuotationPaymentRows} />
+      {tab === "reports" && reportOnly && !budgetOnly && (
+        <MonthlyFinanceReport transactions={transactions} />
       )}
-      {tab === "overview" && (
+      {tab === "overview" && !budgetOnly && (
         <>
           {internal ? (
             <div className="space-y-4">
@@ -3915,7 +4096,7 @@ export function FinanceWorkspace({
                   <FinanceOverviewMetricCard label="Cash In" value={peso.format(periodTotals.income)} color="text-[var(--color-success-text)]" detail={periodLabel} />
                   <FinanceOverviewMetricCard label="Cash Out" value={peso.format(periodTotals.expense)} color="text-[var(--color-danger-text)]" detail={periodLabel} />
                   <FinanceOverviewMetricCard label="Available cash" value={peso.format(currentCashBalance)} color="text-[#202938]" detail="Across Finance accounts" />
-                  <FinanceOverviewMetricCard label="Open receivables" value={peso.format(openQuotationReceivableBalance)} color="text-[var(--color-success-text)]" detail="Remaining from approved quotations" />
+                  <FinanceOverviewMetricCard label="Open receivables" value={peso.format(openQuotationReceivableBalance)} color="text-[var(--color-success-text)]" detail="Remaining from approved projects" />
                   <FinanceOverviewMetricCard label="Open payables" value={peso.format(openSupplierBalance + openCommissionBalance + openLedgerPayableBalance)} color="text-[var(--color-danger-text)]" detail="Awaiting settlement" />
                   <FinanceOverviewMetricCard label="Pending approvals" value={String(pendingApprovalCount)} color="text-[var(--color-warning-text)]" detail="Open Finance approval queue" />
                   <FinanceOverviewMetricCard label="Returned for correction" value={String(revisionRequests)} color="text-[#6941c6]" detail={revisionRequests ? `${peso.format(revisionRequestAmount)} returned to External Finance` : "Returned to External Finance"} />
@@ -3934,19 +4115,13 @@ export function FinanceWorkspace({
                 <div className="grid items-stretch gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   <FinanceOverviewMetricCard label="Cash In" value={peso.format(periodTotals.income)} color="text-[var(--color-success-text)]" detail={periodLabel} />
                   <FinanceOverviewMetricCard label="Cash Out" value={peso.format(periodTotals.expense)} color="text-[var(--color-danger-text)]" detail={periodLabel} />
-                  <FinanceOverviewMetricCard label="Available budget" value={peso.format(approvedBudgetRemainingTotal)} color="text-[var(--color-warning-text)]" detail={`${peso.format(approvedBudgetTotal)} approved total`} />
+                  {internal ? <FinanceOverviewMetricCard label="Undistributed budget" value={peso.format(numericValue(budgetSnapshot, "undistributed"))} color="text-[var(--color-warning-text)]" detail={`${peso.format(approvedBudgetTotal)} GM approved`} /> : <FinanceOverviewMetricCard label="Funding requests" value={String(accountFundingRequests.filter((request) => stringValue(request, "status") === "pending").length)} color="text-[var(--color-warning-text)]" detail="Awaiting Internal Finance" />}
                   <FinanceOverviewMetricCard label="Awaiting confirmation" value={String(awaitingConfirmationCount)} color="text-[var(--color-warning-text)]" detail={`${peso.format(awaitingConfirmationAmount)} submitted`} />
                   <FinanceOverviewMetricCard label="Returned for correction" value={String(revisionRequests)} color="text-[#6941c6]" detail={revisionRequests ? `${peso.format(revisionRequestAmount)} returned by Internal Finance` : "Returned by Internal Finance"} />
                 </div>
               </div>
             </div>
           )}
-          <div className="flex justify-end">
-            <Link href="/finance/reports" className={secondaryButton}>
-              <CalendarDays size={14} />
-              Monthly report
-            </Link>
-          </div>
           <Panel title={internal ? "Recent finance activity" : "Recent submissions"} detail={internal ? "Posted and pending finance activity. Pending approvals are handled in Pending approvals." : "Recent Cash In and Cash Out submissions. Confirmation is handled in Internal Finance."}>
             <TransactionTable rows={recentTransactions} categoryName={categoryName} accountName={accountName} leadName={leadName} quotationName={quotationName} budgetLabel={budgetLabel} accounts={activeAccounts} internal={internal} allowActions={false} approveAndPay={requestApproveAndPay} requestRevision={requestTransactionRevisionReview} verifyIncome={requestVerifyIncome} requestIncomeRevision={requestManualIncomeRevisionReview} voidIncome={requestVoidManualIncome} editRevision={openRevisionEditor} markPaid={requestMarkPaid} assignAccount={assignAccount} openReceipt={openReceipt} onSelectTransaction={setSelectedTransaction} saving={saving} />
           </Panel>
@@ -3954,7 +4129,7 @@ export function FinanceWorkspace({
       )}
 
       {tab === "approvals" && internal && (
-        <Panel title="Pending approvals" detail="Review every open Cash In and Cash Out decision in one queue. Quotation receipts become Cash In only after verification; posted ledger history is in Transaction history.">
+        <Panel title="Pending approvals" detail="Review every open Cash In and Cash Out decision in one queue. Project receipts become Cash In only after verification; posted ledger history is in Transaction history.">
           <nav aria-label="Pending Finance approval type" className="app-tabs border-b border-[#edf0f5] px-4 sm:px-5">
             {([
               ["all", "All", pendingApprovalRows.length],
@@ -3968,7 +4143,7 @@ export function FinanceWorkspace({
           <section className="border-b border-[#edf0f5]">
             <div className="px-4 py-4 sm:px-5">
               <h3 className="text-[13px] font-semibold text-[#202938]">Cash In and Cash Out approvals</h3>
-              <p className="mt-1 text-[11px] text-[#7d8797]">Quotation receipts, manual Cash In, and pending Cash Out submissions use the same approval table while their underlying records remain separate.</p>
+              <p className="mt-1 text-[11px] text-[#7d8797]">Project receipts, manual Cash In, and pending Cash Out submissions use the same approval table while their underlying records remain separate.</p>
             </div>
             <PendingApprovalTable
               rows={visiblePendingApprovalRows}
@@ -3981,23 +4156,24 @@ export function FinanceWorkspace({
             />
           </section>
 
-          {pendingBudgetRows.length > 0 && (
+          {canManageBudget && pendingBudgetRows.length > 0 && (
             <section>
               <div className="px-4 py-4 sm:px-5">
-                <h3 className="text-[13px] font-semibold text-[#202938]">Budget requests</h3>
-                <p className="mt-1 text-[11px] text-[#7d8797]">Approve, reject, or return pending budget requests from the same queue.</p>
+                <h3 className="text-[13px] font-semibold text-[#202938]">Account funding requests</h3>
+                <p className="mt-1 text-[11px] text-[#7d8797]">Approve, reject, or return pending account funding requests from the same queue.</p>
               </div>
               <div className="table-shell overflow-x-auto">
-                <table className="app-table w-full min-w-[850px]">
-                  <thead><tr><th>Requested by</th><th>Requested on</th><th>Amount</th><th>Note</th><th>Action</th></tr></thead>
+                <table className="app-table w-full min-w-[960px]">
+                  <thead><tr><th>Account</th><th>Requested by</th><th>Requested on</th><th>Amount</th><th>Note</th><th>Action</th></tr></thead>
                   <tbody>
                     {pendingBudgetRows.map((budget) => (
                       <tr key={String(budget.id)}>
+                        <td>{accountName(budget.account_id)}</td>
                         <td>{financeUserName(budget.requested_by)}</td>
                         <td>{displayDate(budget.requested_at)}</td>
-                        <td className="font-semibold">{peso.format(numericValue(budget, "amount"))}</td>
+                        <td className="font-semibold">{peso.format(numericValue(budget, "requested_amount"))}</td>
                         <td>{stringValue(budget, "note") || "—"}</td>
-                        <td><span className="flex gap-1"><button type="button" disabled={saving} onClick={() => requestBudgetReview(String(budget.id), "rejected")} className="button-danger text-[10px]"><XCircle size={13} /> Reject</button><button type="button" disabled={saving} onClick={() => requestBudgetReview(String(budget.id), "revision_requested")} className="button-secondary text-[10px] text-[#6941c6]"><Undo2 size={13} /> Return</button><button type="button" disabled={saving} onClick={() => requestBudgetReview(String(budget.id), "approved")} className="button-secondary text-[10px] text-[#218b55]"><Check size={13} /> Approve</button></span></td>
+                        <td><span className="flex gap-1"><button type="button" disabled={saving} onClick={() => requestFundingReview(budget, "rejected")} className="button-danger text-[10px]"><XCircle size={13} /> Reject</button><button type="button" disabled={saving} onClick={() => requestFundingReview(budget, "revision_requested")} className="button-secondary text-[10px] text-[#6941c6]"><Undo2 size={13} /> Return</button><button type="button" disabled={saving} onClick={() => requestFundingReview(budget, "approved")} className="button-secondary text-[10px] text-[#218b55]"><Check size={13} /> Approve</button></span></td>
                       </tr>
                     ))}
                   </tbody>
@@ -4010,7 +4186,7 @@ export function FinanceWorkspace({
         </Panel>
       )}
 
-      {tab === "transactions" && (
+      {tab === "transactions" && !budgetOnly && (
         <Panel title="Transaction history" detail={internal ? "Review verified project activity. Pending approvals are handled in Pending approvals." : "Review the finance ledger by Cash In, Cash Out, source, and status."}>
           {!internal && <div className="border-b border-[#edf0f5] px-4 pt-4 sm:px-5">
             <div className="app-tabs overflow-x-auto" role="tablist" aria-label="Transaction type">
@@ -4041,7 +4217,7 @@ export function FinanceWorkspace({
           </div>}
           {internal ? (
             <div className="border-b border-[#edf0f5] p-4 sm:px-5">
-              <label className="relative block max-w-md"><Search size={15} className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]" /><input value={transactionQuery} onChange={(event) => { setTransactionQuery(event.target.value); setTransactionsPage(1); }} className="input mt-0 w-full search-input text-[12px]" placeholder="Search project, client, or quotation" aria-label="Search project transaction history" /></label>
+              <label className="relative block max-w-md"><Search size={15} className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]" /><input value={transactionQuery} onChange={(event) => { setTransactionQuery(event.target.value); setTransactionsPage(1); }} className="input mt-0 w-full search-input text-[12px]" placeholder="Search project or client" aria-label="Search project transaction history" /></label>
             </div>
           ) : (
           <div className="grid gap-2 border-b border-[#edf0f5] p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
@@ -4068,7 +4244,7 @@ export function FinanceWorkspace({
         </Panel>
       )}
 
-      {tab === "accounts" && (
+      {tab === "accounts" && internal && (
         <Panel
           title="Bank and e-wallet accounts"
           detail="Internal Finance manages payment accounts, opening balances, and later account funding. Funding changes cash but is not counted as customer income."
@@ -4139,8 +4315,36 @@ export function FinanceWorkspace({
         </Panel>
       )}
 
-      {tab === "budget" && (
-        <Panel title="Budget" detail="Approved budget requests are consolidated here. Every External Finance Cash Out uses the available approved budget automatically." action={canRequestBudget ? <button type="button" onClick={openBudgetRequest} className={primaryButton}><Plus size={13} /> Request budget</button> : undefined}>
+      {tab === "budget" && (canViewBudget || canRequestBudget) && (
+        <Panel
+          title={canViewBudget ? "Budget & allocations" : "Account funding requests"}
+          detail={canViewBudget ? "The GM approves the monthly spending limit. Internal Finance distributes it across active accounts; allocations stay separate from actual cash." : "Request budget for a specific active account. Internal Finance decides the approved amount from the GM monthly pool."}
+          action={canViewBudget ? <span className="flex flex-wrap gap-2">{canGrantBudget && <button type="button" onClick={openBudgetGrant} className={primaryButton}><Plus size={13} /> {currentBudgetGrants.length ? "Add top-up" : "Add GM budget"}</button>}{canManageBudget && <button type="button" onClick={() => openBudgetAllocation()} className="button-secondary"><Wallet size={13} /> Allocate budget</button>}</span> : <button type="button" onClick={openFundingRequest} className={primaryButton}><Plus size={13} /> Request account funding</button>}
+        >
+          {canViewBudget ? (
+            <>
+              <div className="border-b border-[#edf0f5] p-4 sm:p-5">
+                <FinanceSummaryLayout primaryLabel="Undistributed pool" primaryValue={peso.format(numericValue(budgetSnapshot, "undistributed"))} primaryDetail={currentBudgetPeriod ? `${displayDate(currentBudgetPeriod.period_start)} - ${displayDate(currentBudgetPeriod.period_end)}` : "Current month"}>
+                  <div>
+                    <div className="flex items-baseline justify-between gap-3"><p className="text-[12px] text-[#4f5663]">Account allocation usage</p><p className="text-[11px] font-semibold text-[#687386]">{approvedBudgetUsagePercent}% used or committed</p></div>
+                    <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#edf0f5]" role="progressbar" aria-label="Budget allocation usage" aria-valuemin={0} aria-valuemax={100} aria-valuenow={approvedBudgetUsagePercent}><div className="h-full rounded-full bg-[#c43b43] transition-[width]" style={{ width: `${approvedBudgetUsagePercent}%` }} /></div>
+                    <p className="mt-2 text-[10px] text-[#7d8797]">{peso.format(approvedBudgetConsumedTotal)} of {peso.format(numericValue(budgetSnapshot, "total_allocated"))} distributed</p>
+                    <div className="mt-5 grid gap-x-6 gap-y-5 sm:grid-cols-4"><FinanceSummaryMetric label="GM approved" value={peso.format(approvedBudgetTotal)} color="text-[#a76605]" /><FinanceSummaryMetric label="Distributed" value={peso.format(numericValue(budgetSnapshot, "total_allocated"))} color="text-[#344054]" /><FinanceSummaryMetric label="Used" value={peso.format(approvedBudgetUsedTotal)} color="text-[#b42318]" /><FinanceSummaryMetric label="Committed" value={peso.format(approvedBudgetCommittedTotal)} color="text-[#a76605]" /></div>
+                  </div>
+                </FinanceSummaryLayout>
+              </div>
+              <div className="px-4 py-4 sm:px-5"><h3 className="text-[13px] font-semibold text-[#202938]">Active account allocations</h3><p className="mt-1 text-[11px] text-[#7d8797]">{canManageBudget ? "Only unused and uncommitted allocation can be moved to another active account." : "Internal Finance distributes and reallocates the GM-approved budget."}</p></div>
+              <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[940px]"><thead><tr><th>Account</th><th>Allocated</th><th>Used</th><th>Committed</th><th>Available</th>{canManageBudget && <th>Action</th>}</tr></thead><tbody>{currentAccountAllocations.map((allocation) => <tr key={String(allocation.id)}><td>{stringValue(allocation, "account_name", accountName(allocation.account_id))}</td><td className="font-semibold">{peso.format(numericValue(allocation, "allocated_amount"))}</td><td className="text-[#b42318]">{peso.format(numericValue(allocation, "used_amount"))}</td><td className="text-[#a76605]">{peso.format(numericValue(allocation, "committed_amount"))}</td><td className="font-semibold text-[#218b55]">{peso.format(numericValue(allocation, "available_amount"))}</td>{canManageBudget && <td><button type="button" disabled={saving || numericValue(allocation, "available_amount") <= 0} onClick={() => openBudgetAllocation("reallocate", String(allocation.account_id))} className="button-secondary text-[10px]">Reallocate</button></td>}</tr>)}{!currentAccountAllocations.length && <tr><td colSpan={canManageBudget ? 6 : 5} className="text-center text-[#7d8797]">No account allocations yet. Add a GM budget, then allocate it to active accounts.</td></tr>}</tbody></table></div>
+              <div className="border-t border-[#edf0f5] px-4 py-4 sm:px-5"><h3 className="text-[13px] font-semibold text-[#202938]">Account funding requests</h3><p className="mt-1 text-[11px] text-[#7d8797]">Approval automatically adds the approved amount to the requested account allocation.</p></div>
+            </>
+          ) : <p className="border-b border-[#edf0f5] p-4 text-[12px] leading-[1.5] text-[#4f5663] sm:p-5">Select the account that needs budget and submit the amount. You will see the approved amount and decision without seeing account balances.</p>}
+          <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[980px]"><thead><tr><th>Account</th><th>Requested by</th><th>Requested on</th><th>Requested</th><th>Approved</th><th>Status</th><th>Decision note</th><th>Action</th></tr></thead><tbody>{visibleFundingRequests.map((request) => { const status = stringValue(request, "status"); return <tr key={String(request.id)}><td>{accountName(request.account_id)}</td><td>{financeUserName(request.requested_by)}</td><td>{displayDate(request.requested_at)}</td><td className="font-semibold">{peso.format(numericValue(request, "requested_amount"))}</td><td className="font-semibold text-[#218b55]">{request.approved_amount == null ? "-" : peso.format(numericValue(request, "approved_amount"))}</td><td><StatusPill value={status} /></td><td>{stringValue(request, "decision_note") || stringValue(request, "note") || "-"}</td><td>{canManageBudget && ["pending", "revision_requested"].includes(status) ? <span className="flex gap-1"><button type="button" disabled={saving} onClick={() => requestFundingReview(request, "approved")} className="icon-button text-[#218b55]" title="Approve account funding" aria-label="Approve account funding"><Check size={15} /></button><button type="button" disabled={saving} onClick={() => requestFundingReview(request, "rejected")} className="icon-button text-[#b42318]" title="Reject account funding" aria-label="Reject account funding"><XCircle size={15} /></button><button type="button" disabled={saving} onClick={() => requestFundingReview(request, "revision_requested")} className="icon-button text-[#6941c6]" title="Return account funding for revision" aria-label="Return account funding for revision"><Undo2 size={15} /></button></span> : canRequestBudget && status === "revision_requested" ? <button type="button" disabled={saving} onClick={() => openFundingRequestRevision(request)} className="button-secondary whitespace-nowrap text-[10px]" title="Edit and resubmit account funding request"><Undo2 size={13} /> Edit &amp; resubmit</button> : "-"}</td></tr>; })}{!accountFundingRequests.length && <tr><td colSpan={8} className="text-center text-[#7d8797]">No account funding requests yet.</td></tr>}</tbody></table></div>
+          <TablePagination page={activeBudgetPage} pageCount={budgetPageCount} total={accountFundingRequests.length} onPageChange={setBudgetPage} label="Account funding requests pagination" />
+        </Panel>
+      )}
+
+      {false && (
+        <Panel title="Legacy Budget" detail="Legacy budget requests are preserved for historical transactions.">
           <div className="border-b border-[#edf0f5] p-4 sm:p-5">
             <FinanceSummaryLayout primaryLabel="Available budget" primaryValue={peso.format(approvedBudgetRemainingTotal)} primaryDetail="Available for Cash Out">
               <div>
@@ -4214,14 +4418,14 @@ export function FinanceWorkspace({
         </Panel>
       )}
 
-      {tab === "supplier_costing" && (
+      {tab === "supplier_costing" && !budgetOnly && (
         <Panel title="Supplier Costing logbook" detail="External Finance records supplier obligations here. These entries become Cash Out only when an actual supplier payment is made." action={canRecordSupplierCosting ? <button type="button" onClick={() => setSupplierCostOpen(true)} className={primaryButton}><Plus size={13} /> Log supplier cost</button> : undefined}>
-          <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[980px]"><thead><tr><th>Supplier</th><th>Quotation</th><th>Name / Company</th><th>Description</th><th>Total cost</th><th>Paid</th><th>Remaining</th><th>Due</th><th>Status</th></tr></thead><tbody>{visibleSupplierCostingRows.map((payable) => { const linkedLead = stringValue(payable, "lead_id"); const linkedQuotation = quotations.find((quotation) => quotation.id === payable.quotation_id); const nameCompany = stringValue(linkedQuotation, "client_name") || leadName(linkedLead); return <tr key={String(payable.id)}><td>{supplierName(payable.supplier_id)}</td><td>{quotationName(payable.quotation_id)}</td><td>{nameCompany || "—"}</td><td>{stringValue(payable, "description", "—")}</td><td className="font-semibold">{peso.format(numericValue(payable, "amount"))}</td><td>{peso.format(numericValue(payable, "amount_paid"))}</td><td className="font-semibold text-[#b42318]">{peso.format(Math.max(numericValue(payable, "amount") - numericValue(payable, "amount_paid"), 0))}</td><td>{displayDate(payable.due_date)}</td><td><StatusPill value={stringValue(payable, "status")} /></td></tr>; })}{!supplierCostingRows.length && <tr><td colSpan={9} className="text-center text-[#7d8797]">No supplier costing entries yet.</td></tr>}</tbody></table></div>
+          <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[980px]"><thead><tr><th>Supplier</th><th>Project</th><th>Name / Company</th><th>Description</th><th>Total cost</th><th>Paid</th><th>Remaining</th><th>Due</th><th>Status</th></tr></thead><tbody>{visibleSupplierCostingRows.map((payable) => { const linkedLead = stringValue(payable, "lead_id"); const linkedQuotation = quotations.find((quotation) => quotation.id === payable.quotation_id); const nameCompany = stringValue(linkedQuotation, "client_name") || leadName(linkedLead); return <tr key={String(payable.id)}><td>{supplierName(payable.supplier_id)}</td><td>{quotationName(payable.quotation_id)}</td><td>{nameCompany || "—"}</td><td>{stringValue(payable, "description", "—")}</td><td className="font-semibold">{peso.format(numericValue(payable, "amount"))}</td><td>{peso.format(numericValue(payable, "amount_paid"))}</td><td className="font-semibold text-[#b42318]">{peso.format(Math.max(numericValue(payable, "amount") - numericValue(payable, "amount_paid"), 0))}</td><td>{displayDate(payable.due_date)}</td><td><StatusPill value={stringValue(payable, "status")} /></td></tr>; })}{!supplierCostingRows.length && <tr><td colSpan={9} className="text-center text-[#7d8797]">No supplier costing entries yet.</td></tr>}</tbody></table></div>
           <TablePagination page={activeSupplierCostingPage} pageCount={supplierCostingPageCount} total={supplierCostingRows.length} onPageChange={setSupplierCostingPage} label="Supplier costing pagination" />
         </Panel>
       )}
 
-      {tab === "payables" && (
+      {tab === "payables" && internal && (
         <div className="space-y-4">
           <nav className="app-tabs overflow-x-auto" role="tablist" aria-label="Payables categories">
               {payablesSectionOptions.map(({ value, label }) => {
@@ -4251,7 +4455,7 @@ export function FinanceWorkspace({
 
           {payablesSection === "commission" && (
             <div id="payables-panel-commission" role="tabpanel" aria-labelledby="payables-tab-commission">
-          <Panel title="Commission payouts" detail="Each S.E. Origin and Co-Worker allocation is paid separately only after the quotation is fully paid and the existing three-day hold has passed.">
+          <Panel title="Commission payouts" detail="Each S.E. Origin and Co-Worker allocation is paid separately only after the project is fully paid and the existing three-day hold has passed.">
             {internal && eligibleCommissionAllocations.length > 0 && (
               <div className="flex flex-wrap gap-2 border-b border-[#edf0f5] p-4">
                 {eligibleCommissionAllocations.map((allocation) => (
@@ -4261,7 +4465,7 @@ export function FinanceWorkspace({
                 ))}
               </div>
             )}
-            <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[1040px]"><thead><tr><th>Quotation</th><th>Name / Company</th><th>Recipient</th><th>Role</th><th>Division</th><th>Amount</th><th>Eligible</th><th>Status</th></tr></thead><tbody>{visiblePayablesRows.map((allocation) => { const verifiedAt = verifiedPaymentByQuotation.get(stringValue(allocation, "quotation_id")); const eligibleAt = verifiedAt ? new Date(new Date(verifiedAt).getTime() + 3 * 24 * 60 * 60 * 1000) : null; const eligible = Boolean(eligibleAt && currentTime >= eligibleAt.getTime()); const quotation = quotations.find((item) => item.id === allocation.quotation_id); return <tr key={String(allocation.id)}><td>{quotationName(allocation.quotation_id)}</td><td>{stringValue(quotation, "client_name", "—")}</td><td>{profileName(allocation.recipient_user_id)}</td><td>{commissionRoleLabel(allocation.allocation_role)}</td><td>{commissionDivisionLabel(quotation?.commission_split_option)}</td><td className="font-semibold text-[#b42318]">{peso.format(numericValue(allocation, "amount"))}</td><td>{eligible ? <StatusPill value="approved" /> : <span className="text-[11px] text-[#a76605]">{eligibleAt ? displayDate(eligibleAt) : "Awaiting verified payment"}</span>}</td><td><StatusPill value={stringValue(allocation, "status")} /></td></tr>; })}{!activePayablesRows.length && <tr><td colSpan={8} className="text-center text-[#7d8797]">No commission allocations yet.</td></tr>}</tbody></table></div>
+            <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[1040px]"><thead><tr><th>Project</th><th>Name / Company</th><th>Recipient</th><th>Role</th><th>Division</th><th>Amount</th><th>Eligible</th><th>Status</th></tr></thead><tbody>{visiblePayablesRows.map((allocation) => { const verifiedAt = verifiedPaymentByQuotation.get(stringValue(allocation, "quotation_id")); const eligibleAt = verifiedAt ? new Date(new Date(verifiedAt).getTime() + 3 * 24 * 60 * 60 * 1000) : null; const eligible = Boolean(eligibleAt && currentTime >= eligibleAt.getTime()); const quotation = quotations.find((item) => item.id === allocation.quotation_id); return <tr key={String(allocation.id)}><td>{quotationName(allocation.quotation_id)}</td><td>{stringValue(quotation, "client_name", "—")}</td><td>{profileName(allocation.recipient_user_id)}</td><td>{commissionRoleLabel(allocation.allocation_role)}</td><td>{commissionDivisionLabel(quotation?.commission_split_option)}</td><td className="font-semibold text-[#b42318]">{peso.format(numericValue(allocation, "amount"))}</td><td>{eligible ? <StatusPill value="approved" /> : <span className="text-[11px] text-[#a76605]">{eligibleAt ? displayDate(eligibleAt) : "Awaiting verified payment"}</span>}</td><td><StatusPill value={stringValue(allocation, "status")} /></td></tr>; })}{!activePayablesRows.length && <tr><td colSpan={8} className="text-center text-[#7d8797]">No commission allocations yet.</td></tr>}</tbody></table></div>
           </Panel>
           <TablePagination page={activePayablesPage} pageCount={payablesPageCount} total={activePayablesRows.length} onPageChange={setPayablesPage} label="Payables pagination" />
             </div>
@@ -4348,13 +4552,10 @@ export function FinanceWorkspace({
         <FinanceDialog title={transactionDialogTitle} detail={transactionDialogDetail} close={closeTransactionForm}>
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
             {transactionDirection === "expense" && !commissionPayoutMode && !internal && <div className="field-label sm:col-span-2">
-              <span>Budget</span>
+              <span>Account budget</span>
               <div className="mt-1 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <strong className="text-xl font-semibold text-[#202938]">{peso.format(approvedBudgetRemainingTotal)}</strong>
-                  <span className="text-[10px] font-semibold uppercase tracking-[.1em] text-[#218b55]">Available</span>
-                </div>
-                {!approvedBudgetRemainingTotal && <p className="mt-2 text-[11px] font-semibold text-[#b42318]">No available approved budget. Request a budget before submitting Cash Out.</p>}
+                <p className="text-[11px] leading-[1.45] text-[#4f5663]">Choose an active account with an Internal Finance allocation. Available account balances are not shown to External Finance.</p>
+                {!availableExpenseAccounts.length && <p className="mt-2 text-[11px] font-semibold text-[#b42318]">No active account has available budget. Ask Internal Finance to fund or reallocate an account.</p>}
               </div>
             </div>}
             {!internal && transactionDirection === "income" && !revisionTransaction && (
@@ -4369,15 +4570,15 @@ export function FinanceWorkspace({
             {quotationPaymentMode ? (
               <>
                 <div className="field-label sm:col-span-2">
-                  <span>Quotation</span>
+                  <span>Project</span>
                   <SearchableSelect
                     options={normalizedQuotationPaymentOptions}
                     value={transactionValues.quotation_id}
                     onChange={chooseQuotationPayment}
-                    placeholder={normalizedQuotationPaymentOptions.length ? "Choose company and client" : "No approved quotations available"}
+                    placeholder={normalizedQuotationPaymentOptions.length ? "Choose company and client" : "No approved projects available"}
                     searchPlaceholder="Search company or client"
-                    noResultsLabel="No approved quotation found."
-                    ariaLabel="Quotation payment source"
+                    noResultsLabel="No approved project found."
+                    ariaLabel="Project payment source"
                     required
                     clearable={false}
                     disabled={!normalizedQuotationPaymentOptions.length}
@@ -4386,7 +4587,7 @@ export function FinanceWorkspace({
                 </div>
                 {selectedQuotationPayment && selectedQuotationPaymentSummary && (
                   <div className="grid gap-2 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[11px] sm:col-span-2 sm:grid-cols-3">
-                    <div><span className="block text-[10px] text-[#8b92a1]">Quotation total</span><strong className="block text-[#344054]">{peso.format(selectedQuotationPaymentSummary.total)}</strong></div>
+                    <div><span className="block text-[10px] text-[#8b92a1]">Project total</span><strong className="block text-[#344054]">{peso.format(selectedQuotationPaymentSummary.total)}</strong></div>
                     <div><span className="block text-[10px] text-[#8b92a1]">Verified paid</span><strong className="block text-[#218b55]">{peso.format(selectedQuotationPaymentSummary.verified)}</strong></div>
                     <div><span className="block text-[10px] text-[#8b92a1]">Available balance</span><strong className="block text-[#344054]">{peso.format(selectedQuotationPaymentSummary.available)}</strong></div>
                     {selectedQuotationPaymentRevision && <p className="sm:col-span-3 rounded-md border border-[#f0d49b] bg-[#fff8e9] px-3 py-2 text-[11px] leading-[1.45] text-[#8a5a00]">This receipt was returned for correction{stringValue(selectedQuotationPaymentRevision, "correction_note") ? `: ${stringValue(selectedQuotationPaymentRevision, "correction_note")}` : ". Upload the corrected details and receipt image, then resubmit it."}</p>}
@@ -4401,7 +4602,7 @@ export function FinanceWorkspace({
                     account_id: quotationPaymentAccountIdFor(selectedQuotationPayment, kind),
                   }));
                 }} className="input mt-1">{quotationPaymentKindOptions.map(([key, label]) => <option key={key} value={key}>{key === "full_payment" && stringValue(selectedQuotationPayment, "payment_terms_option") === "pdc_50_50" ? "Full balance (PDC)" : label}</option>)}</select></label>
-                <label className="field-label">Amount<NumberInput min="0.01" step="0.01" value={transactionValues.amount} onChange={(value) => setTransactionValues((current) => ({ ...current, amount: value }))} className="input mt-1" placeholder="0.00" /><span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">{selectedQuotationPaymentSummary ? transactionValues.payment_kind === "downpayment" ? `Required remaining downpayment: ${peso.format(selectedQuotationPaymentSummary.downpaymentRemaining)}` : `Must equal available balance: ${peso.format(selectedQuotationPaymentSummary.available)}` : "Choose a quotation first"}</span></label>
+                <label className="field-label">Amount<NumberInput min="0.01" step="0.01" value={transactionValues.amount} onChange={(value) => setTransactionValues((current) => ({ ...current, amount: value }))} className="input mt-1" placeholder="0.00" /><span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">{selectedQuotationPaymentSummary ? transactionValues.payment_kind === "downpayment" ? `Required remaining downpayment: ${peso.format(selectedQuotationPaymentSummary.downpaymentRemaining)}` : `Must equal available balance: ${peso.format(selectedQuotationPaymentSummary.available)}` : "Choose a project first"}</span></label>
                 <label className="field-label">Paid date<input type="date" value={transactionValues.transaction_date} onClick={(event) => event.currentTarget.showPicker?.()} onChange={(event) => setTransactionValues((current) => ({ ...current, transaction_date: event.target.value }))} className="input mt-1" /></label>
                 <label className="field-label">Received into account
                   <SearchableSelect options={quotationPaymentAccountOptions} value={transactionValues.account_id} onChange={(value) => setTransactionValues((current) => ({ ...current, account_id: value }))} placeholder={activeAccounts.length ? "Choose receiving account" : "No active account available"} searchPlaceholder="Search receiving accounts" noResultsLabel={transactionValues.payment_kind === "full_payment" && stringValue(selectedQuotationPayment, "payment_terms_option") === "pdc_50_50" ? "No active Check/PDC account found." : "No matching receiving account."} ariaLabel="Receiving Finance account" required clearable={false} disabled={!quotationPaymentAccountOptions.length} className="mt-1" />
@@ -4424,15 +4625,15 @@ export function FinanceWorkspace({
               </fieldset>
             )}
             {projectExpenseMode && <div className="field-label sm:col-span-2">
-              <span>Project / quotation</span>
+              <span>Project</span>
               <SearchableSelect
                 options={projectExpenseOptions}
                 value={projectExpenseSelection}
                 onChange={chooseProjectExpense}
-                placeholder={projectExpenseOptions.length ? "Choose an approved project quotation" : "No approved project quotations available"}
-                searchPlaceholder="Search project, client, or quotation"
-                noResultsLabel="No matching approved project quotation found."
-                ariaLabel="Project or quotation for expense"
+                placeholder={projectExpenseOptions.length ? "Choose an approved project" : "No approved projects available"}
+                searchPlaceholder="Search project or client"
+                noResultsLabel="No matching approved project found."
+                ariaLabel="Project for expense"
                 required
                 clearable={false}
                 disabled={!projectExpenseOptions.length}
@@ -4443,14 +4644,14 @@ export function FinanceWorkspace({
                   <div><span className="block text-[10px] text-[#8b92a1]">Total direct cost</span><strong className="block text-[#344054]">{peso.format(selectedProjectExpenseCapacity.totalDirectCost)}</strong></div>
                   <div><span className="block text-[10px] text-[#8b92a1]">Committed expenses</span><strong className="block text-[#a76605]">{peso.format(selectedProjectExpenseCapacity.committedProjectExpense)}</strong></div>
                   <div><span className="block text-[10px] text-[#8b92a1]">Available to expense</span><strong className={`block ${(selectedProjectExpenseCapacity.availableToExpense ?? 0) > 0 ? "text-[#218b55]" : "text-[#b42318]"}`}>{peso.format(selectedProjectExpenseCapacity.availableToExpense ?? 0)}</strong></div>
-                  {(selectedProjectExpenseCapacity.availableToExpense ?? 0) <= 0 && <p className="sm:col-span-3 rounded-md border border-[#f2b8b5] bg-[#fef3f2] px-3 py-2 text-[11px] leading-[1.45] text-[#b42318]">This quotation has no remaining direct-cost capacity for another project expense.</p>}
+                  {(selectedProjectExpenseCapacity.availableToExpense ?? 0) <= 0 && <p className="sm:col-span-3 rounded-md border border-[#f2b8b5] bg-[#fef3f2] px-3 py-2 text-[11px] leading-[1.45] text-[#b42318]">This project has no remaining direct-cost capacity for another project expense.</p>}
                 </div>
-              ) : <small className="mt-1 block text-[#7d8797]">Only approved direct quotations can receive a capped project expense.</small>}
+              ) : <small className="mt-1 block text-[#7d8797]">Only approved direct-cost projects can receive a capped project expense.</small>}
             </div>}
-            <label className="field-label">Amount<NumberInput min="0.01" max={projectExpenseMode ? selectedProjectExpenseCapacity?.availableToExpense : undefined} step="0.01" value={transactionValues.amount} onChange={(value) => setTransactionValues((current) => ({ ...current, amount: value }))} aria-invalid={Boolean(projectExpenseAmountError)} className="input mt-1" />{projectExpenseMode && selectedProjectExpenseCapacity && <span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">Maximum for this quotation: {peso.format(selectedProjectExpenseCapacity.availableToExpense ?? 0)}</span>}{projectExpenseAmountError && <span role="alert" className="mt-1 block text-[11px] font-semibold text-[#b42318]">{projectExpenseAmountError}</span>}</label>
+            <label className="field-label">Amount<NumberInput min="0.01" max={projectExpenseMode ? selectedProjectExpenseCapacity?.availableToExpense : undefined} step="0.01" value={transactionValues.amount} onChange={(value) => setTransactionValues((current) => ({ ...current, amount: value }))} aria-invalid={Boolean(projectExpenseAmountError)} className="input mt-1" />{projectExpenseMode && selectedProjectExpenseCapacity && <span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">Maximum for this project: {peso.format(selectedProjectExpenseCapacity.availableToExpense ?? 0)}</span>}{projectExpenseAmountError && <span role="alert" className="mt-1 block text-[11px] font-semibold text-[#b42318]">{projectExpenseAmountError}</span>}</label>
             <label className="field-label">
               {transactionDirection === "income" ? "Income category" : "Expense category"}
-              <SearchableSelect options={categoryOptions} value={transactionValues.category_id} onChange={(value) => setTransactionValues((current) => ({ ...current, category_id: value }))} placeholder="Choose category" searchPlaceholder="Search categories" ariaLabel={transactionDirection === "income" ? "Income category" : "Expense category"} required clearable={false} className="mt-1" />
+              <SearchableSelect options={categoryOptions} value={transactionValues.category_id} onChange={handleCategoryChange} placeholder="Choose category" searchPlaceholder="Search categories" ariaLabel={transactionDirection === "income" ? "Income category" : "Expense category"} required clearable={false} className="mt-1" />
             </label>
             {supplierPaymentMode && <div className="field-label sm:col-span-2">
               <span>Supplier payable</span>
@@ -4478,8 +4679,8 @@ export function FinanceWorkspace({
             </div>}
             {(transactionDirection === "expense" || manualIncomeMode || manualIncomeRevisionMode) && <label className="field-label">
               {transactionDirection === "income" ? "Receiving account" : "Payment account"}
-              <SearchableSelect options={accountOptions} value={transactionValues.account_id} onChange={(value) => setTransactionValues((current) => ({ ...current, account_id: value }))} placeholder={activeAccounts.length ? `Choose ${transactionDirection === "income" ? "receiving" : "payment"} account` : "No active account available"} searchPlaceholder="Search payment accounts" ariaLabel={transactionDirection === "income" ? "Receiving account" : "Payment account"} required clearable={false} disabled={!activeAccounts.length} className="mt-1" />
-              {!activeAccounts.length && <small className="mt-1 block text-[#a76605]">Internal Finance must add an active payment account before this record can be submitted.</small>}
+              <SearchableSelect options={accountOptions} value={transactionValues.account_id} onChange={(value) => setTransactionValues((current) => ({ ...current, account_id: value }))} placeholder={accountOptions.length ? `Choose ${transactionDirection === "income" ? "receiving" : "payment"} account` : "No account with available budget"} searchPlaceholder="Search payment accounts" ariaLabel={transactionDirection === "income" ? "Receiving account" : "Payment account"} required clearable={false} disabled={!accountOptions.length} className="mt-1" />
+              {!accountOptions.length && <small className="mt-1 block text-[#a76605]">Internal Finance must add or reallocate budget to an active account before this Cash Out can be submitted.</small>}
             </label>}
             {(!supplierPaymentMode && !projectExpenseMode && !manualIncomeMode && !manualIncomeRevisionMode || internal) && <label className="field-label">Name / Company from Leads<SearchableLeadSelect options={leadOptions} value={transactionValues.lead_id} onChange={(value) => setTransactionValues((current) => ({ ...current, lead_id: value }))} placeholder="Not linked" searchPlaceholder="Search name, contact, project, or lead number" ariaLabel="Name / Company from Leads" className="mt-1" /></label>}
             <label className="field-label">Date<input type="date" value={transactionValues.transaction_date} onClick={(event) => event.currentTarget.showPicker?.()} onChange={(event) => setTransactionValues((current) => ({ ...current, transaction_date: event.target.value }))} className="input mt-1" /></label>
@@ -4499,10 +4700,43 @@ export function FinanceWorkspace({
             </>
             )}
           </div>
-          {internal && (
-          <div className="mt-4 rounded-lg border border-[#edf0f5] bg-[#fafbfc] p-3"><p className="text-[11px] font-semibold text-[#344054]">Add a custom {transactionDirection} category</p><div className="mt-2 flex flex-wrap gap-2"><input value={categoryDraft.name} onChange={(event) => setCategoryDraft((current) => ({ ...current, name: event.target.value }))} className="input min-w-[200px] flex-1 text-[12px]" placeholder="Category name" />{transactionDirection === "expense" && <select value={categoryDraft.expense_class} onChange={(event) => setCategoryDraft((current) => ({ ...current, expense_class: event.target.value }))} className="input text-[12px]"><option value="operating">Operating Expense</option><option value="non_operating">Non Operating Expense</option></select>}<button type="button" onClick={() => void saveCategory()} disabled={saving} className="button-secondary">Add category</button></div><div className="mt-3 flex flex-wrap gap-1.5">{activeCategories.filter((category) => !Boolean(category.is_system)).map((category) => <button key={String(category.id)} type="button" onClick={() => void archiveCategory(category)} className="inline-flex items-center gap-1 rounded-full border border-[#d9e0e9] px-2 py-1 text-[10px] text-[#687386] hover:border-[#f2b8b5] hover:text-[#b42318]">{stringValue(category, "name")} <X size={11} /></button>)}</div></div>
-          )}
-            <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={closeTransactionForm} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveTransaction()} disabled={saving || (quotationPaymentMode && (!transactionValues.quotation_id || !transactionValues.account_id || !transactionFile || !quotationPaymentAccountOptions.length)) || (!revisionTransaction && !internal && !manualIncomeMode && !commissionPayoutMode && transactionDirection === "expense" && approvedBudgetRemainingTotal <= 0) || ((transactionDirection === "expense" || manualIncomeMode || manualIncomeRevisionMode) && (!activeAccounts.length || !transactionValues.account_id)) || (supplierPaymentMode && !transactionValues.supplier_payable_id) || (projectExpenseMode && (!transactionValues.quotation_id || !selectedProjectExpense || !((selectedProjectExpenseCapacity?.availableToExpense ?? 0) > 0))) || (internal && !transactionValues.commission_allocation_id)} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} {saving ? "Saving..." : quotationPaymentMode ? selectedQuotationPaymentRevision ? "Resubmit receipt" : "Submit receipt" : manualIncomeMode ? "Submit Cash In" : manualIncomeRevisionMode ? "Resubmit Cash In" : revisionTransaction ? "Resubmit Cash Out" : commissionPayoutMode ? "Create commission payout" : projectExpenseMode ? "Submit project expense" : supplierPaymentMode ? "Submit supplier payment" : "Submit regular expense"}</button></div>
+            <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={closeTransactionForm} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveTransaction()} disabled={saving || (quotationPaymentMode && (!transactionValues.quotation_id || !transactionValues.account_id || !transactionFile || !quotationPaymentAccountOptions.length)) || (!revisionTransaction && !internal && !manualIncomeMode && !commissionPayoutMode && transactionDirection === "expense" && !availableExpenseAccounts.length) || ((transactionDirection === "expense" || manualIncomeMode || manualIncomeRevisionMode) && (!accountOptions.length || !transactionValues.account_id)) || (supplierPaymentMode && !transactionValues.supplier_payable_id) || (projectExpenseMode && (!transactionValues.quotation_id || !selectedProjectExpense || !((selectedProjectExpenseCapacity?.availableToExpense ?? 0) > 0))) || (internal && !transactionValues.commission_allocation_id)} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} {saving ? "Saving..." : quotationPaymentMode ? selectedQuotationPaymentRevision ? "Resubmit receipt" : "Submit receipt" : manualIncomeMode ? "Submit Cash In" : manualIncomeRevisionMode ? "Resubmit Cash In" : revisionTransaction ? "Resubmit Cash Out" : commissionPayoutMode ? "Create commission payout" : projectExpenseMode ? "Submit project expense" : supplierPaymentMode ? "Submit supplier payment" : "Submit regular expense"}</button></div>
+        </FinanceDialog>
+      )}
+
+      {categoryCreateOpen && transactionDirection && !quotationPaymentMode && (
+        <FinanceDialog
+          title={transactionDirection === "income" ? "Add income category" : "Add expense category"}
+          detail="Add a category without leaving this transaction form."
+          close={closeCategoryCreate}
+          compact
+          layer="top"
+        >
+          <div className="mt-5 space-y-3">
+            {categoryCreateMessage && <p role="status" className="rounded-md bg-[#edf9f2] px-3 py-2 text-[11px] font-semibold text-[#218b55]">{categoryCreateMessage}</p>}
+            <label className="field-label">
+              Category name
+              <input value={categoryDraft.name} onChange={(event) => setCategoryDraft((current) => ({ ...current, name: event.target.value }))} className="input mt-1" placeholder="Enter category name" maxLength={100} />
+            </label>
+            {transactionDirection === "expense" && <label className="field-label">
+              Expense class
+              <select value={categoryDraft.expense_class} onChange={(event) => setCategoryDraft((current) => ({ ...current, expense_class: event.target.value }))} className="input mt-1">
+                <option value="operating">Operating Expense</option>
+                <option value="non_operating">Non Operating Expense</option>
+              </select>
+            </label>}
+            {internal && <div className="border-t border-[#edf0f5] pt-3">
+              <p className="text-[11px] font-semibold text-[#344054]">Custom categories</p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {activeCategories.filter((category) => !Boolean(category.is_system)).map((category) => <button key={String(category.id)} type="button" onClick={() => void archiveCategory(category)} className="inline-flex items-center gap-1 rounded-full border border-[#d9e0e9] px-2 py-1 text-[10px] text-[#687386] hover:border-[#f2b8b5] hover:text-[#b42318]">{stringValue(category, "name")} <X size={11} /></button>)}
+                {!activeCategories.some((category) => !Boolean(category.is_system)) && <span className="text-[11px] text-[#7d8797]">No custom categories yet.</span>}
+              </div>
+            </div>}
+          </div>
+          <div className="mt-5 flex justify-end gap-2">
+            <button type="button" onClick={closeCategoryCreate} className="button-secondary">Done</button>
+            <button type="button" onClick={() => void saveCategory()} disabled={saving || !categoryDraft.name.trim()} className="button-primary">{saving ? "Adding..." : "Add category"}</button>
+          </div>
         </FinanceDialog>
       )}
 
@@ -4518,7 +4752,7 @@ export function FinanceWorkspace({
               <SearchableSelect options={supplierOptions} value={supplierCostValues.supplier_id} onChange={(value) => setSupplierCostValues((current) => ({ ...current, supplier_id: value }))} placeholder="Choose supplier" searchPlaceholder="Search suppliers" ariaLabel="Supplier" required clearable={false} className="mt-1" />
             </label>
             <label className="field-label">
-              Related quotation (optional)
+              Related project (optional)
               <SearchableSelect
                 options={normalizedQuotationOptions}
                 value={supplierCostValues.quotation_id}
@@ -4527,8 +4761,8 @@ export function FinanceWorkspace({
                   setSupplierCostValues((current) => ({ ...current, quotation_id: value, lead_id: value ? stringValue(quotation, "lead_id") : "" }));
                 }}
                 placeholder="Not linked"
-                searchPlaceholder="Search quotations"
-                ariaLabel="Related quotation"
+                searchPlaceholder="Search projects"
+                ariaLabel="Related project"
                 className="mt-1"
               />
             </label>
@@ -4542,7 +4776,7 @@ export function FinanceWorkspace({
             </label>
             <label className="field-label sm:col-span-2">
               Description
-              <input value={supplierCostValues.description} onChange={(event) => setSupplierCostValues((current) => ({ ...current, description: event.target.value }))} className="input mt-1" placeholder="Example: Supplier materials for quotation" />
+              <input value={supplierCostValues.description} onChange={(event) => setSupplierCostValues((current) => ({ ...current, description: event.target.value }))} className="input mt-1" placeholder="Example: Supplier materials for project" />
             </label>
             <label className="field-label">
               Due date
@@ -4592,7 +4826,13 @@ export function FinanceWorkspace({
         </FinanceDialog>
       )}
 
-      {budgetOpen && <FinanceDialog title={budgetRevision ? "Revise budget request" : "Request budget"} detail={budgetRevision ? "Correct the returned request and resubmit it for Internal Finance review." : "The request will be reviewed by Internal Finance."} close={closeBudgetForm}><div className="mt-5 space-y-3"><label className="field-label">Amount<NumberInput min="0.01" step="0.01" value={budgetValues.amount} onChange={(value) => setBudgetValues((current) => ({ ...current, amount: value }))} className="input mt-1" /></label><label className="field-label">Note<textarea value={budgetValues.note} onChange={(event) => setBudgetValues((current) => ({ ...current, note: event.target.value }))} className="input mt-1 min-h-24" placeholder="Explain the budget request" /></label></div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={closeBudgetForm} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveBudget()} disabled={saving} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} {budgetRevision ? "Resubmit request" : "Submit request"}</button></div></FinanceDialog>}
+      {budgetOpen && <FinanceDialog title={budgetRevision ? "Revise account funding request" : "Request account funding"} detail="Choose the active account that needs budget. Account balances are not shown here." close={closeBudgetForm}><div className="mt-5 space-y-3"><label className="field-label">Account<SearchableSelect options={fundingRequestAccounts.map((account) => ({ value: String(account.id), label: stringValue(account, "account_name"), searchText: stringValue(account, "account_name") }))} value={budgetValues.account_id} onChange={(value) => setBudgetValues((current) => ({ ...current, account_id: value }))} placeholder={fundingRequestAccounts.length ? "Choose account" : "No active account available"} searchPlaceholder="Search account names" ariaLabel="Account for funding request" required clearable={false} disabled={!fundingRequestAccounts.length} className="mt-1" /></label><label className="field-label">Requested amount<NumberInput min="0.01" step="0.01" value={budgetValues.amount} onChange={(value) => setBudgetValues((current) => ({ ...current, amount: value }))} className="input mt-1" /></label><label className="field-label">Note<textarea value={budgetValues.note} onChange={(event) => setBudgetValues((current) => ({ ...current, note: event.target.value }))} className="input mt-1 min-h-24" placeholder="Explain why this account needs budget" /></label></div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={closeBudgetForm} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveFundingRequest()} disabled={saving} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} {budgetRevision ? "Resubmit request" : "Submit request"}</button></div></FinanceDialog>}
+
+      {grantOpen && <FinanceDialog title={currentBudgetGrants.length ? "Add GM budget top-up" : "Add GM monthly budget"} detail="This changes the approved spending-limit pool only. It does not record Cash In or increase an account's actual balance." close={() => setGrantOpen(false)} compact><div className="mt-5 space-y-3"><label className="field-label">Approved amount<NumberInput min="0.01" step="0.01" value={grantValues.amount} onChange={(value) => setGrantValues((current) => ({ ...current, amount: value }))} className="input mt-1" /></label><label className="field-label">Note<textarea value={grantValues.note} onChange={(event) => setGrantValues((current) => ({ ...current, note: event.target.value }))} className="input mt-1 min-h-24" placeholder="Explain the GM budget approval or top-up" /></label></div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setGrantOpen(false)} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveBudgetGrant()} disabled={saving} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} Save budget</button></div></FinanceDialog>}
+
+      {allocationOpen && <FinanceDialog title={allocationMode === "reallocate" ? "Reallocate account budget" : "Allocate budget to account"} detail={allocationMode === "reallocate" ? "Only unused and uncommitted budget can move from the source account." : "Distribute the current GM pool to an active account."} close={() => setAllocationOpen(false)} compact><div className="mt-5 space-y-3">{allocationMode === "reallocate" && <label className="field-label">From account<select value={allocationValues.from_account_id} onChange={(event) => setAllocationValues((current) => ({ ...current, from_account_id: event.target.value }))} className="input mt-1"><option value="">Choose source account</option>{activeAccounts.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")}</option>)}</select></label>}<label className="field-label">{allocationMode === "reallocate" ? "To account" : "Account"}<select value={allocationValues.to_account_id} onChange={(event) => setAllocationValues((current) => ({ ...current, to_account_id: event.target.value }))} className="input mt-1"><option value="">Choose account</option>{activeAccounts.filter((account) => allocationMode !== "reallocate" || String(account.id) !== allocationValues.from_account_id).map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")}</option>)}</select></label><label className="field-label">Amount<NumberInput min="0.01" step="0.01" value={allocationValues.amount} onChange={(value) => setAllocationValues((current) => ({ ...current, amount: value }))} className="input mt-1" /></label><label className="field-label">Note<textarea value={allocationValues.note} onChange={(event) => setAllocationValues((current) => ({ ...current, note: event.target.value }))} className="input mt-1 min-h-20" placeholder="Explain the allocation change" /></label></div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setAllocationOpen(false)} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveBudgetAllocation()} disabled={saving} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} {allocationMode === "reallocate" ? "Reallocate" : "Allocate"}</button></div></FinanceDialog>}
+
+      {fundingReviewRequest && <FinanceDialog title="Approve account funding request" detail="The approved amount is added to the selected account allocation and deducted from the undistributed GM pool." close={() => setFundingReviewRequest(null)} compact><div className="mt-5 space-y-3"><div className="rounded-md border border-[#d9e0e9] bg-[#fafbfc] px-3 py-2 text-[11px]"><span className="text-[#7d8797]">Account</span><strong className="mt-1 block text-[#202938]">{accountName(fundingReviewRequest.account_id)}</strong><span className="mt-2 block text-[#7d8797]">Requested</span><strong className="mt-1 block text-[#202938]">{peso.format(numericValue(fundingReviewRequest, "requested_amount"))}</strong></div><label className="field-label">Approved amount<NumberInput min="0.01" max={numericValue(fundingReviewRequest, "requested_amount")} step="0.01" value={fundingApprovedAmount} onChange={setFundingApprovedAmount} className="input mt-1" /></label><label className="field-label">Decision note (optional)<textarea value={fundingReviewNote} onChange={(event) => setFundingReviewNote(event.target.value)} className="input mt-1 min-h-20" placeholder="Add context for the approval" /></label></div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setFundingReviewRequest(null)} className="button-secondary">Cancel</button><button type="button" onClick={() => void submitFundingApproval()} disabled={saving} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} Approve and allocate</button></div></FinanceDialog>}
 
       {loading && <LoadingState label="Updating Finance data..." />}
     </div>
@@ -4684,7 +4924,7 @@ function LegacyTransactionTable({
         })}
         {!rows.length && <p className="rounded-lg border border-dashed border-[#d9e0e9] px-3 py-6 text-center text-[11px] text-[#7d8797]">No transactions match the current filter.</p>}
       </div>
-      <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[1080px]"><thead><tr><th>Date</th><th>Name / Company</th><th>Category</th><th>Account</th><th>Cash In</th><th>Cash Out</th><th>Payment</th><th>Approval</th><th>Receipt</th><th>Action</th></tr></thead><tbody>{rows.map((transaction) => { const type = stringValue(transaction, "transaction_type"); const approval = stringValue(transaction, "approval_status"); const paid = stringValue(transaction, "payment_status"); const isVoided = Boolean(transaction.is_voided); const isRegularExpense = type === "expense" && !transaction.source_payment_id && !transaction.supplier_payable_id && !transaction.commission_summary_id && !transaction.commission_allocation_id; const canApproveAndPay = internal && !isVoided && isRegularExpense && paid === "unpaid" && ["pending", "approved"].includes(approval); const canMarkPaid = internal && !isVoided && type === "expense" && !isRegularExpense && paid === "unpaid" && approval === "approved"; const canRequestRevision = internal && !isVoided && type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval) && !transaction.source_payment_id && !transaction.commission_summary_id && !transaction.commission_allocation_id; const canEditRevision = !internal && !isVoided && type === "expense" && paid === "unpaid" && approval === "revision_requested"; const accountId = stringValue(transaction, "account_id"); const canChangeAccount = internal && !isVoided && ((type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval)) || (!accountId && Boolean(transaction.source_payment_id))); const receiptBucket = stringValue(transaction, "receipt_bucket", "finance-receipts"); return <tr key={String(transaction.id)} className={isVoided ? "opacity-60" : undefined}><td>{displayDate(transaction.transaction_date)}<small>{stringValue(transaction, "transaction_time")}</small></td><td>{leadName(transaction.lead_id)}{Boolean(transaction.source_payment_id) && <small>Automatic quotation payment</small>}</td><td>{categoryName(transaction.category_id)}<small>{isVoided ? `Voided: ${stringValue(transaction, "void_reason", "Reversed source payment")}` : approval === "revision_requested" ? `Revision requested: ${stringValue(transaction, "decision_note", "See reviewer note")}` : stringValue(transaction, "note", "-")}</small></td><td>{canChangeAccount ? <select aria-label="Payment account" defaultValue={accountId} onChange={(event) => void assignAccount(String(transaction.id), event.target.value)} disabled={saving} className="input min-w-[150px] text-[10px]"><option value="">Choose payment account</option>{accounts.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")}</option>)}</select> : accountName(transaction.account_id)}</td><td className="font-semibold text-[#218b55]">{type === "income" ? peso.format(numericValue(transaction, "amount")) : "-"}</td><td className="font-semibold text-[#b42318]">{type === "expense" ? peso.format(numericValue(transaction, "amount")) : "-"}</td><td><StatusPill value={isVoided ? "voided" : paid} /></td><td><StatusPill value={approval} /></td><td>{stringValue(transaction, "receipt_storage_path") ? <button type="button" onClick={() => void openReceipt(stringValue(transaction, "receipt_storage_path"), receiptBucket)} className="text-[#c43b43]" title="View receipt"><ReceiptText size={15} /></button> : "-"}</td><td><span className="flex flex-wrap gap-1">{canApproveAndPay && <button type="button" disabled={saving || !accountId} onClick={() => approveAndPay(String(transaction.id))} className="button-secondary text-[10px]" title={approval === "pending" ? "Approve and pay Cash Out" : "Pay approved Cash Out"}>{approval === "pending" ? "Approve and pay" : "Pay now"}</button>}{canRequestRevision && <button type="button" disabled={saving} onClick={() => requestRevision(String(transaction.id))} className="button-secondary text-[10px]" title="Return Cash Out for revision">Return</button>}{canEditRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[10px] text-[#6941c6]">Edit &amp; resubmit</button>}{canMarkPaid && <button type="button" disabled={saving} onClick={() => markPaid(String(transaction.id), "Cash Out")} className="button-secondary text-[10px]">Mark paid</button>}{!canApproveAndPay && !canRequestRevision && !canEditRevision && !canMarkPaid && !(internal && !isVoided && type === "expense" && approval === "pending") && "-"}</span></td></tr>; })}{!rows.length && <tr><td colSpan={10} className="text-center text-[#7d8797]">No transactions match the current filter.</td></tr>}</tbody></table></div>
+      <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[1080px]"><thead><tr><th>Date</th><th>Name / Company</th><th>Category</th><th>Account</th><th>Cash In</th><th>Cash Out</th><th>Payment</th><th>Approval</th><th>Receipt</th><th>Action</th></tr></thead><tbody>{rows.map((transaction) => { const type = stringValue(transaction, "transaction_type"); const approval = stringValue(transaction, "approval_status"); const paid = stringValue(transaction, "payment_status"); const isVoided = Boolean(transaction.is_voided); const isRegularExpense = type === "expense" && !transaction.source_payment_id && !transaction.supplier_payable_id && !transaction.commission_summary_id && !transaction.commission_allocation_id; const canApproveAndPay = internal && !isVoided && isRegularExpense && paid === "unpaid" && ["pending", "approved"].includes(approval); const canMarkPaid = internal && !isVoided && type === "expense" && !isRegularExpense && paid === "unpaid" && approval === "approved"; const canRequestRevision = internal && !isVoided && type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval) && !transaction.source_payment_id && !transaction.commission_summary_id && !transaction.commission_allocation_id; const canEditRevision = !internal && !isVoided && type === "expense" && paid === "unpaid" && approval === "revision_requested"; const accountId = stringValue(transaction, "account_id"); const canChangeAccount = internal && !isVoided && ((type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval)) || (!accountId && Boolean(transaction.source_payment_id))); const receiptBucket = stringValue(transaction, "receipt_bucket", "finance-receipts"); return <tr key={String(transaction.id)} className={isVoided ? "opacity-60" : undefined}><td>{displayDate(transaction.transaction_date)}<small>{stringValue(transaction, "transaction_time")}</small></td><td>{leadName(transaction.lead_id)}{Boolean(transaction.source_payment_id) && <small>Automatic project payment</small>}</td><td>{categoryName(transaction.category_id)}<small>{isVoided ? `Voided: ${stringValue(transaction, "void_reason", "Reversed source payment")}` : approval === "revision_requested" ? `Revision requested: ${stringValue(transaction, "decision_note", "See reviewer note")}` : stringValue(transaction, "note", "-")}</small></td><td>{canChangeAccount ? <select aria-label="Payment account" defaultValue={accountId} onChange={(event) => void assignAccount(String(transaction.id), event.target.value)} disabled={saving} className="input min-w-[150px] text-[10px]"><option value="">Choose payment account</option>{accounts.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")}</option>)}</select> : accountName(transaction.account_id)}</td><td className="font-semibold text-[#218b55]">{type === "income" ? peso.format(numericValue(transaction, "amount")) : "-"}</td><td className="font-semibold text-[#b42318]">{type === "expense" ? peso.format(numericValue(transaction, "amount")) : "-"}</td><td><StatusPill value={isVoided ? "voided" : paid} /></td><td><StatusPill value={approval} /></td><td>{stringValue(transaction, "receipt_storage_path") ? <button type="button" onClick={() => void openReceipt(stringValue(transaction, "receipt_storage_path"), receiptBucket)} className="text-[#c43b43]" title="View receipt"><ReceiptText size={15} /></button> : "-"}</td><td><span className="flex flex-wrap gap-1">{canApproveAndPay && <button type="button" disabled={saving || !accountId} onClick={() => approveAndPay(String(transaction.id))} className="button-secondary text-[10px]" title={approval === "pending" ? "Approve and pay Cash Out" : "Pay approved Cash Out"}>{approval === "pending" ? "Approve and pay" : "Pay now"}</button>}{canRequestRevision && <button type="button" disabled={saving} onClick={() => requestRevision(String(transaction.id))} className="button-secondary text-[10px]" title="Return Cash Out for revision">Return</button>}{canEditRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[10px] text-[#6941c6]">Edit &amp; resubmit</button>}{canMarkPaid && <button type="button" disabled={saving} onClick={() => markPaid(String(transaction.id), "Cash Out")} className="button-secondary text-[10px]">Mark paid</button>}{!canApproveAndPay && !canRequestRevision && !canEditRevision && !canMarkPaid && !(internal && !isVoided && type === "expense" && approval === "pending") && "-"}</span></td></tr>; })}{!rows.length && <tr><td colSpan={10} className="text-center text-[#7d8797]">No transactions match the current filter.</td></tr>}</tbody></table></div>
     </div>
   );
 }
