@@ -34,6 +34,7 @@ type ManagedUser = {
   full_name: string;
   email: string;
   role: string;
+  internal_finance_enabled: boolean;
   project_types: string[];
   production_approval_enabled: boolean;
   banned: boolean;
@@ -49,7 +50,8 @@ type UserFormValues = {
   production_approval_enabled: boolean;
 };
 
-const displayRole = workspaceRoleLabel;
+const displayRole = (role: string, internalFinanceEnabled = false) =>
+  workspaceRoleLabel(role, internalFinanceEnabled);
 const isPricingRole = (role: string) =>
   role === "sales_pricing_officer";
 const titleCase = (value: string) =>
@@ -430,7 +432,7 @@ export function SuperAdminConsole({
                       <td className="px-5 py-4 text-[#475467]">{user.email}</td>
                       <td className="px-5 py-4">
                         <span className="rounded-full bg-[#fceced] px-2.5 py-1 text-[12px] font-semibold text-[#a82e35]">
-                          {displayRole(user.role)}
+                          {displayRole(user.role, user.internal_finance_enabled)}
                         </span>
                       </td>
                       <td className="px-5 py-4 text-[#475467]">

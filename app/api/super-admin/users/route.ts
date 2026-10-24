@@ -9,6 +9,7 @@ type CreateUserRequest = {
   email?: unknown;
   password?: unknown;
   role?: unknown;
+  internal_finance_enabled?: unknown;
   production_approval_enabled?: unknown;
 };
 type UserOperationRequest = {
@@ -18,12 +19,16 @@ type UserOperationRequest = {
   email?: unknown;
   password?: unknown;
   role?: unknown;
+  internal_finance_enabled?: unknown;
   production_approval_enabled?: unknown;
 };
 
 const json = (body: Record<string, unknown>, status: number) =>
   Response.json(body, { status });
 const isMissingProductionApprovalTable = (
+  error: { code?: string } | null | undefined,
+) => Boolean(error && ["42P01", "PGRST205"].includes(error.code ?? ""));
+const isMissingMemberCapabilityTable = (
   error: { code?: string } | null | undefined,
 ) => Boolean(error && ["42P01", "PGRST205"].includes(error.code ?? ""));
 
@@ -133,6 +138,7 @@ export async function GET() {
     { data: profiles, error: profileError },
     { data: projectTypeAssignments, error: assignmentError },
     { data: productionApprovals, error: productionApprovalError },
+    { data: memberCapabilities, error: memberCapabilityError },
   ] = await Promise.all([
     userIds.length
       ? admin.from("profiles").select("id, signature_url").in("id", userIds)
@@ -151,12 +157,22 @@ export async function GET() {
           .eq("is_active", true)
           .in("user_id", userIds)
       : Promise.resolve({ data: [], error: null }),
+    userIds.length
+      ? admin
+          .from("organization_member_capabilities")
+          .select("user_id, capability")
+          .eq("organization_id", organizationId)
+          .eq("capability", "internal_finance")
+          .in("user_id", userIds)
+      : Promise.resolve({ data: [], error: null }),
   ]);
   if (
     profileError ||
     assignmentError ||
     (productionApprovalError &&
-      !isMissingProductionApprovalTable(productionApprovalError))
+      !isMissingProductionApprovalTable(productionApprovalError)) ||
+    (memberCapabilityError &&
+      !isMissingMemberCapabilityTable(memberCapabilityError))
   )
     return json({ error: profileError?.message ?? assignmentError?.message ?? productionApprovalError?.message ?? "Unable to load user details." }, 500);
 
@@ -177,6 +193,11 @@ export async function GET() {
       .filter((permission) => permission.is_active)
       .map((permission) => permission.user_id),
   );
+  const internalFinanceUserIds = new Set(
+    (memberCapabilities ?? [])
+      .filter((capability) => capability.capability === "internal_finance")
+      .map((capability) => capability.user_id),
+  );
   return Response.json({
     users: (memberships ?? [])
       .filter((member) => member.role !== "super_admin")
@@ -190,6 +211,9 @@ export async function GET() {
               : (user?.email ?? "Unnamed user"),
           email: user?.email ?? "—",
           role: member.role,
+          internal_finance_enabled:
+            member.role === "internal_finance" ||
+            internalFinanceUserIds.has(member.user_id),
           project_types: projectTypesByUserId.get(member.user_id) ?? [],
           production_approval_enabled: productionApprovalUserIds.has(member.user_id),
           signature_url: profileByUserId.get(member.user_id)?.signature_url ?? null,
@@ -236,6 +260,9 @@ export async function POST(request: Request) {
       ? body.role
       : null;
   const productionApprovalEnabled = body?.production_approval_enabled === true;
+  const internalFinanceEnabled =
+    role === "sales_pricing_officer" &&
+    body?.internal_finance_enabled === true;
   if (
     !fullName ||
     !/^\S+@\S+\.\S+$/.test(email) ||
@@ -283,6 +310,26 @@ export async function POST(request: Request) {
   if (membershipError) {
     await admin.auth.admin.deleteUser(userId);
     return json({ error: membershipError.message }, 500);
+  }
+
+  if (internalFinanceEnabled) {
+    const { error: capabilityError } = await admin
+      .from("organization_member_capabilities")
+      .upsert(
+        {
+          organization_id: organizationId,
+          user_id: userId,
+          capability: "internal_finance",
+          granted_by: actorUserId,
+        },
+        { onConflict: "organization_id,user_id,capability" },
+      );
+    if (capabilityError) {
+      await admin.from("organization_members").delete().eq("organization_id", organizationId).eq("user_id", userId);
+      await admin.from("profiles").delete().eq("id", userId);
+      await admin.auth.admin.deleteUser(userId);
+      return json({ error: capabilityError.message }, 500);
+    }
   }
 
   if (productionApprovalEnabled) {
@@ -406,6 +453,23 @@ export async function PATCH(request: Request) {
       { error: "Production approval can only be assigned to a Sales & Pricing Officer." },
       400,
     );
+  const { data: existingCapability, error: capabilityReadError } = await managed.admin
+    .from("organization_member_capabilities")
+    .select("capability")
+    .eq("organization_id", organizationId)
+    .eq("user_id", userId)
+    .eq("capability", "internal_finance")
+    .maybeSingle();
+  if (
+    capabilityReadError &&
+    !isMissingMemberCapabilityTable(capabilityReadError)
+  )
+    return json({ error: capabilityReadError.message }, 500);
+  const internalFinanceEnabled =
+    role === "sales_pricing_officer" &&
+    (typeof body?.internal_finance_enabled === "boolean"
+      ? body.internal_finance_enabled
+      : existingCapability?.capability === "internal_finance");
   let productionApprovalEnabled = productionApprovalRequested === true;
   if (
     role === "sales_pricing_officer" &&
@@ -455,6 +519,28 @@ export async function PATCH(request: Request) {
     .eq("organization_id", organizationId)
     .eq("user_id", userId);
   if (membershipError) return json({ error: membershipError.message }, 500);
+
+  const capabilityMutation = internalFinanceEnabled
+    ? await managed.admin.from("organization_member_capabilities").upsert(
+        {
+          organization_id: organizationId,
+          user_id: userId,
+          capability: "internal_finance",
+          granted_by: actorUserId,
+        },
+        { onConflict: "organization_id,user_id,capability" },
+      )
+    : await managed.admin
+        .from("organization_member_capabilities")
+        .delete()
+        .eq("organization_id", organizationId)
+        .eq("user_id", userId)
+        .eq("capability", "internal_finance");
+  if (
+    capabilityMutation.error &&
+    !isMissingMemberCapabilityTable(capabilityMutation.error)
+  )
+    return json({ error: capabilityMutation.error.message }, 500);
 
   const { error: permissionError } = await setProductionApprovalPermission(
     managed.admin,

@@ -25,6 +25,7 @@ export function AccountProfileDialog({
   embedded = false,
   fullWidth = false,
   role = "",
+  internalFinanceEnabled = false,
   backHref = "/",
 }: {
   open: boolean;
@@ -34,6 +35,7 @@ export function AccountProfileDialog({
   embedded?: boolean;
   fullWidth?: boolean;
   role?: string;
+  internalFinanceEnabled?: boolean;
   backHref?: string;
 }) {
   const client = useMemo(() => createClient(), []);
@@ -45,7 +47,7 @@ export function AccountProfileDialog({
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState(!embedded);
   const [showPassword, setShowPassword] = useState(false);
-  const accountType = workspaceRoleLabel(role);
+  const accountType = workspaceRoleLabel(role, internalFinanceEnabled);
 
   useEffect(() => {
     if (!open) return;

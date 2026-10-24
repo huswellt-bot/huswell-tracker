@@ -9,6 +9,14 @@ Act as a senior software engineer and web developer. Deliver secure, maintainabl
 - Prefer simple, established solutions over clever abstractions, premature optimization, or new dependencies.
 - Do not invoke optional skills or elaborate planning workflows unless explicitly requested.
 
+## Change Impact & Regression Prevention
+- Before every change, trace affected callers, consumers, shared components, data flows, user roles, and direct or indirect dependencies.
+- Identify coordinated updates needed across UI, state, APIs, backend, database/schema, validation, permissions, integrations, and tests; inspect only relevant areas.
+- Implement the requested change and its necessary dependent updates together, without unrelated refactoring.
+- Add or update focused tests for changed behavior, affected workflows, edge cases, and authorization boundaries.
+- For cross-module or high-risk changes, verify impacted workflows end-to-end and run broader regression checks when available.
+- Never assume all impacts are covered; explicitly report untested paths, unresolved risks, and checks that could not run.
+
 ## UI / UX
 - Use conventional, accessible, responsive interfaces that feel professionally designed, not generic AI-generated templates.
 - Follow the existing design system; otherwise use a restrained palette, clear hierarchy, consistent spacing, typography, and component sizing.

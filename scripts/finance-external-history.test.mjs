@@ -101,7 +101,7 @@ test("Finance can open category creation from the dropdown without inline catego
   assert.match(workspace, /const canCreateCategory = internal \|\| role === "external_finance";/);
   assert.match(categoryManagement, /if \(!canCreateCategory\) return setErrorMessage\("Only Internal or External Finance can manage finance categories\."\);/);
   assert.match(workspace, /const addCategoryOptionValue = "__add_finance_category__";/);
-  assert.match(workspace, /label: "\+ Add new category"/);
+  assert.match(workspace, /label: "Add new"/);
   assert.match(workspace, /if \(value === addCategoryOptionValue\)/);
   assert.match(workspace, /setCategoryCreateOpen\(true\)/);
   assert.doesNotMatch(transactionForm, /Add a custom \{transactionDirection\} category/);
@@ -137,7 +137,7 @@ test("Internal and External Finance expose their sections in the main sidebar", 
   assert.match(workspaceShell, /view: "Finance Reports", icon: CalendarDays/);
   assert.match(workspaceShell, /view === "Finance Reports"[\s\S]{0,120}"Monthly report"/);
   assert.match(workspaceShell, /view === "Finance Transactions" && role === "external_finance"[\s\S]{0,100}"Transaction"/);
-  assert.match(workspaceShell, /view === "Finance Transactions" && isInternalFinanceRole\(role\)[\s\S]{0,120}"Transaction history"/);
+  assert.match(workspaceShell, /view === "Finance Transactions" && hasInternalFinanceAccess[\s\S]{0,120}"Transaction history"/);
   assert.match(workspaceShell, /active === "Finance Transactions"/);
   assert.match(workspaceShell, /initialTab="transactions"/);
 });

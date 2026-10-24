@@ -11,6 +11,10 @@ const financeFollowUpMigration = readFileSync(
   join(repoRoot, "supabase", "233_finance_gm_budget_only_and_legacy_compatibility.sql"),
   "utf8",
 );
+const financeCapabilityMigration = readFileSync(
+  join(repoRoot, "supabase", "237_internal_finance_member_capability.sql"),
+  "utf8",
+);
 
 test("malformed costing uploads return a controlled client error", () => {
   assert.match(costingRoute, /request\.formData\(\)\.catch\(\(\) => null\)/);
@@ -35,12 +39,12 @@ test("pending payment receiving-account correction is Internal Finance only", ()
 });
 
 test("Finance realtime subscriptions match the current role boundaries", () => {
-  const start = workspace.indexOf("const isFinance = [");
+  const start = workspace.indexOf("const isFinance = hasInternalFinanceAccess");
   const end = workspace.indexOf("const queueTables = new Set<string>();", start);
   assert.ok(start >= 0 && end > start);
   const roleScope = workspace.slice(start, end);
-  assert.match(roleScope, /const isFinance = \["internal_finance", "external_finance"\]\.includes\(role\);/);
-  assert.match(roleScope, /const isInternalFinance = role === "internal_finance";/);
+  assert.match(roleScope, /const isFinance = hasInternalFinanceAccess \|\| role === "external_finance";/);
+  assert.match(roleScope, /const isInternalFinance = hasInternalFinanceAccess;/);
   assert.doesNotMatch(roleScope, /super_admin|owner|admin|accountant/);
 });
 
@@ -73,11 +77,20 @@ test("External Finance does not receive the broad transaction receipt delete pat
 test("Payment Monitoring cannot be opened by non-Finance roles", () => {
   assert.match(
     workspace,
-    /const financePaymentViewAllowed = \["internal_finance", "external_finance"\]\.includes\(role\);/,
+    /const financePaymentViewAllowed =\s+hasInternalFinanceAccess \|\| role === "external_finance";/,
   );
   assert.match(
     workspace,
     /if \(view === "Payment Monitoring" && !financePaymentViewAllowed\)/,
   );
   assert.match(workspace, /const safeInitialView = requestedInitialView === "Payment Monitoring"/);
+});
+
+test("Dianne's existing Sales and Pricing account receives Finance as a capability", () => {
+  assert.match(financeCapabilityMigration, /organization_member_capabilities/);
+  assert.match(financeCapabilityMigration, /dianne@huswelloffice\.com/);
+  assert.match(financeCapabilityMigration, /member\.role::text = 'sales_pricing_officer'/);
+  assert.match(financeCapabilityMigration, /private\.finance_is_internal/);
+  assert.match(workspace, /internalFinanceEnabled = false/);
+  assert.match(workspace, /role === "internal_finance"/);
 });

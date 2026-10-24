@@ -1,4 +1,9 @@
-export const workspaceRoleLabel = (role: string) => {
+export const workspaceRoleLabel = (
+  role: string,
+  internalFinanceEnabled = false,
+) => {
+  if (role === "sales_pricing_officer" && internalFinanceEnabled)
+    return "Internal Finance + Sales & Pricing Officer";
   switch (role) {
     case "super_admin":
       return "Super Admin";
@@ -22,5 +27,7 @@ export const workspaceRoleLabel = (role: string) => {
   }
 };
 
-export const workspaceAccountLabel = (role: string) =>
-  `${workspaceRoleLabel(role)} Account`;
+export const workspaceAccountLabel = (
+  role: string,
+  internalFinanceEnabled = false,
+) => `${workspaceRoleLabel(role, internalFinanceEnabled)} Account`;

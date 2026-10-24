@@ -17,6 +17,18 @@ const followUpMigrationPath = join(repoRoot, "supabase", "233_finance_gm_budget_
 const followUpMigration = existsSync(followUpMigrationPath)
   ? readFileSync(followUpMigrationPath, "utf8")
   : "";
+const metadataMigrationPath = join(repoRoot, "supabase", "234_finance_accounts_metadata_only.sql");
+const metadataMigration = existsSync(metadataMigrationPath)
+  ? readFileSync(metadataMigrationPath, "utf8")
+  : "";
+const customTypesMigrationPath = join(repoRoot, "supabase", "235_finance_account_custom_types.sql");
+const customTypesMigration = existsSync(customTypesMigrationPath)
+  ? readFileSync(customTypesMigrationPath, "utf8")
+  : "";
+const removalMigrationPath = join(repoRoot, "supabase", "236_finance_category_and_account_type_removal.sql");
+const removalMigration = existsSync(removalMigrationPath)
+  ? readFileSync(removalMigrationPath, "utf8")
+  : "";
 
 test("the new budget workflow has a server-authoritative monthly allocation migration", () => {
   assert.notEqual(migration, "", "expected the monthly allocation migration to exist");
@@ -73,6 +85,91 @@ test("Internal Finance can review an approved amount and allocate it to the requ
   assert.match(workspace, /reallocate_finance_account_budget/);
 });
 
+test("budget view separates account allocations and funding requests into tabs", () => {
+  assert.match(workspace, /aria-label="Budget sections"/);
+  assert.match(workspace, /budgetSection === "allocations"/);
+  assert.match(workspace, /id="finance-budget-allocations"/);
+  assert.match(workspace, /id="finance-budget-requests"/);
+});
+
+test("Accounts page uses GM budget allocation instead of direct account funding", () => {
+  assert.doesNotMatch(workspace, /Add funds to account/);
+  assert.doesNotMatch(workspace, /> Add funds</);
+  assert.doesNotMatch(workspace, /client\.rpc\("create_finance_account_funding",/);
+  assert.match(workspace, /New spending capacity comes from GM-approved budget allocation/);
+});
+
+test("new accounts are metadata-only and start without opening cash", () => {
+  const accountFormStart = workspace.indexOf('title={accountEditing ? "Edit Finance account"');
+  const accountFormEnd = workspace.indexOf("{budgetOpen &&", accountFormStart);
+  assert.ok(accountFormStart >= 0 && accountFormEnd > accountFormStart);
+  const accountForm = workspace.slice(accountFormStart, accountFormEnd);
+  assert.doesNotMatch(accountForm, /Account number \/ identifier/);
+  assert.doesNotMatch(accountForm, /Opening amount/);
+  assert.doesNotMatch(accountForm, /Receipt image/);
+  assert.doesNotMatch(accountForm, /View account receipt/);
+  assert.match(workspace, /p_account_number: null/);
+  assert.match(workspace, /p_opening_balance: 0/);
+  assert.match(workspace, /p_receipt_storage_path: null/);
+});
+
+test("the account card does not present legacy opening fields as current setup", () => {
+  const accountsCardStart = workspace.indexOf('title="Bank and e-wallet accounts"');
+  const accountsCardEnd = workspace.indexOf('{tab === "budget"', accountsCardStart);
+  const accountsCard = workspace.slice(accountsCardStart, accountsCardEnd);
+  assert.doesNotMatch(accountsCard, /Opening balance:/);
+  assert.doesNotMatch(accountsCard, />View receipt</);
+  assert.doesNotMatch(accountsCard, /Historical account funding/);
+  assert.doesNotMatch(accountsCard, /Payments:/);
+  assert.match(accountsCard, /Available cash/);
+});
+
+test("the account creation RPC enforces metadata-only accounts server-side", () => {
+  assert.notEqual(metadataMigration, "", "expected the metadata-only account migration to exist");
+  assert.match(metadataMigration, /create or replace function public\.create_finance_account_with_mapping/);
+  assert.match(metadataMigration, /insert into public\.finance_accounts/);
+  assert.match(metadataMigration, /null, 0, v_payment_method/);
+  assert.match(metadataMigration, /use GM budget allocation for spending capacity/);
+  assert.doesNotMatch(metadataMigration, /Upload the account receipt image/);
+});
+
+test("Other opens a reusable custom account type modal", () => {
+  assert.match(workspace, /accountTypeCreateOpen/);
+  assert.match(workspace, /create_finance_account_type/);
+  assert.match(workspace, /label: "Add new"/);
+  assert.match(workspace, /custom:\$\{String\(type\.id\)\}/);
+  assert.match(workspace, /p_custom_account_type_id/);
+});
+
+test("custom account types are organization-scoped and server-validated", () => {
+  assert.notEqual(customTypesMigration, "", "expected the custom account type migration to exist");
+  assert.match(customTypesMigration, /create table if not exists public\.finance_account_types/);
+  assert.match(customTypesMigration, /finance_account_types_active_name_idx/);
+  assert.match(customTypesMigration, /create or replace function public\.create_finance_account_type/);
+  assert.match(customTypesMigration, /Only Internal Finance can create account types/);
+  assert.match(customTypesMigration, /custom_account_type_id/);
+  assert.match(customTypesMigration, /organization_id = v_organization_id/);
+  assert.match(customTypesMigration, /is_active/);
+});
+
+test("custom categories and account types use icon removal actions", () => {
+  assert.match(workspace, /Delete or archive .* category/);
+  assert.match(workspace, /Delete or archive .* account type/);
+  assert.match(workspace, /remove_finance_category/);
+  assert.match(workspace, /remove_finance_account_type/);
+  assert.match(workspace, /Items already used by transactions or accounts are archived/);
+});
+
+test("removal RPCs delete unused items and archive referenced items", () => {
+  assert.notEqual(removalMigration, "", "expected the safe removal migration to exist");
+  assert.match(removalMigration, /create or replace function public\.remove_finance_category/);
+  assert.match(removalMigration, /create or replace function public\.remove_finance_account_type/);
+  assert.match(removalMigration, /from public\.finance_transactions where category_id = v_category\.id/);
+  assert.match(removalMigration, /from public\.finance_accounts where custom_account_type_id = v_type\.id/);
+  assert.match(removalMigration, /return 'archived'/);
+  assert.match(removalMigration, /return 'deleted'/);
+});
+
 test("budget realtime refresh includes the new monthly allocation tables", () => {
   assert.match(workspace, /finance_budget_periods/);
   assert.match(workspace, /finance_budget_grants/);
@@ -119,7 +216,7 @@ test("GM navigation exposes only the Finance budget view and Accountant has no F
 });
 
 test("direct Finance routes preserve the same role boundary", () => {
-  assert.match(financePage, /super_admin.*owner.*admin.*internal_finance.*external_finance/);
+  assert.match(financePage, /super_admin[\s\S]*owner[\s\S]*admin[\s\S]*internal_finance[\s\S]*external_finance/);
   assert.match(financePage, /\? "Finance Budget"/);
   assert.match(financeReportsPage, /\["internal_finance", "external_finance"\]/);
   assert.doesNotMatch(financeReportsPage, /super_admin|owner|admin|accountant/);

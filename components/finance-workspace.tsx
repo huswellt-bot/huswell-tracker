@@ -9,6 +9,7 @@ import {
   Plus,
   ReceiptText,
   Search,
+  Trash2,
   Undo2,
   Wallet,
   X,
@@ -38,6 +39,7 @@ import { TABLE_PAGE_SIZE, TablePagination } from "@/components/ui/table-paginati
 import { NotificationDialog } from "@/components/ui/notification-dialog";
 
 type Row = { id?: string; [key: string]: unknown };
+type FinanceRemoveTarget = { kind: "category" | "account_type"; id: string; label: string };
 type Direction = "income" | "expense";
 type CashInSource = "other_income" | "quotation_payment";
 type ExpenseMode = "regular" | "project" | "supplier";
@@ -150,13 +152,6 @@ const defaultPaymentMethodForAccountType = (accountType: string) => {
   if (accountType === "other") return "other";
   return "bank_transfer";
 };
-
-const accountFundingSources = [
-  ["owner_funding", "Owner funding"],
-  ["loan_received", "Loan received"],
-  ["external_deposit", "External deposit"],
-  ["other", "Other"],
-] as const;
 
 const peso = new Intl.NumberFormat("en-PH", {
   style: "currency",
@@ -399,7 +394,6 @@ type FinanceAction =
   | { kind: "income_void"; id: string; label: string }
   | { kind: "funding_request"; id: string; decision: BudgetDecision; label: string }
   | { kind: "paid"; id: string; label: string }
-  | { kind: "funding"; id: string; label: string }
   | { kind: "account"; id: string; active: boolean; label: string };
 
 const StatusPill = ({ value }: { value: string }) => (
@@ -1813,12 +1807,10 @@ function FinanceConfirmDialog({
   const isRejection = (action.kind === "funding_request" && action.decision === "rejected") || (action.kind === "quotation_payment" && action.decision === "rejected");
   const isQuotationRevision = action.kind === "quotation_payment" && action.decision === "revision_requested";
   const isRevision = action.kind === "revision" || action.kind === "income_revision" || isQuotationRevision || (action.kind === "funding_request" && action.decision === "revision_requested");
-  const requiresNote = isRejection || isRevision || action.kind === "funding" || action.kind === "income_void";
+  const requiresNote = isRejection || isRevision || action.kind === "income_void";
   const actionLabel = action.kind === "paid"
     ? "Mark paid"
-    : action.kind === "funding"
-      ? "Void"
-      : action.kind === "account"
+    : action.kind === "account"
         ? action.active ? "Reactivate" : "Deactivate"
       : action.kind === "approve_and_pay"
         ? "Approve and pay"
@@ -1837,13 +1829,13 @@ function FinanceConfirmDialog({
   return (
     <FinanceDialog
       title={`${actionLabel} ${action.label}`}
-      detail={action.kind === "funding" ? "This removes the funding amount from the account balance but preserves the audit record." : action.kind === "account" ? "Deactivation hides the account from new payment selections but preserves its balances, payments, and receipts." : action.kind === "approve_and_pay" ? "This approves the regular Cash Out, records it as paid, and deducts the selected payment account." : action.kind === "quotation_payment" ? action.decision === "verified" ? "This confirms the client receipt and posts it as Cash In." : action.decision === "revision_requested" ? "This returns the receipt to External Finance for correction. It stays out of Cash In until resubmitted and verified." : "This rejects the receipt and keeps it out of Cash In." : action.kind === "verify_income" ? "This confirms the receipt, updates the selected receiving account balance, and includes the amount in Cash In totals." : action.kind === "income_void" ? "This reverses the verified Cash In and removes it from the account balance while preserving the audit record." : action.kind === "funding_request" ? action.decision === "revision_requested" ? "This returns the account funding request to External Finance for correction." : "This rejects the account funding request." : isRevision ? action.kind === "income_revision" ? "This sends the standalone Cash In back to External Finance for correction and resubmission." : "This sends the unpaid Cash Out back to External Finance for correction and resubmission." : isDecision ? "Add a note so the financial decision is clear to the next reviewer." : "This changes the settlement status in the finance ledger."}
+      detail={action.kind === "account" ? "Deactivation hides the account from new payment selections but preserves its balances, payments, and receipts." : action.kind === "approve_and_pay" ? "This approves the regular Cash Out, records it as paid, and deducts the selected payment account." : action.kind === "quotation_payment" ? action.decision === "verified" ? "This confirms the client receipt and posts it as Cash In." : action.decision === "revision_requested" ? "This returns the receipt to External Finance for correction. It stays out of Cash In until resubmitted and verified." : "This rejects the receipt and keeps it out of Cash In." : action.kind === "verify_income" ? "This confirms the receipt, updates the selected receiving account balance, and includes the amount in Cash In totals." : action.kind === "income_void" ? "This reverses the verified Cash In and removes it from the account balance while preserving the audit record." : action.kind === "funding_request" ? action.decision === "revision_requested" ? "This returns the account funding request to External Finance for correction." : "This rejects the account funding request." : isRevision ? action.kind === "income_revision" ? "This sends the standalone Cash In back to External Finance for correction and resubmission." : "This sends the unpaid Cash Out back to External Finance for correction and resubmission." : isDecision ? "Add a note so the financial decision is clear to the next reviewer." : "This changes the settlement status in the finance ledger."}
       close={close}
     >
-      {(isDecision || action.kind === "funding" || action.kind === "income_void") && (
+      {(isDecision || action.kind === "income_void") && (
         <label className="field-label mt-5 block">
-          {action.kind === "funding" ? "Void reason (required)" : action.kind === "income_void" ? "Reversal reason (required)" : isRevision ? action.kind === "income_revision" || isQuotationRevision ? "Correction reason (required)" : "Revision reason (required)" : `Decision note${isRejection ? " (required)" : " (optional)"}`}
-          <textarea value={note} onChange={(event) => setNote(event.target.value)} className="input mt-1 min-h-24" placeholder={action.kind === "funding" ? "Explain why this funding entry is being voided" : action.kind === "income_void" ? "Explain why this Cash In is being reversed" : action.kind === "quotation_payment" && action.decision === "revision_requested" ? "Explain what External Finance must correct" : isRevision ? action.kind === "income_revision" ? "Explain what External Finance must correct in this Cash In" : "Explain what External Finance must correct" : isRejection ? action.kind === "quotation_payment" ? "Explain why this receipt is being rejected" : "Explain why this request is being rejected" : "Add context for this approval"} />
+          {action.kind === "income_void" ? "Reversal reason (required)" : isRevision ? action.kind === "income_revision" || isQuotationRevision ? "Correction reason (required)" : "Revision reason (required)" : `Decision note${isRejection ? " (required)" : " (optional)"}`}
+          <textarea value={note} onChange={(event) => setNote(event.target.value)} className="input mt-1 min-h-24" placeholder={action.kind === "income_void" ? "Explain why this Cash In is being reversed" : action.kind === "quotation_payment" && action.decision === "revision_requested" ? "Explain what External Finance must correct" : isRevision ? action.kind === "income_revision" ? "Explain what External Finance must correct in this Cash In" : "Explain what External Finance must correct" : isRejection ? action.kind === "quotation_payment" ? "Explain why this receipt is being rejected" : "Explain why this request is being rejected" : "Add context for this approval"} />
         </label>
       )}
       <div className="mt-5 flex justify-end gap-2">
@@ -1955,7 +1947,6 @@ export function FinanceWorkspace({
   const [paymentRecords, setPaymentRecords] = useState<Row[]>([]);
   const [quotationPaymentRecords, setQuotationPaymentRecords] = useState<Row[]>([]);
   const [pendingQuotationPayments, setPendingQuotationPayments] = useState<Row[]>([]);
-  const [accountFundingEntries, setAccountFundingEntries] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1977,11 +1968,13 @@ export function FinanceWorkspace({
   const [categoryCreateMessage, setCategoryCreateMessage] = useState<string | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [accountEditing, setAccountEditing] = useState<Row | null>(null);
-  const [accountFile, setAccountFile] = useState<File | null>(null);
-  const [accountValues, setAccountValues] = useState({ name: "", type: "bank", number: "", opening_balance: "", payment_method: "bank_transfer" });
-  const [accountFundingOpen, setAccountFundingOpen] = useState(false);
-  const [accountFundingFile, setAccountFundingFile] = useState<File | null>(null);
-  const [accountFundingValues, setAccountFundingValues] = useState({ account_id: "", amount: "", funding_source: "owner_funding", funding_date: localDate(), note: "" });
+  const [accountValues, setAccountValues] = useState({ name: "", type: "bank", payment_method: "bank_transfer" });
+  const [accountTypes, setAccountTypes] = useState<Row[]>([]);
+  const [accountTypeCreateOpen, setAccountTypeCreateOpen] = useState(false);
+  const [accountTypeDraft, setAccountTypeDraft] = useState("");
+  const [accountTypeCreateMessage, setAccountTypeCreateMessage] = useState<string | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<FinanceRemoveTarget | null>(null);
+  const [removeMessage, setRemoveMessage] = useState<string | null>(null);
   const [budgetOpen, setBudgetOpen] = useState(false);
   const [budgetRevision, setBudgetRevision] = useState<Row | null>(null);
   const [budgetValues, setBudgetValues] = useState({ account_id: "", amount: "", note: "" });
@@ -1990,6 +1983,7 @@ export function FinanceWorkspace({
   const [allocationOpen, setAllocationOpen] = useState(false);
   const [allocationMode, setAllocationMode] = useState<"allocate" | "reallocate">("allocate");
   const [allocationValues, setAllocationValues] = useState({ from_account_id: "", to_account_id: "", amount: "", note: "" });
+  const [budgetSection, setBudgetSection] = useState<"allocations" | "requests">("allocations");
   const [fundingReviewRequest, setFundingReviewRequest] = useState<Row | null>(null);
   const [fundingApprovedAmount, setFundingApprovedAmount] = useState("");
   const [fundingReviewNote, setFundingReviewNote] = useState("");
@@ -2033,11 +2027,11 @@ export function FinanceWorkspace({
         : client.rpc("list_finance_funding_request_accounts", {
             p_organization_id: organizationId,
           });
+      const accountTypesRequest = internal
+        ? client.from("finance_account_types").select("id,name,is_active").eq("organization_id", organizationId).order("name")
+        : emptyFinanceRequest();
       const balancesRequest = internal
         ? client.from("finance_account_balances").select("*").eq("organization_id", organizationId).order("account_name")
-        : emptyFinanceRequest();
-      const accountFundingRequest = internal
-        ? client.from("finance_account_funding_entries").select("*").eq("organization_id", organizationId).order("funding_date", { ascending: false }).order("created_at", { ascending: false })
         : emptyFinanceRequest();
       const commissionAllocationsRequest = internal
         ? client.from("commission_summary_allocations").select("*").eq("organization_id", organizationId).order("created_at", { ascending: false })
@@ -2108,7 +2102,6 @@ export function FinanceWorkspace({
         budgetOnly
           ? emptyFinanceRequest()
           : client.from("quotation_payment_records").select("quotation_id,status,amount,verified_at").eq("organization_id", organizationId).eq("status", "verified"),
-        accountFundingRequest,
         pendingQuotationPaymentsRequest,
         quotationPaymentRecordsRequest,
         quotationDirectCostsRequest,
@@ -2130,6 +2123,7 @@ export function FinanceWorkspace({
           : emptyFinanceRequest(),
         expenseAccountsRequest,
         fundingRequestAccountsRequest,
+        accountTypesRequest,
       ]);
       const failed = requests.find((request) => request.error);
       if (failed?.error) {
@@ -2150,16 +2144,16 @@ export function FinanceWorkspace({
       setCommissionAllocations(loadedAllocations);
       setProfiles((requests[10].data ?? []) as Row[]);
       setPaymentRecords((requests[11].data ?? []) as Row[]);
-      setAccountFundingEntries((requests[12].data ?? []) as Row[]);
-      setPendingQuotationPayments((requests[13].data ?? []) as Row[]);
-      setQuotationPaymentRecords((requests[14].data ?? []) as Row[]);
-      setBudgetSnapshot(((requests[17].data ?? []) as Row[])[0] ?? null);
-      setBudgetPeriods((requests[18].data ?? []) as Row[]);
-      setBudgetGrants((requests[19].data ?? []) as Row[]);
-      setAccountBudgetAllocations((requests[20].data ?? []) as Row[]);
-      setAccountFundingRequests((requests[21].data ?? []) as Row[]);
-      setExpenseAccounts((requests[22].data ?? []) as Row[]);
-      setFundingRequestAccounts((requests[23].data ?? []) as Row[]);
+      setPendingQuotationPayments((requests[12].data ?? []) as Row[]);
+      setQuotationPaymentRecords((requests[13].data ?? []) as Row[]);
+      setBudgetSnapshot(((requests[16].data ?? []) as Row[])[0] ?? null);
+      setBudgetPeriods((requests[17].data ?? []) as Row[]);
+      setBudgetGrants((requests[18].data ?? []) as Row[]);
+      setAccountBudgetAllocations((requests[19].data ?? []) as Row[]);
+      setAccountFundingRequests((requests[20].data ?? []) as Row[]);
+      setExpenseAccounts((requests[21].data ?? []) as Row[]);
+      setFundingRequestAccounts((requests[22].data ?? []) as Row[]);
+      setAccountTypes((requests[23].data ?? []) as Row[]);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Finance data could not load.");
     } finally {
@@ -2186,7 +2180,6 @@ export function FinanceWorkspace({
           "finance_transactions",
           "finance_categories",
           "finance_accounts",
-          "finance_account_funding_entries",
           "finance_budget_periods",
           "finance_budget_grants",
           "finance_account_budget_allocations",
@@ -2249,6 +2242,11 @@ export function FinanceWorkspace({
     () => activeAccounts.filter((account) => availableExpenseAccountIds.has(String(account.id))),
     [activeAccounts, availableExpenseAccountIds],
   );
+  const accountTypeLabel = useCallback((account: Row | null | undefined) => {
+    const customType = accountTypes.find((type) => String(type.id) === stringValue(account, "custom_account_type_id"));
+    if (customType) return stringValue(customType, "name");
+    return stringValue(account, "account_type", "other").replaceAll("_", " ");
+  }, [accountTypes]);
 
   const categoryOptions = useMemo<SearchableOption[]>(
     () => {
@@ -2280,7 +2278,7 @@ export function FinanceWorkspace({
       }
 
       return canCreateCategory
-        ? [...options, { value: addCategoryOptionValue, label: "+ Add new category", searchText: "add create category", groupLabel: "Actions" }]
+        ? [...options, { value: addCategoryOptionValue, label: "Add new", searchText: "add create category", groupLabel: "Actions" }]
         : options;
     },
     [activeCategories, canCreateCategory, isStandaloneExternalIncome, transactionDirection],
@@ -2360,9 +2358,9 @@ export function FinanceWorkspace({
     () => (transactionDirection === "expense" && !internal ? availableExpenseAccounts : activeAccounts).map((account) => ({
       value: String(account.id),
       label: stringValue(account, "account_name"),
-      searchText: [stringValue(account, "account_name"), stringValue(account, "account_number"), stringValue(account, "account_type"), financePaymentMethodLabel(account.payment_method)].join(" "),
+      searchText: [stringValue(account, "account_name"), stringValue(account, "account_number"), accountTypeLabel(account), financePaymentMethodLabel(account.payment_method)].join(" "),
     })),
-    [activeAccounts, availableExpenseAccounts, internal, transactionDirection],
+    [accountTypeLabel, activeAccounts, availableExpenseAccounts, internal, transactionDirection],
   );
 
   const supplierOptions = useMemo<SearchableOption[]>(
@@ -3415,21 +3413,60 @@ export function FinanceWorkspace({
 
   const archiveCategory = async (category: Row) => {
     if (!internal) return setErrorMessage("Only Internal Finance can manage finance categories.");
-    const { error } = await client.rpc("archive_finance_category", { p_category_id: category.id });
-    if (error) return setErrorMessage(error.message);
-    setMessage("Category removed from the list.");
-    await load();
+    setRemoveMessage(null);
+    setRemoveTarget({ kind: "category", id: String(category.id), label: stringValue(category, "name") });
+  };
+
+  const requestAccountTypeRemoval = (type: Row) => {
+    setRemoveMessage(null);
+    setRemoveTarget({ kind: "account_type", id: String(type.id), label: stringValue(type, "name") });
+  };
+
+  const confirmRemoveTarget = async () => {
+    if (!removeTarget) return;
+    setRemoveMessage(null);
+    setSaving(true);
+    try {
+      const { data, error } = removeTarget.kind === "category"
+        ? await client.rpc("remove_finance_category", { p_category_id: removeTarget.id })
+        : await client.rpc("remove_finance_account_type", { p_account_type_id: removeTarget.id });
+      if (error) throw error;
+      setRemoveTarget(null);
+      setMessage(data === "archived" ? `${removeTarget.label} was archived because it is already in use.` : `${removeTarget.label} was deleted.`);
+      await load();
+    } catch (error) {
+      setRemoveMessage(error instanceof Error ? error.message : "The item could not be removed.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveAccountType = async () => {
+    const name = accountTypeDraft.trim();
+    if (!name) return setAccountTypeCreateMessage("Enter an account type name.");
+    setAccountTypeCreateMessage(null);
+    setSaving(true);
+    try {
+      const { data, error } = await client.rpc("create_finance_account_type", { p_name: name });
+      if (error) throw error;
+      await load();
+      if (data) setAccountValues((current) => ({ ...current, type: `custom:${String(data)}` }));
+      setAccountTypeDraft("");
+      setAccountTypeCreateOpen(false);
+    } catch (error) {
+      setAccountTypeCreateMessage(error instanceof Error ? error.message : "The account type could not be created.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const openAccountEditor = (account?: Row) => {
     setAccountEditing(account ?? null);
-    setAccountFile(null);
     const accountType = account ? stringValue(account, "account_type", "bank") : "bank";
+    const customAccountTypeId = accountType === "other" ? stringValue(account, "custom_account_type_id") : "";
     setAccountValues({
       name: account ? stringValue(account, "account_name") : "",
-      type: accountType,
-      number: account ? stringValue(account, "account_number") : "",
-      opening_balance: account ? numericValue(account, "opening_balance").toFixed(2) : "",
+      type: customAccountTypeId ? `custom:${customAccountTypeId}` : accountType,
       payment_method: account
         ? stringValue(account, "payment_method", "bank_transfer")
         : defaultPaymentMethodForAccountType(accountType),
@@ -3440,29 +3477,25 @@ export function FinanceWorkspace({
   const closeAccountEditor = () => {
     setAccountOpen(false);
     setAccountEditing(null);
-    setAccountFile(null);
-  };
-
-  const openAccountFunding = (accountId = "") => {
-    setAccountFundingValues({ account_id: accountId, amount: "", funding_source: "owner_funding", funding_date: localDate(), note: "" });
-    setAccountFundingFile(null);
-    setAccountFundingOpen(true);
   };
 
   const saveAccount = async () => {
     if (!accountValues.name.trim()) return setErrorMessage("Enter an account name.");
+    const customAccountTypeId = accountValues.type.startsWith("custom:") ? accountValues.type.slice("custom:".length) : "";
+    const accountType = customAccountTypeId ? "other" : accountValues.type;
     const paymentMethod = accountEditing
       ? accountValues.payment_method
-      : defaultPaymentMethodForAccountType(accountValues.type);
+      : defaultPaymentMethodForAccountType(accountType);
     if (accountEditing) {
       setSaving(true);
       try {
         const { error } = await client.rpc("update_finance_account", {
           p_account_id: accountEditing.id,
           p_account_name: accountValues.name.trim(),
-          p_account_type: accountValues.type,
-          p_account_number: accountValues.number.trim() || null,
+          p_account_type: accountType,
+          p_account_number: stringValue(accountEditing, "account_number") || null,
           p_payment_method: paymentMethod,
+          p_custom_account_type_id: customAccountTypeId || null,
         });
         if (error) throw error;
         closeAccountEditor();
@@ -3475,67 +3508,29 @@ export function FinanceWorkspace({
       }
       return;
     }
-    if (!accountFile) return setErrorMessage("Upload the account opening receipt image.");
     setSaving(true);
     const id = crypto.randomUUID();
-    const path = `${organizationId}/accounts/${id}.${extensionFor(accountFile)}`;
     try {
-      await uploadReceipt(accountFile, path);
       const { error } = await client.rpc("create_finance_account_with_mapping", {
         p_account_id: id,
         p_account_name: accountValues.name.trim(),
-        p_account_type: accountValues.type,
-        p_account_number: accountValues.number.trim() || null,
-        p_opening_balance: Number(accountValues.opening_balance || 0),
-        p_receipt_storage_path: path,
-        p_receipt_file_name: accountFile.name,
-        p_receipt_content_type: accountFile.type,
-        p_receipt_file_size: accountFile.size,
+        p_account_type: accountType,
+        p_account_number: null,
+        p_opening_balance: 0,
+        p_receipt_storage_path: null,
+        p_receipt_file_name: null,
+        p_receipt_content_type: null,
+        p_receipt_file_size: null,
         p_payment_method: paymentMethod,
+        p_custom_account_type_id: customAccountTypeId || null,
       });
       if (error) throw error;
       closeAccountEditor();
-      setAccountValues({ name: "", type: "bank", number: "", opening_balance: "", payment_method: "bank_transfer" });
+      setAccountValues({ name: "", type: "bank", payment_method: "bank_transfer" });
       setMessage("Account added.");
       await load();
     } catch (error) {
-      await removeReceipt(path);
       setErrorMessage(error instanceof Error ? error.message : "The account could not be saved.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const saveAccountFunding = async () => {
-    if (!accountFundingValues.account_id) return setErrorMessage("Choose the account receiving the funds.");
-    if (!accountFundingValues.amount || Number(accountFundingValues.amount) <= 0) return setErrorMessage("Enter a funding amount greater than zero.");
-    if (!accountFundingFile) return setErrorMessage("Upload proof of the account funding.");
-    setSaving(true);
-    const id = crypto.randomUUID();
-    const path = `${organizationId}/account-funding/${id}.${extensionFor(accountFundingFile)}`;
-    try {
-      await uploadReceipt(accountFundingFile, path);
-      const { error } = await client.rpc("create_finance_account_funding", {
-        p_funding_id: id,
-        p_account_id: accountFundingValues.account_id,
-        p_amount: Number(accountFundingValues.amount),
-        p_funding_source: accountFundingValues.funding_source,
-        p_note: accountFundingValues.note.trim() || null,
-        p_funding_date: accountFundingValues.funding_date,
-        p_receipt_storage_path: path,
-        p_receipt_file_name: accountFundingFile.name,
-        p_receipt_content_type: accountFundingFile.type,
-        p_receipt_file_size: accountFundingFile.size,
-      });
-      if (error) throw error;
-      setAccountFundingOpen(false);
-      setAccountFundingFile(null);
-      setAccountFundingValues({ account_id: "", amount: "", funding_source: "owner_funding", funding_date: localDate(), note: "" });
-      setMessage("Account funding recorded. It increased the account balance without being counted as customer income.");
-      await load();
-    } catch (error) {
-      await removeReceipt(path);
-      setErrorMessage(error instanceof Error ? error.message : "The account funding could not be saved.");
     } finally {
       setSaving(false);
     }
@@ -3786,22 +3781,6 @@ export function FinanceWorkspace({
     return true;
   };
 
-  const voidAccountFunding = async (fundingId: string, voidReason: string) => {
-    setSaving(true);
-    const { error } = await client.rpc("void_finance_account_funding", {
-      p_funding_id: fundingId,
-      p_void_reason: voidReason,
-    });
-    setSaving(false);
-    if (error) {
-      setErrorMessage(error.message);
-      return false;
-    }
-    setMessage("Account funding voided. The account balance was updated and the audit record was preserved.");
-    await load();
-    return true;
-  };
-
   const setAccountActive = async (accountId: string, isActive: boolean) => {
     setSaving(true);
     const { error } = await client.rpc("set_finance_account_active", {
@@ -3926,11 +3905,6 @@ export function FinanceWorkspace({
     setPendingAction({ kind: "paid", id: transactionId, label });
   };
 
-  const requestVoidAccountFunding = (fundingId: string, label = "account funding") => {
-    setDecisionNote("");
-    setPendingAction({ kind: "funding", id: fundingId, label });
-  };
-
   const requestAccountStatusChange = (account: Row) => {
     setDecisionNote("");
     setPendingAction({
@@ -3944,16 +3918,13 @@ export function FinanceWorkspace({
   const confirmPendingAction = async () => {
     if (!pendingAction) return;
     const isFundingRequestDecision = pendingAction.kind === "funding_request";
-    const requiresNote = pendingAction.kind === "funding"
-      || pendingAction.kind === "revision"
+    const requiresNote = pendingAction.kind === "revision"
       || (pendingAction.kind === "quotation_payment" && ["revision_requested", "rejected"].includes(pendingAction.decision))
       || pendingAction.kind === "income_revision"
       || pendingAction.kind === "income_void"
       || (isFundingRequestDecision && pendingAction.decision !== "approved");
     if (requiresNote && !decisionNote.trim()) {
-      setErrorMessage(pendingAction.kind === "funding"
-        ? "Add a reason before voiding this funding entry."
-        : pendingAction.kind === "revision"
+      setErrorMessage(pendingAction.kind === "revision"
           ? "Add a reason before returning Cash Out for revision."
           : pendingAction.kind === "income_revision"
             ? "Add a reason before returning Cash In for correction."
@@ -3981,8 +3952,6 @@ export function FinanceWorkspace({
       succeeded = await voidManualIncome(pendingAction.id, decisionNote.trim());
     } else if (pendingAction.kind === "funding_request") {
       succeeded = await reviewFundingRequest(pendingAction.id, pendingAction.decision, null, decisionNote.trim() || null);
-    } else if (pendingAction.kind === "funding") {
-      succeeded = await voidAccountFunding(pendingAction.id, decisionNote.trim());
     } else if (pendingAction.kind === "account") {
       succeeded = await setAccountActive(pendingAction.id, pendingAction.active);
     } else {
@@ -4247,10 +4216,9 @@ export function FinanceWorkspace({
       {tab === "accounts" && internal && (
         <Panel
           title="Bank and e-wallet accounts"
-          detail="Internal Finance manages payment accounts, opening balances, and later account funding. Funding changes cash but is not counted as customer income."
+          detail="Internal Finance manages payment accounts. New spending capacity comes from GM-approved budget allocation."
           action={internal ? (
             <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => openAccountFunding()} className={secondaryButton}><Plus size={13} /> Add funds</button>
               <button type="button" onClick={() => openAccountEditor()} className={primaryButton}><Plus size={13} /> Add account</button>
             </div>
           ) : undefined}
@@ -4263,17 +4231,14 @@ export function FinanceWorkspace({
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-[13px] font-semibold text-[#202938]">{stringValue(account, "account_name")}</p>
-                      <p className="mt-1 text-[11px] capitalize text-[#7d8797]">{stringValue(account, "account_type").replaceAll("_", " ")} {stringValue(account, "account_number") || "No identifier"}</p>
-                      <p className="mt-1 text-[10px] text-[#8b92a1]">Payments: {stringValue(account, "payment_method", "other").replaceAll("_", " ")}</p>
+                      <p className="mt-1 capitalize text-[11px] text-[#7d8797]">{accountTypeLabel(account)}</p>
                     </div>
                     <Wallet size={17} className="text-[#c43b43]" />
                   </div>
                   <div className="mt-3"><StatusPill value={active ? "active" : "inactive"} /></div>
                   <p className="mt-3 text-[10px] font-semibold uppercase tracking-[.06em] text-[#7d8797]">Available cash</p>
                   <p className="mt-1 text-lg font-semibold text-[#202938]">{peso.format(accountBalance(String(account.id)))}</p>
-                  <p className="mt-1 text-[10px] text-[#8b92a1]">Opening balance: {peso.format(numericValue(account, "opening_balance"))}</p>
                   <div className="mt-3 flex flex-wrap gap-2 border-t border-[#edf0f5] pt-3">
-                    {stringValue(account, "receipt_storage_path") && <button type="button" onClick={() => void openReceipt(stringValue(account, "receipt_storage_path"), "finance-receipts")} className="button-secondary text-[10px]"><ReceiptText size={13} /> View receipt</button>}
                     {internal && <button type="button" onClick={() => openAccountEditor(account)} className="button-secondary text-[10px]">Edit</button>}
                     {internal && <button type="button" disabled={saving} onClick={() => requestAccountStatusChange(account)} className={active ? "button-danger text-[10px]" : "button-secondary text-[10px]"}>{active ? "Deactivate" : "Reactivate"}</button>}
                   </div>
@@ -4282,24 +4247,7 @@ export function FinanceWorkspace({
             })}
             {!accounts.length && <p className="text-[12px] text-[#7d8797]">No finance accounts have been added yet.</p>}
           </div>
-          {accountFundingEntries.length > 0 && (
-            <div className="border-t border-[#edf0f5]">
-              <div className="px-4 py-3 sm:px-5">
-                <h3 className="text-[12px] font-semibold text-[#202938]">Account funding history</h3>
-                <p className="mt-1 text-[11px] text-[#7d8797]">These entries increase the selected account balance but remain separate from customer income.</p>
-              </div>
-              <div className="table-shell overflow-x-auto">
-                <table className="app-table w-full min-w-[820px]">
-                  <thead><tr><th>Date</th><th>Account</th><th>Source</th><th>Amount</th><th>Note</th><th>Receipt</th><th>Status</th><th>Action</th></tr></thead>
-                  <tbody>
-                    {accountFundingEntries.map((funding) => {
-                      const isVoided = Boolean(funding.is_voided);
-                      return (
-                        <tr key={String(funding.id)} className={isVoided ? "opacity-60" : undefined}>
-                          <td>{displayDate(funding.funding_date)}</td>
-                          <td>{accountName(funding.account_id)}</td>
-                          <td className="capitalize">{stringValue(funding, "funding_source", "other").replaceAll("_", " ")}</td>
-                          <td className="font-semibold text-[#218b55]">{peso.format(numericValue(funding, "amount"))}</td>
+          {/* Legacy account-funding history intentionally removed from the UI.
                           <td>{isVoided ? stringValue(funding, "void_reason", "Voided funding") : stringValue(funding, "note", "—")}</td>
                           <td>{stringValue(funding, "receipt_storage_path") ? <button type="button" onClick={() => void openReceipt(stringValue(funding, "receipt_storage_path"))} className="button-secondary text-[10px]"><ReceiptText size={13} /> Receipt</button> : "—"}</td>
                           <td><StatusPill value={isVoided ? "voided" : "posted"} /></td>
@@ -4311,7 +4259,7 @@ export function FinanceWorkspace({
                 </table>
               </div>
             </div>
-          )}
+          )} */}
         </Panel>
       )}
 
@@ -4333,13 +4281,26 @@ export function FinanceWorkspace({
                   </div>
                 </FinanceSummaryLayout>
               </div>
-              <div className="px-4 py-4 sm:px-5"><h3 className="text-[13px] font-semibold text-[#202938]">Active account allocations</h3><p className="mt-1 text-[11px] text-[#7d8797]">{canManageBudget ? "Only unused and uncommitted allocation can be moved to another active account." : "Internal Finance distributes and reallocates the GM-approved budget."}</p></div>
-              <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[940px]"><thead><tr><th>Account</th><th>Allocated</th><th>Used</th><th>Committed</th><th>Available</th>{canManageBudget && <th>Action</th>}</tr></thead><tbody>{currentAccountAllocations.map((allocation) => <tr key={String(allocation.id)}><td>{stringValue(allocation, "account_name", accountName(allocation.account_id))}</td><td className="font-semibold">{peso.format(numericValue(allocation, "allocated_amount"))}</td><td className="text-[#b42318]">{peso.format(numericValue(allocation, "used_amount"))}</td><td className="text-[#a76605]">{peso.format(numericValue(allocation, "committed_amount"))}</td><td className="font-semibold text-[#218b55]">{peso.format(numericValue(allocation, "available_amount"))}</td>{canManageBudget && <td><button type="button" disabled={saving || numericValue(allocation, "available_amount") <= 0} onClick={() => openBudgetAllocation("reallocate", String(allocation.account_id))} className="button-secondary text-[10px]">Reallocate</button></td>}</tr>)}{!currentAccountAllocations.length && <tr><td colSpan={canManageBudget ? 6 : 5} className="text-center text-[#7d8797]">No account allocations yet. Add a GM budget, then allocate it to active accounts.</td></tr>}</tbody></table></div>
-              <div className="border-t border-[#edf0f5] px-4 py-4 sm:px-5"><h3 className="text-[13px] font-semibold text-[#202938]">Account funding requests</h3><p className="mt-1 text-[11px] text-[#7d8797]">Approval automatically adds the approved amount to the requested account allocation.</p></div>
+              <nav className="border-b border-[#edf0f5] px-4 pt-3 sm:px-5" role="tablist" aria-label="Budget sections">
+                <button type="button" role="tab" aria-selected={budgetSection === "allocations"} aria-controls="finance-budget-allocations" onClick={() => setBudgetSection("allocations")} className="app-tab whitespace-nowrap">Active account allocations</button>
+                <button type="button" role="tab" aria-selected={budgetSection === "requests"} aria-controls="finance-budget-requests" onClick={() => setBudgetSection("requests")} className="app-tab whitespace-nowrap">Account funding requests<span className="app-tab-count ml-1.5">{accountFundingRequests.length}</span></button>
+              </nav>
+              {budgetSection === "allocations" ? (
+                <section id="finance-budget-allocations" role="tabpanel" aria-label="Active account allocations">
+                  <div className="px-4 py-4 sm:px-5"><h3 className="text-[13px] font-semibold text-[#202938]">Active account allocations</h3><p className="mt-1 text-[11px] text-[#7d8797]">{canManageBudget ? "Only unused and uncommitted allocation can be moved to another active account." : "Internal Finance distributes and reallocates the GM-approved budget."}</p></div>
+                  <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[940px]"><thead><tr><th>Account</th><th>Allocated</th><th>Used</th><th>Committed</th><th>Available</th>{canManageBudget && <th>Action</th>}</tr></thead><tbody>{currentAccountAllocations.map((allocation) => <tr key={String(allocation.id)}><td>{stringValue(allocation, "account_name", accountName(allocation.account_id))}</td><td className="font-semibold">{peso.format(numericValue(allocation, "allocated_amount"))}</td><td className="text-[#b42318]">{peso.format(numericValue(allocation, "used_amount"))}</td><td className="text-[#a76605]">{peso.format(numericValue(allocation, "committed_amount"))}</td><td className="font-semibold text-[#218b55]">{peso.format(numericValue(allocation, "available_amount"))}</td>{canManageBudget && <td><button type="button" disabled={saving || numericValue(allocation, "available_amount") <= 0} onClick={() => openBudgetAllocation("reallocate", String(allocation.account_id))} className="button-secondary text-[10px]">Reallocate</button></td>}</tr>)}{!currentAccountAllocations.length && <tr><td colSpan={canManageBudget ? 6 : 5} className="text-center text-[#7d8797]">No account allocations yet. Add a GM budget, then allocate it to active accounts.</td></tr>}</tbody></table></div>
+                </section>
+              ) : (
+                <section id="finance-budget-requests" role="tabpanel" aria-label="Account funding requests">
+                  <div className="px-4 py-4 sm:px-5"><h3 className="text-[13px] font-semibold text-[#202938]">Account funding requests</h3><p className="mt-1 text-[11px] text-[#7d8797]">Approval automatically adds the approved amount to the requested account allocation.</p></div>
+                </section>
+              )}
             </>
           ) : <p className="border-b border-[#edf0f5] p-4 text-[12px] leading-[1.5] text-[#4f5663] sm:p-5">Select the account that needs budget and submit the amount. You will see the approved amount and decision without seeing account balances.</p>}
-          <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[980px]"><thead><tr><th>Account</th><th>Requested by</th><th>Requested on</th><th>Requested</th><th>Approved</th><th>Status</th><th>Decision note</th><th>Action</th></tr></thead><tbody>{visibleFundingRequests.map((request) => { const status = stringValue(request, "status"); return <tr key={String(request.id)}><td>{accountName(request.account_id)}</td><td>{financeUserName(request.requested_by)}</td><td>{displayDate(request.requested_at)}</td><td className="font-semibold">{peso.format(numericValue(request, "requested_amount"))}</td><td className="font-semibold text-[#218b55]">{request.approved_amount == null ? "-" : peso.format(numericValue(request, "approved_amount"))}</td><td><StatusPill value={status} /></td><td>{stringValue(request, "decision_note") || stringValue(request, "note") || "-"}</td><td>{canManageBudget && ["pending", "revision_requested"].includes(status) ? <span className="flex gap-1"><button type="button" disabled={saving} onClick={() => requestFundingReview(request, "approved")} className="icon-button text-[#218b55]" title="Approve account funding" aria-label="Approve account funding"><Check size={15} /></button><button type="button" disabled={saving} onClick={() => requestFundingReview(request, "rejected")} className="icon-button text-[#b42318]" title="Reject account funding" aria-label="Reject account funding"><XCircle size={15} /></button><button type="button" disabled={saving} onClick={() => requestFundingReview(request, "revision_requested")} className="icon-button text-[#6941c6]" title="Return account funding for revision" aria-label="Return account funding for revision"><Undo2 size={15} /></button></span> : canRequestBudget && status === "revision_requested" ? <button type="button" disabled={saving} onClick={() => openFundingRequestRevision(request)} className="button-secondary whitespace-nowrap text-[10px]" title="Edit and resubmit account funding request"><Undo2 size={13} /> Edit &amp; resubmit</button> : "-"}</td></tr>; })}{!accountFundingRequests.length && <tr><td colSpan={8} className="text-center text-[#7d8797]">No account funding requests yet.</td></tr>}</tbody></table></div>
-          <TablePagination page={activeBudgetPage} pageCount={budgetPageCount} total={accountFundingRequests.length} onPageChange={setBudgetPage} label="Account funding requests pagination" />
+          {(!canViewBudget || budgetSection === "requests") && <>
+            <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[980px]"><thead><tr><th>Account</th><th>Requested by</th><th>Requested on</th><th>Requested</th><th>Approved</th><th>Status</th><th>Decision note</th><th>Action</th></tr></thead><tbody>{visibleFundingRequests.map((request) => { const status = stringValue(request, "status"); return <tr key={String(request.id)}><td>{accountName(request.account_id)}</td><td>{financeUserName(request.requested_by)}</td><td>{displayDate(request.requested_at)}</td><td className="font-semibold">{peso.format(numericValue(request, "requested_amount"))}</td><td className="font-semibold text-[#218b55]">{request.approved_amount == null ? "-" : peso.format(numericValue(request, "approved_amount"))}</td><td><StatusPill value={status} /></td><td>{stringValue(request, "decision_note") || stringValue(request, "note") || "-"}</td><td>{canManageBudget && ["pending", "revision_requested"].includes(status) ? <span className="flex gap-1"><button type="button" disabled={saving} onClick={() => requestFundingReview(request, "approved")} className="icon-button text-[#218b55]" title="Approve account funding" aria-label="Approve account funding"><Check size={15} /></button><button type="button" disabled={saving} onClick={() => requestFundingReview(request, "rejected")} className="icon-button text-[#b42318]" title="Reject account funding" aria-label="Reject account funding"><XCircle size={15} /></button><button type="button" disabled={saving} onClick={() => requestFundingReview(request, "revision_requested")} className="icon-button text-[#6941c6]" title="Return account funding for revision" aria-label="Return account funding for revision"><Undo2 size={15} /></button></span> : canRequestBudget && status === "revision_requested" ? <button type="button" disabled={saving} onClick={() => openFundingRequestRevision(request)} className="button-secondary whitespace-nowrap text-[10px]" title="Edit and resubmit account funding request"><Undo2 size={13} /> Edit &amp; resubmit</button> : "-"}</td></tr>; })}{!accountFundingRequests.length && <tr><td colSpan={8} className="text-center text-[#7d8797]">No account funding requests yet.</td></tr>}</tbody></table></div>
+            <TablePagination page={activeBudgetPage} pageCount={budgetPageCount} total={accountFundingRequests.length} onPageChange={setBudgetPage} label="Account funding requests pagination" />
+          </>}
         </Panel>
       )}
 
@@ -4727,8 +4688,8 @@ export function FinanceWorkspace({
             </label>}
             {internal && <div className="border-t border-[#edf0f5] pt-3">
               <p className="text-[11px] font-semibold text-[#344054]">Custom categories</p>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {activeCategories.filter((category) => !Boolean(category.is_system)).map((category) => <button key={String(category.id)} type="button" onClick={() => void archiveCategory(category)} className="inline-flex items-center gap-1 rounded-full border border-[#d9e0e9] px-2 py-1 text-[10px] text-[#687386] hover:border-[#f2b8b5] hover:text-[#b42318]">{stringValue(category, "name")} <X size={11} /></button>)}
+              <div className="mt-2 space-y-1.5">
+                {activeCategories.filter((category) => !Boolean(category.is_system)).map((category) => <div key={String(category.id)} className="flex items-center justify-between gap-2 rounded-md border border-[#d9e0e9] px-2.5 py-1.5"><span className="text-[10px] text-[#687386]">{stringValue(category, "name")}</span><button type="button" onClick={() => void archiveCategory(category)} aria-label={`Delete or archive ${stringValue(category, "name")} category`} title="Delete or archive category" className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-[#8b92a1] hover:bg-[#fff4f2] hover:text-[#b42318]"><Trash2 size={13} /></button></div>)}
                 {!activeCategories.some((category) => !Boolean(category.is_system)) && <span className="text-[11px] text-[#7d8797]">No custom categories yet.</span>}
               </div>
             </div>}
@@ -4794,35 +4755,64 @@ export function FinanceWorkspace({
         </FinanceDialog>
       )}
 
-      {accountFundingOpen && (
-        <FinanceDialog title="Add funds to account" detail="Record owner funding, a loan, or another deposit. This increases cash but does not create customer income." close={() => setAccountFundingOpen(false)}>
-          <div className="mt-5 grid gap-3 sm:grid-cols-2">
-            <label className="field-label">Account<select value={accountFundingValues.account_id} onChange={(event) => setAccountFundingValues((current) => ({ ...current, account_id: event.target.value }))} className="input mt-1"><option value="">Choose account</option>{activeAccounts.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")}</option>)}</select></label>
-            <label className="field-label">Amount<NumberInput min="0.01" step="0.01" value={accountFundingValues.amount} onChange={(value) => setAccountFundingValues((current) => ({ ...current, amount: value }))} className="input mt-1" /></label>
-            <label className="field-label">Funding source<select value={accountFundingValues.funding_source} onChange={(event) => setAccountFundingValues((current) => ({ ...current, funding_source: event.target.value }))} className="input mt-1">{accountFundingSources.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-            <label className="field-label">Date<input type="date" value={accountFundingValues.funding_date} onClick={(event) => event.currentTarget.showPicker?.()} onChange={(event) => setAccountFundingValues((current) => ({ ...current, funding_date: event.target.value }))} className="input mt-1" /></label>
-            <label className="field-label sm:col-span-2">Note<textarea value={accountFundingValues.note} onChange={(event) => setAccountFundingValues((current) => ({ ...current, note: event.target.value }))} className="input mt-1 min-h-20" placeholder="Explain where the funds came from" /></label>
-            <div className="field-label sm:col-span-2"><span>Proof of funding</span><FileUploadControl accept="image/jpeg,image/png,image/webp" ariaLabel="Choose account funding receipt image" className="mt-1" emptyLabel="Choose receipt image" files={accountFundingFile ? [accountFundingFile] : []} onFilesSelected={(files) => setAccountFundingFile(files[0] ?? null)} /></div>
-          </div>
-          <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setAccountFundingOpen(false)} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveAccountFunding()} disabled={saving} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} Save funding</button></div>
-        </FinanceDialog>
-      )}
-
       {accountOpen && (
         <FinanceDialog
           title={accountEditing ? "Edit Finance account" : "Add bank or e-wallet account"}
-          detail={accountEditing ? "Update the account details. Existing receipt routing is preserved. Opening balances remain fixed; record later deposits as account funding." : "Internal Finance owns the account directory and opening balances. Payment routing is set automatically from the account type."}
+          detail={accountEditing ? "Update the account details. Existing legacy account data remains preserved." : "Create the account directory entry. GM-approved budget allocation is managed separately."}
           close={closeAccountEditor}
         >
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
             <label className="field-label">Account name<input value={accountValues.name} onChange={(event) => setAccountValues((current) => ({ ...current, name: event.target.value }))} className="input mt-1" placeholder="Example: BDO Operating Account" /></label>
-            <label className="field-label">Account type<select value={accountValues.type} onChange={(event) => setAccountValues((current) => ({ ...current, type: event.target.value }))} className="input mt-1"><option value="bank">Bank</option><option value="e_wallet">E-wallet</option><option value="cash">Cash</option><option value="other">Other</option></select></label>
-            <label className="field-label">Account number / identifier<input value={accountValues.number} onChange={(event) => setAccountValues((current) => ({ ...current, number: event.target.value }))} className="input mt-1" /></label>
-            <label className="field-label">Opening amount<NumberInput min="0" step="0.01" disabled={Boolean(accountEditing)} value={accountValues.opening_balance} onChange={(value) => setAccountValues((current) => ({ ...current, opening_balance: value }))} className="input mt-1" />{accountEditing && <span className="mt-1 block text-[10px] text-[#7d8797]">Fixed after account creation.</span>}</label>
-            {!accountEditing && <div className="field-label sm:col-span-2"><span>Receipt image</span><FileUploadControl accept="image/jpeg,image/png,image/webp" ariaLabel="Choose account receipt image" className="mt-1" emptyLabel="Choose receipt image" files={accountFile ? [accountFile] : []} onFilesSelected={(files) => setAccountFile(files[0] ?? null)} /></div>}
-            {accountEditing && stringValue(accountEditing, "receipt_storage_path") && <div className="sm:col-span-2"><button type="button" onClick={() => void openReceipt(stringValue(accountEditing, "receipt_storage_path"), "finance-receipts")} className="button-secondary text-[10px]"><ReceiptText size={13} /> View account receipt</button></div>}
+            <label className="field-label">Account type<select value={accountValues.type} onChange={(event) => {
+              const nextType = event.target.value;
+              if (nextType === "other") {
+                setAccountTypeCreateMessage(null);
+                setAccountTypeCreateOpen(true);
+                return;
+              }
+              setAccountValues((current) => ({ ...current, type: nextType }));
+            }} className="input mt-1"><option value="bank">Bank</option><option value="e_wallet">E-wallet</option><option value="cash">Cash</option>{accountTypes.filter((type) => Boolean(type.is_active)).map((type) => <option key={String(type.id)} value={`custom:${String(type.id)}`}>{stringValue(type, "name")}</option>)}<option value="other">Add new</option></select></label>
           </div>
           <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={closeAccountEditor} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveAccount()} disabled={saving} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} {accountEditing ? "Save changes" : "Save account"}</button></div>
+        </FinanceDialog>
+      )}
+
+      {accountTypeCreateOpen && (
+        <FinanceDialog
+          title="Create account type"
+          detail="Add a reusable type for this organization, then use it for the account."
+          close={() => setAccountTypeCreateOpen(false)}
+          compact
+          layer="top"
+        >
+          <div className="mt-5 space-y-3">
+            {accountTypeCreateMessage && <p role="alert" className="rounded-md bg-[#fff4f2] px-3 py-2 text-[11px] font-semibold text-[#b42318]">{accountTypeCreateMessage}</p>}
+            <label className="field-label">New account type<input value={accountTypeDraft} onChange={(event) => setAccountTypeDraft(event.target.value)} className="input mt-1" placeholder="Example: Digital bank" maxLength={80} /></label>
+            <div className="border-t border-[#edf0f5] pt-3">
+              <p className="text-[11px] font-semibold text-[#344054]">Custom account types</p>
+              <div className="mt-2 space-y-1.5">
+                {accountTypes.filter((type) => Boolean(type.is_active)).map((type) => <div key={String(type.id)} className="flex items-center justify-between gap-2 rounded-md border border-[#d9e0e9] px-2.5 py-1.5"><span className="text-[10px] text-[#687386]">{stringValue(type, "name")}</span><button type="button" onClick={() => requestAccountTypeRemoval(type)} aria-label={`Delete or archive ${stringValue(type, "name")} account type`} title="Delete or archive account type" className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-[#8b92a1] hover:bg-[#fff4f2] hover:text-[#b42318]"><Trash2 size={13} /></button></div>)}
+                {!accountTypes.some((type) => Boolean(type.is_active)) && <span className="text-[11px] text-[#7d8797]">No custom account types yet.</span>}
+              </div>
+            </div>
+          </div>
+          <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setAccountTypeCreateOpen(false)} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveAccountType()} disabled={saving || !accountTypeDraft.trim()} className="button-primary">{saving ? "Adding..." : "Add type"}</button></div>
+        </FinanceDialog>
+      )}
+
+      {removeTarget && (
+        <FinanceDialog
+          title={`Remove ${removeTarget.kind === "category" ? "category" : "account type"}?`}
+          detail="Unused items are deleted. Items already used by transactions or accounts are archived instead so history stays intact."
+          close={() => setRemoveTarget(null)}
+          compact
+          layer="top"
+        >
+          <div className="mt-5 space-y-3">
+            <p className="rounded-md border border-[#d9e0e9] bg-[#fafbfc] px-3 py-2 text-[12px] font-semibold text-[#344054]">{removeTarget.label}</p>
+            {removeMessage && <p role="alert" className="rounded-md bg-[#fff4f2] px-3 py-2 text-[11px] font-semibold text-[#b42318]">{removeMessage}</p>}
+          </div>
+          <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setRemoveTarget(null)} className="button-secondary">Cancel</button><button type="button" onClick={() => void confirmRemoveTarget()} disabled={saving} className="button-danger"><Trash2 size={13} /> {saving ? "Removing..." : "Remove"}</button></div>
         </FinanceDialog>
       )}
 

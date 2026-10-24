@@ -51,6 +51,18 @@ export async function requireWorkspaceAccess() {
     .eq("id", membership.organization_id)
     .single();
 
+  const { data: internalFinanceCapability } = await supabase
+    .from("organization_member_capabilities")
+    .select("capability")
+    .eq("organization_id", membership.organization_id)
+    .eq("user_id", user.id)
+    .eq("capability", "internal_finance")
+    .maybeSingle();
+
+  const internalFinanceEnabled =
+    membership.role === "internal_finance" ||
+    internalFinanceCapability?.capability === "internal_finance";
+
   const isManagementRole = ["super_admin", "owner", "admin"].includes(
     String(membership.role),
   );
@@ -70,6 +82,7 @@ export async function requireWorkspaceAccess() {
     profileName: user.user_metadata.full_name ?? user.email ?? "User",
     profileEmail: user.email ?? "",
     role: membership.role,
+    internalFinanceEnabled,
     productionApprovalEnabled:
       isManagementRole || Boolean(productionApprovalPermission?.is_active),
   };
