@@ -21862,9 +21862,7 @@ function CommissionSummaryView({
 }) {
   const canManage = !readOnly && memberRole(role);
   const [commissionQuery, setCommissionQuery] = useState("");
-  const [commissionMonth, setCommissionMonth] = useState(
-    role === "sales_pricing_officer" && !readOnly ? "" : currentMonth,
-  );
+  const [commissionMonth, setCommissionMonth] = useState(currentMonth);
   const [officerFilter, setOfficerFilter] = useState("all");
   const [commissionPage, setCommissionPage] = useState(1);
 
@@ -22031,7 +22029,7 @@ function CommissionSummaryView({
               secondary
               onClick={() => {
                 setCommissionQuery("");
-                setCommissionMonth(role === "sales_pricing_officer" && !readOnly ? "" : currentMonth());
+                setCommissionMonth(currentMonth());
                 setOfficerFilter("all");
               }}
             >
@@ -23954,7 +23952,7 @@ export function HuswellWorkspace({
       <CommissionSummaryView
         store={store}
         role={role}
-        readOnly={role === "sales_pricing_officer" && !hasInternalFinanceAccess}
+        readOnly={role === "sales_pricing_officer"}
       />
     ) : active === "Payroll & Leave" ? (
       <PayrollLeave

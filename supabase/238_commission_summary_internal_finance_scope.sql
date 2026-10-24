@@ -1,13 +1,16 @@
--- Allow a combined Sales & Pricing Officer + Internal Finance account to
--- view the organization-wide Commission Summary and Finance Payables rows
--- without changing its quotation ownership or commission payout permissions.
+-- Keep Pricing Officer Commission Summary personal while allowing a combined
+-- Sales & Pricing Officer + Internal Finance account to view all Finance
+-- Payables allocation rows. This changes read scope only; it does not rewrite
+-- or backfill commission data and does not grant payout authority by itself.
 --
 -- Run after 237_internal_finance_member_capability.sql and before deploying
--- the matching workspace update. This is intentionally a read-scope change;
--- it does not backfill, rewrite, or delete commission data.
+-- the matching Finance workspace update.
 
 begin;
 
+-- Keep the Pricing Officer Commission Summary personal. This replaces any
+-- earlier draft that incorrectly treated the Internal Finance capability as
+-- organization-wide Commission Summary access.
 create or replace function public.commission_summary_rows_v3(
   p_organization_id uuid
 )
@@ -33,12 +36,9 @@ security definer
 set search_path = public, private
 as $$
 with access as (
-  select (
-    private.has_text_role(
-      p_organization_id,
-      array['super_admin', 'owner', 'admin', 'accountant', 'internal_finance']
-    )
-    or private.finance_is_internal(p_organization_id)
+  select private.has_text_role(
+    p_organization_id,
+    array['super_admin', 'owner', 'admin', 'accountant', 'internal_finance']
   ) as can_view_all
 )
 select
@@ -119,8 +119,8 @@ order by summary.created_at desc, summary.quotation_no asc;
 $$;
 
 -- The Finance Payables workspace reads allocation rows directly. Extend its
--- read policy to recognize the same capability-aware Internal Finance scope;
--- payout creation remains protected by the existing Finance RPC guards.
+-- read policy to recognize the capability-aware Internal Finance scope. The
+-- Pricing Officer branch remains limited to that officer's own allocations.
 drop policy if exists "commission allocations: authorized read"
   on public.commission_summary_allocations;
 create policy "commission allocations: authorized read"
