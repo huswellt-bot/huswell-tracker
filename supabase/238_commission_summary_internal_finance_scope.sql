@@ -1,6 +1,6 @@
 -- Allow a combined Sales & Pricing Officer + Internal Finance account to
--- view the organization-wide Commission Summary without changing its
--- quotation ownership or commission payout permissions.
+-- view the organization-wide Commission Summary and Finance Payables rows
+-- without changing its quotation ownership or commission payout permissions.
 --
 -- Run after 237_internal_finance_member_capability.sql and before deploying
 -- the matching workspace update. This is intentionally a read-scope change;
@@ -38,7 +38,7 @@ with access as (
       p_organization_id,
       array['super_admin', 'owner', 'admin', 'accountant', 'internal_finance']
     )
-    or private.has_member_capability(p_organization_id, 'internal_finance')
+    or private.finance_is_internal(p_organization_id)
   ) as can_view_all
 )
 select
@@ -117,5 +117,23 @@ where summary.organization_id = p_organization_id
   )
 order by summary.created_at desc, summary.quotation_no asc;
 $$;
+
+-- The Finance Payables workspace reads allocation rows directly. Extend its
+-- read policy to recognize the same capability-aware Internal Finance scope;
+-- payout creation remains protected by the existing Finance RPC guards.
+drop policy if exists "commission allocations: authorized read"
+  on public.commission_summary_allocations;
+create policy "commission allocations: authorized read"
+on public.commission_summary_allocations for select to authenticated
+using (
+  private.has_text_role(organization_id, array[
+    'super_admin', 'owner', 'admin', 'accountant'
+  ])
+  or private.finance_is_internal(organization_id)
+  or (
+    private.has_text_role(organization_id, array['sales_pricing_officer'])
+    and recipient_user_id = (select auth.uid())
+  )
+);
 
 commit;

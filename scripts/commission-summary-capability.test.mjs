@@ -16,8 +16,10 @@ const workspace = readFileSync(
 
 test("commission summary scope recognizes the Internal Finance capability", () => {
   assert.match(migration, /create or replace function public\.commission_summary_rows_v3/);
-  assert.match(migration, /private\.has_member_capability\(p_organization_id, 'internal_finance'\)/);
+  assert.match(migration, /private\.finance_is_internal\(p_organization_id\)/);
   assert.match(migration, /access\.can_view_all\s+or allocation\.recipient_user_id/);
+  assert.match(migration, /commission allocations: authorized read/);
+  assert.match(migration, /private\.finance_is_internal\(organization_id\)/);
 });
 
 test("combined Sales & Pricing Officer accounts are not reduced to personal commission view", () => {
