@@ -22057,20 +22057,14 @@ function CommissionSummaryView({
               const originName = originAllocation
                 ? text(originAllocation.recipient_name, userName(originAllocation.recipient_user_id))
                 : "—";
-              const originDetail = originAllocation
-                ? `${n(originAllocation.share_rate)}% - ${peso.format(n(originAllocation.amount))}`
-                : "—";
+              const originDetail = "";
               const selfHandled = text(originAllocation?.allocation_role) === "self_handled_se";
               const coworkerName = selfHandled
                 ? "Self-handled"
                 : coworkerAllocation
                   ? text(coworkerAllocation.recipient_name, userName(coworkerAllocation.recipient_user_id))
                   : "—";
-              const coworkerDetail = selfHandled
-                ? "No co-worker"
-                : coworkerAllocation
-                  ? `${n(coworkerAllocation.share_rate)}% - ${peso.format(n(coworkerAllocation.amount))}`
-                  : "—";
+              const coworkerDetail = selfHandled ? "No co-worker" : "";
               return (
                 <tr key={text(summary.id)}>
                   <td className="px-4 py-3">{stackedCell(summary.quotation_no, text(summary.created_at, "").slice(0, 10))}</td>

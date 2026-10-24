@@ -35,3 +35,9 @@ test("combined accounts keep personal Pricing Officer summaries", () => {
   assert.match(financeWorkspace, /stringValue\(summary, "quotation_no"\) \|\| "—"/);
   assert.match(financeWorkspace, /commissionSummariesRequest/);
 });
+
+test("Pricing Officer commission rows do not duplicate allocation rates and amounts", () => {
+  assert.match(workspace, /const originDetail = ""/);
+  assert.match(workspace, /const coworkerDetail = selfHandled \? "No co-worker" : ""/);
+  assert.doesNotMatch(workspace, /share_rate\)\}% - \$\{peso\.format/);
+});
