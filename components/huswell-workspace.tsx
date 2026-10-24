@@ -62,7 +62,6 @@ import {
   ScrollText,
   Send,
   Settings,
-  ShoppingCart,
   SlidersHorizontal,
   Trash2,
   Upload,
@@ -176,6 +175,20 @@ type View =
   | "Profile";
 
 type FinanceActionRequest = "income" | "expense";
+type SidebarWorkspace = "sales_pricing" | "finance";
+
+const financeSidebarViews: View[] = [
+  "Finance Overview",
+  "Finance Reports",
+  "Finance",
+  "Finance Approvals",
+  "Finance Transactions",
+  "Finance Accounts",
+  "Finance Budget",
+  "Finance Supplier Costing",
+  "Finance Payables",
+  "Payment Monitoring",
+];
 
 type SidebarQueueCountKey =
   | "management_approvals"
@@ -22789,6 +22802,10 @@ export function HuswellWorkspace({
       ? defaultWorkspaceView
       : safeInitialView,
   );
+  const isCombinedSalesPricingAccount = role === "sales_pricing_officer" && hasInternalFinanceAccess;
+  const [sidebarWorkspace, setSidebarWorkspace] = useState<SidebarWorkspace>(
+    financeSidebarViews.includes(safeInitialView) ? "finance" : "sales_pricing",
+  );
   const [leadMode, setLeadMode] = useState<LeadWorkspaceMode>("leads");
   const [mobile, setMobile] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -22888,6 +22905,11 @@ export function HuswellWorkspace({
     if (view === "Leads") setLeadMode("leads");
     setActive(view);
   }, [defaultWorkspaceView, financePaymentViewAllowed, selectLeadWorkspaceMode]);
+  const switchSidebarWorkspace = useCallback((workspace: SidebarWorkspace) => {
+    setSidebarWorkspace(workspace);
+    navigate(workspace === "finance" ? "Finance Overview" : "Dashboard");
+    setMobile(false);
+  }, [navigate]);
   const fetchTable = useCallback(
     async (table: TableName) => {
       if (table === "commission_summaries") {
@@ -23332,6 +23354,61 @@ export function HuswellWorkspace({
     const count = sidebarQueueCounts?.[key];
     return count && count > 0 ? count : undefined;
   };
+  const combinedSalesPricingNav: {
+    label: string;
+    items: { view: View; icon: typeof LayoutDashboard; badge?: number }[];
+  }[] = sidebarWorkspace === "finance"
+    ? [
+        {
+          label: "Finance",
+          items: [
+            { view: "Finance Overview", icon: Wallet },
+            { view: "Finance Reports", icon: CalendarDays },
+            { view: "Finance Approvals", icon: ClipboardCheck, badge: sidebarBadge("finance") },
+            { view: "Finance Transactions", icon: ReceiptText },
+            { view: "Finance Accounts", icon: Wallet },
+            { view: "Finance Budget", icon: FileText },
+            { view: "Finance Supplier Costing", icon: ReceiptText },
+            { view: "Finance Payables", icon: Wallet },
+            { view: "Payment Monitoring", icon: ReceiptText },
+          ],
+        },
+      ]
+    : [
+        {
+          label: "My Work",
+          items: [{ view: "Dashboard", icon: LayoutDashboard }],
+        },
+        {
+          label: "Sales & Pricing",
+          items: [
+            { view: "Leads", icon: ClipboardCheck },
+            { view: "Supplier's List", icon: UsersRound },
+            { view: "Price Quotations", icon: FileText },
+            { view: "Price Quotation Review", icon: ClipboardCheck, badge: sidebarBadge("pricing_review") },
+            { view: "Quotation Costing Overview", icon: ReceiptText },
+            { view: "PDF Costing", icon: FileSpreadsheet, badge: sidebarBadge("pdf_costing") },
+            { view: "Commissions", icon: PhilippinePeso },
+          ],
+        },
+        {
+          label: "Operations",
+          items: [
+            { view: "Approvals", icon: ClipboardCheck, badge: sidebarBadge("production_approval") },
+            { view: "Projects", icon: ClipboardCheck },
+          ],
+        },
+      ];
+  if (isCombinedSalesPricingAccount) {
+    combinedSalesPricingNav.push({
+      label: "Company",
+      items: [
+        { view: "Announcements", icon: MessageSquareText },
+        { view: "Policy", icon: ScrollText },
+        { view: "Letter Request", icon: FileText },
+      ],
+    });
+  }
   const navBase: {
     label: string;
     items: { view: View; icon: typeof LayoutDashboard; badge?: number }[];
@@ -23396,7 +23473,7 @@ export function HuswellWorkspace({
         { view: "Policy", icon: ScrollText },
       ],
     },
-  ] : role === "sales_pricing_officer" ? [
+  ] : role === "sales_pricing_officer" ? isCombinedSalesPricingAccount ? combinedSalesPricingNav : [
     {
       label: "My Work",
       items: [
@@ -23430,20 +23507,6 @@ export function HuswellWorkspace({
         { view: "Letter Request", icon: FileText },
       ],
     },
-    ...(hasInternalFinanceAccess ? ([{
-      label: "Finance",
-      items: [
-        { view: "Finance Overview", icon: Wallet },
-        { view: "Finance Reports", icon: CalendarDays },
-        { view: "Finance Approvals", icon: ClipboardCheck, badge: sidebarBadge("finance") },
-        { view: "Finance Transactions", icon: ReceiptText },
-        { view: "Finance Accounts", icon: Wallet },
-        { view: "Finance Budget", icon: FileText },
-        { view: "Finance Supplier Costing", icon: ReceiptText },
-        { view: "Finance Payables", icon: Wallet },
-        { view: "Payment Monitoring", icon: ReceiptText },
-      ],
-    }] as { label: string; items: { view: View; icon: typeof LayoutDashboard; badge?: number }[] }[]) : []),
   ] : [
     {
       label: "Project operations",
@@ -24012,6 +24075,23 @@ export function HuswellWorkspace({
             <X size={18} />
           </button>
         </div>
+        {isCombinedSalesPricingAccount && (
+          <div className="mb-2">
+            <label className={`mb-1 block px-1 text-[10px] font-semibold uppercase tracking-[.08em] text-[var(--color-text-tertiary)] ${sidebarCollapsed ? "lg:sr-only" : ""}`} htmlFor="sidebar-workspace">
+              Workspace
+            </label>
+            <select
+              id="sidebar-workspace"
+              aria-label="Workspace"
+              value={sidebarWorkspace}
+              onChange={(event) => switchSidebarWorkspace(event.target.value as SidebarWorkspace)}
+              className={`h-8 w-full rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-[12px] font-medium text-[var(--color-text-primary)] outline-none transition-colors focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)] ${sidebarCollapsed ? "lg:px-1 lg:text-[0px]" : ""}`}
+            >
+              <option value="sales_pricing">Sales &amp; Pricing</option>
+              <option value="finance">Finance</option>
+            </select>
+          </div>
+        )}
         <nav className="sidebar-scroll flex-1 space-y-px overflow-y-auto">
           {nav.map((group) => (
             <div key={group.label}>
@@ -24083,7 +24163,7 @@ export function HuswellWorkspace({
                       lineHeight: "var(--line-height-body)",
                     }}
                     aria-current={active === view ? "page" : undefined}
-                    className={`${active === view ? "bg-[var(--color-accent)] font-medium text-[var(--color-on-accent)]" : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)]"} sidebar-item group flex min-h-8 w-full items-center gap-2 rounded-[var(--radius-control)] px-3 py-1 text-left text-[13px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
+                    className={`${active === view ? "bg-[var(--color-accent)] font-medium text-[var(--color-on-accent)]" : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)]"} sidebar-item group flex min-h-7 w-full items-center gap-1.5 rounded-[var(--radius-control)] px-2.5 py-0.5 text-left text-[12px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
                   >
                     <Icon
                       size={16}
@@ -24103,7 +24183,7 @@ export function HuswellWorkspace({
           {canEditOwnProfile && !isManagementRole && (
             <a
               href="/profile"
-              className={`sidebar-item mt-1 flex w-full items-center gap-2.5 rounded-[var(--radius-control)] px-3 py-1.5 text-left text-[13px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
+              className={`sidebar-item mt-1 flex w-full items-center gap-2 rounded-[var(--radius-control)] px-2.5 py-1 text-left text-[12px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
             >
               <UserRound size={16} strokeWidth={1.75} />
               <span className={sidebarCollapsed ? "lg:sr-only" : ""}>Profile</span>
@@ -24111,7 +24191,7 @@ export function HuswellWorkspace({
           )}
           <button
             onClick={() => setSignOutOpen(true)}
-            className={`sidebar-item mt-3 flex w-full items-center gap-2.5 rounded-[var(--radius-control)] px-3 py-1.5 text-left text-[13px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
+            className={`sidebar-item mt-2 flex w-full items-center gap-2 rounded-[var(--radius-control)] px-2.5 py-1 text-left text-[12px] font-medium text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
           >
             <LogOut size={16} strokeWidth={1.75} />
             <span className={sidebarCollapsed ? "lg:sr-only" : ""}>Sign out</span>

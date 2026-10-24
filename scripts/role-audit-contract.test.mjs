@@ -94,3 +94,13 @@ test("Dianne's existing Sales and Pricing account receives Finance as a capabili
   assert.match(workspace, /internalFinanceEnabled = false/);
   assert.match(workspace, /role === "internal_finance"/);
 });
+
+test("combined Sales and Pricing accounts use separate sidebar workspaces", () => {
+  assert.match(workspace, /type SidebarWorkspace = "sales_pricing" \| "finance"/);
+  assert.match(workspace, /const isCombinedSalesPricingAccount = role === "sales_pricing_officer" && hasInternalFinanceAccess/);
+  assert.match(workspace, /id="sidebar-workspace"/);
+  assert.match(workspace, /<option value="sales_pricing">Sales &amp; Pricing<\/option>/);
+  assert.match(workspace, /<option value="finance">Finance<\/option>/);
+  assert.match(workspace, /label: "Company"/);
+  assert.match(workspace, /label: "Finance"/);
+});
