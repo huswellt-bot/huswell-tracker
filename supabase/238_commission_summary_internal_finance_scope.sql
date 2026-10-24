@@ -118,6 +118,20 @@ where summary.organization_id = p_organization_id
 order by summary.created_at desc, summary.quotation_no asc;
 $$;
 
+-- Finance needs the saved quotation number and client fields that belong to
+-- each allocation. Keep this direct summary read unavailable to External
+-- Finance while recognizing the capability-aware Internal Finance account.
+drop policy if exists "commission summaries: finance read"
+  on public.commission_summaries;
+create policy "commission summaries: finance read"
+on public.commission_summaries for select to authenticated
+using (
+  private.has_text_role(organization_id, array[
+    'super_admin', 'owner', 'admin', 'accountant'
+  ])
+  or private.finance_is_internal(organization_id)
+);
+
 -- The Finance Payables workspace reads allocation rows directly. Extend its
 -- read policy to recognize the capability-aware Internal Finance scope. The
 -- Pricing Officer branch remains limited to that officer's own allocations.

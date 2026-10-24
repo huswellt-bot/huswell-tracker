@@ -1943,6 +1943,7 @@ export function FinanceWorkspace({
   const [payables, setPayables] = useState<Row[]>([]);
   const [suppliers, setSuppliers] = useState<Row[]>([]);
   const [commissionAllocations, setCommissionAllocations] = useState<Row[]>([]);
+  const [commissionSummaries, setCommissionSummaries] = useState<Row[]>([]);
   const [profiles, setProfiles] = useState<Row[]>([]);
   const [paymentRecords, setPaymentRecords] = useState<Row[]>([]);
   const [quotationPaymentRecords, setQuotationPaymentRecords] = useState<Row[]>([]);
@@ -2036,6 +2037,9 @@ export function FinanceWorkspace({
       const commissionAllocationsRequest = internal
         ? client.from("commission_summary_allocations").select("*").eq("organization_id", organizationId).order("created_at", { ascending: false })
         : emptyFinanceRequest();
+      const commissionSummariesRequest = internal
+        ? client.from("commission_summaries").select("quotation_id,quotation_no,client_name,project_name,grand_total,commission_split_option").eq("organization_id", organizationId).order("created_at", { ascending: false })
+        : emptyFinanceRequest();
       const quotationsRequest = budgetOnly
         ? emptyFinanceRequest()
         : internal
@@ -2123,6 +2127,7 @@ export function FinanceWorkspace({
         expenseAccountsRequest,
         fundingRequestAccountsRequest,
         accountTypesRequest,
+        commissionSummariesRequest,
       ]);
       const failed = requests.find((request) => request.error);
       if (failed?.error) {
@@ -2153,6 +2158,7 @@ export function FinanceWorkspace({
       setExpenseAccounts((requests[21].data ?? []) as Row[]);
       setFundingRequestAccounts((requests[22].data ?? []) as Row[]);
       setAccountTypes((requests[23].data ?? []) as Row[]);
+      setCommissionSummaries((requests[24].data ?? []) as Row[]);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Finance data could not load.");
     } finally {
@@ -2309,10 +2315,12 @@ export function FinanceWorkspace({
   const leadName = useCallback((leadId: unknown) => stringValue(leads.find((lead) => lead.id === leadId), "client_name", "—"), [leads]);
   const supplierName = useCallback((supplierId: unknown) => stringValue(suppliers.find((supplier) => supplier.id === supplierId), "company_name", "—"), [suppliers]);
   const quotationForId = useCallback((quotationId: unknown) => quotations.find((quotation) => String(quotation.id) === String(quotationId)), [quotations]);
+  const commissionSummaryForQuotation = useCallback((quotationId: unknown) => commissionSummaries.find((summary) => String(summary.quotation_id) === String(quotationId)), [commissionSummaries]);
   const quotationName = useCallback((quotationId: unknown) => {
     const quotation = quotationForId(quotationId);
-    return stringValue(quotation, "quotation_no", String(quotationId ?? "").trim() || "—");
-  }, [quotationForId]);
+    const summary = commissionSummaryForQuotation(quotationId);
+    return stringValue(quotation, "quotation_no") || stringValue(summary, "quotation_no") || "—";
+  }, [commissionSummaryForQuotation, quotationForId]);
   const profileName = useCallback((profileId: unknown) => stringValue(profiles.find((profile) => profile.id === profileId), "full_name", "Sales & Pricing Officer"), [profiles]);
   const financeUserName = useCallback((profileId: unknown) => stringValue(profiles.find((profile) => profile.id === profileId), "full_name", "—"), [profiles]);
 
@@ -2346,16 +2354,17 @@ export function FinanceWorkspace({
   const eligibleCommissionAllocationsForOptions = useMemo(() => commissionAllocations.filter((allocation) => {
     if (stringValue(allocation, "status") !== "not_yet_paid") return false;
     const quotation = quotationForId(allocation.quotation_id);
+    const summary = commissionSummaryForQuotation(allocation.quotation_id);
     const verifiedAt = verifiedPaymentByQuotation.get(stringValue(allocation, "quotation_id"));
     const verifiedAmount = verifiedPaymentTotalsByQuotation.get(stringValue(allocation, "quotation_id")) ?? 0;
-    const total = numericValue(quotation, "total_amount");
+    const total = numericValue(quotation, "total_amount") || numericValue(summary, "grand_total");
     return Boolean(
       verifiedAt
       && total > 0
       && verifiedAmount + 0.001 >= total
       && currentTime >= new Date(verifiedAt).getTime() + 3 * 24 * 60 * 60 * 1000,
     );
-  }), [commissionAllocations, currentTime, quotationForId, verifiedPaymentByQuotation, verifiedPaymentTotalsByQuotation]);
+  }), [commissionAllocations, commissionSummaryForQuotation, currentTime, quotationForId, verifiedPaymentByQuotation, verifiedPaymentTotalsByQuotation]);
 
   const accountOptions = useMemo<SearchableOption[]>(
     () => (transactionDirection === "expense" && !internal ? availableExpenseAccounts : activeAccounts).map((account) => ({
@@ -2821,16 +2830,17 @@ export function FinanceWorkspace({
   const eligibleCommissionAllocations = useMemo(() => commissionAllocations.filter((allocation) => {
     if (stringValue(allocation, "status") !== "not_yet_paid") return false;
     const quotation = quotationForId(allocation.quotation_id);
+    const summary = commissionSummaryForQuotation(allocation.quotation_id);
     const verifiedAt = verifiedPaymentByQuotation.get(stringValue(allocation, "quotation_id"));
     const verifiedAmount = verifiedPaymentTotalsByQuotation.get(stringValue(allocation, "quotation_id")) ?? 0;
-    const total = numericValue(quotation, "total_amount");
+    const total = numericValue(quotation, "total_amount") || numericValue(summary, "grand_total");
     return Boolean(
       verifiedAt
       && total > 0
       && verifiedAmount + 0.001 >= total
       && currentTime >= new Date(verifiedAt).getTime() + 3 * 24 * 60 * 60 * 1000,
     );
-  }), [commissionAllocations, currentTime, quotationForId, verifiedPaymentByQuotation, verifiedPaymentTotalsByQuotation]);
+  }), [commissionAllocations, commissionSummaryForQuotation, currentTime, quotationForId, verifiedPaymentByQuotation, verifiedPaymentTotalsByQuotation]);
   const transactionPayables = useMemo(
     () => transactions.filter((transaction) => !Boolean(transaction.is_voided) && stringValue(transaction, "transaction_type") === "expense" && stringValue(transaction, "approval_status") === "approved" && stringValue(transaction, "payment_status") === "unpaid"),
     [transactions],
@@ -4427,7 +4437,7 @@ export function FinanceWorkspace({
                 ))}
               </div>
             )}
-            <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[1040px]"><thead><tr><th>Project</th><th>Name / Company</th><th>Recipient</th><th>Role</th><th>Division</th><th>Amount</th><th>Eligible</th><th>Status</th></tr></thead><tbody>{visiblePayablesRows.map((allocation) => { const verifiedAt = verifiedPaymentByQuotation.get(stringValue(allocation, "quotation_id")); const eligibleAt = verifiedAt ? new Date(new Date(verifiedAt).getTime() + 3 * 24 * 60 * 60 * 1000) : null; const eligible = Boolean(eligibleAt && currentTime >= eligibleAt.getTime()); const quotation = quotationForId(allocation.quotation_id); return <tr key={String(allocation.id)}><td>{quotationName(allocation.quotation_id)}</td><td>{stringValue(quotation, "client_name", "—")}</td><td>{profileName(allocation.recipient_user_id)}</td><td>{commissionRoleLabel(allocation.allocation_role)}</td><td>{commissionDivisionLabel(quotation?.commission_split_option)}</td><td className="font-semibold text-[#b42318]">{peso.format(numericValue(allocation, "amount"))}</td><td>{eligible ? <StatusPill value="approved" /> : <span className="text-[11px] text-[#a76605]">{eligibleAt ? displayDate(eligibleAt) : "Awaiting verified payment"}</span>}</td><td><StatusPill value={stringValue(allocation, "status")} /></td></tr>; })}{!activePayablesRows.length && <tr><td colSpan={8} className="text-center text-[#7d8797]">No commission allocations yet.</td></tr>}</tbody></table></div>
+            <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[1040px]"><thead><tr><th>Project</th><th>Name / Company</th><th>Recipient</th><th>Role</th><th>Division</th><th>Amount</th><th>Eligible</th><th>Status</th></tr></thead><tbody>{visiblePayablesRows.map((allocation) => { const verifiedAt = verifiedPaymentByQuotation.get(stringValue(allocation, "quotation_id")); const eligibleAt = verifiedAt ? new Date(new Date(verifiedAt).getTime() + 3 * 24 * 60 * 60 * 1000) : null; const eligible = Boolean(eligibleAt && currentTime >= eligibleAt.getTime()); const quotation = quotationForId(allocation.quotation_id); const summary = commissionSummaryForQuotation(allocation.quotation_id); return <tr key={String(allocation.id)}><td>{quotationName(allocation.quotation_id)}</td><td>{stringValue(quotation, "client_name") || stringValue(summary, "client_name") || "—"}</td><td>{profileName(allocation.recipient_user_id)}</td><td>{commissionRoleLabel(allocation.allocation_role)}</td><td>{commissionDivisionLabel(stringValue(quotation, "commission_split_option") || stringValue(summary, "commission_split_option"))}</td><td className="font-semibold text-[#b42318]">{peso.format(numericValue(allocation, "amount"))}</td><td>{eligible ? <StatusPill value="approved" /> : <span className="text-[11px] text-[#a76605]">{eligibleAt ? displayDate(eligibleAt) : "Awaiting verified payment"}</span>}</td><td><StatusPill value={stringValue(allocation, "status")} /></td></tr>; })}{!activePayablesRows.length && <tr><td colSpan={8} className="text-center text-[#7d8797]">No commission allocations yet.</td></tr>}</tbody></table></div>
           </Panel>
           <TablePagination page={activePayablesPage} pageCount={payablesPageCount} total={activePayablesRows.length} onPageChange={setPayablesPage} label="Payables pagination" />
             </div>

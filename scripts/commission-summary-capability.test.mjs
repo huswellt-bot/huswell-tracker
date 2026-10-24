@@ -22,6 +22,7 @@ test("Finance Payables scope recognizes the Internal Finance capability", () => 
   assert.match(migration, /create or replace function public\.commission_summary_rows_v3/);
   assert.doesNotMatch(migration, /private\.has_member_capability\(p_organization_id/);
   assert.doesNotMatch(migration, /private\.finance_is_internal\(p_organization_id\)/);
+  assert.match(migration, /commission summaries: finance read/);
   assert.match(migration, /commission allocations: authorized read/);
   assert.match(migration, /private\.finance_is_internal\(organization_id\)/);
 });
@@ -29,6 +30,8 @@ test("Finance Payables scope recognizes the Internal Finance capability", () => 
 test("combined accounts keep personal Pricing Officer summaries", () => {
   assert.match(workspace, /readOnly=\{role === "sales_pricing_officer"\}/);
   assert.match(workspace, /const \[commissionMonth, setCommissionMonth\] = useState\(currentMonth\)/);
-  assert.match(financeWorkspace, /const quotationForId = useCallback\(\(quotationId: unknown\) => quotations\.find\(\(quotation\) => String\(quotation\.id\) === String\(quotationId\)\)/);
-  assert.match(financeWorkspace, /stringValue\(quotation, "quotation_no", String\(quotationId \?\? ""\)\.trim\(\) \|\| "—"\)/);
+  assert.match(financeWorkspace, /const quotationForId = useCallback/);
+  assert.match(financeWorkspace, /const commissionSummaryForQuotation = useCallback/);
+  assert.match(financeWorkspace, /stringValue\(summary, "quotation_no"\) \|\| "—"/);
+  assert.match(financeWorkspace, /commissionSummariesRequest/);
 });
