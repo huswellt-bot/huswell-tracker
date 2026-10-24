@@ -1647,16 +1647,16 @@ function MonthlyFinanceReport({
                   <td className="text-center font-medium">{row.label}</td>
                   <td className="text-center font-semibold text-[var(--color-success-text)]" aria-label={`Cash In ${peso.format(row.cashIn)}`}>{peso.format(row.cashIn)}</td>
                   <td className="text-center font-semibold text-[var(--color-danger-text)]" aria-label={`Cash Out ${peso.format(row.cashOut)}`}>{peso.format(row.cashOut)}</td>
-                  <td className={`text-center font-semibold ${row.netEarnings >= 0 ? "text-[var(--color-success-text)]" : "text-[var(--color-danger-text)]"}`}>{peso.format(row.netEarnings)}</td>
+                  <td className="text-center font-semibold text-[#202938]">{peso.format(row.netEarnings)}</td>
                 </tr>
               ))}
             </tbody>
             <tfoot className="border-t-2 border-[#d9e0e9]">
               <tr>
                 <td className="px-3 pb-3 pt-4 text-center font-semibold">Total</td>
-                <td className="px-3 pb-3 pt-4 text-center font-semibold text-[var(--color-success-text)]" aria-label={`Total Cash In ${peso.format(totals.cashIn)}`}>{peso.format(totals.cashIn)}</td>
-                <td className="px-3 pb-3 pt-4 text-center font-semibold text-[var(--color-danger-text)]" aria-label={`Total Cash Out ${peso.format(totals.cashOut)}`}>{peso.format(totals.cashOut)}</td>
-                <td className={`px-3 pb-3 pt-4 text-center font-semibold ${totals.netEarnings >= 0 ? "text-[var(--color-success-text)]" : "text-[var(--color-danger-text)]"}`}>{peso.format(totals.netEarnings)}</td>
+                <td className="px-3 pb-3 pt-4 text-center font-semibold text-[#202938]" aria-label={`Total Cash In ${peso.format(totals.cashIn)}`}>{peso.format(totals.cashIn)}</td>
+                <td className="px-3 pb-3 pt-4 text-center font-semibold text-[#202938]" aria-label={`Total Cash Out ${peso.format(totals.cashOut)}`}>{peso.format(totals.cashOut)}</td>
+                <td className="px-3 pb-3 pt-4 text-center font-semibold text-[#202938]">{peso.format(totals.netEarnings)}</td>
               </tr>
             </tfoot>
           </table>
@@ -4055,8 +4055,7 @@ export function FinanceWorkspace({
           {internal ? (
             <div className="space-y-4">
               <div className="border-b border-[#d9e0e9] pb-5">
-                <p className="text-[11px] font-semibold uppercase tracking-[.06em] text-[#7d8797]">Net earnings</p>
-                <p className="mt-2 text-5xl font-bold tracking-tight text-[#202938]">{peso.format(periodTotals.income - periodTotals.expense)}</p>
+                <p className="text-5xl font-bold tracking-tight text-[#202938]">{peso.format(periodTotals.income - periodTotals.expense)}</p>
                 <p className="mt-1 text-[11px] text-[#7d8797]">This month</p>
               </div>
               <div>
@@ -4075,8 +4074,7 @@ export function FinanceWorkspace({
           ) : (
             <div className="space-y-4">
               <div className="border-b border-[#d9e0e9] pb-5">
-                <p className="text-[11px] font-semibold uppercase tracking-[.06em] text-[#7d8797]">Net earnings</p>
-                <p className="mt-2 text-5xl font-bold tracking-tight text-[#202938]">{peso.format(periodTotals.income - periodTotals.expense)}</p>
+                <p className="text-5xl font-bold tracking-tight text-[#202938]">{peso.format(periodTotals.income - periodTotals.expense)}</p>
                 <p className="mt-1 text-[11px] text-[#7d8797]">This month</p>
               </div>
               <div>
@@ -4267,7 +4265,7 @@ export function FinanceWorkspace({
         <Panel
           title={canViewBudget ? "Budget & allocations" : "Account funding requests"}
           detail={canViewBudget ? "The GM approves the monthly spending limit. Internal Finance distributes it across active accounts; allocations stay separate from actual cash." : "Request budget for a specific active account. Internal Finance decides the approved amount from the GM monthly pool."}
-          action={canViewBudget ? <span className="flex flex-wrap gap-2">{canGrantBudget && <button type="button" onClick={openBudgetGrant} className={primaryButton}><Plus size={13} /> {currentBudgetGrants.length ? "Add top-up" : "Add GM budget"}</button>}{canManageBudget && <button type="button" onClick={() => openBudgetAllocation()} className="button-secondary"><Wallet size={13} /> Allocate budget</button>}</span> : <button type="button" onClick={openFundingRequest} className={primaryButton}><Plus size={13} /> Request account funding</button>}
+          action={canViewBudget ? <span className="flex flex-wrap gap-2">{canGrantBudget && <button type="button" onClick={openBudgetGrant} className={primaryButton}><Plus size={13} /> {currentBudgetGrants.length ? "Add top-up" : "Add budget"}</button>}{canManageBudget && <button type="button" onClick={() => openBudgetAllocation()} className="button-secondary"><Wallet size={13} /> Allocate budget</button>}</span> : <button type="button" onClick={openFundingRequest} className={primaryButton}><Plus size={13} /> Request account funding</button>}
         >
           {canViewBudget ? (
             <>

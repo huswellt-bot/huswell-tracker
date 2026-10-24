@@ -1692,3 +1692,8 @@ select option[value=""] {
 .compact-ui [class*="tracking-[-"] {
   letter-spacing: 0 !important;
 }
+
+/* Keep every website table header aligned with its centered cell values. */
+table thead th {
+  text-align: center !important;
+}

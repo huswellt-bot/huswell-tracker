@@ -183,7 +183,18 @@ test("monthly Finance report keeps separate colored Cash In and Cash Out columns
   assert.doesNotMatch(monthlyReport, /<th className="text-right">Amount<\/th>/);
   assert.match(monthlyReport, /<td className="text-center font-semibold text-\[var\(--color-success-text\)\][\s\S]{0,120}peso\.format\(row\.cashIn\)/);
   assert.match(monthlyReport, /<td className="text-center font-semibold text-\[var\(--color-danger-text\)\][\s\S]{0,120}peso\.format\(row\.cashOut\)/);
+  assert.match(monthlyReport, /<td className="text-center font-semibold text-\[#202938\]">\{peso\.format\(row\.netEarnings\)\}<\/td>/);
+  assert.match(monthlyReport, /<td className="px-3 pb-3 pt-4 text-center font-semibold text-\[#202938\]" aria-label=\{`Total Cash In/);
+  assert.match(monthlyReport, /<td className="px-3 pb-3 pt-4 text-center font-semibold text-\[#202938\]" aria-label=\{`Total Cash Out/);
+  assert.match(monthlyReport, /<td className="px-3 pb-3 pt-4 text-center font-semibold text-\[#202938\]">\{peso\.format\(totals\.netEarnings\)\}<\/td>/);
   assert.doesNotMatch(monthlyReport, /Cash In ·|Cash Out ·/);
   assert.doesNotMatch(monthlyReport, /monthlyFinanceAmountRows|visibleAmountRows|totalAmountRows|amountLabel/);
   assert.doesNotMatch(monthlyReport, /quotationPayments/);
+});
+
+test("Finance overview does not repeat the Net earnings label above the amount", () => {
+  assert.doesNotMatch(
+    workspaceShell,
+    /<p className="text-\[11px\] font-semibold uppercase tracking-\[\.06em\] text-\[#7d8797\]">Net earnings<\/p>/,
+  );
 });
