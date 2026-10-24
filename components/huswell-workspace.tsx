@@ -459,7 +459,7 @@ const pricingMarkupDefinitions: Array<{
   { key: "target_profit_margin", label: "Target Profit Margin", fallback: "75", legacyKeys: ["default_profit_margin"] },
   { key: "overhead_allocation", label: "Overhead Allocation", fallback: "0", legacyKeys: ["default_overhead_rate"] },
   { key: "contingency_allowance", label: "Contingency Allowance", fallback: "20", legacyKeys: ["default_buffer_margin"] },
-  { key: "sales_commission", label: "Sales Executive Commission", fallback: "0", legacyKeys: ["production_commission", "commission_default_rate"] },
+  { key: "sales_commission", label: "Pricing Officer Commission", fallback: "0", legacyKeys: ["production_commission", "commission_default_rate"] },
   { key: "incentives", label: "Incentives", fallback: "0", legacyKeys: [] },
   { key: "discounts", label: "Discounts", fallback: "0", legacyKeys: [] },
   { key: "third_party_markup", label: "Third Party Mark Up", fallback: "15", legacyKeys: ["default_additional_markup"] },
@@ -16856,7 +16856,7 @@ function ProductCostingsSectionWithPricing({
                           </div>
                         </label> : <output aria-label={`Target selling price per piece for ${product ? text(product.description, "finished product") : "product"}`} className="text-[13px] font-semibold text-[#176b40]">{peso.format(totals.unitIncVat)}</output>}
                       </div>
-                    <p className="mt-2 text-[11px] text-[#687386]">Other percentage markups are recalculated to reach this target. Sales Executive Commission, Internal VAT, Discount and customer VAT remain as entered. GM markup percentages may exceed 100%.</p>
+                    <p className="mt-2 text-[11px] text-[#687386]">Other percentage markups are recalculated to reach this target. Pricing Officer Commission, Internal VAT, Discount and customer VAT remain as entered. GM markup percentages may exceed 100%.</p>
                       {targetBudgetErrors[costing.key] && <p className="mt-2 text-[11px] font-medium text-[#b42318]">{targetBudgetErrors[costing.key]}</p>}
                     </div>
                   </div>}
@@ -23737,7 +23737,7 @@ export function HuswellWorkspace({
       title: "Commissions",
       detail: role === "sales_pricing_officer"
         ? "View commission allocations assigned to your Price Quotations."
-        : "Manage Sales Executive Commission allocations.",
+        : "Manage Pricing Officer Commission allocations.",
     },
     Announcements: {
       title: "Announcements",
