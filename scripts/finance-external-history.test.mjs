@@ -24,6 +24,9 @@ const monthlyReport = workspace.slice(monthlyReportStart, monthlyReportEnd);
 const transactionDialogStart = workspace.indexOf("function TransactionDetailDialog(");
 const transactionDialogEnd = workspace.indexOf("function ProjectFinanceDialog(", transactionDialogStart);
 const transactionDialog = workspace.slice(transactionDialogStart, transactionDialogEnd);
+const confirmationDialogStart = workspace.indexOf("function FinanceConfirmDialog(");
+const confirmationDialogEnd = workspace.indexOf("function FinanceLoadingState(", confirmationDialogStart);
+const confirmationDialog = workspace.slice(confirmationDialogStart, confirmationDialogEnd);
 const topHeaderStart = workspaceShell.indexOf('<header className="sticky top-0');
 const topHeaderEnd = workspaceShell.indexOf("</header>", topHeaderStart);
 const topHeader = workspaceShell.slice(topHeaderStart, topHeaderEnd);
@@ -45,12 +48,123 @@ const categoryRpcStart = financeMigration.indexOf("create or replace function pu
 const categoryRpcEnd = financeMigration.indexOf("create or replace function public.archive_finance_category", categoryRpcStart);
 const categoryRpc = financeMigration.slice(categoryRpcStart, categoryRpcEnd);
 
-test("External Finance history keeps only necessary columns and uses quotation as the payment reference", () => {
+test("External Finance history keeps only necessary columns and color-codes the amount", () => {
   assert.match(transactionTable, /\{internal && <th>Budget<\/th>\}/);
   assert.match(transactionTable, /\{internal && <th>Note<\/th>\}/);
   assert.match(transactionTable, /internal \? \(allowActions \? "min-w-\[1320px\]"/);
-  assert.match(transactionTable, /transactionReference\(transaction, quotationName\)/);
-  assert.match(transactionTable, /8 \+ \(internal \? 2 : 0\) \+ \(allowActions \? 2 : 0\)/);
+  assert.doesNotMatch(transactionTable, /<th>Reference<\/th>/);
+  assert.doesNotMatch(transactionTable, /transactionReference\(transaction, quotationName\)/);
+  assert.match(transactionTable, /finance-cash-in-amount text-\[#218b55\]/);
+  assert.match(transactionTable, /finance-cash-out-amount text-\[#b42318\]/);
+  assert.match(globalStyles, /\.finance-transaction-table \.app-table tbody td\.finance-cash-in-amount,[\s\S]*color: #218b55 !important/);
+  assert.match(globalStyles, /\.finance-transaction-table \.app-table tbody td\.finance-cash-out-amount,[\s\S]*color: #b42318 !important/);
+  assert.match(transactionTable, /7 \+ \(internal \? 2 : 0\) \+ \(allowActions \? 2 : 0\)/);
+});
+
+test("pending project payments appear in External Finance transaction history", () => {
+  assert.match(workspace, /const transactionHistoryRows = useMemo<Row\[\]>\(\(\) =>/);
+  assert.match(workspace, /\["pending", "revision_requested"\]\.includes\(stringValue\(payment, "status"\)\)/);
+  assert.match(workspace, /id: `quotation-payment:\$\{String\(payment\.id\)\}`/);
+  assert.match(workspace, /income_review_status: stringValue\(payment, "status"\)/);
+  assert.match(workspace, /postedQuotationPaymentIds/);
+  assert.match(workspace, /transactionPeriodTransactions = useMemo\(\s*\(\) => transactionHistoryRows\.filter/);
+  assert.match(workspace, /return "pending_confirmation";/);
+});
+
+test("project expense options use the project-expense RPC result", () => {
+  assert.match(workspace, /setQuotationDirectCosts\(\(requests\[14\]\.data \?\? \[\]\) as Row\[\]\)/);
+  assert.match(workspace, /setProjectExpenseRows\(\(requests\[15\]\.data \?\? \[\]\) as Row\[\]\)/);
+  assert.match(workspace, /setBudgetSnapshot\(\(\(requests\[16\]\.data \?\? \[\]\) as Row\[\]\)\[0\] \?\? null\)/);
+});
+
+test("Cash In project payment rows use the payment type as their category", () => {
+  assert.match(workspace, /const transactionCategoryLabel = \(row: Row, categoryName/);
+  assert.match(workspace, /if \(paymentKind === "downpayment"\) return "Down payment"/);
+  assert.match(workspace, /if \(paymentKind === "full_payment"\) return "Full payment"/);
+  assert.match(workspace, /payment_kind: stringValue\(payment, "payment_kind"\)/);
+  assert.match(workspace, /transactionCategoryLabel\(transaction, categoryName\)/);
+});
+
+test("External Finance transaction history keeps only the search bar", () => {
+  const historyPanelStart = workspace.indexOf('<Panel title="Transaction history"');
+  const historyPanelEnd = workspace.indexOf('<Panel title="', historyPanelStart + 1);
+  const historyPanel = workspace.slice(historyPanelStart, historyPanelEnd === -1 ? undefined : historyPanelEnd);
+  assert.match(historyPanel, /placeholder=\{internal \? "Search project or client" : "Search history"\}/);
+  assert.doesNotMatch(historyPanel, /Transaction period|Transaction source|Finance account|Transaction category/);
+  assert.doesNotMatch(historyPanel, /<select/);
+});
+
+test("External Finance transaction history toggles between pending and verified rows", () => {
+  assert.match(workspace, /type TransactionStatusView = "pending" \| "verified"/);
+  assert.match(workspace, /transactionStatusViewOptions: Array/);
+  assert.match(workspace, /label: "Pending"/);
+  assert.match(workspace, /label: "Verified"/);
+  assert.match(workspace, /transactionStatusViewValue\(transaction\) !== transactionStatusView/);
+  assert.match(workspace, /transactionStatusViewCounts\[option\.value\]/);
+  assert.match(workspace, /aria-label="Transaction status"/);
+  assert.doesNotMatch(workspace, /aria-label="Transaction type"/);
+});
+
+test("External Finance replaces the transaction count row with the status toggle", () => {
+  const historyPanelStart = workspace.indexOf('<Panel title="Transaction history"');
+  const historyPanelEnd = workspace.indexOf('<Panel title="', historyPanelStart + 1);
+  const historyPanel = workspace.slice(historyPanelStart, historyPanelEnd === -1 ? undefined : historyPanelEnd);
+  const searchIndex = historyPanel.indexOf('placeholder={internal ? "Search project or client" : "Search history"}');
+  const toggleIndex = historyPanel.indexOf('aria-label="Transaction status"');
+  assert.ok(searchIndex >= 0);
+  assert.ok(toggleIndex > searchIndex);
+  assert.doesNotMatch(historyPanel, /Showing \{filteredTransactions\.length/);
+});
+
+test("Internal Finance approvals toggle Cash In, Cash Out, and budget request queues", () => {
+  assert.match(workspace, /type PendingApprovalSection = "income" \| "expense" \| "budget"/);
+  assert.match(workspace, /"Budget requests"/);
+  assert.match(workspace, /pendingApprovalSection === "budget"/);
+  assert.match(workspace, /setPendingApprovalSection\(value\)/);
+  assert.match(workspace, /Cash In approvals/);
+  assert.match(workspace, /Cash Out approvals/);
+  assert.match(workspace, /Account funding requests/);
+});
+
+test("Budget approval queue opens a detailed review modal", () => {
+  assert.match(workspace, /function BudgetRequestReviewDialog/);
+  assert.match(workspace, /<th>Account<\/th><th>Requested on<\/th><th>Amount<\/th><th className="finance-action-column">Review<\/th>/);
+  assert.match(workspace, /setBudgetReviewRequest\(budget\)/);
+  assert.match(workspace, /Requested budget/);
+  assert.match(workspace, /label="Requested by"/);
+  assert.match(workspace, /label="Note"/);
+  assert.match(workspace, /requestFundingReview\(request, decision\)/);
+  assert.match(workspace, /Return for revision/);
+  assert.match(workspace, /submitDecision\("approved"\).*className="button-success"/s);
+  assert.match(workspace, /submitDecision\("revision_requested"\)[\s\S]*submitDecision\("rejected"\)[\s\S]*submitDecision\("approved"\)/);
+});
+
+test("Cash In and Cash Out approval notes are modal-only", () => {
+  assert.match(workspace, /<th>Date<\/th><th>Description<\/th><th>Source<\/th><th>Account<\/th><th>Amount<\/th><th>Status<\/th><th className="finance-action-column">Review<\/th>/);
+  assert.match(workspace, /<TransactionDetailField label="Note"/);
+  assert.doesNotMatch(workspace, /<td>\{row\.note\}<\/td>/);
+});
+
+test("approval notes are required only for rejection, return, or reversal", () => {
+  assert.match(confirmationDialog, /\{requiresNote && \(/);
+  assert.doesNotMatch(confirmationDialog, /Decision note.*optional/);
+  assert.match(workspace, /approveAndPay\(pendingAction\.id\);/);
+  assert.match(workspace, /verifyManualIncome\(pendingAction\.id\);/);
+  assert.match(workspace, /reviewFundingRequest\(String\(fundingReviewRequest\.id\), "approved", approvedAmount, null\)/);
+  assert.doesNotMatch(workspace, /<label className="field-label">Decision note \(optional\)/);
+});
+
+test("eligible commission allocations have a pay action in their table row", () => {
+  assert.match(workspace, /<th className="finance-action-column">Action<\/th>/);
+  assert.match(workspace, /eligibleCommissionAllocations\.some\(\(eligibleAllocation\)/);
+  assert.match(workspace, /onClick=\{\(\) => openCommissionPayout\(String\(allocation\.id\)\)\}/);
+  assert.match(workspace, />Pay commission<\/button>/);
+  assert.match(workspace, /Awaiting full payment/);
+});
+
+test("Non-project Cash Out does not show a Leads company field", () => {
+  assert.match(workspace, /transactionDirection === "income" && !manualIncomeMode && !manualIncomeRevisionMode/);
+  assert.match(workspace, /ariaLabel="Name \/ Company from Leads"/);
 });
 
 test("quotation payment notes remain optional and are shown only from the real payment record", () => {
@@ -84,12 +198,9 @@ test("the quotation payment toggle is labeled Project payment", () => {
   assert.doesNotMatch(cashInSource, />Quotation payment<\/button>/);
 });
 
-test("Cash Out shows the account budget guidance at the top of the modal", () => {
-  const budgetIndex = transactionForm.indexOf("<span>Account budget</span>");
-  const expenseTypeIndex = transactionForm.indexOf("<legend>Expense type</legend>");
-
-  assert.notEqual(budgetIndex, -1);
-  assert.ok(expenseTypeIndex > budgetIndex);
+test("Cash Out does not show the removed account budget guidance", () => {
+  assert.doesNotMatch(transactionForm, /Account budget/);
+  assert.doesNotMatch(transactionForm, /Available account balances are not shown to External Finance/);
 });
 
 test("the non-project Cash Out toggle uses its user-facing label", () => {

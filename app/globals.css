@@ -1683,6 +1683,16 @@ select option[value=""] {
   color: #b42318 !important;
 }
 
+.finance-transaction-table .app-table tbody td.finance-cash-in-amount,
+.finance-transaction-table .finance-cash-in-amount {
+  color: #218b55 !important;
+}
+
+.finance-transaction-table .app-table tbody td.finance-cash-out-amount,
+.finance-transaction-table .finance-cash-out-amount {
+  color: #b42318 !important;
+}
+
 @media (max-width: 767px) {
   .finance-transaction-table > .overflow-x-auto {
     display: none;
