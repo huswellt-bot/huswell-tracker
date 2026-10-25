@@ -37,3 +37,15 @@ test("GM dashboard renders the hero cash flow, monthly chart, account balances, 
   assert.match(workspace, /Unpaid commissions/);
   assert.match(workspace, /Budget remaining/);
 });
+
+test("GM has a working Monthly report navigation page backed by the finance aggregate", () => {
+  assert.match(workspace, /\{ view: "Finance Reports", icon: CalendarDays \}/);
+  assert.match(workspace, /GeneralManagerMonthlyFinanceReport/);
+  assert.match(workspace, /Monthly breakdown/);
+  assert.match(workspace, /Verified and approved Finance totals by month/);
+});
+
+test("GM KPI cards keep a shared desktop width for long amounts", () => {
+  assert.match(workspace, /overflow-x-auto pb-1/);
+  assert.match(workspace, /xl:min-w-\[1040px\] xl:grid-cols-4/);
+});

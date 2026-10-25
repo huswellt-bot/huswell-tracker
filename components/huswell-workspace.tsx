@@ -4686,6 +4686,40 @@ function MonthlyFinanceFlowChart({
   );
 }
 
+function GeneralManagerMonthlyFinanceReport({ orgId }: { orgId: string }) {
+  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
+  const financeKpis = useSharedFinanceKpiDashboard(orgId, selectedMonth);
+  const monthlyRows = monthlyFinanceFlowPoints(financeKpis?.monthly_cash_flow)
+    .filter((point) => !point.month || point.month <= selectedMonth);
+  const cashIn = n(financeKpis?.cash_in);
+  const cashOut = n(financeKpis?.cash_out);
+  const netCashFlow = cashIn - cashOut;
+  const monthLabel = new Intl.DateTimeFormat("en-PH", { month: "long", year: "numeric" }).format(new Date(`${selectedMonth}-01T00:00:00`));
+  const metricCards = [
+    { label: "Cash In", value: cashIn, color: "text-[#16854f]" },
+    { label: "Cash Out", value: cashOut, color: "text-[#d33c43]" },
+    { label: "Net Cash Flow", value: netCashFlow, color: netCashFlow < 0 ? "text-[#d33c43]" : "text-[#16386d]" },
+  ];
+
+  return <div className="space-y-4">
+    <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[#e4e8ef] pb-4">
+      <div><h2 className="text-[16px] font-semibold text-[#202938]">Monthly finance report</h2><p className="mt-1 text-[11px] text-[#687386]">Verified Cash In, approved paid Cash Out, and net cash movement for the selected month.</p></div>
+      <label className="inline-flex items-center gap-2 text-[12px] text-[#687386]"><CalendarDays size={15} className="text-[#c43b43]" /><span className="sr-only">Reporting month</span><input aria-label="Reporting month" type="month" value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)} className="rounded-md border border-[#dfe5ed] bg-white px-2.5 py-1.5 text-[12px] text-[#202938] outline-none focus:border-[#16386d]" /></label>
+    </div>
+    <div className="grid gap-3 sm:grid-cols-3">
+      {metricCards.map(({ label, value, color }) => <article key={label} className="min-w-0 rounded-lg border border-[#dfe5ed] bg-white p-4"><p className="text-[11px] font-medium uppercase tracking-[.08em] text-[#687386]">{label}</p><p className={`mt-2 whitespace-nowrap font-semibold leading-tight tabular-nums ${color}`} style={{ fontSize: value === 0 ? "24px" : peso.format(value).length > 18 ? "16px" : "24px" }}>{peso.format(value)}</p><p className="mt-2 text-[10px] text-[#8b92a1]">{monthLabel}</p></article>)}
+    </div>
+    <section className="overflow-hidden rounded-lg border border-[#e7ebf0] bg-white">
+      <div className="flex flex-wrap items-start justify-between gap-3 px-4 pb-2 pt-4"><div><h3 className="text-[13px] font-semibold text-[#151922]">Monthly money flow</h3><p className="mt-1 text-[11px] text-[#8b92a1]">Cash movement through {monthLabel}.</p></div><span className="text-[11px] font-semibold text-[#202124]">{selectedMonth.slice(0, 4)}</span></div>
+      {monthlyRows.length ? <MonthlyFinanceFlowChart data={monthlyRows} /> : <div className="flex h-64 items-center justify-center px-5 text-center text-[12px] text-[#8b92a1]">{financeKpis ? "No posted Finance activity for this period." : "Loading monthly Finance report..."}</div>}
+    </section>
+    <section className="overflow-hidden rounded-lg border border-[#e7ebf0] bg-white">
+      <div className="border-b border-[#e4e8ef] px-4 py-4"><h3 className="text-[13px] font-semibold text-[#151922]">Monthly breakdown</h3><p className="mt-1 text-[11px] text-[#8b92a1]">Verified and approved Finance totals by month.</p></div>
+      <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[640px]"><thead><tr><th>Month</th><th>Cash In</th><th>Cash Out</th><th>Net Cash Flow</th></tr></thead><tbody>{monthlyRows.map((row) => <tr key={row.month || row.label}><td>{row.label}</td><td className="font-semibold text-[#16854f]">{peso.format(row.cash_in)}</td><td className="font-semibold text-[#d33c43]">{peso.format(row.cash_out)}</td><td className={`font-semibold ${row.net_cash_flow < 0 ? "text-[#d33c43]" : "text-[#16386d]"}`}>{peso.format(row.net_cash_flow)}</td></tr>)}{!monthlyRows.length && <tr><td colSpan={4} className="text-center text-[#7d8797]">No monthly Finance data available.</td></tr>}</tbody></table></div>
+    </section>
+  </div>;
+}
+
 function MonthlyPerformanceChart({
   data,
   primaryLabel = "Invoiced revenue",
@@ -21499,13 +21533,15 @@ function GeneralManagerKpiDashboard({ store, orgId }: { store: Store; orgId: str
           </article>)}
         </div>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="overflow-x-auto pb-1">
+        <div className="grid gap-3 sm:grid-cols-2 xl:min-w-[1040px] xl:grid-cols-4">
         {metricCards.map(({ title, value, detail, compare: change, previous, Icon, color, tint }) => <article key={title} className="min-w-0 rounded-lg border border-[#dfe5ed] bg-white p-4">
           <div className="flex items-start justify-between gap-3"><span className="grid size-8 place-items-center rounded-md text-white" style={{ backgroundColor: color }}><Icon size={16} /></span><span className="text-[11px] text-[#687386]">{detail}</span></div>
           <h2 className="mt-4 text-[11px] font-medium text-[#687386]">{title}</h2>
           <p className="mt-1 whitespace-nowrap font-semibold leading-none tabular-nums text-[#202938]" style={{ fontSize: financeAmountSize(value) }}>{peso.format(value)}</p>
           {change && <div className="mt-4 flex items-center justify-between border-t border-[#edf0f5] pt-3 text-left text-[11px] text-[#687386]"><span className="font-medium text-[#202938]">{change}</span><span className="text-right">Previous <b className="text-[#202938]">{peso.format(previous ?? 0)}</b></span></div>}
         </article>)}
+        </div>
       </div>
       <section className="overflow-hidden rounded-lg border border-[#dfe5ed]">
         <div className="flex items-center gap-2 border-b border-[#e4e8ef] px-4 py-3"><span className="grid size-8 place-items-center rounded-md bg-[#16386d] text-white"><Goal size={16} /></span><div><h2 className="text-[14px] font-semibold text-[#202938]">Quarterly sales quota</h2><p className="mt-0.5 text-[11px] text-[#687386]">Q{quarter + 1} {currentYear}</p></div></div>
@@ -23513,6 +23549,7 @@ export function HuswellWorkspace({
   const allowedViews: Record<string, View[]> = {
     super_admin: [
       "Dashboard",
+      "Finance Reports",
       "Leads",
       "Supplier's List",
       "Projects",
@@ -23525,6 +23562,7 @@ export function HuswellWorkspace({
     ],
     owner: [
       "Dashboard",
+      "Finance Reports",
       "Leads",
       "Supplier's List",
       "Projects",
@@ -23541,6 +23579,7 @@ export function HuswellWorkspace({
     ],
     admin: [
       "Dashboard",
+      "Finance Reports",
       "Leads",
       "Supplier's List",
       "Projects",
@@ -23706,6 +23745,7 @@ export function HuswellWorkspace({
       label: "Management",
       items: [
         { view: "Dashboard", icon: LayoutDashboard },
+        { view: "Finance Reports", icon: CalendarDays },
         { view: "Approvals", icon: ClipboardCheck, badge: sidebarBadge("management_approvals") },
         { view: "Leads", icon: ClipboardCheck },
         { view: "Supplier's List", icon: UsersRound },
@@ -24220,6 +24260,8 @@ export function HuswellWorkspace({
       />
     ) : active === "Finance Overview" ? (
       <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} overviewOnly />
+    ) : active === "Finance Reports" && isManagementRole ? (
+      <GeneralManagerMonthlyFinanceReport orgId={organizationId} />
     ) : active === "Finance Reports" ? (
       <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} reportOnly />
     ) : active === "Finance Approvals" ? (
@@ -24406,7 +24448,7 @@ export function HuswellWorkspace({
                             ? "Production"
                             : view === "Finance Overview" && (hasInternalFinanceAccess || role === "external_finance")
                               ? "Overview"
-                            : view === "Finance Reports" && (hasInternalFinanceAccess || role === "external_finance")
+                            : view === "Finance Reports"
                               ? "Monthly report"
                             : view === "Finance Approvals"
                               ? "Pending approvals"
