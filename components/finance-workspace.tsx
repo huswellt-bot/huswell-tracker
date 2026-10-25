@@ -6,6 +6,7 @@ import {
   ClipboardCheck,
   Download,
   LoaderCircle,
+  MessageSquareText,
   Plus,
   ReceiptText,
   Search,
@@ -43,8 +44,9 @@ type FinanceRemoveTarget = { kind: "category" | "account_type"; id: string; labe
 type Direction = "income" | "expense";
 type CashInSource = "other_income" | "quotation_payment";
 type ExpenseMode = "regular" | "project" | "supplier";
-type Tab = "overview" | "reports" | "approvals" | "transactions" | "accounts" | "budget" | "supplier_costing" | "payables";
+type Tab = "overview" | "reports" | "approvals" | "transactions" | "accounts" | "budget" | "supplier_costing" | "payables" | "commission_history";
 type PayablesSection = "commission" | "supplier";
+type CommissionPayablesView = "awaiting_payment" | "ready_to_pay";
 type Period = "all" | "weekly" | "monthly" | "yearly";
 type BudgetDecision = "approved" | "rejected" | "revision_requested";
 type QuotationPaymentDecision = "verified" | "revision_requested" | "rejected";
@@ -108,6 +110,11 @@ const transactionSourceFilterOptions: Array<{ value: TransactionSourceFilter; la
 const payablesSectionOptions: { value: PayablesSection; label: string }[] = [
   { value: "commission", label: "Commission payouts" },
   { value: "supplier", label: "Supplier payables" },
+];
+
+const commissionPayablesViewOptions: { value: CommissionPayablesView; label: string }[] = [
+  { value: "awaiting_payment", label: "Awaiting verified payment" },
+  { value: "ready_to_pay", label: "Fully paid" },
 ];
 
 const commissionRoleLabel = (value: unknown) => {
@@ -954,6 +961,7 @@ function ProjectFinanceDialog({
       ? "income"
       : "expense"
   ));
+  const [selectedNoteTransaction, setSelectedNoteTransaction] = useState<Row | null>(null);
 
   const transactionDescription = (transaction: Row) => {
     if (Boolean(transaction.source_payment_id)) return "Project payment";
@@ -979,7 +987,8 @@ function ProjectFinanceDialog({
   });
 
   return (
-    <FinanceDialog
+    <>
+      <FinanceDialog
       title={`${project.projectName} review`}
       wide
       detail={`${project.clientName} · ${project.transactions.length} verified transaction${project.transactions.length === 1 ? "" : "s"}`}
@@ -1054,7 +1063,7 @@ function ProjectFinanceDialog({
                 <div className="mt-3 grid grid-cols-2 gap-3 text-[11px]">
                   <div><span className="block text-[10px] text-[#8b92a1]">Account</span><span className="text-[#344054]">{accountName(transaction.account_id)}</span></div>
                   <div><span className="block text-[10px] text-[#8b92a1]">Category</span><span className="text-[#344054]">{categoryName(transaction.category_id)}</span></div>
-                  <div className="col-span-2"><span className="block text-[10px] text-[#8b92a1]">Note</span><span className="line-clamp-2 whitespace-pre-wrap text-[#344054]">{transactionNote(transaction)}</span></div>
+                  <div className="col-span-2"><span className="block text-[10px] text-[#8b92a1]">Note</span>{transactionNote(transaction) !== "-" ? <button type="button" onClick={() => setSelectedNoteTransaction(transaction)} className="table-action" title="View note" aria-label="View note"><MessageSquareText size={15} aria-hidden="true" /></button> : <span className="text-[#344054]">—</span>}</div>
                 </div>
                 {receiptPath && <div className="mt-3 border-t border-[#edf0f5] pt-3"><button type="button" onClick={() => void openReceipt(receiptPath, stringValue(transaction, "receipt_bucket", "finance-receipts"))} className="table-action" title="View receipt" aria-label="View receipt"><ReceiptText size={15} aria-hidden="true" /></button></div>}
               </article>
@@ -1073,7 +1082,7 @@ function ProjectFinanceDialog({
                   <tr key={String(transaction.id)}>
                     <td>{displayDate(transaction.transaction_date)}</td>
                     <td>{transactionDescription(transaction)}</td>
-                    <td>{transactionNote(transaction)}</td>
+                    <td>{transactionNote(transaction) !== "-" ? <button type="button" onClick={() => setSelectedNoteTransaction(transaction)} className="table-action" title="View note" aria-label="View note"><MessageSquareText size={15} aria-hidden="true" /></button> : "—"}</td>
                     <td>{transactionSourceLabel(transaction)}</td>
                     <td>{accountName(transaction.account_id)}</td>
                     <td className={`whitespace-nowrap font-semibold ${isIncome ? "finance-cash-in-amount text-[#218b55]" : "finance-cash-out-amount text-[#b42318]"}`} aria-label={`${isIncome ? "Cash In" : "Cash Out"} amount ${peso.format(numericValue(transaction, "amount"))}`}>{peso.format(numericValue(transaction, "amount"))}</td>
@@ -1094,7 +1103,24 @@ function ProjectFinanceDialog({
         </div>
       </div>
       <div className="mt-5 flex justify-end border-t border-[#edf0f5] pt-4"><button type="button" onClick={close} className="button-primary">Close</button></div>
-    </FinanceDialog>
+      </FinanceDialog>
+      {selectedNoteTransaction && (
+      <FinanceDialog
+        title="Transaction note"
+        detail={`${transactionDescription(selectedNoteTransaction)} · ${displayDate(selectedNoteTransaction.transaction_date)}`}
+        close={() => setSelectedNoteTransaction(null)}
+        compact
+        layer="top"
+      >
+        <div className="mt-5 rounded-md border border-[#d9e0e9] bg-[#fafbfc] px-3 py-3 text-[12px] leading-[1.5] text-[#344054]">
+          <p className="whitespace-pre-wrap">{transactionNote(selectedNoteTransaction)}</p>
+        </div>
+        <div className="mt-5 flex justify-end border-t border-[#edf0f5] pt-4">
+          <button type="button" onClick={() => setSelectedNoteTransaction(null)} className="button-primary">Close</button>
+        </div>
+        </FinanceDialog>
+      )}
+    </>
   );
 }
 
@@ -1958,12 +1984,17 @@ export function FinanceWorkspace({
           ["budget", internal ? "Budget & allocations" : "Funding requests"],
           ...(internal || canRecordSupplierCosting ? [["supplier_costing", "Supplier costing"] as [Tab, string]] : []),
           ...(internal ? [["payables", "Payables"] as [Tab, string]] : []),
+          ...(internal ? [["commission_history", "Paid commissions"] as [Tab, string]] : []),
         ],
     [budgetOnly, canRecordSupplierCosting, internal, role],
   );
   const [tab, setTab] = useState<Tab>(initialTab ?? (budgetOnly ? "budget" : reportOnly ? "reports" : overviewOnly ? "overview" : internal ? "approvals" : "transactions"));
   const [payablesSection, setPayablesSection] = useState<PayablesSection>("commission");
+  const [commissionPayablesView, setCommissionPayablesView] = useState<CommissionPayablesView>("ready_to_pay");
+  const [commissionPayoutQuery, setCommissionPayoutQuery] = useState("");
+  const [paidCommissionQuery, setPaidCommissionQuery] = useState("");
   const [payablesPage, setPayablesPage] = useState(1);
+  const [paidCommissionPage, setPaidCommissionPage] = useState(1);
   const [budgetPage, setBudgetPage] = useState(1);
   const [supplierCostingPage, setSupplierCostingPage] = useState(1);
   const [transactionsPage, setTransactionsPage] = useState(1);
@@ -2643,6 +2674,7 @@ export function FinanceWorkspace({
     const grouped = new Map<string, ProjectHistoryRow>();
     transactions.forEach((transaction) => {
       if (!isVerifiedFinanceTransaction(transaction)) return;
+      if (transaction.commission_summary_id || transaction.commission_allocation_id) return;
       const quotation = quotations.find((item) => String(item.id) === String(transaction.quotation_id ?? ""));
       const lead = leads.find((item) => String(item.id) === String(transaction.lead_id ?? quotation?.lead_id ?? ""));
       const leadId = String(transaction.lead_id ?? quotation?.lead_id ?? "");
@@ -2934,6 +2966,20 @@ export function FinanceWorkspace({
     }),
     [commissionAllocations, payables],
   );
+  const eligibleCommissionAllocationIds = useMemo(
+    () => new Set(eligibleCommissionAllocations.map((allocation) => String(allocation.id))),
+    [eligibleCommissionAllocations],
+  );
+  const commissionPayablesRowsByView = useMemo<Record<CommissionPayablesView, Row[]>>(
+    () => ({
+      awaiting_payment: payablesRowsBySection.commission.filter((allocation) => (
+        stringValue(allocation, "status") === "not_yet_paid"
+        && !eligibleCommissionAllocationIds.has(String(allocation.id))
+      )),
+      ready_to_pay: eligibleCommissionAllocations,
+    }),
+    [eligibleCommissionAllocationIds, eligibleCommissionAllocations, payablesRowsBySection.commission],
+  );
   const supplierCostingRows = useMemo(
     () => payables.filter((payable) => stringValue(payable, "status") !== "cancelled"),
     [payables],
@@ -2944,12 +2990,72 @@ export function FinanceWorkspace({
     (activeSupplierCostingPage - 1) * TABLE_PAGE_SIZE,
     activeSupplierCostingPage * TABLE_PAGE_SIZE,
   );
-  const activePayablesRows = payablesRowsBySection[payablesSection];
-  const payablesPageCount = Math.max(1, Math.ceil(activePayablesRows.length / TABLE_PAGE_SIZE));
+  const activePayablesRows = payablesSection === "commission"
+    ? commissionPayablesRowsByView[commissionPayablesView]
+    : payablesRowsBySection[payablesSection];
+  const normalizedCommissionPayoutQuery = commissionPayoutQuery.trim().toLowerCase();
+  const filteredPayablesRows = activePayablesRows.filter((allocation) => {
+    if (payablesSection !== "commission" || !normalizedCommissionPayoutQuery) return true;
+    const quotation = quotationForId(allocation.quotation_id);
+    const summary = commissionSummaryForQuotation(allocation.quotation_id);
+    return [
+      quotationName(allocation.quotation_id),
+      stringValue(quotation, "client_name"),
+      stringValue(summary, "client_name"),
+      profileName(allocation.recipient_user_id),
+      commissionRoleLabel(allocation.allocation_role),
+      commissionDivisionLabel(stringValue(quotation, "commission_split_option") || stringValue(summary, "commission_split_option")),
+      peso.format(numericValue(allocation, "amount")),
+      stringValue(allocation, "status"),
+      commissionPayablesView === "ready_to_pay" ? "fully paid" : "awaiting verified payment",
+    ].join(" ").toLowerCase().includes(normalizedCommissionPayoutQuery);
+  });
+  const payablesPageCount = Math.max(1, Math.ceil(filteredPayablesRows.length / TABLE_PAGE_SIZE));
   const activePayablesPage = Math.min(payablesPage, payablesPageCount);
-  const visiblePayablesRows = activePayablesRows.slice(
+  const visiblePayablesRows = filteredPayablesRows.slice(
     (activePayablesPage - 1) * TABLE_PAGE_SIZE,
     activePayablesPage * TABLE_PAGE_SIZE,
+  );
+  const paidCommissionRows = useMemo(
+    () => transactions
+      .filter((transaction) => (
+        !Boolean(transaction.is_voided)
+        && stringValue(transaction, "transaction_type") === "expense"
+        && Boolean(transaction.commission_allocation_id)
+        && stringValue(transaction, "payment_status") === "paid"
+        && stringValue(transaction, "approval_status") === "approved"
+      ))
+      .sort((left, right) => (
+        stringValue(right, "paid_at").localeCompare(stringValue(left, "paid_at"))
+        || stringValue(right, "transaction_date").localeCompare(stringValue(left, "transaction_date"))
+        || stringValue(right, "created_at").localeCompare(stringValue(left, "created_at"))
+      )),
+    [transactions],
+  );
+  const normalizedPaidCommissionQuery = paidCommissionQuery.trim().toLowerCase();
+  const filteredPaidCommissionRows = paidCommissionRows.filter((transaction) => {
+    if (!normalizedPaidCommissionQuery) return true;
+    const allocation = commissionAllocations.find((item) => String(item.id) === String(transaction.commission_allocation_id));
+    const quotationId = transaction.quotation_id ?? allocation?.quotation_id;
+    const quotation = quotationForId(quotationId);
+    const summary = commissionSummaryForQuotation(quotationId);
+    return [
+      quotationName(quotationId),
+      stringValue(quotation, "client_name"),
+      stringValue(summary, "client_name"),
+      leadName(transaction.lead_id),
+      allocation ? profileName(allocation.recipient_user_id) : "",
+      allocation ? commissionRoleLabel(allocation.allocation_role) : "",
+      commissionDivisionLabel(stringValue(quotation, "commission_split_option") || stringValue(summary, "commission_split_option")),
+      peso.format(numericValue(transaction, "amount")),
+      accountName(transaction.account_id),
+    ].join(" ").toLowerCase().includes(normalizedPaidCommissionQuery);
+  });
+  const paidCommissionPageCount = Math.max(1, Math.ceil(filteredPaidCommissionRows.length / TABLE_PAGE_SIZE));
+  const activePaidCommissionPage = Math.min(paidCommissionPage, paidCommissionPageCount);
+  const visiblePaidCommissionRows = filteredPaidCommissionRows.slice(
+    (activePaidCommissionPage - 1) * TABLE_PAGE_SIZE,
+    activePaidCommissionPage * TABLE_PAGE_SIZE,
   );
   const currentCashBalance = useMemo(
     () => balances.reduce((total, balance) => total + numericValue(balance, "current_balance"), 0),
@@ -3020,6 +3126,27 @@ export function FinanceWorkspace({
 
   const accountBalance = (accountId: string) => numericValue(balances.find((balance) => balance.id === accountId), "current_balance");
   const commissionPayoutMode = internal && Boolean(transactionValues.commission_allocation_id);
+  const selectedCommissionAllocation = useMemo(
+    () => commissionPayoutMode
+      ? eligibleCommissionAllocations.find((allocation) => String(allocation.id) === String(transactionValues.commission_allocation_id)) ?? null
+      : null,
+    [commissionPayoutMode, eligibleCommissionAllocations, transactionValues.commission_allocation_id],
+  );
+  const commissionExpenseCategory = useMemo(
+    () => categories.find((category) => (
+      stringValue(category, "direction") === "expense"
+      && stringValue(category, "name").trim().toLowerCase() === "commissions"
+    )) ?? null,
+    [categories],
+  );
+  const selectedCommissionQuotation = useMemo(
+    () => selectedCommissionAllocation ? quotationForId(selectedCommissionAllocation.quotation_id) : null,
+    [quotationForId, selectedCommissionAllocation],
+  );
+  const selectedCommissionSummary = useMemo(
+    () => selectedCommissionAllocation ? commissionSummaryForQuotation(selectedCommissionAllocation.quotation_id) : null,
+    [commissionSummaryForQuotation, selectedCommissionAllocation],
+  );
   const projectExpenseMode = !internal && transactionDirection === "expense" && expenseMode === "project";
   const supplierPaymentMode = !internal && transactionDirection === "expense" && expenseMode === "supplier";
   const quotationPaymentMode = !internal && transactionDirection === "income" && !revisionTransaction && cashInSource === "quotation_payment";
@@ -3276,10 +3403,15 @@ export function FinanceWorkspace({
   const openCommissionPayout = (allocationId: string) => {
     const allocation = eligibleCommissionAllocations.find((item) => String(item.id) === allocationId);
     if (!allocation) return setErrorMessage("That commission allocation is not yet eligible for payment.");
+    if (!commissionExpenseCategory) return setErrorMessage("The Commissions expense category is unavailable.");
+    const commissionAmount = numericValue(allocation, "amount");
+    if (commissionAmount <= 0) return setErrorMessage("This commission allocation has no payable amount.");
     setTransactionDirection("expense");
     setExpenseMode("regular");
     setTransactionValues({
       ...defaultTransaction("expense"),
+      amount: commissionAmount.toFixed(2),
+      category_id: String(commissionExpenseCategory.id),
       quotation_id: String(allocation.quotation_id ?? ""),
       commission_allocation_id: allocationId,
       payment_status: "paid",
@@ -3344,12 +3476,13 @@ export function FinanceWorkspace({
 
   const saveTransaction = async () => {
     const submittedFile = transactionFile;
+    const commissionPayoutSubmission = internal && Boolean(transactionValues.commission_allocation_id);
     if (!transactionDirection) return setErrorMessage("Choose a finance transaction type.");
     if (quotationPaymentMode) {
       await saveQuotationPayment();
       return;
     }
-    if (!revisionTransaction && !submittedFile) return setErrorMessage("Upload the transaction receipt image.");
+    if (!revisionTransaction && !submittedFile && !commissionPayoutSubmission) return setErrorMessage("Upload the transaction receipt image.");
     if (revisionTransaction && internal) return setErrorMessage("Only External Finance can resubmit returned Finance records.");
     if (!internal && !manualIncomeMode && !manualIncomeRevisionMode && (transactionDirection !== "expense" || !canSubmitExpense)) return setErrorMessage("External Finance can submit Cash Out or standalone Cash In.");
     if (!internal && transactionValues.payment_status !== "unpaid") return setErrorMessage("External Finance submissions must remain unpaid until Internal Finance confirms the payment.");
@@ -3416,7 +3549,9 @@ export function FinanceWorkspace({
         await load();
         return;
       }
-      if (!submittedFile || !path) throw new Error("Upload the transaction receipt image.");
+      if (!submittedFile || !path) {
+        if (!commissionPayoutSubmission) throw new Error("Upload the transaction receipt image.");
+      }
       const transactionPayload = {
         p_transaction_id: transactionId,
         p_transaction_type: transactionDirection,
@@ -3433,9 +3568,9 @@ export function FinanceWorkspace({
         p_supplier_payable_id: supplierPaymentMode ? transactionValues.supplier_payable_id || null : null,
         p_commission_summary_id: null,
         p_receipt_storage_path: path,
-        p_receipt_file_name: submittedFile.name,
-        p_receipt_content_type: submittedFile.type,
-        p_receipt_file_size: submittedFile.size,
+        p_receipt_file_name: submittedFile?.name ?? null,
+        p_receipt_content_type: submittedFile?.type ?? null,
+        p_receipt_file_size: submittedFile?.size ?? null,
       };
       const result = manualIncomeMode
         ? await client.rpc("create_manual_finance_income", {
@@ -3448,9 +3583,9 @@ export function FinanceWorkspace({
             p_transaction_date: transactionValues.transaction_date,
             p_transaction_time: transactionTime,
             p_receipt_storage_path: path,
-            p_receipt_file_name: submittedFile.name,
-            p_receipt_content_type: submittedFile.type,
-            p_receipt_file_size: submittedFile.size,
+            p_receipt_file_name: submittedFile?.name ?? null,
+            p_receipt_content_type: submittedFile?.type ?? null,
+            p_receipt_file_size: submittedFile?.size ?? null,
           })
         : selectedAllocation
         ? await client.rpc("create_finance_transaction_with_commission_allocation", {
@@ -4485,9 +4620,26 @@ export function FinanceWorkspace({
           {payablesSection === "commission" && (
             <div id="payables-panel-commission" role="tabpanel" aria-labelledby="payables-tab-commission">
           <Panel title="Commission payouts" detail="Each S.E. Origin and Co-Worker allocation is paid separately after the project is fully paid and the final client payment is verified.">
-            <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[1160px]"><thead><tr><th>Project</th><th>Name / Company</th><th>Recipient</th><th>Role</th><th>Division</th><th>Amount</th><th>Eligible</th><th>Status</th><th className="finance-action-column">Action</th></tr></thead><tbody>{visiblePayablesRows.map((allocation) => { const verifiedAt = verifiedPaymentByQuotation.get(stringValue(allocation, "quotation_id")); const eligible = eligibleCommissionAllocations.some((eligibleAllocation) => String(eligibleAllocation.id) === String(allocation.id)); const quotation = quotationForId(allocation.quotation_id); const summary = commissionSummaryForQuotation(allocation.quotation_id); return <tr key={String(allocation.id)}><td>{quotationName(allocation.quotation_id)}</td><td>{stringValue(quotation, "client_name") || stringValue(summary, "client_name") || "—"}</td><td>{profileName(allocation.recipient_user_id)}</td><td>{commissionRoleLabel(allocation.allocation_role)}</td><td>{commissionDivisionLabel(stringValue(quotation, "commission_split_option") || stringValue(summary, "commission_split_option"))}</td><td className="font-semibold text-[#b42318]">{peso.format(numericValue(allocation, "amount"))}</td><td>{eligible ? <StatusPill value="approved" /> : <span className="text-[11px] text-[#a76605]">{verifiedAt ? "Awaiting full payment" : "Awaiting verified payment"}</span>}</td><td><StatusPill value={stringValue(allocation, "status")} /></td><td className="finance-action-cell">{eligible ? <button type="button" onClick={() => openCommissionPayout(String(allocation.id))} disabled={saving} className="button-secondary whitespace-nowrap text-[10px]" aria-label={"Pay commission for " + quotationName(allocation.quotation_id)}>Pay commission</button> : "—"}</td></tr>; })}{!activePayablesRows.length && <tr><td colSpan={9} className="text-center text-[#7d8797]">No commission allocations yet.</td></tr>}</tbody></table></div>
+            <div className="px-4 pt-3 sm:px-5">
+              <label className="relative block max-w-md">
+                <Search size={15} className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]" />
+                <input type="search" value={commissionPayoutQuery} onChange={(event) => { setCommissionPayoutQuery(event.target.value); setPayablesPage(1); }} className="input mt-0 w-full search-input text-[12px]" placeholder="Search commission payouts" aria-label="Search commission payouts" />
+              </label>
+            </div>
+            <div className="border-b border-[#edf0f5] px-4 pt-3 sm:px-5">
+              <nav className="app-tabs overflow-x-auto" role="tablist" aria-label="Commission payout readiness">
+                {commissionPayablesViewOptions.map(({ value, label }) => {
+                  const active = commissionPayablesView === value;
+                  const count = commissionPayablesRowsByView[value].length;
+                  return <button key={value} id={`commission-payables-tab-${value}`} type="button" role="tab" aria-selected={active} aria-controls={`commission-payables-panel-${value}`} onClick={() => { setCommissionPayablesView(value); setPayablesPage(1); }} className="app-tab whitespace-nowrap">{label}<span className="app-tab-count ml-1.5">{count}</span></button>;
+                })}
+              </nav>
+            </div>
+            <div id={`commission-payables-panel-${commissionPayablesView}`} role="tabpanel" aria-labelledby={`commission-payables-tab-${commissionPayablesView}`}>
+              <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[1080px]"><thead><tr><th>Project</th><th>Name / Company</th><th>Recipient</th><th>Role</th><th>Division</th><th>Amount</th><th>Status</th>{commissionPayablesView === "ready_to_pay" && <th className="finance-action-column">Action</th>}</tr></thead><tbody>{visiblePayablesRows.map((allocation) => { const verifiedAt = verifiedPaymentByQuotation.get(stringValue(allocation, "quotation_id")); const eligible = eligibleCommissionAllocations.some((eligibleAllocation) => String(eligibleAllocation.id) === String(allocation.id)); const quotation = quotationForId(allocation.quotation_id); const summary = commissionSummaryForQuotation(allocation.quotation_id); return <tr key={String(allocation.id)}><td>{quotationName(allocation.quotation_id)}</td><td>{stringValue(quotation, "client_name") || stringValue(summary, "client_name") || "—"}</td><td>{profileName(allocation.recipient_user_id)}</td><td>{commissionRoleLabel(allocation.allocation_role)}</td><td>{commissionDivisionLabel(stringValue(quotation, "commission_split_option") || stringValue(summary, "commission_split_option"))}</td><td className="font-semibold text-[#b42318]">{peso.format(numericValue(allocation, "amount"))}</td><td>{commissionPayablesView === "ready_to_pay" ? <StatusPill value={stringValue(allocation, "status")} /> : <span className="text-[11px] text-[#a76605]">{verifiedAt ? "Awaiting full payment" : "Awaiting verified payment"}</span>}</td>{commissionPayablesView === "ready_to_pay" && <td className="finance-action-cell">{eligible ? <button type="button" onClick={() => openCommissionPayout(String(allocation.id))} disabled={saving} className="inline-flex min-h-7 items-center gap-1 rounded-[6px] bg-[#218b55] px-2.5 text-[10px] font-semibold text-white transition-colors hover:bg-[#176b40] disabled:cursor-not-allowed disabled:opacity-50" aria-label={"Pay commission for " + quotationName(allocation.quotation_id)}>Pay commission</button> : "—"}</td>}</tr>; })}{!filteredPayablesRows.length && <tr><td colSpan={commissionPayablesView === "ready_to_pay" ? 8 : 7} className="text-center text-[#7d8797]">{normalizedCommissionPayoutQuery ? "No commission payouts match your search." : commissionPayablesView === "ready_to_pay" ? "No fully paid projects are ready for commission payout." : "No commission projects are awaiting verified payment."}</td></tr>}</tbody></table></div>
+            </div>
           </Panel>
-          <TablePagination page={activePayablesPage} pageCount={payablesPageCount} total={activePayablesRows.length} onPageChange={setPayablesPage} label="Payables pagination" />
+          <TablePagination page={activePayablesPage} pageCount={payablesPageCount} total={filteredPayablesRows.length} onPageChange={setPayablesPage} label="Payables pagination" />
             </div>
           )}
 
@@ -4496,11 +4648,49 @@ export function FinanceWorkspace({
           <Panel title="Supplier payables" detail="Confirmed supplier obligations remain payable until paid.">
             <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[760px]"><thead><tr><th>Supplier</th><th>Payable number</th><th>Due</th><th>Balance</th><th>Status</th></tr></thead><tbody>{visiblePayablesRows.map((payable) => <tr key={String(payable.id)}><td>{supplierName(payable.supplier_id)}</td><td>{stringValue(payable, "payable_no") || "-"}</td><td>{displayDate(payable.due_date)}</td><td className="font-semibold">{peso.format(Math.max(numericValue(payable, "amount") - numericValue(payable, "amount_paid"), 0))}</td><td><StatusPill value={stringValue(payable, "status")} /></td></tr>)}{!activePayablesRows.length && <tr><td colSpan={5} className="text-center text-[#7d8797]">No open supplier payables.</td></tr>}</tbody></table></div>
           </Panel>
-          <TablePagination page={activePayablesPage} pageCount={payablesPageCount} total={activePayablesRows.length} onPageChange={setPayablesPage} label="Payables pagination" />
+          <TablePagination page={activePayablesPage} pageCount={payablesPageCount} total={filteredPayablesRows.length} onPageChange={setPayablesPage} label="Payables pagination" />
             </div>
           )}
 
         </div>
+      )}
+
+      {tab === "commission_history" && internal && (
+        <Panel title="Paid commissions" detail="Completed commission payouts by project and pricing officer. Shared commissions appear as separate paid rows for each recipient.">
+          <div className="px-4 pb-3 pt-3 sm:px-5">
+            <label className="relative block max-w-md">
+              <Search size={15} className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]" />
+              <input type="search" value={paidCommissionQuery} onChange={(event) => { setPaidCommissionQuery(event.target.value); setPaidCommissionPage(1); }} className="input mt-0 w-full search-input text-[12px]" placeholder="Search paid commissions" aria-label="Search paid commissions" />
+            </label>
+          </div>
+          <div className="table-shell overflow-x-auto">
+            <table className="app-table w-full min-w-[1060px]">
+              <thead><tr><th>Paid date</th><th>Project</th><th>Name / Company</th><th>Pricing officer</th><th>Role</th><th>Division</th><th>Amount paid</th><th>Account</th></tr></thead>
+              <tbody>
+                {visiblePaidCommissionRows.map((transaction) => {
+                  const allocation = commissionAllocations.find((item) => String(item.id) === String(transaction.commission_allocation_id));
+                  const quotationId = transaction.quotation_id ?? allocation?.quotation_id;
+                  const quotation = quotationForId(quotationId);
+                  const summary = commissionSummaryForQuotation(quotationId);
+                  return (
+                    <tr key={String(transaction.id)}>
+                      <td>{displayDate(stringValue(transaction, "paid_at") || transaction.transaction_date)}</td>
+                      <td>{quotationName(quotationId)}</td>
+                      <td>{stringValue(quotation, "client_name") || stringValue(summary, "client_name") || leadName(transaction.lead_id)}</td>
+                      <td>{allocation ? profileName(allocation.recipient_user_id) : "—"}</td>
+                      <td>{allocation ? commissionRoleLabel(allocation.allocation_role) : "—"}</td>
+                      <td>{commissionDivisionLabel(stringValue(quotation, "commission_split_option") || stringValue(summary, "commission_split_option"))}</td>
+                      <td className="font-semibold text-[#b42318]">{peso.format(numericValue(transaction, "amount"))}</td>
+                      <td>{accountName(transaction.account_id)}</td>
+                    </tr>
+                  );
+                })}
+                {!filteredPaidCommissionRows.length && <tr><td colSpan={8} className="text-center text-[#7d8797]">{normalizedPaidCommissionQuery ? "No paid commissions match your search." : "No paid commissions yet."}</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          <TablePagination page={activePaidCommissionPage} pageCount={paidCommissionPageCount} total={filteredPaidCommissionRows.length} onPageChange={setPaidCommissionPage} label="Paid commissions pagination" />
+        </Panel>
       )}
 
       </>}
@@ -4672,11 +4862,28 @@ export function FinanceWorkspace({
                 </div>
               ) : <small className="mt-1 block text-[#7d8797]">Only approved direct-cost projects can receive a capped project expense.</small>}
             </div>}
-            <label className="field-label">Amount<NumberInput min="0.01" max={projectExpenseMode ? selectedProjectExpenseCapacity?.availableToExpense : undefined} step="0.01" value={transactionValues.amount} onChange={(value) => setTransactionValues((current) => ({ ...current, amount: value }))} aria-invalid={Boolean(projectExpenseAmountError)} className="input mt-1" />{projectExpenseMode && selectedProjectExpenseCapacity && <span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">Maximum for this project: {peso.format(selectedProjectExpenseCapacity.availableToExpense ?? 0)}</span>}{projectExpenseAmountError && <span role="alert" className="mt-1 block text-[11px] font-semibold text-[#b42318]">{projectExpenseAmountError}</span>}</label>
-            <label className="field-label">
+            {commissionPayoutMode && selectedCommissionAllocation && <div className="field-label sm:col-span-2">
+              <span>Commission allocation</span>
+              <div className="mt-1 grid gap-2 rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-3 text-[11px] sm:grid-cols-2 lg:grid-cols-5">
+                <div><span className="block text-[10px] text-[#8b92a1]">Project</span><strong className="block text-[#344054]">{quotationName(selectedCommissionAllocation.quotation_id)}</strong></div>
+                <div><span className="block text-[10px] text-[#8b92a1]">Recipient</span><strong className="block text-[#344054]">{profileName(selectedCommissionAllocation.recipient_user_id)}</strong></div>
+                <div><span className="block text-[10px] text-[#8b92a1]">Role</span><strong className="block text-[#344054]">{commissionRoleLabel(selectedCommissionAllocation.allocation_role)}</strong></div>
+                <div><span className="block text-[10px] text-[#8b92a1]">Division</span><strong className="block text-[#344054]">{commissionDivisionLabel(stringValue(selectedCommissionQuotation, "commission_split_option") || stringValue(selectedCommissionSummary, "commission_split_option"))}</strong></div>
+                <div><span className="block text-[10px] text-[#8b92a1]">Payable amount</span><strong className="block text-[#b42318]">{peso.format(numericValue(selectedCommissionAllocation, "amount"))}</strong></div>
+              </div>
+              <small className="mt-1 block text-[#7d8797]">The amount and Commissions category come from the approved allocation. Choose the account and payout date.</small>
+            </div>}
+            {commissionPayoutMode ? <div className="field-label">
+              Amount
+              <div className="input mt-1 bg-[#fafbfc] font-semibold text-[#b42318]" aria-label="Commission payout amount" aria-readonly="true">{peso.format(numericValue(selectedCommissionAllocation, "amount"))}</div>
+            </div> : <label className="field-label">Amount<NumberInput min="0.01" max={projectExpenseMode ? selectedProjectExpenseCapacity?.availableToExpense : undefined} step="0.01" value={transactionValues.amount} onChange={(value) => setTransactionValues((current) => ({ ...current, amount: value }))} aria-invalid={Boolean(projectExpenseAmountError)} className="input mt-1" />{projectExpenseMode && selectedProjectExpenseCapacity && <span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">Maximum for this project: {peso.format(selectedProjectExpenseCapacity.availableToExpense ?? 0)}</span>}{projectExpenseAmountError && <span role="alert" className="mt-1 block text-[11px] font-semibold text-[#b42318]">{projectExpenseAmountError}</span>}</label>}
+            {commissionPayoutMode ? <div className="field-label">
+              Expense category
+              <div className="input mt-1 bg-[#fafbfc]" aria-label="Expense category" aria-readonly="true">{categoryName(transactionValues.category_id)}</div>
+            </div> : <label className="field-label">
               {transactionDirection === "income" ? "Income category" : "Expense category"}
               <SearchableSelect options={categoryOptions} value={transactionValues.category_id} onChange={handleCategoryChange} placeholder="Choose category" searchPlaceholder="Search categories" ariaLabel={transactionDirection === "income" ? "Income category" : "Expense category"} required clearable={false} className="mt-1" />
-            </label>
+            </label>}
             {supplierPaymentMode && <div className="field-label sm:col-span-2">
               <span>Supplier payable</span>
               <SearchableSelect
@@ -4710,11 +4917,11 @@ export function FinanceWorkspace({
             <label className="field-label">Date<input type="date" value={transactionValues.transaction_date} onClick={(event) => event.currentTarget.showPicker?.()} onChange={(event) => setTransactionValues((current) => ({ ...current, transaction_date: event.target.value }))} className="input mt-1" /></label>
             {internal && <label className="field-label">Time<input type="time" value={transactionValues.transaction_time} onClick={(event) => event.currentTarget.showPicker?.()} onChange={(event) => setTransactionValues((current) => ({ ...current, transaction_time: event.target.value }))} className="input mt-1" /></label>}
             {(manualIncomeMode || manualIncomeRevisionMode) && <label className="field-label">Reference number (optional)<input value={transactionValues.reference_number} onChange={(event) => setTransactionValues((current) => ({ ...current, reference_number: event.target.value }))} className="input mt-1" placeholder="Receipt or transaction reference" maxLength={200} /></label>}
-            <label className="field-label sm:col-span-2">{projectExpenseMode ? "Purpose / details" : "Note (optional)"}<textarea value={transactionValues.note} onChange={(event) => setTransactionValues((current) => ({ ...current, note: event.target.value }))} className="input mt-1 min-h-20" placeholder={projectExpenseMode ? "Explain what this project expense is for" : "Add a note"} /></label>
+            <label className="field-label sm:col-span-2">{projectExpenseMode ? "Purpose / details" : "Note (optional)"}<textarea value={transactionValues.note} onChange={(event) => setTransactionValues((current) => ({ ...current, note: event.target.value }))} readOnly={commissionPayoutMode} className="input mt-1 min-h-20" placeholder={projectExpenseMode ? "Explain what this project expense is for" : "Add a note"} /></label>
             {internal && !commissionPayoutMode && <div className="field-label"><span>Payment status</span><div className="mt-1 flex rounded-lg border border-[#d9e0e9] bg-[#fafbfc] p-1"><button type="button" onClick={() => setTransactionValues((current) => ({ ...current, payment_status: "paid" }))} className={transactionValues.payment_status === "paid" ? "flex-1 rounded-md bg-[#edf9f2] px-3 py-2 text-[11px] font-semibold text-[#218b55]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797]"}>Paid</button><button type="button" onClick={() => setTransactionValues((current) => ({ ...current, payment_status: "unpaid" }))} className={transactionValues.payment_status === "unpaid" ? "flex-1 rounded-md bg-[#fff8e9] px-3 py-2 text-[11px] font-semibold text-[#a76605]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797]"}>Unpaid</button></div></div>}
-              <div className="field-label"><span>{revisionTransaction ? "Replacement proof (optional)" : manualIncomeMode ? "Receipt or proof" : "Receipt image"}</span><FileUploadControl accept="image/jpeg,image/png,image/webp" ariaLabel={revisionTransaction ? "Choose replacement finance receipt image" : "Choose finance receipt image"} className="mt-1" emptyLabel={revisionTransaction ? "Keep current proof or choose replacement" : manualIncomeMode ? "Choose receipt or proof" : "Choose receipt image"} files={transactionFile ? [transactionFile] : []} onFilesSelected={(files) => setTransactionFile(files[0] ?? null)} /></div>
+              {!commissionPayoutMode && <div className="field-label"><span>{revisionTransaction ? "Replacement proof (optional)" : manualIncomeMode ? "Receipt or proof" : "Receipt image"}</span><FileUploadControl accept="image/jpeg,image/png,image/webp" ariaLabel={revisionTransaction ? "Choose replacement finance receipt image" : "Choose finance receipt image"} className="mt-1" emptyLabel={revisionTransaction ? "Keep current proof or choose replacement" : manualIncomeMode ? "Choose receipt or proof" : "Choose receipt image"} files={transactionFile ? [transactionFile] : []} onFilesSelected={(files) => setTransactionFile(files[0] ?? null)} /></div>}
             {transactionDirection === "expense" && <>
-              {internal && <label className="field-label">
+              {internal && !commissionPayoutMode && <label className="field-label">
                 Commission payout allocation
                 <SearchableSelect options={eligibleCommissionOptions} value={transactionValues.commission_allocation_id} onChange={(value) => setTransactionValues((current) => ({ ...current, commission_allocation_id: value }))} placeholder="Choose eligible commission" searchPlaceholder="Search commission allocations" ariaLabel="Commission payout allocation" disabled={commissionPayoutMode} clearable={!commissionPayoutMode} className="mt-1" />
                 {!eligibleCommissionOptions.length && <small className="mt-1 block text-[#7d8797]">No commission allocation is currently eligible.</small>}

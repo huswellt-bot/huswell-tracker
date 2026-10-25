@@ -81,6 +81,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  ComposedChart,
   Legend,
   Line,
   LineChart,
@@ -160,6 +161,7 @@ type View =
   | "Finance Budget"
   | "Finance Supplier Costing"
   | "Finance Payables"
+  | "Paid commissions"
   | "Payroll & Leave"
   | "Letter Request"
   | "Directory"
@@ -187,6 +189,7 @@ const financeSidebarViews: View[] = [
   "Finance Budget",
   "Finance Supplier Costing",
   "Finance Payables",
+  "Paid commissions",
   "Payment Monitoring",
 ];
 
@@ -4611,6 +4614,75 @@ function MonthlyBarChart<T extends { label: string }>({
               <Bar key={metric.key} dataKey={metric.key} name={metric.key} fill={metric.color} radius={[3, 3, 0, 0]} maxBarSize={26} />
             ))}
           </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+type MonthlyFinanceFlowPoint = {
+  label: string;
+  month: string;
+  cash_in: number;
+  cash_out: number;
+  net_cash_flow: number;
+};
+
+const monthlyFinanceFlowPoints = (value: unknown): MonthlyFinanceFlowPoint[] =>
+  Array.isArray(value)
+    ? value.map((point) => {
+        const row = point && typeof point === "object" ? point as Row : {};
+        return {
+          label: text(row.label),
+          month: text(row.month),
+          cash_in: n(row.cash_in),
+          cash_out: n(row.cash_out),
+          net_cash_flow: n(row.net_cash_flow),
+        };
+      })
+    : [];
+
+function MonthlyFinanceFlowChart({
+  data,
+}: {
+  data: MonthlyFinanceFlowPoint[];
+}) {
+  const compact = new Intl.NumberFormat("en-PH", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  });
+
+  return (
+    <div className="px-4 pb-4 pt-1 sm:px-5">
+      <div className="mb-4 flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px] text-[var(--color-chart-tooltip-muted)]">
+        {[
+          { label: "Cash In", color: "#16854f" },
+          { label: "Cash Out", color: "#d33c43" },
+          { label: "Net cash flow", color: "#16386d" },
+        ].map((item) => (
+          <span className="inline-flex items-center gap-2" key={item.label}>
+            <i className="size-2 rounded-full" style={{ backgroundColor: item.color }} />
+            {item.label}
+          </span>
+        ))}
+      </div>
+      <div className="h-64" role="img" aria-label="Monthly Cash In, Cash Out, and Net Cash Flow">
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={data} margin={{ top: 8, right: 6, left: -12, bottom: 0 }} barGap={4}>
+            <CartesianGrid vertical={false} stroke="var(--color-chart-grid)" strokeDasharray="3 5" />
+            <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "var(--color-chart-axis)", fontSize: 10 }} dy={8} />
+            <YAxis axisLine={false} tickLine={false} tick={{ fill: "var(--color-chart-axis)", fontSize: 10 }} tickFormatter={(value) => compact.format(Number(value))} width={42} />
+            <Tooltip
+              cursor={{ fill: "var(--color-chart-cursor)", opacity: 0.08 }}
+              contentStyle={{ borderRadius: 10, border: "1px solid var(--color-chart-tooltip-border)", backgroundColor: "var(--color-chart-tooltip-bg)", boxShadow: "none", padding: "9px 11px" }}
+              labelStyle={{ color: "var(--color-chart-tooltip-text)", fontSize: 12, fontWeight: 600, marginBottom: 5 }}
+              itemStyle={{ color: "var(--color-chart-tooltip-muted)", fontSize: 11, padding: 0 }}
+              formatter={(value, name) => [peso.format(Number(value)), name === "cash_in" ? "Cash In" : name === "cash_out" ? "Cash Out" : "Net Cash Flow"]}
+            />
+            <Bar dataKey="cash_in" name="cash_in" fill="#16854f" radius={[3, 3, 0, 0]} maxBarSize={22} />
+            <Bar dataKey="cash_out" name="cash_out" fill="#d33c43" radius={[3, 3, 0, 0]} maxBarSize={22} />
+            <Line dataKey="net_cash_flow" name="net_cash_flow" type="monotone" stroke="#16386d" strokeWidth={2.5} dot={{ r: 3, fill: "#16386d", strokeWidth: 0 }} activeDot={{ r: 4 }} />
+          </ComposedChart>
         </ResponsiveContainer>
       </div>
     </div>
@@ -21106,6 +21178,40 @@ function useSharedKpiDashboard(orgId: string, month = currentMonth()) {
   return sharedKpis;
 }
 
+function useSharedFinanceKpiDashboard(
+  orgId: string,
+  month = currentMonth(),
+  enabled = true,
+) {
+  const [financeKpis, setFinanceKpis] = useState<Row | null>(null);
+
+  useEffect(() => {
+    if (!enabled) {
+      setFinanceKpis(null);
+      return;
+    }
+    let active = true;
+    setFinanceKpis(null);
+    void Promise.resolve(createClient()
+      .rpc("shared_kpi_finance_dashboard", {
+        p_organization_id: orgId,
+        p_month: `${month}-01`,
+      }))
+      .then(({ data }) => {
+        if (active && data && typeof data === "object" && n((data as Row).kpi_version) >= 1)
+          setFinanceKpis(data as Row);
+      })
+      .catch(() => {
+        if (active) setFinanceKpis(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, [enabled, month, orgId]);
+
+  return financeKpis;
+}
+
 function useSharedMonthlyKpiActivity(
   orgId: string,
   month = currentMonth(),
@@ -21268,12 +21374,16 @@ function ProjectOfficerSalesFunnel({
 }
 
 function GeneralManagerKpiDashboard({ store, orgId }: { store: Store; orgId: string }) {
-  const sharedKpis = useSharedKpiDashboard(orgId);
-  const monthlyActivity = useSharedMonthlyKpiActivity(orgId);
   const now = new Date();
   const manilaToday = manilaIsoDate(now);
-  const currentMonth = Number(manilaToday.slice(5, 7)) - 1;
-  const currentYear = Number(manilaToday.slice(0, 4));
+  const [selectedMonth, setSelectedMonth] = useState(manilaToday.slice(0, 7));
+  const [selectedYear, selectedMonthNumber] = selectedMonth.split("-").map(Number);
+  const selectedMonthIndex = selectedMonthNumber - 1;
+  const sharedKpis = useSharedKpiDashboard(orgId, selectedMonth);
+  const financeKpis = useSharedFinanceKpiDashboard(orgId, selectedMonth);
+  const monthlyActivity = useSharedMonthlyKpiActivity(orgId, selectedMonth);
+  const currentYear = selectedYear;
+  const currentMonth = selectedMonthIndex;
   const isInMonth = (value: unknown, year: number, month: number) => {
     const date = new Date(String(value));
     return !Number.isNaN(date.getTime()) && date.getFullYear() === year && date.getMonth() === month;
@@ -21321,7 +21431,21 @@ function GeneralManagerKpiDashboard({ store, orgId }: { store: Store; orgId: str
   const displayedQuarterSales = sharedKpis ? n(sharedKpis.quarter_sales) : quarterSales;
   const displayedQuota = sharedKpis ? n(sharedKpis.quarter_target) : quota;
   const displayedQuotaProgress = displayedQuota ? Math.min(Math.round((displayedQuarterSales / displayedQuota) * 100), 100) : 0;
-  const monthLabel = new Intl.DateTimeFormat("en-PH", { month: "long", year: "numeric" }).format(new Date(`${manilaToday.slice(0, 7)}-01T00:00:00`));
+  const displayedCashIn = n(financeKpis?.cash_in);
+  const displayedCashOut = n(financeKpis?.cash_out);
+  const displayedNetCashFlow = displayedCashIn - displayedCashOut;
+  const displayedAvailableCash = n(financeKpis?.available_cash);
+  const displayedSupplierPayables = n(financeKpis?.supplier_payables_open);
+  const displayedCommissionPayables = n(financeKpis?.commission_payables_open);
+  const displayedBudgetGranted = n(financeKpis?.budget_granted);
+  const displayedBudgetAllocated = n(financeKpis?.budget_allocated);
+  const displayedBudgetRemaining = n(financeKpis?.budget_remaining);
+  const displayedPendingApprovals = n(financeKpis?.pending_cash_out) + n(financeKpis?.pending_budget_requests);
+  const financeFlow = monthlyFinanceFlowPoints(financeKpis?.monthly_cash_flow);
+  const accountBalances = Array.isArray(financeKpis?.account_balances)
+    ? financeKpis.account_balances.map((account) => account && typeof account === "object" ? account as Row : {})
+    : [];
+  const monthLabel = new Intl.DateTimeFormat("en-PH", { month: "long", year: "numeric" }).format(new Date(`${selectedMonth}-01T00:00:00`));
   const compare = (value: number, previous: number) => previous ? `${Math.abs(((value - previous) / previous) * 100).toFixed(1)}% ${value >= previous ? "up" : "down"}` : "No prior month";
   const financeAmountSize = (value: number) => {
     const length = peso.format(value).length;
@@ -21336,14 +21460,50 @@ function GeneralManagerKpiDashboard({ store, orgId }: { store: Store; orgId: str
     { title: "TOTAL RECEIVABLES", value: displayedReceivables, detail: "As of today", Icon: ReceiptText, color: "#f38300", tint: "#fff5e8" },
     { title: "OVERDUE RECEIVABLES", value: displayedOverdue, detail: "As of today", compare: compare(displayedOverdue, displayedPreviousOverdue), previous: displayedPreviousOverdue, Icon: CalendarDays, color: "#e30719", tint: "#fff0f1" },
   ];
+  const financeCards = [
+    { title: "CASH IN", value: displayedCashIn, detail: "Verified and posted", Icon: TrendingUp, color: "#16854f" },
+    { title: "CASH OUT", value: displayedCashOut, detail: "Approved and paid", Icon: Wallet, color: "#d33c43" },
+    { title: "AVAILABLE CASH", value: displayedAvailableCash, detail: "Across active accounts", Icon: PhilippinePeso, color: "#16386d" },
+    { title: "OPEN PAYABLES", value: displayedSupplierPayables + displayedCommissionPayables, detail: "Supplier + commission", Icon: ReceiptText, color: "#f38300" },
+  ];
+  const budgetProgress = displayedBudgetGranted ? Math.min(Math.round((displayedBudgetAllocated / displayedBudgetGranted) * 100), 100) : 0;
 
   return <div className="space-y-4">
-    <section className="overflow-hidden rounded-lg border border-[#dfe5ed] bg-white">
-      <header className="flex flex-wrap items-end justify-between gap-3 border-b border-[#e4e8ef] px-4 py-4 sm:px-5">
+    <div className="space-y-4">
+      <header className="flex flex-wrap items-end justify-between gap-3 border-b border-[#e4e8ef] px-0 pb-4">
         <div><h1 className="text-[20px] font-semibold tracking-[-.02em] text-[#202938]">KPI dashboard</h1><p className="mt-1 text-[12px] text-[#687386]">Sales, collections, and cash exposure at a glance.</p></div>
-        <span className="inline-flex items-center gap-2 text-[12px] text-[#687386]"><CalendarDays size={15} className="text-[#c43b43]" />{monthLabel}</span>
+        <label className="inline-flex items-center gap-2 text-[12px] text-[#687386]">
+          <CalendarDays size={15} className="text-[#c43b43]" />
+          <span className="sr-only">Reporting month</span>
+          <input
+            aria-label="Reporting month"
+            className="rounded-md border border-[#dfe5ed] bg-white px-2.5 py-1.5 text-[12px] text-[#202938] outline-none focus:border-[#16386d]"
+            type="month"
+            value={selectedMonth}
+            onChange={(event) => setSelectedMonth(event.target.value)}
+          />
+        </label>
       </header>
-      <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4 sm:p-5">
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,2fr)]">
+        <article className="min-w-0 rounded-lg border border-[#dfe5ed] bg-[#f7f9fc] p-5 sm:p-6">
+          <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#687386]">This month</p>
+          <p aria-label="Net cash flow" className={`mt-4 whitespace-nowrap font-semibold leading-none tabular-nums ${displayedNetCashFlow < 0 ? "text-[#d33c43]" : "text-[#16854f]"}`} style={{ fontSize: "clamp(2.25rem, 5vw, 4rem)" }}>
+            {peso.format(displayedNetCashFlow)}
+          </p>
+          <dl className="mt-6 grid grid-cols-2 gap-4 border-t border-[#dfe5ed] pt-4">
+            <div><dt className="text-[11px] text-[#687386]">Cash In</dt><dd className="mt-1 text-[14px] font-semibold tabular-nums text-[#16854f]">{peso.format(displayedCashIn)}</dd></div>
+            <div><dt className="text-[11px] text-[#687386]">Cash Out</dt><dd className="mt-1 text-[14px] font-semibold tabular-nums text-[#d33c43]">{peso.format(displayedCashOut)}</dd></div>
+          </dl>
+        </article>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {financeCards.map(({ title, value, detail, Icon, color }) => <article key={title} className="min-w-0 rounded-lg border border-[#dfe5ed] p-4">
+            <div className="flex items-start justify-between gap-3"><span className="grid size-8 place-items-center rounded-md text-white" style={{ backgroundColor: color }}><Icon size={16} /></span><span className="text-right text-[11px] text-[#687386]">{detail}</span></div>
+            <h2 className="mt-4 text-[11px] font-medium text-[#687386]">{title}</h2>
+            <p className="mt-1 whitespace-nowrap text-[22px] font-semibold leading-none tabular-nums text-[#202938]">{peso.format(value)}</p>
+          </article>)}
+        </div>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {metricCards.map(({ title, value, detail, compare: change, previous, Icon, color, tint }) => <article key={title} className="min-w-0 rounded-lg border border-[#dfe5ed] p-4">
           <div className="flex items-start justify-between gap-3"><span className="grid size-8 place-items-center rounded-md text-white" style={{ backgroundColor: color }}><Icon size={16} /></span><span className="text-[11px] text-[#687386]">{detail}</span></div>
           <h2 className="mt-4 text-[11px] font-medium text-[#687386]">{title}</h2>
@@ -21351,7 +21511,7 @@ function GeneralManagerKpiDashboard({ store, orgId }: { store: Store; orgId: str
           {change && <div className="mt-4 flex items-center justify-between border-t border-[#edf0f5] pt-3 text-left text-[11px] text-[#687386]"><span className="font-medium text-[#202938]">{change}</span><span className="text-right">Previous <b className="text-[#202938]">{peso.format(previous ?? 0)}</b></span></div>}
         </article>)}
       </div>
-      <section className="mx-4 mb-4 overflow-hidden rounded-lg border border-[#dfe5ed] sm:mx-5 sm:mb-5">
+      <section className="overflow-hidden rounded-lg border border-[#dfe5ed]">
         <div className="flex items-center gap-2 border-b border-[#e4e8ef] px-4 py-3"><span className="grid size-8 place-items-center rounded-md bg-[#16386d] text-white"><Goal size={16} /></span><div><h2 className="text-[14px] font-semibold text-[#202938]">Quarterly sales quota</h2><p className="mt-0.5 text-[11px] text-[#687386]">Q{quarter + 1} {currentYear}</p></div></div>
         <div className="grid gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-center">
           <div><div className="flex items-end justify-between gap-3"><div><p className="text-[11px] font-medium text-[#687386]">Progress toward target</p><p className="mt-1 text-[24px] font-semibold leading-none tabular-nums text-[#202938]">{displayedQuotaProgress}%</p></div><p className="text-right text-[11px] text-[#687386]">{peso.format(displayedQuarterSales)} of<br /><span className="font-medium text-[#202938]">{peso.format(displayedQuota)}</span></p></div><div className="mt-4 h-2 overflow-hidden rounded-full bg-[#edf0f5]"><div className="h-full rounded-full bg-[#c43b43]" style={{ width: `${displayedQuotaProgress}%` }} /></div></div>
@@ -21360,7 +21520,7 @@ function GeneralManagerKpiDashboard({ store, orgId }: { store: Store; orgId: str
           </dl>
         </div>
       </section>
-    </section>
+    </div>
     <section className="overflow-hidden rounded-lg border border-[#e7ebf0] bg-white shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
       <div className="flex flex-wrap items-start justify-between gap-3 px-4 pb-2 pt-4">
         <div>
@@ -21376,6 +21536,52 @@ function GeneralManagerKpiDashboard({ store, orgId }: { store: Store; orgId: str
         primaryColor="var(--color-chart-primary)"
         secondaryColor="var(--color-chart-secondary)"
       />
+    </section>
+    <section className="overflow-hidden rounded-lg border border-[#e7ebf0] bg-white shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
+      <div className="flex flex-wrap items-start justify-between gap-3 px-4 pb-2 pt-4">
+        <div>
+          <h2 className="text-[13px] font-semibold text-[#151922]">Monthly money flow</h2>
+          <p className="mt-1 text-[11px] text-[#8b92a1]">Verified Cash In, approved paid Cash Out, and the resulting monthly movement.</p>
+        </div>
+        <span className="text-[11px] font-semibold text-[#202124]">{currentYear}</span>
+      </div>
+      {financeFlow.length ? <MonthlyFinanceFlowChart data={financeFlow} /> : <div className="flex h-64 items-center justify-center px-5 text-center text-[12px] text-[#8b92a1]">{financeKpis ? "No posted Finance activity for this year." : "Loading monthly money flow..."}</div>}
+    </section>
+    <section className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,.85fr)]">
+      <article className="overflow-hidden rounded-lg border border-[#e7ebf0] bg-white shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
+        <div className="border-b border-[#e4e8ef] px-4 py-4 sm:px-5">
+          <h2 className="text-[13px] font-semibold text-[#151922]">Account balances</h2>
+          <p className="mt-1 text-[11px] text-[#8b92a1]">Available cash across active Finance accounts.</p>
+        </div>
+        <div className="divide-y divide-[#edf0f5] px-4 sm:px-5">
+          {accountBalances.length ? accountBalances.map((account) => {
+            const balance = n(account.current_balance);
+            const maximum = Math.max(...accountBalances.map((item) => n(item.current_balance)), 1);
+            return <div className="py-3" key={text(account.id, text(account.account_name))}>
+              <div className="flex items-center justify-between gap-3 text-[12px]"><span className="min-w-0 truncate font-medium text-[#202938]">{text(account.account_name, "Account")}</span><span className={`shrink-0 font-semibold tabular-nums ${balance < 0 ? "text-[#d33c43]" : "text-[#202938]"}`}>{peso.format(balance)}</span></div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#edf0f5]"><div className={`h-full rounded-full ${balance < 0 ? "bg-[#d33c43]" : "bg-[#16386d]"}`} style={{ width: `${Math.min(Math.max((balance / maximum) * 100, 0), 100)}%` }} /></div>
+            </div>;
+          }) : <p className="py-6 text-[12px] text-[#8b92a1]">{financeKpis ? "No active accounts found." : "Loading account balances..."}</p>}
+        </div>
+      </article>
+      <article className="overflow-hidden rounded-lg border border-[#e7ebf0] bg-white shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
+        <div className="border-b border-[#e4e8ef] px-4 py-4 sm:px-5">
+          <h2 className="text-[13px] font-semibold text-[#151922]">Finance commitments</h2>
+          <p className="mt-1 text-[11px] text-[#8b92a1]">Amounts and decisions that still need attention.</p>
+        </div>
+        <dl className="divide-y divide-[#edf0f5] px-4 sm:px-5">
+          {[
+            { label: "Supplier payables", value: displayedSupplierPayables, color: "text-[#202938]" },
+            { label: "Unpaid commissions", value: displayedCommissionPayables, color: "text-[#202938]" },
+            { label: "Pending approvals", value: displayedPendingApprovals, color: "text-[#f38300]", count: true },
+            { label: "Budget remaining", value: displayedBudgetRemaining, color: "text-[#16854f]" },
+          ].map((item) => <div className="flex items-center justify-between gap-3 py-3" key={item.label}><dt className="text-[12px] text-[#687386]">{item.label}</dt><dd className={`font-semibold tabular-nums ${item.color}`}>{item.count ? item.value.toLocaleString() : peso.format(item.value)}</dd></div>)}
+        </dl>
+        <div className="border-t border-[#e4e8ef] px-4 py-4 sm:px-5">
+          <div className="flex items-center justify-between gap-3 text-[11px] text-[#687386]"><span>Budget allocated</span><span className="font-medium text-[#202938]">{peso.format(displayedBudgetAllocated)} of {peso.format(displayedBudgetGranted)}</span></div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#edf0f5]"><div className="h-full rounded-full bg-[#16854f]" style={{ width: `${budgetProgress}%` }} /></div>
+        </div>
+      </article>
     </section>
     <MonthlyKpiActivityGraphs data={monthlyActivity} />
     <ProjectOfficerSalesFunnel store={store} orgId={orgId} />
@@ -23369,7 +23575,7 @@ export function HuswellWorkspace({
     sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Announcements", "Policy"],
     warehouse: ["Dashboard", "Catalog", "Inventory", "Production", "Announcements", "Policy"],
     accountant: ["Announcements", "Policy"],
-    internal_finance: ["Finance Overview", "Finance Reports", "Finance", "Finance Approvals", "Finance Transactions", "Finance Accounts", "Finance Budget", "Finance Supplier Costing", "Finance Payables", "Payment Monitoring", "Announcements", "Policy"],
+    internal_finance: ["Finance Overview", "Finance Reports", "Finance", "Finance Approvals", "Finance Transactions", "Finance Accounts", "Finance Budget", "Finance Supplier Costing", "Finance Payables", "Paid commissions", "Payment Monitoring", "Announcements", "Policy"],
     external_finance: ["Finance Overview", "Finance Reports", "Finance", "Finance Transactions", "Finance Budget", "Finance Supplier Costing", "Payment Monitoring", "Announcements", "Policy"],
     lead_coordinator: ["Leads", "Announcements", "Policy"],
     payroll: ["Dashboard", "Payroll & Leave", "Letter Request", "Directory", "Announcements", "Policy"],
@@ -23403,6 +23609,7 @@ export function HuswellWorkspace({
       "Finance Budget",
       "Finance Supplier Costing",
       "Finance Payables",
+      "Paid commissions",
       "Payment Monitoring",
     );
   }
@@ -23446,6 +23653,7 @@ export function HuswellWorkspace({
             { view: "Finance Budget", icon: FileText },
             { view: "Finance Supplier Costing", icon: ReceiptText },
             { view: "Finance Payables", icon: Wallet },
+            { view: "Paid commissions", icon: PhilippinePeso },
             { view: "Payment Monitoring", icon: ReceiptText },
           ],
         },
@@ -23530,6 +23738,7 @@ export function HuswellWorkspace({
         { view: "Finance Budget", icon: FileText },
         { view: "Finance Supplier Costing", icon: ReceiptText },
         { view: "Finance Payables", icon: Wallet },
+        { view: "Paid commissions", icon: PhilippinePeso },
         { view: "Payment Monitoring", icon: ReceiptText },
         { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
@@ -23757,6 +23966,10 @@ export function HuswellWorkspace({
     "Finance Payables": {
       title: "Payables",
       detail: "Review supplier and commission payables.",
+    },
+    "Paid commissions": {
+      title: "Paid commissions",
+      detail: "Review completed commission payouts by project and pricing officer.",
     },
     Finance: {
       title: role === "external_finance" ? "External Finance" : hasInternalFinanceAccess ? "Internal Finance" : "Finance",
@@ -24016,6 +24229,8 @@ export function HuswellWorkspace({
       <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} initialTab="supplier_costing" />
     ) : active === "Finance Payables" ? (
       <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} initialTab="payables" />
+    ) : active === "Paid commissions" ? (
+      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} initialTab="commission_history" />
     ) : active === "Finance" ? (
       <DynamicFinanceWorkspace
         key={active}
