@@ -4275,7 +4275,7 @@ export function FinanceWorkspace({
       {tab === "budget" && (canViewBudget || canRequestBudget) && (
         <Panel
           title={canViewBudget ? "Budget & allocations" : "Account funding requests"}
-          detail={canViewBudget ? "The GM approves the monthly spending limit. Internal Finance distributes it across active accounts; allocations stay separate from actual cash." : "Request budget for a specific active account. Internal Finance decides the approved amount from the GM monthly pool."}
+          detail={canViewBudget ? "The GM approves the monthly spending limit. Internal Finance distributes it across active accounts, and each allocation is added to that account's available cash." : "Request budget for a specific active account. Internal Finance decides the approved amount from the GM monthly pool."}
           action={canViewBudget ? <span className="flex flex-wrap gap-2">{canGrantBudget && <button type="button" onClick={openBudgetGrant} className={primaryButton}><Plus size={13} /> {currentBudgetGrants.length ? "Add top-up" : "Add budget"}</button>}{canManageBudget && <button type="button" onClick={() => openBudgetAllocation()} className="button-secondary"><Wallet size={13} /> Allocate budget</button>}</span> : <button type="button" onClick={openFundingRequest} className={primaryButton}><Plus size={13} /> Request account funding</button>}
         >
           {canViewBudget ? (
