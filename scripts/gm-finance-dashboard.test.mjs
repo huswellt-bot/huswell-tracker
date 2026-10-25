@@ -6,7 +6,7 @@ import test from "node:test";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const migration = readFileSync(
-  join(repoRoot, "supabase", "migrations", "20261025124930_gm_finance_dashboard_aggregates.sql"),
+  join(repoRoot, "supabase", "migrations", "20261025130255_gm_finance_dashboard_aggregates.sql"),
   "utf8",
 );
 const workspace = readFileSync(

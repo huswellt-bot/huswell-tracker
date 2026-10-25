@@ -21485,7 +21485,7 @@ function GeneralManagerKpiDashboard({ store, orgId }: { store: Store; orgId: str
         </label>
       </header>
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,2fr)]">
-        <article className="min-w-0 rounded-lg border border-[#dfe5ed] bg-[#f7f9fc] p-5 sm:p-6">
+        <article className="min-w-0 rounded-lg border border-[#dfe5ed] bg-white p-5 sm:p-6">
           <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#687386]">This month</p>
           <p aria-label="Net cash flow" className={`mt-4 whitespace-nowrap font-semibold leading-none tabular-nums ${displayedNetCashFlow < 0 ? "text-[#d33c43]" : "text-[#16854f]"}`} style={{ fontSize: "clamp(2.25rem, 5vw, 4rem)" }}>
             {peso.format(displayedNetCashFlow)}
@@ -21496,7 +21496,7 @@ function GeneralManagerKpiDashboard({ store, orgId }: { store: Store; orgId: str
           </dl>
         </article>
         <div className="grid gap-3 sm:grid-cols-2">
-          {financeCards.map(({ title, value, detail, Icon, color }) => <article key={title} className="min-w-0 rounded-lg border border-[#dfe5ed] p-4">
+          {financeCards.map(({ title, value, detail, Icon, color }) => <article key={title} className="min-w-0 rounded-lg border border-[#dfe5ed] bg-white p-4">
             <div className="flex items-start justify-between gap-3"><span className="grid size-8 place-items-center rounded-md text-white" style={{ backgroundColor: color }}><Icon size={16} /></span><span className="text-right text-[11px] text-[#687386]">{detail}</span></div>
             <h2 className="mt-4 text-[11px] font-medium text-[#687386]">{title}</h2>
             <p className="mt-1 whitespace-nowrap text-[22px] font-semibold leading-none tabular-nums text-[#202938]">{peso.format(value)}</p>
@@ -21504,7 +21504,7 @@ function GeneralManagerKpiDashboard({ store, orgId }: { store: Store; orgId: str
         </div>
       </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        {metricCards.map(({ title, value, detail, compare: change, previous, Icon, color, tint }) => <article key={title} className="min-w-0 rounded-lg border border-[#dfe5ed] p-4">
+        {metricCards.map(({ title, value, detail, compare: change, previous, Icon, color, tint }) => <article key={title} className="min-w-0 rounded-lg border border-[#dfe5ed] bg-white p-4">
           <div className="flex items-start justify-between gap-3"><span className="grid size-8 place-items-center rounded-md text-white" style={{ backgroundColor: color }}><Icon size={16} /></span><span className="text-[11px] text-[#687386]">{detail}</span></div>
           <h2 className="mt-4 text-[11px] font-medium text-[#687386]">{title}</h2>
           <p className="mt-1 whitespace-nowrap font-semibold leading-none tabular-nums text-[#202938]" style={{ fontSize: financeAmountSize(value) }}>{peso.format(value)}</p>
