@@ -23549,7 +23549,6 @@ export function HuswellWorkspace({
   const allowedViews: Record<string, View[]> = {
     super_admin: [
       "Dashboard",
-      "Finance Reports",
       "Leads",
       "Supplier's List",
       "Projects",
@@ -23562,7 +23561,6 @@ export function HuswellWorkspace({
     ],
     owner: [
       "Dashboard",
-      "Finance Reports",
       "Leads",
       "Supplier's List",
       "Projects",
@@ -23579,7 +23577,6 @@ export function HuswellWorkspace({
     ],
     admin: [
       "Dashboard",
-      "Finance Reports",
       "Leads",
       "Supplier's List",
       "Projects",
@@ -23745,7 +23742,6 @@ export function HuswellWorkspace({
       label: "Management",
       items: [
         { view: "Dashboard", icon: LayoutDashboard },
-        { view: "Finance Reports", icon: CalendarDays },
         { view: "Approvals", icon: ClipboardCheck, badge: sidebarBadge("management_approvals") },
         { view: "Leads", icon: ClipboardCheck },
         { view: "Supplier's List", icon: UsersRound },
@@ -24443,7 +24439,9 @@ export function HuswellWorkspace({
                       : view === "Policy"
                         ? "Policy"
                       : isManagementRole && view === "Leads"
-                          ? "Generated Leads"
+                          ? "Leads"
+                      : isManagementRole && view === "Supplier's List"
+                          ? "Suppliers"
                       : view === "Projects"
                             ? "Production"
                             : view === "Finance Overview" && (hasInternalFinanceAccess || role === "external_finance")
@@ -24478,6 +24476,8 @@ export function HuswellWorkspace({
                               ? "HP Latex 700W"
                             : isManagementRole && view === "Price Quotations"
                               ? "Price Quotations"
+                              : isManagementRole && view === "Approvals"
+                                ? "Approvals"
                               : view === "Approvals"
                                 ? "Approval Center"
                                 : view === "Payment Monitoring" && hasInternalFinanceAccess

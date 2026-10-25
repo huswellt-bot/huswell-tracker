@@ -38,11 +38,9 @@ test("GM dashboard renders the hero cash flow, monthly chart, account balances, 
   assert.match(workspace, /Budget remaining/);
 });
 
-test("GM has a working Monthly report navigation page backed by the finance aggregate", () => {
-  assert.match(workspace, /\{ view: "Finance Reports", icon: CalendarDays \}/);
-  assert.match(workspace, /GeneralManagerMonthlyFinanceReport/);
-  assert.match(workspace, /Monthly breakdown/);
-  assert.match(workspace, /Verified and approved Finance totals by month/);
+test("GM dashboard does not expose the Monthly report navigation page", () => {
+  const managementNav = workspace.match(/label: "Management",\s*items: \[(.*?)\s*\],\s*\},\s*\{\s*label: "Operations"/s)?.[1] ?? "";
+  assert.doesNotMatch(managementNav, /view: "Finance Reports"/);
 });
 
 test("GM KPI cards keep a shared desktop width for long amounts", () => {
