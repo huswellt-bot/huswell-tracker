@@ -1174,6 +1174,12 @@ const stackedCell = (
     </>
   );
 };
+const distinctQuotationProject = (quotation: Row, companyName: unknown) => {
+  const projectName = text(quotation.project_name, "").trim();
+  return comparableDisplayText(projectName) === comparableDisplayText(companyName)
+    ? ""
+    : projectName;
+};
 const policyStoragePath = (value: unknown, organizationId: string) => {
   const rawValue = text(value, "").trim();
   if (!rawValue) return "";
@@ -19242,7 +19248,7 @@ function Submissions({
           {visiblePendingPriceQuotations.map((quotation) => {
             const party = quotationParty(quotation, store);
             const note = text(quotation.pricing_submission_note, "").trim();
-            return <tr key={text(quotation.id)}>{renderSelectionCell(`price-${text(quotation.id)}`)}<td className="px-5 py-3">{stackedCell(quotation.quotation_no, quotation.project_name)}</td><td className="px-5 py-3 font-medium">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3">{note ? <NoteAction label="View Pricing Officer note" tone="amber" onClick={() => setSubmissionNoteQuotation(quotation)} /> : <span className="text-[11px] text-[#8b92a1]">â€”</span>}</td><td className="px-5 py-3"><ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>;
+            return <tr key={text(quotation.id)}>{renderSelectionCell(`price-${text(quotation.id)}`)}<td className="px-5 py-3">{stackedCell(quotation.quotation_no, distinctQuotationProject(quotation, party.companyName))}</td><td className="px-5 py-3 font-medium">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3">{note ? <NoteAction label="View Pricing Officer note" tone="amber" onClick={() => setSubmissionNoteQuotation(quotation)} /> : <span className="text-[11px] text-[#8b92a1]">â€”</span>}</td><td className="px-5 py-3"><ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>;
           })}
         </Table>
       ) : <Empty>No Price Quotations are awaiting review.</Empty>)}
@@ -19251,7 +19257,7 @@ function Submissions({
           {visiblePendingPriceQuotationRevisions.map((request) => {
             const quotation = store.quotations.find((item) => item.id === request.quotation_id);
             const party = quotation ? quotationParty(quotation, store) : { clientName: "-", companyName: "-" };
-            return <tr key={text(request.id)}>{renderSelectionCell(`price-revision-${text(request.id)}`)}<td className="px-5 py-3">{stackedCell(text(quotation?.quotation_no, "Price Quotation"), quotation?.project_name)}</td><td className="px-5 py-3">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{projectOfficerName(request)}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>;
+            return <tr key={text(request.id)}>{renderSelectionCell(`price-revision-${text(request.id)}`)}<td className="px-5 py-3">{stackedCell(text(quotation?.quotation_no, "Price Quotation"), quotation ? distinctQuotationProject(quotation, party.companyName) : "")}</td><td className="px-5 py-3">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{projectOfficerName(request)}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>;
           })}
         </Table>
       ) : <Empty>No Price Quotation revisions are awaiting review.</Empty>)}
@@ -22106,14 +22112,17 @@ function CommissionSummaryView({
         {filteredRows.length ? (
           <>
           <Table
-            labels={["Quotation", "Name / Company", "S.E. Origin", "Co-Worker", "Grand Total", "Commission"]}
-            minWidth={920}
+            labels={["Quotation", "Name / Company", "S.E. Origin", "Co-Worker", "Grand Total", "Client payment", "Remaining client balance", "Commission payout"]}
+            minWidth={1180}
             className="commission-summary-table table-fixed"
-            columnWidths={["15%", "23%", "18%", "18%", "12%", "14%"]}
-            alignRightLabels={["Grand Total", "Commission"]}
+            columnWidths={["12%", "18%", "14%", "14%", "10%", "12%", "10%", "10%"]}
+            alignRightLabels={["Grand Total", "Remaining client balance", "Commission payout"]}
           >
             {visibleCommissionRows.map((summary) => {
               const allocations = allocationRowsFor(summary);
+              const hasClientPaymentData = Object.prototype.hasOwnProperty.call(summary, "client_payment_status");
+              const clientPaymentStatus = hasClientPaymentData ? text(summary.client_payment_status, "unpaid") : "payment_data_unavailable";
+              const clientPendingPayment = hasClientPaymentData ? n(summary.client_pending_payment_amount) : 0;
               const originAllocation = allocations.find((allocation) =>
                 ["originating_se", "self_handled_se"].includes(text(allocation.allocation_role)),
               );
@@ -22138,6 +22147,13 @@ function CommissionSummaryView({
                   <td className="px-4 py-3">{stackedCell(originName, originDetail)}</td>
                   <td className="px-4 py-3">{stackedCell(coworkerName, coworkerDetail)}</td>
                   <td className="px-4 py-3 text-right font-medium">{peso.format(n(summary.grand_total))}</td>
+                  <td className="px-4 py-3">
+                    <Status value={clientPaymentStatus} />
+                    {clientPendingPayment > 0 && <small>{peso.format(clientPendingPayment)} pending review</small>}
+                  </td>
+                  <td className="px-4 py-3 text-right font-medium">
+                    {hasClientPaymentData ? peso.format(n(summary.client_remaining_balance)) : "Unavailable"}
+                  </td>
                   <td className="px-4 py-3 text-right font-semibold text-[#176b40]">{stackedCell(peso.format(totalCommissionAmount(summary)), formatStatus(summary))}</td>
                 </tr>
               );
