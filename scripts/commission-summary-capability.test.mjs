@@ -13,6 +13,10 @@ const paymentGateMigration = readFileSync(
   join(repoRoot, "supabase", "239_commission_visibility_after_verified_payment.sql"),
   "utf8",
 ).toLowerCase();
+const personalScopeMigration = readFileSync(
+  join(repoRoot, "supabase", "245_restore_personal_pricing_commission_scope.sql"),
+  "utf8",
+).toLowerCase();
 const workspace = readFileSync(
   join(repoRoot, "components", "huswell-workspace.tsx"),
   "utf8",
@@ -33,6 +37,11 @@ test("Finance Payables scope recognizes the Internal Finance capability", () => 
 
 test("combined accounts keep personal Pricing Officer summaries", () => {
   assert.match(workspace, /readOnly=\{role === "sales_pricing_officer"\}/);
+  assert.match(
+    personalScopeMigration,
+    /array\['super_admin', 'owner', 'admin', 'accountant', 'internal_finance'\]\s*\) as can_view_all/,
+  );
+  assert.doesNotMatch(personalScopeMigration, /private\.finance_is_internal\(p_organization_id\)/);
   assert.match(workspace, /const \[commissionMonth, setCommissionMonth\] = useState\(currentMonth\)/);
   assert.match(financeWorkspace, /const quotationForId = useCallback/);
   assert.match(financeWorkspace, /const commissionSummaryForQuotation = useCallback/);
