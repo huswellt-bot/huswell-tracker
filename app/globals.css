@@ -1707,3 +1707,32 @@ select option[value=""] {
 table thead th {
   text-align: center !important;
 }
+
+/* Responsive foundations for dense business screens. Keep these rules limited
+   to the page canvas and table shells so existing card and modal sizing wins. */
+html,
+body {
+  max-width: 100%;
+}
+
+.huswell-workspace,
+.huswell-workspace main,
+.huswell-workspace .workspace-content,
+.super-admin-console {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.huswell-workspace .table-shell,
+.huswell-workspace .modern-table-shell,
+.super-admin-console .table-shell {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+@media (max-width: 640px) {
+  .huswell-workspace [role="dialog"] {
+    max-height: calc(100dvh - 1rem);
+  }
+}

@@ -81,10 +81,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  ComposedChart,
   Legend,
-  Line,
-  LineChart,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -4668,7 +4665,7 @@ function MonthlyFinanceFlowChart({
       </div>
       <div className="h-64" role="img" aria-label="Monthly Cash In, Cash Out, and Net Cash Flow">
         <ResponsiveContainer width="100%" height="100%">
-          <ComposedChart data={data} margin={{ top: 8, right: 6, left: -12, bottom: 0 }} barGap={4}>
+          <BarChart data={data} margin={{ top: 8, right: 6, left: -12, bottom: 0 }} barGap={4}>
             <CartesianGrid vertical={false} stroke="var(--color-chart-grid)" strokeDasharray="3 5" />
             <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: "var(--color-chart-axis)", fontSize: 10 }} dy={8} />
             <YAxis axisLine={false} tickLine={false} tick={{ fill: "var(--color-chart-axis)", fontSize: 10 }} tickFormatter={(value) => compact.format(Number(value))} width={42} />
@@ -4681,8 +4678,8 @@ function MonthlyFinanceFlowChart({
             />
             <Bar dataKey="cash_in" name="cash_in" fill="#16854f" radius={[3, 3, 0, 0]} maxBarSize={22} />
             <Bar dataKey="cash_out" name="cash_out" fill="#d33c43" radius={[3, 3, 0, 0]} maxBarSize={22} />
-            <Line dataKey="net_cash_flow" name="net_cash_flow" type="monotone" stroke="#16386d" strokeWidth={2.5} dot={{ r: 3, fill: "#16386d", strokeWidth: 0 }} activeDot={{ r: 4 }} />
-          </ComposedChart>
+            <Bar dataKey="net_cash_flow" name="net_cash_flow" fill="#16386d" radius={[3, 3, 0, 0]} maxBarSize={22} />
+          </BarChart>
         </ResponsiveContainer>
       </div>
     </div>
@@ -21442,6 +21439,7 @@ function GeneralManagerKpiDashboard({ store, orgId }: { store: Store; orgId: str
   const displayedBudgetRemaining = n(financeKpis?.budget_remaining);
   const displayedPendingApprovals = n(financeKpis?.pending_cash_out) + n(financeKpis?.pending_budget_requests);
   const financeFlow = monthlyFinanceFlowPoints(financeKpis?.monthly_cash_flow);
+  const visibleFinanceFlow = financeFlow.filter((point) => !point.month || point.month <= selectedMonth);
   const accountBalances = Array.isArray(financeKpis?.account_balances)
     ? financeKpis.account_balances.map((account) => account && typeof account === "object" ? account as Row : {})
     : [];
@@ -21449,6 +21447,8 @@ function GeneralManagerKpiDashboard({ store, orgId }: { store: Store; orgId: str
   const compare = (value: number, previous: number) => previous ? `${Math.abs(((value - previous) / previous) * 100).toFixed(1)}% ${value >= previous ? "up" : "down"}` : "No prior month";
   const financeAmountSize = (value: number) => {
     const length = peso.format(value).length;
+    if (length > 24) return "12px";
+    if (length > 21) return "14px";
     if (length > 18) return "16px";
     if (length > 15) return "19px";
     if (length > 12) return "23px";
@@ -21484,26 +21484,22 @@ function GeneralManagerKpiDashboard({ store, orgId }: { store: Store; orgId: str
           />
         </label>
       </header>
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,2fr)]">
+      <div className="grid gap-3">
         <article className="min-w-0 rounded-lg border border-[#dfe5ed] bg-white p-5 sm:p-6">
           <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#687386]">This month</p>
           <p aria-label="Net cash flow" className={`mt-4 whitespace-nowrap font-semibold leading-none tabular-nums ${displayedNetCashFlow < 0 ? "text-[#d33c43]" : "text-[#16854f]"}`} style={{ fontSize: "clamp(2.25rem, 5vw, 4rem)" }}>
             {peso.format(displayedNetCashFlow)}
           </p>
-          <dl className="mt-6 grid grid-cols-2 gap-4 border-t border-[#dfe5ed] pt-4">
-            <div><dt className="text-[11px] text-[#687386]">Cash In</dt><dd className="mt-1 text-[14px] font-semibold tabular-nums text-[#16854f]">{peso.format(displayedCashIn)}</dd></div>
-            <div><dt className="text-[11px] text-[#687386]">Cash Out</dt><dd className="mt-1 text-[14px] font-semibold tabular-nums text-[#d33c43]">{peso.format(displayedCashOut)}</dd></div>
-          </dl>
         </article>
         <div className="grid gap-3 sm:grid-cols-2">
           {financeCards.map(({ title, value, detail, Icon, color }) => <article key={title} className="min-w-0 rounded-lg border border-[#dfe5ed] bg-white p-4">
             <div className="flex items-start justify-between gap-3"><span className="grid size-8 place-items-center rounded-md text-white" style={{ backgroundColor: color }}><Icon size={16} /></span><span className="text-right text-[11px] text-[#687386]">{detail}</span></div>
             <h2 className="mt-4 text-[11px] font-medium text-[#687386]">{title}</h2>
-            <p className="mt-1 whitespace-nowrap text-[22px] font-semibold leading-none tabular-nums text-[#202938]">{peso.format(value)}</p>
+            <p className="mt-1 whitespace-nowrap font-semibold leading-none tabular-nums text-[#202938]" style={{ fontSize: financeAmountSize(value) }}>{peso.format(value)}</p>
           </article>)}
         </div>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         {metricCards.map(({ title, value, detail, compare: change, previous, Icon, color, tint }) => <article key={title} className="min-w-0 rounded-lg border border-[#dfe5ed] bg-white p-4">
           <div className="flex items-start justify-between gap-3"><span className="grid size-8 place-items-center rounded-md text-white" style={{ backgroundColor: color }}><Icon size={16} /></span><span className="text-[11px] text-[#687386]">{detail}</span></div>
           <h2 className="mt-4 text-[11px] font-medium text-[#687386]">{title}</h2>
@@ -21541,11 +21537,11 @@ function GeneralManagerKpiDashboard({ store, orgId }: { store: Store; orgId: str
       <div className="flex flex-wrap items-start justify-between gap-3 px-4 pb-2 pt-4">
         <div>
           <h2 className="text-[13px] font-semibold text-[#151922]">Monthly money flow</h2>
-          <p className="mt-1 text-[11px] text-[#8b92a1]">Verified Cash In, approved paid Cash Out, and the resulting monthly movement.</p>
+          <p className="mt-1 text-[11px] text-[#8b92a1]">Verified Cash In, approved paid Cash Out, and the resulting movement through {monthLabel}.</p>
         </div>
         <span className="text-[11px] font-semibold text-[#202124]">{currentYear}</span>
       </div>
-      {financeFlow.length ? <MonthlyFinanceFlowChart data={financeFlow} /> : <div className="flex h-64 items-center justify-center px-5 text-center text-[12px] text-[#8b92a1]">{financeKpis ? "No posted Finance activity for this year." : "Loading monthly money flow..."}</div>}
+      {visibleFinanceFlow.length ? <MonthlyFinanceFlowChart data={visibleFinanceFlow} /> : <div className="flex h-64 items-center justify-center px-5 text-center text-[12px] text-[#8b92a1]">{financeKpis ? "No posted Finance activity for this period." : "Loading monthly money flow..."}</div>}
     </section>
     <section className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,.85fr)]">
       <article className="overflow-hidden rounded-lg border border-[#e7ebf0] bg-white shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
@@ -21586,6 +21582,15 @@ function GeneralManagerKpiDashboard({ store, orgId }: { store: Store; orgId: str
     <MonthlyKpiActivityGraphs data={monthlyActivity} />
     <ProjectOfficerSalesFunnel store={store} orgId={orgId} />
   </div>;
+}
+
+function dashboardMetricFontSize(value: unknown, maximum = 22) {
+  const length = String(value ?? "").length;
+  if (length > 24) return "12px";
+  if (length > 20) return "14px";
+  if (length > 16) return "16px";
+  if (length > 13) return "19px";
+  return `${maximum}px`;
 }
 
 function Dashboard({
@@ -21758,7 +21763,7 @@ function Dashboard({
                 <span className={`grid size-11 shrink-0 place-items-center rounded-full text-white ${tone}`}><Icon size={21} strokeWidth={2.2} /></span>
                 <div className="min-w-0">
                   <p className="dashboard-metric-label truncate font-semibold uppercase tracking-[.08em] text-[#626b7a]">{label}</p>
-                  <p className="dashboard-metric-value mt-1 truncate font-semibold tracking-tight text-[#151922]">{value.toLocaleString()}</p>
+                  <p className="dashboard-metric-value mt-1 whitespace-nowrap font-semibold tracking-tight text-[#151922]" style={{ fontSize: dashboardMetricFontSize(value.toLocaleString(), 20) }}>{value.toLocaleString()}</p>
                   <p className="dashboard-metric-hint mt-1 truncate font-medium text-[#626b7a]">{detail}</p>
                 </div>
               </div>
@@ -21780,7 +21785,7 @@ function Dashboard({
                   <span className={`mt-1 size-2 rounded-full ${accent}`} aria-hidden />
                 </div>
                 <p className="mt-3 text-[11px] font-medium text-[#4b5565]">{label}</p>
-                <p className="mt-1 truncate text-[22px] font-semibold tracking-[-.03em] text-[#151922]" title={value}>{value}</p>
+                <p className="mt-1 whitespace-nowrap font-semibold tracking-[-.03em] text-[#151922]" style={{ fontSize: dashboardMetricFontSize(value, 22) }} title={value}>{value}</p>
                 <p className="mt-1 text-[10px] text-[#8b92a1]">{detail}</p>
               </button>
             ))}
@@ -21799,7 +21804,7 @@ function Dashboard({
                     <span className={`mt-1 size-2 rounded-full ${tone}`} aria-hidden />
                   </div>
                   <p className="mt-3 text-[11px] font-medium text-[#4b5565]">{label}</p>
-                  <p className="mt-1 truncate text-[22px] font-semibold tracking-[-.03em] text-[#151922]">{value.toLocaleString()}</p>
+                  <p className="mt-1 whitespace-nowrap font-semibold tracking-[-.03em] text-[#151922]" style={{ fontSize: dashboardMetricFontSize(value.toLocaleString(), 22) }}>{value.toLocaleString()}</p>
                   <p className="mt-1 text-[10px] text-[#8b92a1]">{detail}</p>
                 </button>
               ))}
@@ -21820,13 +21825,13 @@ function Dashboard({
             <button type="button" onClick={() => go(readOnlyKpiView)} className="rounded-lg border border-[#eef1f5] bg-[#fbfcfe] p-3 text-left transition-colors hover:bg-[#f6f8fb] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c43b43]">
               <span className="grid size-7 place-items-center rounded-md bg-[#1769e8] text-white"><TrendingUp size={15} /></span>
               <p className="mt-4 text-[10px] font-medium uppercase tracking-[.06em] text-[#8b92a1]">Sales invoiced</p>
-              <p className="mt-1 text-[23px] font-semibold tracking-[-.03em] text-[#151922]">{peso.format(dashboardSales)}</p>
+              <p className="mt-1 whitespace-nowrap font-semibold tracking-[-.03em] text-[#151922]" style={{ fontSize: dashboardMetricFontSize(peso.format(dashboardSales), 23) }}>{peso.format(dashboardSales)}</p>
               <p className="mt-1 text-[10px] text-[#16854f]">For {monthName}</p>
             </button>
             <button type="button" onClick={() => go(readOnlyKpiView)} className="rounded-lg border border-[#eef1f5] bg-[#fbfcfe] p-3 text-left transition-colors hover:bg-[#f6f8fb] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c43b43]">
               <span className="grid size-7 place-items-center rounded-md bg-[#16854f] text-white"><PhilippinePeso size={15} /></span>
               <p className="mt-4 text-[10px] font-medium uppercase tracking-[.06em] text-[#8b92a1]">Collections</p>
-              <p className="mt-1 text-[23px] font-semibold tracking-[-.03em] text-[#151922]">{peso.format(dashboardCollections)}</p>
+              <p className="mt-1 whitespace-nowrap font-semibold tracking-[-.03em] text-[#151922]" style={{ fontSize: dashboardMetricFontSize(peso.format(dashboardCollections), 23) }}>{peso.format(dashboardCollections)}</p>
               <p className="mt-1 text-[10px] text-[#16854f]">For {monthName}</p>
             </button>
           </div>

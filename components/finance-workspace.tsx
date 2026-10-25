@@ -1597,10 +1597,13 @@ function FinanceSummaryMetric({
   color?: string;
   detail?: string;
 }) {
+  const valueLength = typeof value === "string" || typeof value === "number" ? String(value).length : 0;
+  const valueSize = valueLength > 24 ? "12px" : valueLength > 20 ? "14px" : valueLength > 16 ? "16px" : "20px";
+
   return (
     <div className="min-w-0">
       <p className="text-[12px] text-[#4f5663]">{label}</p>
-      <p className={`mt-1.5 text-xl font-semibold ${color}`}>{value}</p>
+      <p className={`mt-1.5 whitespace-nowrap font-semibold leading-tight ${color}`} style={{ fontSize: valueSize }}>{value}</p>
       {detail && <p className="mt-1 text-[10px] leading-4 text-[#7d8797]">{detail}</p>}
     </div>
   );
@@ -1617,10 +1620,13 @@ function FinanceOverviewMetricCard({
   color?: string;
   detail?: string;
 }) {
+  const valueLength = typeof value === "string" || typeof value === "number" ? String(value).length : 0;
+  const valueSize = valueLength > 24 ? "12px" : valueLength > 20 ? "14px" : valueLength > 16 ? "16px" : "22px";
+
   return (
     <article className="flex min-h-[112px] min-w-0 flex-col rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-[var(--card-shadow)]">
       <p className="text-[11px] font-semibold uppercase tracking-[.06em] text-[var(--color-text-tertiary)]">{label}</p>
-      <p className={`mt-2 truncate text-[22px] font-semibold tracking-tight ${color}`}>{value}</p>
+      <p className={`mt-2 whitespace-nowrap font-semibold leading-tight tracking-tight ${color}`} style={{ fontSize: valueSize }}>{value}</p>
       {detail && <p className="mt-auto pt-2 text-[10px] leading-4 text-[var(--color-text-tertiary)]">{detail}</p>}
     </article>
   );
@@ -1764,11 +1770,14 @@ function FinanceSummaryLayout({
   children: ReactNode;
   className?: string;
 }) {
+  const primaryValueLength = typeof primaryValue === "string" ? primaryValue.length : 0;
+  const primaryValueSize = primaryValueLength > 24 ? "22px" : primaryValueLength > 20 ? "26px" : primaryValueLength > 16 ? "30px" : "36px";
+
   return (
     <div className={`grid gap-6 lg:grid-cols-[minmax(0,0.82fr)_minmax(0,1.18fr)] ${className}`}>
       <div className="min-w-0">
         <p className="text-[15px] text-[#4f5663]">{primaryLabel}</p>
-        <p className="mt-2 text-4xl font-bold tracking-tight text-[#202938]">{primaryValue}</p>
+        <p className="mt-2 whitespace-nowrap font-bold leading-tight tracking-tight text-[#202938]" style={{ fontSize: primaryValueSize }}>{primaryValue}</p>
         {primaryDetail && <p className="mt-2 text-[11px] text-[#7d8797]">{primaryDetail}</p>}
       </div>
       <div className="border-t border-[#edf0f5] pt-5 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
@@ -4480,7 +4489,7 @@ export function FinanceWorkspace({
                     <div className="flex items-baseline justify-between gap-3"><p className="text-[12px] text-[#4f5663]">Account allocation usage</p><p className="text-[11px] font-semibold text-[#687386]">{approvedBudgetUsagePercent}% used or committed</p></div>
                     <div className="mt-3 h-2 overflow-hidden rounded-full bg-[#edf0f5]" role="progressbar" aria-label="Budget allocation usage" aria-valuemin={0} aria-valuemax={100} aria-valuenow={approvedBudgetUsagePercent}><div className="h-full rounded-full bg-[#c43b43] transition-[width]" style={{ width: `${approvedBudgetUsagePercent}%` }} /></div>
                     <p className="mt-2 text-[10px] text-[#7d8797]">{peso.format(approvedBudgetConsumedTotal)} of {peso.format(numericValue(budgetSnapshot, "total_allocated"))} distributed</p>
-                    <div className="mt-5 grid gap-x-6 gap-y-5 sm:grid-cols-4"><FinanceSummaryMetric label="GM approved" value={peso.format(approvedBudgetTotal)} color="text-[#a76605]" /><FinanceSummaryMetric label="Distributed" value={peso.format(numericValue(budgetSnapshot, "total_allocated"))} color="text-[#344054]" /><FinanceSummaryMetric label="Used" value={peso.format(approvedBudgetUsedTotal)} color="text-[#b42318]" /><FinanceSummaryMetric label="Committed" value={peso.format(approvedBudgetCommittedTotal)} color="text-[#a76605]" /></div>
+                    <div className="mt-5 grid gap-x-6 gap-y-5 sm:grid-cols-2 xl:grid-cols-4"><FinanceSummaryMetric label="GM approved" value={peso.format(approvedBudgetTotal)} color="text-[#a76605]" /><FinanceSummaryMetric label="Distributed" value={peso.format(numericValue(budgetSnapshot, "total_allocated"))} color="text-[#344054]" /><FinanceSummaryMetric label="Used" value={peso.format(approvedBudgetUsedTotal)} color="text-[#b42318]" /><FinanceSummaryMetric label="Committed" value={peso.format(approvedBudgetCommittedTotal)} color="text-[#a76605]" /></div>
                   </div>
                 </FinanceSummaryLayout>
               </div>
