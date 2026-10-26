@@ -1535,11 +1535,11 @@ const commissionSplitOptions: Array<{
   label: string;
   detail: string;
 }> = [
-  { value: "self_handled_100_0", label: "100% S.E. Origin", detail: "The S.E. Origin handles and receives the full commission." },
-  { value: "50_50", label: "50% / 50%", detail: "Split equally between the S.E. Origin and Co-Worker." },
-  { value: "60_40", label: "60% / 40%", detail: "S.E. Origin receives 60%; Co-Worker receives 40%." },
-  { value: "70_30", label: "70% / 30%", detail: "S.E. Origin receives 70%; Co-Worker receives 30%." },
-  { value: "80_20", label: "80% / 20%", detail: "S.E. Origin receives 80%; Co-Worker receives 20%." },
+  { value: "self_handled_100_0", label: "100% Sales Origin", detail: "The Sales Origin handles and receives the full commission." },
+  { value: "50_50", label: "50% / 50%", detail: "Split equally between the Sales Origin and Co-Worker." },
+  { value: "60_40", label: "60% / 40%", detail: "Sales Origin receives 60%; Co-Worker receives 40%." },
+  { value: "70_30", label: "70% / 30%", detail: "Sales Origin receives 70%; Co-Worker receives 30%." },
+  { value: "80_20", label: "80% / 20%", detail: "Sales Origin receives 80%; Co-Worker receives 20%." },
 ];
 const sharedCommissionSplitOptions = commissionSplitOptions.filter(
   (option) => option.value !== "self_handled_100_0",
@@ -15842,7 +15842,7 @@ function PriceQuotationWorkspace({
     const effectiveOriginId = transferCommissionLocked ? transferCommissionOriginId : commissionOriginId;
     const effectiveHandlingMode: CommissionHandlingMode = transferCommissionLocked ? "shared" : commissionHandlingMode;
     const effectiveCoWorkerId = transferCommissionLocked ? transferCommissionCoWorkerId : commissionCoWorkerId;
-    if (!effectiveOriginId) return notice("Choose the S.E. Origin before saving the quotation.");
+    if (!effectiveOriginId) return notice("Choose the Sales Origin before saving the quotation.");
     if (effectiveHandlingMode === "self_handled" && !canChooseSelfHandled) {
       return notice("Only a Sales & Pricing Officer can choose self-handled mode.");
     }
@@ -15858,7 +15858,7 @@ function PriceQuotationWorkspace({
             pricingProjectTypeKey(assignment.project_type) === pricingProjectTypeKey(projectType),
         );
       if (!originAssigned) {
-        return notice("The selected S.E. Origin is not assigned to the selected project type, so this quotation must be shared with an assigned Pricing Officer.");
+        return notice("The selected Sales Origin is not assigned to the selected project type, so this quotation must be shared with an assigned Pricing Officer.");
       }
     }
     if (effectiveHandlingMode === "shared" && !effectiveCoWorkerId) {
@@ -16254,7 +16254,7 @@ function PriceQuotationWorkspace({
                 <p className="mt-1 text-[12px] text-[#687386]">Internal routing only. This selection is not included in the client Price Quotation PDF.</p>
               </div>
               <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1fr]">
-                <label className="block text-[12px] font-medium text-[#202938]">S.E. Origin
+                <label className="block text-[12px] font-medium text-[#202938]">Sales Origin
                   <SearchableSelect
                     options={commissionOriginSelectOptions}
                     value={commissionOriginId}
@@ -16262,10 +16262,10 @@ function PriceQuotationWorkspace({
                       setCommissionOriginId(value);
                       if (value === commissionCoWorkerId) setCommissionCoWorkerId("");
                     }}
-                    placeholder="Choose S.E. Origin"
+                    placeholder="Choose Sales Origin"
                     searchPlaceholder="Search Sales Executives and Pricing Officers"
                     noResultsLabel="No eligible officers found."
-                    ariaLabel="S.E. Origin"
+                    ariaLabel="Sales Origin"
                     required
                     clearable={false}
                     disabled={transferCommissionLocked || commissionOriginSelectOptions.length === 0}
@@ -17087,22 +17087,22 @@ function PriceQuotationReviewContent({
           <p className="mt-1 text-[12px] text-[#687386]">Internal workflow only. The General Manager has final authority over this assignment. It is not printed on the client Price Quotation.</p>
         </div>
         <div className="mt-3">
-          {commissionOriginEditable && !readOnly ? <label className="block text-[12px] font-medium text-[#202938]">S.E. Origin
+          {commissionOriginEditable && !readOnly ? <label className="block text-[12px] font-medium text-[#202938]">Sales Origin
             <SearchableSelect
               options={commissionOriginOptions}
               value={commissionOriginUserId}
               onChange={onCommissionOriginChange}
-              placeholder="Choose S.E. Origin"
+              placeholder="Choose Sales Origin"
               searchPlaceholder="Search Sales Executives and Pricing Officers"
               noResultsLabel="No eligible officers found."
-              ariaLabel="S.E. Origin"
+              ariaLabel="Sales Origin"
               required
               clearable={false}
               disabled={commissionOriginOptions.length === 0}
               className="mt-1"
             />
           </label> : <dl className="grid gap-1 text-[13px] sm:grid-cols-[140px_1fr]">
-            <dt className="text-[#687386]">S.E. Origin</dt>
+            <dt className="text-[#687386]">Sales Origin</dt>
             <dd className="font-medium text-[#202938]">{commissionOriginName || "Sales Executive"}</dd>
           </dl>}
         </div>
@@ -17576,7 +17576,7 @@ function PriceQuotationReview({
       return false;
     }
     if (commissionAssignmentVisible && finalApproval && !commissionOriginUserId) {
-      notice("Choose the final S.E. Origin before submitting the GM decision.");
+      notice("Choose the final Sales Origin before submitting the GM decision.");
       return false;
     }
     if (commissionAssignmentVisible && finalApproval && commissionHandlingMode === "shared" && !commissionCoWorkerUserId) {
@@ -21404,220 +21404,67 @@ function ProjectOfficerSalesFunnel({
   </section>;
 }
 
-function GeneralManagerKpiDashboard({ store, orgId }: { store: Store; orgId: string }) {
-  const now = new Date();
-  const manilaToday = manilaIsoDate(now);
-  const [selectedMonth, setSelectedMonth] = useState(manilaToday.slice(0, 7));
-  const [selectedYear, selectedMonthNumber] = selectedMonth.split("-").map(Number);
-  const selectedMonthIndex = selectedMonthNumber - 1;
-  const sharedKpis = useSharedKpiDashboard(orgId, selectedMonth);
-  const financeKpis = useSharedFinanceKpiDashboard(orgId, selectedMonth);
-  const monthlyActivity = useSharedMonthlyKpiActivity(orgId, selectedMonth);
-  const currentYear = selectedYear;
-  const currentMonth = selectedMonthIndex;
-  const isInMonth = (value: unknown, year: number, month: number) => {
-    const date = new Date(String(value));
-    return !Number.isNaN(date.getTime()) && date.getFullYear() === year && date.getMonth() === month;
-  };
-  const previousMonth = currentMonth === 0 ? 11 : currentMonth - 1;
-  const previousYear = currentMonth === 0 ? currentYear - 1 : currentYear;
-  const invoices = store.invoices.filter((invoice) => text(invoice.status) !== "void");
-  const invoiceBalance = (invoice: Row) => Math.max(
-    n(invoice.total_amount) - store.payments.filter((payment) => payment.invoice_id === invoice.id && !payment.reversed_at).reduce((sum, payment) => sum + n(payment.amount), 0),
-    0,
-  );
-  const salesFor = (year: number, month: number) => invoices.filter((invoice) => isInMonth(invoice.issue_date, year, month)).reduce((sum, invoice) => sum + n(invoice.total_amount), 0);
-  const collectionsFor = (year: number, month: number) => store.payments.filter((payment) => !payment.reversed_at && isInMonth(payment.paid_at, year, month)).reduce((sum, payment) => sum + n(payment.amount), 0);
-  const totalSales = salesFor(currentYear, currentMonth);
-  const collections = collectionsFor(currentYear, currentMonth);
-  const previousSales = salesFor(previousYear, previousMonth);
-  const previousCollections = collectionsFor(previousYear, previousMonth);
-  const receivables = invoices.reduce((sum, invoice) => sum + invoiceBalance(invoice), 0);
-  const today = new Date(currentYear, currentMonth, now.getDate());
-  const overdue = invoices.filter((invoice) => {
-    const dueDate = new Date(text(invoice.due_date, ""));
-    return invoiceBalance(invoice) > 0 && !Number.isNaN(dueDate.getTime()) && dueDate < today;
-  }).reduce((sum, invoice) => sum + invoiceBalance(invoice), 0);
-  const previousOverdue = invoices.filter((invoice) => {
-    const dueDate = new Date(text(invoice.due_date, ""));
-    const previousToday = new Date(previousYear, previousMonth, Math.min(now.getDate(), new Date(previousYear, previousMonth + 1, 0).getDate()));
-    return invoiceBalance(invoice) > 0 && !Number.isNaN(dueDate.getTime()) && dueDate < previousToday;
-  }).reduce((sum, invoice) => sum + invoiceBalance(invoice), 0);
-  const quarter = Math.floor(currentMonth / 3);
-  const quarterStart = new Date(currentYear, quarter * 3, 1);
-  const quarterEnd = new Date(currentYear, quarter * 3 + 3, 1);
-  const quarterSales = invoices.filter((invoice) => {
-    const date = new Date(String(invoice.issue_date));
-    return !Number.isNaN(date.getTime()) && date >= quarterStart && date < quarterEnd;
-  }).reduce((sum, invoice) => sum + n(invoice.total_amount), 0);
-  const quota = n(store.target_goals.find((goal) => text(goal.goal_type) === "quarterly_sales" && isInMonth(goal.period_start, currentYear, quarter * 3))?.target_value);
-  const quotaProgress = quota ? Math.min(Math.round((quarterSales / quota) * 100), 100) : 0;
-  const displayedTotalSales = sharedKpis ? n(sharedKpis.total_sales) : totalSales;
-  const displayedCollections = sharedKpis ? n(sharedKpis.collections) : collections;
-  const displayedPreviousSales = sharedKpis ? n(sharedKpis.previous_month_sales) : previousSales;
-  const displayedPreviousCollections = sharedKpis ? n(sharedKpis.previous_month_collections) : previousCollections;
-  const displayedReceivables = sharedKpis ? n(sharedKpis.receivables) : receivables;
-  const displayedOverdue = sharedKpis ? n(sharedKpis.overdue_receivables) : overdue;
-  const displayedPreviousOverdue = sharedKpis ? n(sharedKpis.previous_overdue_receivables) : previousOverdue;
-  const displayedQuarterSales = sharedKpis ? n(sharedKpis.quarter_sales) : quarterSales;
-  const displayedQuota = sharedKpis ? n(sharedKpis.quarter_target) : quota;
-  const displayedQuotaProgress = displayedQuota ? Math.min(Math.round((displayedQuarterSales / displayedQuota) * 100), 100) : 0;
-  const displayedCashIn = n(financeKpis?.cash_in);
-  const displayedCashOut = n(financeKpis?.cash_out);
-  const displayedNetCashFlow = displayedCashIn - displayedCashOut;
-  const displayedAvailableCash = n(financeKpis?.available_cash);
-  const displayedSupplierPayables = n(financeKpis?.supplier_payables_open);
-  const displayedCommissionPayables = n(financeKpis?.commission_payables_open);
-  const displayedBudgetGranted = n(financeKpis?.budget_granted);
-  const displayedBudgetAllocated = n(financeKpis?.budget_allocated);
-  const displayedBudgetRemaining = n(financeKpis?.budget_remaining);
-  const displayedPendingApprovals = n(financeKpis?.pending_cash_out) + n(financeKpis?.pending_budget_requests);
-  const financeFlow = monthlyFinanceFlowPoints(financeKpis?.monthly_cash_flow);
-  const visibleFinanceFlow = financeFlow.filter((point) => !point.month || point.month <= selectedMonth);
-  const accountBalances = Array.isArray(financeKpis?.account_balances)
-    ? financeKpis.account_balances.map((account) => account && typeof account === "object" ? account as Row : {})
-    : [];
-  const monthLabel = new Intl.DateTimeFormat("en-PH", { month: "long", year: "numeric" }).format(new Date(`${selectedMonth}-01T00:00:00`));
-  const compare = (value: number, previous: number) => previous ? `${Math.abs(((value - previous) / previous) * 100).toFixed(1)}% ${value >= previous ? "up" : "down"}` : "No prior month";
-  const financeAmountSize = (value: number) => {
-    const length = peso.format(value).length;
-    if (length > 24) return "12px";
-    if (length > 21) return "14px";
-    if (length > 18) return "16px";
-    if (length > 15) return "19px";
-    if (length > 12) return "23px";
-    return "28px";
-  };
-  const metricCards = [
-    { title: "TOTAL SALES", value: displayedTotalSales, detail: "This month", compare: compare(displayedTotalSales, displayedPreviousSales), previous: displayedPreviousSales, Icon: TrendingUp, color: "#1262e7", tint: "#edf4ff" },
-    { title: "COLLECTIONS RECEIVED", value: displayedCollections, detail: "This month", compare: compare(displayedCollections, displayedPreviousCollections), previous: displayedPreviousCollections, Icon: Wallet, color: "#087b19", tint: "#edf9ef" },
-    { title: "TOTAL RECEIVABLES", value: displayedReceivables, detail: "As of today", Icon: ReceiptText, color: "#f38300", tint: "#fff5e8" },
-    { title: "OVERDUE RECEIVABLES", value: displayedOverdue, detail: "As of today", compare: compare(displayedOverdue, displayedPreviousOverdue), previous: displayedPreviousOverdue, Icon: CalendarDays, color: "#e30719", tint: "#fff0f1" },
+function GeneralManagerPerformanceDashboard({ orgId }: { orgId: string }) {
+  const month = currentMonth();
+  const sharedKpis = useSharedKpiDashboard(orgId, month);
+  const financeKpis = useSharedFinanceKpiDashboard(orgId, month);
+  const cashOnHand = n(financeKpis?.available_cash);
+  const expectedCollections = n(sharedKpis?.receivables);
+  const payablesDue = n(financeKpis?.supplier_payables_open) + n(financeKpis?.commission_payables_open);
+  const netCashPosition = cashOnHand + expectedCollections - payablesDue;
+  const loaded = Boolean(sharedKpis && financeKpis);
+  const formatAmount = (value: number) => loaded ? peso.format(value) : "—";
+  const supportingMetrics = [
+    { label: "Cash on Hand", value: cashOnHand, color: "#16386d" },
+    { label: "Expected Collections", value: expectedCollections, color: "#16854f" },
+    { label: "Payables Due", value: payablesDue, color: "#d33c43" },
   ];
-  const financeCards = [
-    { title: "CASH IN", value: displayedCashIn, detail: "Verified and posted", Icon: TrendingUp, color: "#16854f" },
-    { title: "CASH OUT", value: displayedCashOut, detail: "Approved and paid", Icon: Wallet, color: "#d33c43" },
-    { title: "AVAILABLE CASH", value: displayedAvailableCash, detail: "Across active accounts", Icon: PhilippinePeso, color: "#16386d" },
-    { title: "OPEN PAYABLES", value: displayedSupplierPayables + displayedCommissionPayables, detail: "Supplier + commission", Icon: ReceiptText, color: "#f38300" },
-  ];
-  const budgetProgress = displayedBudgetGranted ? Math.min(Math.round((displayedBudgetAllocated / displayedBudgetGranted) * 100), 100) : 0;
+  const asOfLabel = new Intl.DateTimeFormat("en-PH", {
+    dateStyle: "medium",
+    timeZone: "Asia/Manila",
+  }).format(new Date());
 
-  return <div className="space-y-4">
+  return (
     <div className="space-y-4">
-      <header className="flex flex-wrap items-end justify-between gap-3 border-b border-[#e4e8ef] px-0 pb-4">
-        <div><h1 className="text-[20px] font-semibold tracking-[-.02em] text-[#202938]">KPI dashboard</h1><p className="mt-1 text-[12px] text-[#687386]">Sales, collections, and cash exposure at a glance.</p></div>
-        <label className="inline-flex items-center gap-2 text-[12px] text-[#687386]">
-          <CalendarDays size={15} className="text-[#c43b43]" />
-          <span className="sr-only">Reporting month</span>
-          <input
-            aria-label="Reporting month"
-            className="rounded-md border border-[#dfe5ed] bg-white px-2.5 py-1.5 text-[12px] text-[#202938] outline-none focus:border-[#16386d]"
-            type="month"
-            value={selectedMonth}
-            onChange={(event) => setSelectedMonth(event.target.value)}
-          />
-        </label>
+      <header className="flex flex-wrap items-end justify-between gap-3 border-b border-[#e4e8ef] pb-4">
+        <div>
+          <h1 className="text-[20px] font-semibold tracking-[-.02em] text-[#202938]">Performance</h1>
+          <p className="mt-1 text-[12px] text-[#687386]">Cash Flow &amp; Position</p>
+        </div>
+        <p className="text-[11px] text-[#687386]">As of {asOfLabel}</p>
       </header>
-      <div className="grid gap-3">
-        <article className="min-w-0 rounded-lg border border-[#dfe5ed] bg-white p-5 sm:p-6">
-          <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#687386]">This month</p>
-          <p aria-label="Net cash flow" className={`mt-4 whitespace-nowrap font-semibold leading-none tabular-nums ${displayedNetCashFlow < 0 ? "text-[#d33c43]" : "text-[#16854f]"}`} style={{ fontSize: "clamp(2.25rem, 5vw, 4rem)" }}>
-            {peso.format(displayedNetCashFlow)}
-          </p>
-        </article>
-        <div className="grid gap-3 sm:grid-cols-2">
-          {financeCards.map(({ title, value, detail, Icon, color }) => <article key={title} className="min-w-0 rounded-lg border border-[#dfe5ed] bg-white p-4">
-            <div className="flex items-start justify-between gap-3"><span className="grid size-8 place-items-center rounded-md text-white" style={{ backgroundColor: color }}><Icon size={16} /></span><span className="text-right text-[11px] text-[#687386]">{detail}</span></div>
-            <h2 className="mt-4 text-[11px] font-medium text-[#687386]">{title}</h2>
-            <p className="mt-1 whitespace-nowrap font-semibold leading-none tabular-nums text-[#202938]" style={{ fontSize: financeAmountSize(value) }}>{peso.format(value)}</p>
-          </article>)}
+      <section className="overflow-hidden rounded-lg border border-[#dfe5ed] bg-white">
+        <div className="border-b border-[#e4e8ef] px-4 py-3 sm:px-5">
+          <h2 className="text-[13px] font-semibold uppercase tracking-[.08em] text-[#687386]">Cash Flow &amp; Position</h2>
         </div>
-      </div>
-      <div className="overflow-x-auto pb-1">
-        <div className="grid gap-3 sm:grid-cols-2 xl:min-w-[1040px] xl:grid-cols-4">
-        {metricCards.map(({ title, value, detail, compare: change, previous, Icon, color, tint }) => <article key={title} className="min-w-0 rounded-lg border border-[#dfe5ed] bg-white p-4">
-          <div className="flex items-start justify-between gap-3"><span className="grid size-8 place-items-center rounded-md text-white" style={{ backgroundColor: color }}><Icon size={16} /></span><span className="text-[11px] text-[#687386]">{detail}</span></div>
-          <h2 className="mt-4 text-[11px] font-medium text-[#687386]">{title}</h2>
-          <p className="mt-1 whitespace-nowrap font-semibold leading-none tabular-nums text-[#202938]" style={{ fontSize: financeAmountSize(value) }}>{peso.format(value)}</p>
-          {change && <div className="mt-4 flex items-center justify-between border-t border-[#edf0f5] pt-3 text-left text-[11px] text-[#687386]"><span className="font-medium text-[#202938]">{change}</span><span className="text-right">Previous <b className="text-[#202938]">{peso.format(previous ?? 0)}</b></span></div>}
-        </article>)}
-        </div>
-      </div>
-      <section className="overflow-hidden rounded-lg border border-[#dfe5ed]">
-        <div className="flex items-center gap-2 border-b border-[#e4e8ef] px-4 py-3"><span className="grid size-8 place-items-center rounded-md bg-[#16386d] text-white"><Goal size={16} /></span><div><h2 className="text-[14px] font-semibold text-[#202938]">Quarterly sales quota</h2><p className="mt-0.5 text-[11px] text-[#687386]">Q{quarter + 1} {currentYear}</p></div></div>
-        <div className="grid gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-center">
-          <div><div className="flex items-end justify-between gap-3"><div><p className="text-[11px] font-medium text-[#687386]">Progress toward target</p><p className="mt-1 text-[24px] font-semibold leading-none tabular-nums text-[#202938]">{displayedQuotaProgress}%</p></div><p className="text-right text-[11px] text-[#687386]">{peso.format(displayedQuarterSales)} of<br /><span className="font-medium text-[#202938]">{peso.format(displayedQuota)}</span></p></div><div className="mt-4 h-2 overflow-hidden rounded-full bg-[#edf0f5]"><div className="h-full rounded-full bg-[#c43b43]" style={{ width: `${displayedQuotaProgress}%` }} /></div></div>
-          <dl className="divide-y divide-[#edf0f5]">
-            {[{ label: "Quarterly target", value: displayedQuota, Icon: Goal }, { label: "Achieved", value: displayedQuarterSales, Icon: Check }, { label: "Remaining", value: Math.max(displayedQuota - displayedQuarterSales, 0), Icon: Wallet }].map(({ label, value, Icon }) => <div className="flex items-center justify-between gap-3 py-2.5" key={label}><dt className="flex items-center gap-2 text-[12px] text-[#687386]"><Icon size={15} className="text-[#16386d]" />{label}</dt><dd className="text-[13px] font-semibold tabular-nums text-[#202938]">{peso.format(value)}</dd></div>)}
-          </dl>
+        <div className="space-y-3 p-4 sm:p-5">
+          <article className="min-w-0 rounded-lg border border-[#cbd8ea] bg-[#f6f9fe] p-5 sm:p-7">
+            <p className="text-[11px] font-semibold uppercase tracking-[.12em] text-[#687386]">Net Cash Position</p>
+            <p
+              aria-label="Net Cash Position"
+              className={`mt-3 break-words font-semibold leading-none tabular-nums ${netCashPosition < 0 ? "text-[#d33c43]" : "text-[#16854f]"}`}
+              style={{ fontSize: dashboardMetricFontSize(formatAmount(netCashPosition), 48) }}
+            >
+              {formatAmount(netCashPosition)}
+            </p>
+          </article>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {supportingMetrics.map((metric) => (
+              <article key={metric.label} className="min-w-0 rounded-lg border border-[#dfe5ed] bg-white p-4 sm:p-5">
+                <p className="text-[11px] font-medium uppercase tracking-[.08em] text-[#687386]">{metric.label}</p>
+                <p
+                  className="mt-3 break-words font-semibold leading-tight tabular-nums"
+                  style={{ color: metric.color, fontSize: dashboardMetricFontSize(formatAmount(metric.value), 28) }}
+                >
+                  {formatAmount(metric.value)}
+                </p>
+              </article>
+            ))}
+          </div>
         </div>
       </section>
     </div>
-    <section className="overflow-hidden rounded-lg border border-[#e7ebf0] bg-white shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
-      <div className="flex flex-wrap items-start justify-between gap-3 px-4 pb-2 pt-4">
-        <div>
-          <h2 className="text-[13px] font-semibold text-[#151922]">Monthly sales vs. collections</h2>
-          <p className="mt-1 text-[11px] text-[#8b92a1]">Monthly financial comparison for {currentYear}.</p>
-        </div>
-        <span className="text-[11px] font-semibold text-[#202124]">{monthLabel}</span>
-      </div>
-      <MonthlyPerformanceChart
-        data={monthlyPerformancePoints(sharedKpis?.monthly_performance)}
-        primaryLabel="Sales"
-        secondaryLabel="Collections"
-        primaryColor="var(--color-chart-primary)"
-        secondaryColor="var(--color-chart-secondary)"
-      />
-    </section>
-    <section className="overflow-hidden rounded-lg border border-[#e7ebf0] bg-white shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
-      <div className="flex flex-wrap items-start justify-between gap-3 px-4 pb-2 pt-4">
-        <div>
-          <h2 className="text-[13px] font-semibold text-[#151922]">Monthly money flow</h2>
-          <p className="mt-1 text-[11px] text-[#8b92a1]">Verified Cash In, approved paid Cash Out, and the resulting movement through {monthLabel}.</p>
-        </div>
-        <span className="text-[11px] font-semibold text-[#202124]">{currentYear}</span>
-      </div>
-      {visibleFinanceFlow.length ? <MonthlyFinanceFlowChart data={visibleFinanceFlow} /> : <div className="flex h-64 items-center justify-center px-5 text-center text-[12px] text-[#8b92a1]">{financeKpis ? "No posted Finance activity for this period." : "Loading monthly money flow..."}</div>}
-    </section>
-    <section className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,.85fr)]">
-      <article className="overflow-hidden rounded-lg border border-[#e7ebf0] bg-white shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
-        <div className="border-b border-[#e4e8ef] px-4 py-4 sm:px-5">
-          <h2 className="text-[13px] font-semibold text-[#151922]">Account balances</h2>
-          <p className="mt-1 text-[11px] text-[#8b92a1]">Available cash across active Finance accounts.</p>
-        </div>
-        <div className="divide-y divide-[#edf0f5] px-4 sm:px-5">
-          {accountBalances.length ? accountBalances.map((account) => {
-            const balance = n(account.current_balance);
-            const maximum = Math.max(...accountBalances.map((item) => n(item.current_balance)), 1);
-            return <div className="py-3" key={text(account.id, text(account.account_name))}>
-              <div className="flex items-center justify-between gap-3 text-[12px]"><span className="min-w-0 truncate font-medium text-[#202938]">{text(account.account_name, "Account")}</span><span className={`shrink-0 font-semibold tabular-nums ${balance < 0 ? "text-[#d33c43]" : "text-[#202938]"}`}>{peso.format(balance)}</span></div>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#edf0f5]"><div className={`h-full rounded-full ${balance < 0 ? "bg-[#d33c43]" : "bg-[#16386d]"}`} style={{ width: `${Math.min(Math.max((balance / maximum) * 100, 0), 100)}%` }} /></div>
-            </div>;
-          }) : <p className="py-6 text-[12px] text-[#8b92a1]">{financeKpis ? "No active accounts found." : "Loading account balances..."}</p>}
-        </div>
-      </article>
-      <article className="overflow-hidden rounded-lg border border-[#e7ebf0] bg-white shadow-[0_1px_2px_rgb(16_24_40_/_3%)]">
-        <div className="border-b border-[#e4e8ef] px-4 py-4 sm:px-5">
-          <h2 className="text-[13px] font-semibold text-[#151922]">Finance commitments</h2>
-          <p className="mt-1 text-[11px] text-[#8b92a1]">Amounts and decisions that still need attention.</p>
-        </div>
-        <dl className="divide-y divide-[#edf0f5] px-4 sm:px-5">
-          {[
-            { label: "Supplier payables", value: displayedSupplierPayables, color: "text-[#202938]" },
-            { label: "Unpaid commissions", value: displayedCommissionPayables, color: "text-[#202938]" },
-            { label: "Pending approvals", value: displayedPendingApprovals, color: "text-[#f38300]", count: true },
-            { label: "Budget remaining", value: displayedBudgetRemaining, color: "text-[#16854f]" },
-          ].map((item) => <div className="flex items-center justify-between gap-3 py-3" key={item.label}><dt className="text-[12px] text-[#687386]">{item.label}</dt><dd className={`font-semibold tabular-nums ${item.color}`}>{item.count ? item.value.toLocaleString() : peso.format(item.value)}</dd></div>)}
-        </dl>
-        <div className="border-t border-[#e4e8ef] px-4 py-4 sm:px-5">
-          <div className="flex items-center justify-between gap-3 text-[11px] text-[#687386]"><span>Budget allocated</span><span className="font-medium text-[#202938]">{peso.format(displayedBudgetAllocated)} of {peso.format(displayedBudgetGranted)}</span></div>
-          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#edf0f5]"><div className="h-full rounded-full bg-[#16854f]" style={{ width: `${budgetProgress}%` }} /></div>
-        </div>
-      </article>
-    </section>
-    <MonthlyKpiActivityGraphs data={monthlyActivity} />
-    <ProjectOfficerSalesFunnel store={store} orgId={orgId} />
-  </div>;
+  );
 }
 
 function dashboardMetricFontSize(value: unknown, maximum = 22) {
@@ -21679,7 +21526,7 @@ function Dashboard({
     };
   }, [isProjectOfficer, orgId, role, selectedMonth]);
   if (isProjectOfficer) return <ProjectOfficerSalesFunnel store={store} orgId={orgId} />;
-  if (role === "admin") return <GeneralManagerKpiDashboard store={store} orgId={orgId} />;
+  if (role === "admin") return <GeneralManagerPerformanceDashboard orgId={orgId} />;
   const quarterStartMonth = (Math.floor((selectedMonthIndex - 1) / 3)) * 3;
   const isCurrentMonth = (value: unknown) => {
     const raw = text(value, "");
@@ -22280,7 +22127,7 @@ function CommissionSummaryView({
         detail={
           readOnly
             ? "Only your allocation from approved Price Quotations is shown."
-            : "Commission allocations are created from approved costing and the GM-approved S.E. Origin / Co-Worker division."
+            : "Commission allocations are created from approved costing and the GM-approved Sales Origin / Co-Worker division."
         }
         action={
           readOnly ? (
@@ -22299,7 +22146,7 @@ function CommissionSummaryView({
             </div>
             <div className="rounded-[8px] border border-[#b7dfc5] bg-[#f1fbf4] p-2.5 text-[11px]">
               <p className="text-[#687386]">Payout model</p>
-              <p className="mt-0.5 text-[12px] font-semibold text-[#176b40]">Approved self-handled or S.E. Origin / Co-Worker division</p>
+              <p className="mt-0.5 text-[12px] font-semibold text-[#176b40]">Approved self-handled or Sales Origin / Co-Worker division</p>
             </div>
           </div>
         )}
@@ -22359,7 +22206,7 @@ function CommissionSummaryView({
         {filteredRows.length ? (
           <>
           <Table
-            labels={["Quotation", "Name / Company", "S.E. Origin", "Co-Worker", "Grand Total", "Client payment", "Remaining client balance", "Commission payout"]}
+            labels={["Quotation", "Name / Company", "Sales Origin", "Co-Worker", "Grand Total", "Client payment", "Remaining client balance", "Commission payout"]}
             minWidth={1180}
             className="commission-summary-table table-fixed"
             columnWidths={["12%", "18%", "14%", "14%", "10%", "12%", "10%", "10%"]}
@@ -23744,7 +23591,6 @@ export function HuswellWorkspace({
         { view: "Dashboard", icon: LayoutDashboard },
         { view: "Approvals", icon: ClipboardCheck, badge: sidebarBadge("management_approvals") },
         { view: "Leads", icon: ClipboardCheck },
-        { view: "Supplier's List", icon: UsersRound },
       ],
     },
     {
@@ -23752,7 +23598,6 @@ export function HuswellWorkspace({
       items: [
         { view: "Price Quotations", icon: FileText },
         { view: "Quotation Costing Overview", icon: ReceiptText },
-        { view: "PDF Costing", icon: FileSpreadsheet, badge: sidebarBadge("pdf_costing") },
         { view: "Projects", icon: ClipboardCheck },
       ],
     },
@@ -23761,10 +23606,12 @@ export function HuswellWorkspace({
       items: [
         { view: "Finance Budget", icon: FileText },
         { view: "Commissions", icon: PhilippinePeso },
+        { view: "Supplier's List", icon: UsersRound },
         { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
         { view: "Settings", icon: Settings },
         { view: "Letter Request", icon: FileText, badge: sidebarBadge("letter_requests") },
+        { view: "PDF Costing", icon: FileSpreadsheet, badge: sidebarBadge("pdf_costing") },
       ],
     },
   ] : role === "internal_finance" ? [
@@ -23880,10 +23727,12 @@ export function HuswellWorkspace({
     .filter((group) => group.items.length > 0);
   const pageHeader: Record<View, { title: string; detail: string }> = {
     Dashboard: {
-      title: isProjectOfficerRole(role) || role === "admin" ? "KPI Dashboard" : "Dashboard",
+      title: isProjectOfficerRole(role) ? "KPI Dashboard" : role === "admin" ? "Performance" : "Dashboard",
       detail:
         isProjectOfficerRole(role)
           ? "Track your lead, quotation, and supplier key performance indicators."
+          : role === "admin"
+            ? "Review cash on hand, expected collections, payables due, and net cash position."
           : "Monitor business performance and current work.",
     },
     Leads: {
@@ -24432,8 +24281,10 @@ export function HuswellWorkspace({
               <div className="space-y-px">
                 {group.items.map(({ view, icon: Icon, badge }) => {
                   const navigationLabel =
-                    view === "Dashboard" && (isProjectOfficerRole(role) || role === "admin")
+                    view === "Dashboard" && isProjectOfficerRole(role)
                       ? "KPI"
+                    : role === "admin" && view === "Dashboard"
+                        ? "Performance"
                     : view === "Announcements"
                         ? "Announcements"
                       : view === "Policy"
@@ -24442,6 +24293,8 @@ export function HuswellWorkspace({
                           ? "Leads"
                       : isManagementRole && view === "Supplier's List"
                           ? "Suppliers"
+                      : isManagementRole && view === "Projects"
+                            ? "Production Status"
                       : view === "Projects"
                             ? "Production"
                             : view === "Finance Overview" && (hasInternalFinanceAccess || role === "external_finance")
@@ -24475,7 +24328,7 @@ export function HuswellWorkspace({
                             : view === "PDF Costing"
                               ? "HP Latex 700W"
                             : isManagementRole && view === "Price Quotations"
-                              ? "Price Quotations"
+                              ? "Quotation"
                               : isManagementRole && view === "Approvals"
                                 ? "Approvals"
                               : view === "Approvals"

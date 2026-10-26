@@ -119,14 +119,14 @@ const commissionPayablesViewOptions: { value: CommissionPayablesView; label: str
 
 const commissionRoleLabel = (value: unknown) => {
   const role = String(value ?? "");
-  if (role === "originating_se") return "S.E. Origin";
+  if (role === "originating_se") return "Sales Origin";
   if (role === "costing_se") return "Co-Worker";
   if (role === "self_handled_se") return "Self-handled";
   return role.replaceAll("_", " ") || "—";
 };
 
 const commissionDivisionLabel = (value: unknown) => {
-  if (value === "self_handled_100_0") return "100% S.E. Origin";
+  if (value === "self_handled_100_0") return "100% Sales Origin";
   if (value === "50_50") return "50% / 50%";
   if (value === "60_40") return "60% / 40%";
   if (value === "70_30") return "70% / 30%";
@@ -409,7 +409,8 @@ type FinanceAction =
   | { kind: "income_void"; id: string; label: string }
   | { kind: "funding_request"; id: string; decision: BudgetDecision; label: string }
   | { kind: "paid"; id: string; label: string }
-  | { kind: "account"; id: string; active: boolean; label: string };
+  | { kind: "account"; id: string; active: boolean; label: string }
+  | { kind: "account_delete"; id: string; label: string };
 
 const StatusPill = ({ value }: { value: string }) => (
   <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize ${statusClass(value)}`}>
@@ -1899,6 +1900,8 @@ function FinanceConfirmDialog({
   const requiresNote = isRejection || isRevision || action.kind === "income_void";
   const actionLabel = action.kind === "paid"
     ? "Mark paid"
+    : action.kind === "account_delete"
+        ? "Delete account"
     : action.kind === "account"
         ? action.active ? "Reactivate" : "Deactivate"
       : action.kind === "approve_and_pay"
@@ -1918,7 +1921,7 @@ function FinanceConfirmDialog({
   return (
     <FinanceDialog
       title={`${actionLabel} ${action.label}`}
-      detail={action.kind === "account" ? "Deactivation hides the account from new payment selections but preserves its balances, payments, and receipts." : action.kind === "approve_and_pay" ? "This approves the regular Cash Out, records it as paid, and deducts the selected payment account." : action.kind === "quotation_payment" ? action.decision === "verified" ? "This confirms the client receipt and posts it as Cash In." : action.decision === "revision_requested" ? "This returns the receipt to External Finance for correction. It stays out of Cash In until resubmitted and verified." : "This rejects the receipt and keeps it out of Cash In." : action.kind === "verify_income" ? "This confirms the receipt, updates the selected receiving account balance, and includes the amount in Cash In totals." : action.kind === "income_void" ? "This reverses the verified Cash In and removes it from the account balance while preserving the audit record." : action.kind === "funding_request" ? action.decision === "revision_requested" ? "This returns the account funding request to External Finance for correction." : "This rejects the account funding request." : isRevision ? action.kind === "income_revision" ? "This sends the standalone Cash In back to External Finance for correction and resubmission." : "This sends the unpaid Cash Out back to External Finance for correction and resubmission." : "This changes the settlement status in the finance ledger."}
+      detail={action.kind === "account_delete" ? "This permanently removes the account. It can only succeed when the account has no opening balance, transactions, payments, allocations, or funding history." : action.kind === "account" ? "Deactivation hides the account from new payment selections but preserves its balances, payments, and receipts." : action.kind === "approve_and_pay" ? "This approves the regular Cash Out, records it as paid, and deducts the selected payment account." : action.kind === "quotation_payment" ? action.decision === "verified" ? "This confirms the client receipt and posts it as Cash In." : action.decision === "revision_requested" ? "This returns the receipt to External Finance for correction. It stays out of Cash In until resubmitted and verified." : "This rejects the receipt and keeps it out of Cash In." : action.kind === "verify_income" ? "This confirms the receipt, updates the selected receiving account balance, and includes the amount in Cash In totals." : action.kind === "income_void" ? "This reverses the verified Cash In and removes it from the account balance while preserving the audit record." : action.kind === "funding_request" ? action.decision === "revision_requested" ? "This returns the account funding request to External Finance for correction." : "This rejects the account funding request." : isRevision ? action.kind === "income_revision" ? "This sends the standalone Cash In back to External Finance for correction and resubmission." : "This sends the unpaid Cash Out back to External Finance for correction and resubmission." : "This changes the settlement status in the finance ledger."}
       close={close}
     >
       {requiresNote && (
@@ -1933,7 +1936,7 @@ function FinanceConfirmDialog({
           type="button"
           onClick={() => void confirm()}
           disabled={saving || (requiresNote && !note.trim())}
-          className={requiresNote ? "button-danger" : primaryButton}
+          className={requiresNote || action.kind === "account_delete" ? "button-danger" : primaryButton}
         >
           {saving && <LoaderCircle size={14} className="animate-spin" />}
           {saving ? "Saving…" : actionLabel}
@@ -4150,6 +4153,30 @@ export function FinanceWorkspace({
     });
   };
 
+  const requestAccountDeletion = (account: Row) => {
+    setDecisionNote("");
+    setPendingAction({
+      kind: "account_delete",
+      id: String(account.id),
+      label: stringValue(account, "account_name", "Finance account"),
+    });
+  };
+
+  const deleteAccount = async (accountId: string) => {
+    setSaving(true);
+    const { error } = await client.rpc("delete_finance_account", {
+      p_account_id: accountId,
+    });
+    setSaving(false);
+    if (error) {
+      setErrorMessage(error.message);
+      return false;
+    }
+    setMessage("Finance account permanently deleted.");
+    await load();
+    return true;
+  };
+
   const confirmPendingAction = async () => {
     if (!pendingAction) return;
     const isFundingRequestDecision = pendingAction.kind === "funding_request";
@@ -4189,6 +4216,8 @@ export function FinanceWorkspace({
       succeeded = await reviewFundingRequest(pendingAction.id, pendingAction.decision, null, decisionNote.trim() || null);
     } else if (pendingAction.kind === "account") {
       succeeded = await setAccountActive(pendingAction.id, pendingAction.active);
+    } else if (pendingAction.kind === "account_delete") {
+      succeeded = await deleteAccount(pendingAction.id);
     } else {
       succeeded = await markPaid(pendingAction.id);
     }
@@ -4453,6 +4482,7 @@ export function FinanceWorkspace({
                   <div className="mt-3 flex flex-wrap gap-2 border-t border-[#edf0f5] pt-3">
                     {internal && <button type="button" onClick={() => openAccountEditor(account)} className="button-secondary text-[10px]">Edit</button>}
                     {internal && <button type="button" disabled={saving} onClick={() => requestAccountStatusChange(account)} className={active ? "button-danger text-[10px]" : "button-secondary text-[10px]"}>{active ? "Deactivate" : "Reactivate"}</button>}
+                    {internal && <button type="button" disabled={saving} onClick={() => requestAccountDeletion(account)} className="button-danger text-[10px]"><Trash2 size={12} /> Delete</button>}
                   </div>
                 </div>
               );
@@ -4628,7 +4658,7 @@ export function FinanceWorkspace({
 
           {payablesSection === "commission" && (
             <div id="payables-panel-commission" role="tabpanel" aria-labelledby="payables-tab-commission">
-          <Panel title="Commission payouts" detail="Each S.E. Origin and Co-Worker allocation is paid separately after the project is fully paid and the final client payment is verified.">
+          <Panel title="Commission payouts" detail="Each Sales Origin and Co-Worker allocation is paid separately after the project is fully paid and the final client payment is verified.">
             <div className="px-4 pt-3 sm:px-5">
               <label className="relative block max-w-md">
                 <Search size={15} className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]" />
