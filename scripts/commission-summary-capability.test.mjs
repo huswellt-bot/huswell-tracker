@@ -42,7 +42,10 @@ test("combined accounts keep personal Pricing Officer summaries", () => {
     /array\['super_admin', 'owner', 'admin', 'accountant', 'internal_finance'\]\s*\) as can_view_all/,
   );
   assert.doesNotMatch(personalScopeMigration, /private\.finance_is_internal\(p_organization_id\)/);
-  assert.match(workspace, /const \[commissionMonth, setCommissionMonth\] = useState\(currentMonth\)/);
+  assert.match(workspace, /const \[commissionMonth, setCommissionMonth\] = useState\(""\)/);
+  assert.match(workspace, /aria-pressed=\{!commissionMonth\}/);
+  assert.match(workspace, /Show all/);
+  assert.match(workspace, /setCommissionMonth\(""\)/);
   assert.match(financeWorkspace, /const quotationForId = useCallback/);
   assert.match(financeWorkspace, /const commissionSummaryForQuotation = useCallback/);
   assert.match(financeWorkspace, /stringValue\(summary, "quotation_no"\) \|\| "—"/);
@@ -57,6 +60,16 @@ test("Pricing Officer commission summaries require a verified quotation payment"
     paymentGateMigration,
     /access\.can_view_all\s+or exists\s*\(\s*select 1\s+from public\.quotation_payment_records payment/s,
   );
+});
+
+test("all commission pages default to Show all month filters", () => {
+  assert.match(financeWorkspace, /commissionPayablesMonth/);
+  assert.match(financeWorkspace, /paidCommissionMonth/);
+  assert.match(financeWorkspace, /aria-label="Commission payout month"/);
+  assert.match(financeWorkspace, /aria-label="Paid commission month"/);
+  assert.match(financeWorkspace, /aria-pressed=\{!commissionPayablesMonth\}/);
+  assert.match(financeWorkspace, /aria-pressed=\{!paidCommissionMonth\}/);
+  assert.match(financeWorkspace, /Show all/);
 });
 
 test("Pricing Officer commission rows do not duplicate allocation rates and amounts", () => {

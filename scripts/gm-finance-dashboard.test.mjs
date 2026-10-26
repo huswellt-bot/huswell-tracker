@@ -26,16 +26,12 @@ test("GM Finance dashboard aggregate is role-restricted and returns the money-fl
   assert.match(migration, /grant execute on function public\.shared_kpi_finance_dashboard/);
 });
 
-test("GM dashboard renders the hero cash flow, monthly chart, account balances, and commitments", () => {
+test("GM dashboard renders the cash position and supporting financial metrics", () => {
   assert.match(workspace, /shared_kpi_finance_dashboard/);
-  assert.match(workspace, /aria-label="Net cash flow"/);
-  assert.match(workspace, /Monthly money flow/);
-  assert.match(workspace, /MonthlyFinanceFlowChart/);
-  assert.match(workspace, /Account balances/);
-  assert.match(workspace, /Finance commitments/);
-  assert.match(workspace, /Supplier payables/);
-  assert.match(workspace, /Unpaid commissions/);
-  assert.match(workspace, /Budget remaining/);
+  assert.match(workspace, /aria-label="Net Cash Position"/);
+  assert.match(workspace, /Cash on Hand/);
+  assert.match(workspace, /Expected Collections/);
+  assert.match(workspace, /Payables Due/);
 });
 
 test("GM dashboard does not expose the Monthly report navigation page", () => {
@@ -44,6 +40,6 @@ test("GM dashboard does not expose the Monthly report navigation page", () => {
 });
 
 test("GM KPI cards keep a shared desktop width for long amounts", () => {
-  assert.match(workspace, /overflow-x-auto pb-1/);
-  assert.match(workspace, /xl:min-w-\[1040px\] xl:grid-cols-4/);
+  assert.match(workspace, /dashboardMetricFontSize/);
+  assert.match(workspace, /grid gap-3 sm:grid-cols-3/);
 });

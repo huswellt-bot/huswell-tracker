@@ -2004,7 +2004,9 @@ export function FinanceWorkspace({
   const [payablesSection, setPayablesSection] = useState<PayablesSection>("commission");
   const [commissionPayablesView, setCommissionPayablesView] = useState<CommissionPayablesView>("ready_to_pay");
   const [commissionPayoutQuery, setCommissionPayoutQuery] = useState("");
+  const [commissionPayablesMonth, setCommissionPayablesMonth] = useState("");
   const [paidCommissionQuery, setPaidCommissionQuery] = useState("");
+  const [paidCommissionMonth, setPaidCommissionMonth] = useState("");
   const [payablesPage, setPayablesPage] = useState(1);
   const [paidCommissionPage, setPaidCommissionPage] = useState(1);
   const [budgetPage, setBudgetPage] = useState(1);
@@ -3028,9 +3030,12 @@ export function FinanceWorkspace({
     : payablesRowsBySection[payablesSection];
   const normalizedCommissionPayoutQuery = commissionPayoutQuery.trim().toLowerCase();
   const filteredPayablesRows = activePayablesRows.filter((allocation) => {
-    if (payablesSection !== "commission" || !normalizedCommissionPayoutQuery) return true;
+    if (payablesSection !== "commission") return true;
     const quotation = quotationForId(allocation.quotation_id);
     const summary = commissionSummaryForQuotation(allocation.quotation_id);
+    const commissionDate = stringValue(allocation, "created_at") || stringValue(summary, "created_at");
+    if (commissionPayablesMonth && financeMonthKey(commissionDate) !== commissionPayablesMonth) return false;
+    if (!normalizedCommissionPayoutQuery) return true;
     return [
       quotationName(allocation.quotation_id),
       stringValue(quotation, "client_name"),
@@ -3067,11 +3072,13 @@ export function FinanceWorkspace({
   );
   const normalizedPaidCommissionQuery = paidCommissionQuery.trim().toLowerCase();
   const filteredPaidCommissionRows = paidCommissionRows.filter((transaction) => {
-    if (!normalizedPaidCommissionQuery) return true;
     const allocation = commissionAllocations.find((item) => String(item.id) === String(transaction.commission_allocation_id));
     const quotationId = transaction.quotation_id ?? allocation?.quotation_id;
     const quotation = quotationForId(quotationId);
     const summary = commissionSummaryForQuotation(quotationId);
+    const paidDate = stringValue(transaction, "paid_at") || stringValue(transaction, "transaction_date") || stringValue(transaction, "created_at");
+    if (paidCommissionMonth && financeMonthKey(paidDate) !== paidCommissionMonth) return false;
+    if (!normalizedPaidCommissionQuery) return true;
     return [
       quotationName(quotationId),
       stringValue(quotation, "client_name"),
@@ -4687,6 +4694,30 @@ export function FinanceWorkspace({
                 <input type="search" value={commissionPayoutQuery} onChange={(event) => { setCommissionPayoutQuery(event.target.value); setPayablesPage(1); }} className="input mt-0 w-full search-input text-[12px]" placeholder="Search commission payouts" aria-label="Search commission payouts" />
               </label>
             </div>
+            <div className="flex flex-wrap items-end gap-2 px-4 pb-3 pt-2 sm:px-5">
+              <div className="min-w-52 text-[11px] font-medium">
+                <span className="block">Commission month</span>
+                <div className="mt-1 flex items-center gap-2">
+                  <input
+                    aria-label="Commission payout month"
+                    type="month"
+                    value={commissionPayablesMonth}
+                    onClick={(event) => event.currentTarget.showPicker?.()}
+                    onChange={(event) => { setCommissionPayablesMonth(event.target.value); setPayablesPage(1); }}
+                    disabled={!commissionPayablesMonth}
+                    className="input mt-0 min-w-0 flex-1 disabled:bg-[#f6f8fb] disabled:text-[#8b92a1]"
+                  />
+                  <button
+                    type="button"
+                    aria-pressed={!commissionPayablesMonth}
+                    onClick={() => { setCommissionPayablesMonth(commissionPayablesMonth ? "" : financeMonthKey(localDate())); setPayablesPage(1); }}
+                    className={`button-secondary whitespace-nowrap text-[10px] ${!commissionPayablesMonth ? "border-[#b7dfc5] bg-[#f1fbf4] text-[#176b40]" : ""}`}
+                  >
+                    Show all
+                  </button>
+                </div>
+              </div>
+            </div>
             <div className="border-b border-[#edf0f5] px-4 pt-3 sm:px-5">
               <nav className="app-tabs overflow-x-auto" role="tablist" aria-label="Commission payout readiness">
                 {commissionPayablesViewOptions.map(({ value, label }) => {
@@ -4697,7 +4728,7 @@ export function FinanceWorkspace({
               </nav>
             </div>
             <div id={`commission-payables-panel-${commissionPayablesView}`} role="tabpanel" aria-labelledby={`commission-payables-tab-${commissionPayablesView}`}>
-              <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[1080px]"><thead><tr><th>Project</th><th>Name / Company</th><th>Recipient</th><th>Role</th><th>Division</th><th>Amount</th><th>Status</th>{commissionPayablesView === "ready_to_pay" && <th className="finance-action-column">Action</th>}</tr></thead><tbody>{visiblePayablesRows.map((allocation) => { const verifiedAt = verifiedPaymentByQuotation.get(stringValue(allocation, "quotation_id")); const eligible = eligibleCommissionAllocations.some((eligibleAllocation) => String(eligibleAllocation.id) === String(allocation.id)); const quotation = quotationForId(allocation.quotation_id); const summary = commissionSummaryForQuotation(allocation.quotation_id); return <tr key={String(allocation.id)}><td>{quotationName(allocation.quotation_id)}</td><td>{stringValue(quotation, "client_name") || stringValue(summary, "client_name") || "—"}</td><td>{profileName(allocation.recipient_user_id)}</td><td>{commissionRoleLabel(allocation.allocation_role)}</td><td>{commissionDivisionLabel(stringValue(quotation, "commission_split_option") || stringValue(summary, "commission_split_option"))}</td><td className="font-semibold text-[#b42318]">{peso.format(numericValue(allocation, "amount"))}</td><td>{commissionPayablesView === "ready_to_pay" ? <StatusPill value={stringValue(allocation, "status")} /> : <span className="text-[11px] text-[#a76605]">{verifiedAt ? "Awaiting full payment" : "Awaiting verified payment"}</span>}</td>{commissionPayablesView === "ready_to_pay" && <td className="finance-action-cell">{eligible ? <button type="button" onClick={() => openCommissionPayout(String(allocation.id))} disabled={saving} className="inline-flex min-h-7 items-center gap-1 rounded-[6px] bg-[#218b55] px-2.5 text-[10px] font-semibold text-white transition-colors hover:bg-[#176b40] disabled:cursor-not-allowed disabled:opacity-50" aria-label={"Pay commission for " + quotationName(allocation.quotation_id)}>Pay commission</button> : "—"}</td>}</tr>; })}{!filteredPayablesRows.length && <tr><td colSpan={commissionPayablesView === "ready_to_pay" ? 8 : 7} className="text-center text-[#7d8797]">{normalizedCommissionPayoutQuery ? "No commission payouts match your search." : commissionPayablesView === "ready_to_pay" ? "No fully paid projects are ready for commission payout." : "No commission projects are awaiting verified payment."}</td></tr>}</tbody></table></div>
+              <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[1080px]"><thead><tr><th>Project</th><th>Name / Company</th><th>Recipient</th><th>Role</th><th>Division</th><th>Amount</th><th>Status</th>{commissionPayablesView === "ready_to_pay" && <th className="finance-action-column">Action</th>}</tr></thead><tbody>{visiblePayablesRows.map((allocation) => { const verifiedAt = verifiedPaymentByQuotation.get(stringValue(allocation, "quotation_id")); const eligible = eligibleCommissionAllocations.some((eligibleAllocation) => String(eligibleAllocation.id) === String(allocation.id)); const quotation = quotationForId(allocation.quotation_id); const summary = commissionSummaryForQuotation(allocation.quotation_id); return <tr key={String(allocation.id)}><td>{quotationName(allocation.quotation_id)}</td><td>{stringValue(quotation, "client_name") || stringValue(summary, "client_name") || "—"}</td><td>{profileName(allocation.recipient_user_id)}</td><td>{commissionRoleLabel(allocation.allocation_role)}</td><td>{commissionDivisionLabel(stringValue(quotation, "commission_split_option") || stringValue(summary, "commission_split_option"))}</td><td className="font-semibold text-[#b42318]">{peso.format(numericValue(allocation, "amount"))}</td><td>{commissionPayablesView === "ready_to_pay" ? <StatusPill value={stringValue(allocation, "status")} /> : <span className="text-[11px] text-[#a76605]">{verifiedAt ? "Awaiting full payment" : "Awaiting verified payment"}</span>}</td>{commissionPayablesView === "ready_to_pay" && <td className="finance-action-cell">{eligible ? <button type="button" onClick={() => openCommissionPayout(String(allocation.id))} disabled={saving} className="inline-flex min-h-7 items-center gap-1 rounded-[6px] bg-[#218b55] px-2.5 text-[10px] font-semibold text-white transition-colors hover:bg-[#176b40] disabled:cursor-not-allowed disabled:opacity-50" aria-label={"Pay commission for " + quotationName(allocation.quotation_id)}>Pay commission</button> : "—"}</td>}</tr>; })}{!filteredPayablesRows.length && <tr><td colSpan={commissionPayablesView === "ready_to_pay" ? 8 : 7} className="text-center text-[#7d8797]">{normalizedCommissionPayoutQuery || commissionPayablesMonth ? "No commission payouts match the selected filters." : commissionPayablesView === "ready_to_pay" ? "No fully paid projects are ready for commission payout." : "No commission projects are awaiting verified payment."}</td></tr>}</tbody></table></div>
             </div>
           </Panel>
           <TablePagination page={activePayablesPage} pageCount={payablesPageCount} total={filteredPayablesRows.length} onPageChange={setPayablesPage} label="Payables pagination" />
@@ -4724,6 +4755,30 @@ export function FinanceWorkspace({
               <input type="search" value={paidCommissionQuery} onChange={(event) => { setPaidCommissionQuery(event.target.value); setPaidCommissionPage(1); }} className="input mt-0 w-full search-input text-[12px]" placeholder="Search paid commissions" aria-label="Search paid commissions" />
             </label>
           </div>
+          <div className="flex flex-wrap items-end gap-2 px-4 pb-3 sm:px-5">
+            <div className="min-w-52 text-[11px] font-medium">
+              <span className="block">Paid month</span>
+              <div className="mt-1 flex items-center gap-2">
+                <input
+                  aria-label="Paid commission month"
+                  type="month"
+                  value={paidCommissionMonth}
+                  onClick={(event) => event.currentTarget.showPicker?.()}
+                  onChange={(event) => { setPaidCommissionMonth(event.target.value); setPaidCommissionPage(1); }}
+                  disabled={!paidCommissionMonth}
+                  className="input mt-0 min-w-0 flex-1 disabled:bg-[#f6f8fb] disabled:text-[#8b92a1]"
+                />
+                <button
+                  type="button"
+                  aria-pressed={!paidCommissionMonth}
+                  onClick={() => { setPaidCommissionMonth(paidCommissionMonth ? "" : financeMonthKey(localDate())); setPaidCommissionPage(1); }}
+                  className={`button-secondary whitespace-nowrap text-[10px] ${!paidCommissionMonth ? "border-[#b7dfc5] bg-[#f1fbf4] text-[#176b40]" : ""}`}
+                >
+                  Show all
+                </button>
+              </div>
+            </div>
+          </div>
           <div className="table-shell overflow-x-auto">
             <table className="app-table w-full min-w-[1060px]">
               <thead><tr><th>Paid date</th><th>Project</th><th>Name / Company</th><th>Pricing officer</th><th>Role</th><th>Division</th><th>Amount paid</th><th>Account</th></tr></thead>
@@ -4746,7 +4801,7 @@ export function FinanceWorkspace({
                     </tr>
                   );
                 })}
-                {!filteredPaidCommissionRows.length && <tr><td colSpan={8} className="text-center text-[#7d8797]">{normalizedPaidCommissionQuery ? "No paid commissions match your search." : "No paid commissions yet."}</td></tr>}
+                {!filteredPaidCommissionRows.length && <tr><td colSpan={8} className="text-center text-[#7d8797]">{normalizedPaidCommissionQuery || paidCommissionMonth ? "No paid commissions match the selected filters." : "No paid commissions yet."}</td></tr>}
               </tbody>
             </table>
           </div>

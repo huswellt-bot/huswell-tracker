@@ -47,6 +47,7 @@ import {
   Goal,
   ImageIcon,
   LayoutDashboard,
+  Lock,
   LoaderCircle,
   LogOut,
   Menu,
@@ -71,6 +72,7 @@ import {
   X,
   XCircle,
   TrendingUp,
+  Unlock,
   Undo2,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -448,6 +450,7 @@ type PricingMarkupDefault = {
   calculationType: MarkupCalculationType;
   value: string;
   visible: boolean;
+  locked: boolean;
   custom?: boolean;
 };
 const pricingMarkupDefinitions: Array<{
@@ -516,10 +519,11 @@ const pricingMarkupDefaults = (
     const rawValue = storedEntry.value ?? storedEntry.rate ?? legacyValue ?? definition.fallback;
     return {
       key: definition.key,
-      label: definition.label,
+      label: text(storedEntry.label, definition.label),
       calculationType: "percentage" as const,
       value: text(rawValue, definition.fallback),
       visible: storedEntry.visible !== false,
+      locked: storedEntry.locked === true,
     };
   });
   const customDefaults = Object.entries(storedDefaults)
@@ -532,6 +536,7 @@ const pricingMarkupDefaults = (
         calculationType: "percentage" as const,
         value: text(entry.value ?? entry.rate, "0"),
         visible: entry.visible !== false,
+        locked: entry.locked === true,
         custom: true,
       };
     });
@@ -539,10 +544,11 @@ const pricingMarkupDefaults = (
   const legacyVat = legacySettings?.vat_rate;
   const vatDefault: PricingMarkupDefault = {
     key: "vat",
-    label: "VAT",
+    label: text(storedVat.label, "VAT"),
     calculationType: "percentage",
     value: text(storedVat.value ?? storedVat.rate ?? legacyVat, "12"),
     visible: storedVat.visible !== false,
+    locked: storedVat.locked === true,
   };
   return [...standardDefaults, ...customDefaults, vatDefault];
 };
@@ -555,6 +561,7 @@ const pricingMarkupDefaultPayload = (defaults: PricingMarkupDefault[]) =>
         calculation_type: definition.key === "vat" ? "percentage" : definition.calculationType,
         value: n(definition.value),
         visible: definition.visible !== false,
+        locked: definition.locked === true,
       },
     ]),
   );
@@ -578,6 +585,7 @@ type ProductCostingDraft = {
     calculationType?: MarkupCalculationType;
     value?: string;
     rate?: string;
+    locked?: boolean;
   }[];
 };
 const orderedProductCostingDrafts = (
@@ -624,6 +632,7 @@ const newProductCostingDraft = (
       label: definition.label,
       calculationType: definition.calculationType,
       value: definition.value,
+      locked: definition.locked === true,
     })),
 });
 const productCostingDrafts = (
@@ -649,6 +658,7 @@ const productCostingDrafts = (
           value: calculationType === "fixed_amount"
             ? text(markup.amount, text(markup.rate, "0"))
             : text(markup.rate, "0"),
+          locked: markup.locked === true,
         };
       });
     return {
@@ -818,9 +828,14 @@ const adjustCostingToTargetBudget = (
     (sum, markup) => sum + (isProtectedCommission(markup) ? currentTotals.markupAmounts[markup.key] ?? 0 : 0),
     0,
   );
+  const lockedMarkupAmount = costing.markups.reduce((sum, markup) => {
+    const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
+    if (markup.locked !== true || key === "discounts" || key === "vat" || isProtectedCommission(markup)) return sum;
+    return sum + (currentTotals.markupAmounts[markup.key] ?? 0);
+  }, 0);
   const adjustableMarkups = costing.markups.filter((markup) => {
     const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
-    return key !== "discounts" && key !== "vat" && !isProtectedCommission(markup);
+    return key !== "discounts" && key !== "vat" && !isProtectedCommission(markup) && markup.locked !== true;
   });
   if (adjustableMarkups.some((markup) => markupCalculationType(markup) === "fixed_amount")) {
     return { costing, error: "Change non-discount markup rows to Percentage before applying a Target Budget." };
@@ -831,13 +846,16 @@ const adjustCostingToTargetBudget = (
     0,
   );
   const unchangedInternalVatAmount = currentTotals.internalVatAmount;
-  const requiredAdjustableMarkupAmount = requiredMarkupTotal - unchangedInternalVatAmount - protectedCommissionAmount;
+  const requiredAdjustableMarkupAmount = requiredMarkupTotal
+    - unchangedInternalVatAmount
+    - protectedCommissionAmount
+    - lockedMarkupAmount;
   if (requiredAdjustableMarkupAmount < -0.01) {
-    return { costing, error: "The Target Budget is below the unchanged direct cost, Internal VAT, and commissions after the current Discount." };
+    return { costing, error: "The Target Budget is below the unchanged direct cost, locked markups, Internal VAT, and commissions after the current Discount." };
   }
   if (currentAdjustableMarkupTotal <= 0) {
     if (Math.abs(requiredAdjustableMarkupAmount) <= 0.01) return { costing };
-    return { costing, error: "Add at least one percentage markup before applying a Target Budget." };
+    return { costing, error: "Unlock at least one percentage markup before applying a Target Budget." };
   }
 
   const factor = Math.max(0, requiredAdjustableMarkupAmount) / currentAdjustableMarkupTotal;
@@ -847,7 +865,7 @@ const adjustCostingToTargetBudget = (
   const roundRate = (value: number) => Math.round(value * 10000) / 10000;
   const scaledMarkups = costing.markups.map((markup) => {
     const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
-    if (key === "discounts" || key === "vat" || isProtectedCommission(markup)) return markup;
+    if (key === "discounts" || key === "vat" || isProtectedCommission(markup) || markup.locked === true) return markup;
     const nextValue = roundRate(Math.max(0, n(markupValue(markup))) * factor);
     return { ...markup, calculationType: "percentage" as MarkupCalculationType, value: String(nextValue) };
   });
@@ -870,7 +888,7 @@ const adjustCostingToTargetBudget = (
       / ((1 + customerVatRate / 100) * discountFactor * currentTotals.cogs);
     const correctionMarkupKey = preferredMarkup.key;
     const correctedMarkups = nextCosting.markups.map((markup) => {
-      if (markup.key !== correctionMarkupKey) return markup;
+      if (markup.key !== correctionMarkupKey || markup.locked === true) return markup;
       const correctedValue = roundRate(n(markupValue(markup)) + correctionRate);
       return { ...markup, value: String(correctedValue) };
     });
@@ -16489,6 +16507,7 @@ function PricingMarkupEditor({
         key: definition.key,
         label: definition.label,
         value: markupDefaults.find((markup) => markup.key === definition.key)?.value ?? definition.fallback,
+        locked: markupDefaults.find((markup) => markup.key === definition.key)?.locked === true,
       })),
     ...markupDefaults
       .filter((markup) =>
@@ -16496,7 +16515,7 @@ function PricingMarkupEditor({
         markup.custom &&
         !existingMarkupKeys.has(markup.key),
       )
-      .map((markup) => ({ key: markup.key, label: markup.label, value: markup.value })),
+      .map((markup) => ({ key: markup.key, label: markup.label, value: markup.value, locked: markup.locked === true })),
   ];
   const selectedMarkup = availableMarkupOptions.find((markup) => markup.key === selectedMarkupKey);
   const addMarkup = () => {
@@ -16515,6 +16534,7 @@ function PricingMarkupEditor({
           label,
           calculationType: "percentage",
           value: isCustom ? newMarkupValue : selectedMarkup?.value ?? "0",
+          locked: !isCustom && selectedMarkup?.locked === true,
         },
       ],
     });
@@ -16526,6 +16546,7 @@ function PricingMarkupEditor({
   const discountOnly = visibleMarkupKeys.length === 1 && visibleMarkupKeys[0] === "discounts";
   const includesDiscount = visibleMarkupKeys.includes("discounts");
   const canChangeRows = editable && !readOnly;
+  const canToggleLock = canChangeRows && !discountOnly;
   return (
     <div className="rounded-lg border border-[#d9e0e9] bg-white">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#edf0f5] px-3 py-2">
@@ -16569,13 +16590,13 @@ function PricingMarkupEditor({
           const isDiscount = key === "discounts";
           const label = discountOnly && key === "discounts"
             ? "Discount"
-            : pricingMarkupDefinition(key as PricingMarkupKey)?.label ?? markup.label;
+            : markup.label || pricingMarkupDefinition(key as PricingMarkupKey)?.label || "Markup";
           const calculationType = markupCalculationType(markup);
           const rowCalculationType = isDiscount ? calculationType : "percentage";
           const amount = totals.markupAmounts[markup.key] ?? 0;
           return (
             <tr key={markup.key} className="hover:bg-[#fbfcff]">
-              <td className="px-3 py-2 font-medium text-[#344054]">{label}</td>
+              <td className="px-3 py-2 font-medium text-[#344054]">{label}{markup.locked === true && <span className="ml-2 rounded-full border border-[#ead7a8] bg-[#fff9e8] px-1.5 py-0.5 text-[10px] font-medium text-[#8a6500]">Locked</span>}</td>
               {includesDiscount && <td className="px-2 py-2">
                 {isDiscount && editable ? <SegmentedToggle ariaLabel={`${label} calculation basis`} value={rowCalculationType} options={markupBasisOptions} onChange={(value) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, calculationType: value as MarkupCalculationType } : item) })} size="compact" className="w-16" /> : <span className="block text-right text-[#687386]">{rowCalculationType === "fixed_amount" ? "Amount" : "Percent"}</span>}
               </td>}
@@ -16583,7 +16604,7 @@ function PricingMarkupEditor({
                 {editable ? <div className="flex items-center justify-end gap-1"><input aria-label={`${label} ${rowCalculationType === "fixed_amount" ? "amount" : "percentage"}`} type={sensitiveValuesHidden ? "password" : "number"} min="0" max={isDiscount && rowCalculationType === "percentage" ? "100" : undefined} step="any" value={markupValue(markup)} onChange={(event) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, calculationType: isDiscount ? rowCalculationType : "percentage", value: event.target.value } : item) })} className="input mt-0 px-2 py-1.5 tabular-nums" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /><span className="w-4 text-[11px] text-[#687386]">{sensitiveValuesHidden ? confidentialPricingValue : rowCalculationType === "fixed_amount" ? "₱" : "%"}</span></div> : <span className="block text-right tabular-nums text-[#687386]">{sensitiveValuesHidden ? confidentialPricingValue : rowCalculationType === "fixed_amount" ? peso.format(n(markupValue(markup))) : `${n(markupValue(markup))}%`}</span>}
               </td>
               <td className="px-3 py-2 text-right font-medium tabular-nums">{sensitiveValuesHidden ? confidentialPricingValue : peso.format(amount)}</td>
-              {canChangeRows && <td className="px-1 py-2 text-center"><ActionIcon label={`Remove ${label}`} tone="red" confirmationDescription={`Remove ${label} from this product costing? The quotation price will be recalculated when the quotation is approved.`} onClick={() => update({ ...costing, markups: costing.markups.filter((item) => item.key !== markup.key) })}><Trash2 size={14} /></ActionIcon></td>}
+              {canChangeRows && <td className="px-1 py-2 text-center"><div className="flex items-center justify-center gap-1">{canToggleLock && <button type="button" aria-label={`${markup.locked === true ? "Unlock" : "Lock"} ${label} for target selling price recomputation`} aria-pressed={markup.locked === true} title={`${markup.locked === true ? "Unlock" : "Lock"} ${label} for target selling price recomputation`} onClick={() => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, locked: item.locked !== true } : item) })} className={`grid size-7 place-items-center rounded border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] ${markup.locked === true ? "border-[#ead7a8] bg-[#fff9e8] text-[#8a6500]" : "border-[#d9e0e9] bg-white text-[#687386] hover:bg-[#f5f7fa]"}`}>{markup.locked === true ? <Lock size={13} /> : <Unlock size={13} />}</button>}<ActionIcon label={`Remove ${label}`} tone="red" confirmationDescription={`Remove ${label} from this product costing? The quotation price will be recalculated when the quotation is approved.`} onClick={() => update({ ...costing, markups: costing.markups.filter((item) => item.key !== markup.key) })}><Trash2 size={14} /></ActionIcon></div></td>}
             </tr>
           );
         })}
@@ -16664,6 +16685,8 @@ type PriceQuotationReviewContentProps = {
   productCostings: ProductCostingDraft[];
   pricingDefaults: Row;
   setProductCostings: (next: ProductCostingDraft[] | ((current: ProductCostingDraft[]) => ProductCostingDraft[])) => void;
+  approvedSellingPrices: Record<string, string>;
+  setApprovedSellingPrices: (next: Record<string, string> | ((current: Record<string, string>) => Record<string, string>)) => void;
   prices: Record<string, string>;
   setPrices: (next: Record<string, string> | ((current: Record<string, string>) => Record<string, string>)) => void;
   subtotal: number;
@@ -16708,6 +16731,7 @@ type PriceQuotationReviewContentProps = {
   commissionOriginEditable: boolean;
   commissionHandlingEditable: boolean;
   commissionSplitEditable: boolean;
+  editableApprovedSellingPrices: boolean;
   onCommissionOriginChange: (value: string) => void;
   onCommissionHandlingModeChange: (value: CommissionHandlingMode) => void;
   onCommissionCoWorkerChange: (value: string) => void;
@@ -16838,6 +16862,7 @@ function ProductCostingsSectionWithPricing({
   setVatValue,
   costings,
   setCostings,
+  approvedSellingPrices,
   pricingDefaults,
   editableMarkups,
   editableInternalMarkups,
@@ -16853,6 +16878,7 @@ function ProductCostingsSectionWithPricing({
   setVatValue: (value: string) => void;
   costings: ProductCostingDraft[];
   setCostings: (next: ProductCostingDraft[] | ((current: ProductCostingDraft[]) => ProductCostingDraft[])) => void;
+  approvedSellingPrices: Record<string, string>;
   pricingDefaults: Record<string, unknown>;
   editableMarkups: boolean;
   editableInternalMarkups: boolean;
@@ -16919,6 +16945,7 @@ function ProductCostingsSectionWithPricing({
           {orderedCostings.map((costing, costingIndex) => {
             const product = lines.find((line) => line.id === costing.quotationItemId);
             const totals = productCostingTotals(costing, n(product?.quantity), n(vatValue));
+            const approvedSellingPrice = product ? approvedSellingPrices[text(product.id)] : "";
             return (
               <article key={costing.key} className="overflow-hidden rounded-xl border border-[#d9e0e9] bg-white p-4 shadow-sm">
                 <div className="-mx-4 -mt-4 mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-[#edf0f5] bg-[#fafbfc] px-4 py-3">
@@ -16993,6 +17020,10 @@ function ProductCostingsSectionWithPricing({
                           <h4 className="text-[12px] font-semibold text-[#344054]">Target Budget</h4>
                           <p className="mt-0.5 text-[11px] text-[#687386]">Target selling price per piece, VAT included. Direct costs stay unchanged.</p>
                         </div>
+                        <div className="min-w-44 rounded-md border border-[#d9e0e9] bg-[#f8fbff] px-3 py-2">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[#687386]">Approved Selling Price / Unit</p>
+                          <p className="mt-1 text-[13px] font-semibold tabular-nums text-[#1769e8]">{approvedSellingPrice.trim() ? peso.format(n(approvedSellingPrice)) : "Not provided"}</p>
+                        </div>
                         {editableInternalMarkups ? <label className="text-[11px] font-medium text-[#344054]">
                           Target Selling Price / Piece
                           <div className="mt-1 flex items-center gap-1">
@@ -17009,7 +17040,7 @@ function ProductCostingsSectionWithPricing({
                           </div>
                         </label> : <output aria-label={`Target selling price per piece for ${product ? text(product.description, "finished product") : "product"}`} className="text-[13px] font-semibold text-[#176b40]">{peso.format(totals.unitIncVat)}</output>}
                       </div>
-                    <p className="mt-2 text-[11px] text-[#687386]">Other percentage markups are recalculated to reach this target. Pricing Officer Commission, Internal VAT, Discount and customer VAT remain as entered. GM markup percentages may exceed 100%.</p>
+                    <p className="mt-2 text-[11px] text-[#687386]">Unlocked percentage markups are recalculated to reach this target. Locked markups, Pricing Officer Commission, Internal VAT, Discount and customer VAT remain as entered. GM markup percentages may exceed 100%.</p>
                       {targetBudgetErrors[costing.key] && <p className="mt-2 text-[11px] font-medium text-[#b42318]">{targetBudgetErrors[costing.key]}</p>}
                     </div>
                   </div>}
@@ -17049,10 +17080,10 @@ function ProductCostingsSectionWithPricing({
 }
 
 function PriceQuotationReviewContent({
-  lines, projectName, projectType, illustrations, productCostings, pricingDefaults, setProductCostings, prices, setPrices, subtotal, vatRate, setVatRate, tax,
+  lines, projectName, projectType, illustrations, productCostings, pricingDefaults, setProductCostings, approvedSellingPrices, setApprovedSellingPrices, prices, setPrices, subtotal, vatRate, setVatRate, tax,
   total, terms, setTerms, paymentTermsOption, pdcTermDays, onPaymentTermsOptionChange, onPdcTermDaysChange, bankDetails, setBankDetails,
   revisionNote, setRevisionNote, submissionNote, setSubmissionNote, close, saving, working, review, finalApproval, showInternalMarkups, sensitiveValuesHidden, toggleSensitiveValues, visibleMarkupKeys, bankVisibility, pricingRevision, readOnly = false,
-  documentLabel = "Price Quotation", sourceQuotationNo, commissionAssignmentVisible, commissionOriginUserId, commissionOriginName, commissionOriginOptions, commissionHandlingMode, commissionCoWorkerUserId, commissionSplitOption, commissionOfficerOptions, commissionOriginEditable, commissionHandlingEditable, commissionSplitEditable, onCommissionOriginChange, onCommissionHandlingModeChange, onCommissionCoWorkerChange, onCommissionSplitOptionChange,
+  documentLabel = "Price Quotation", sourceQuotationNo, commissionAssignmentVisible, commissionOriginUserId, commissionOriginName, commissionOriginOptions, commissionHandlingMode, commissionCoWorkerUserId, commissionSplitOption, commissionOfficerOptions, commissionOriginEditable, commissionHandlingEditable, commissionSplitEditable, editableApprovedSellingPrices, onCommissionOriginChange, onCommissionHandlingModeChange, onCommissionCoWorkerChange, onCommissionSplitOptionChange,
 }: PriceQuotationReviewContentProps) {
   const [revisionDialogOpen, setRevisionDialogOpen] = useState(false);
   const syncTermsWithPaymentOption = (
@@ -17145,6 +17176,24 @@ function PriceQuotationReviewContent({
           />
         </label>}
       </section>}
+      {!showInternalMarkups && <section className="rounded-xl border border-[#e1e6ee] bg-[#f8fbff] p-4">
+        <div>
+          <h3 className="text-[14px] font-semibold">Approved Selling Price / Unit</h3>
+          <p className="mt-1 text-[12px] text-[#687386]">Enter the price the client approved for each finished product. This is separate from the General Manager&apos;s internal target price.</p>
+        </div>
+        <div className="mt-3 overflow-x-auto">
+          <Table labels={["#", "Finished product", "Quantity", "Approved Selling Price / Unit"]} minWidth={680}>
+            {lines.map((line, index) => <tr key={text(line.id)}>
+              <td className="px-3 py-2 text-center font-medium">{index + 1}</td>
+              <td className="px-3 py-2 font-medium">{text(line.description, "Finished product")}</td>
+              <td className="px-3 py-2 text-center">{n(line.quantity)}</td>
+              <td className="px-3 py-2">
+                {editableApprovedSellingPrices ? <div className="flex items-center justify-end gap-1"><span className="text-[12px] text-[#687386]">₱</span><input aria-label={`Approved selling price per unit for ${text(line.description, "finished product")}`} type="number" min="0" step="0.01" value={approvedSellingPrices[text(line.id)] ?? ""} onChange={(event) => setApprovedSellingPrices((current) => ({ ...current, [text(line.id)]: event.target.value }))} className="input mt-0 w-40 px-2 py-1.5 text-right tabular-nums" /></div> : <output className="block text-right font-semibold tabular-nums text-[#1769e8]">{approvedSellingPrices[text(line.id)]?.trim() ? peso.format(n(approvedSellingPrices[text(line.id)])) : "Not provided"}</output>}
+              </td>
+            </tr>)}
+          </Table>
+        </div>
+      </section>}
       <section className="rounded-xl border border-[#e1e6ee] p-4">
         <h3 className="text-[14px] font-semibold">{documentLabel} details</h3>
         <dl className="mt-3 grid gap-1 text-[13px] sm:grid-cols-[120px_1fr]">
@@ -17159,7 +17208,7 @@ function PriceQuotationReviewContent({
         <p className="mt-2 whitespace-pre-wrap text-[13px] leading-5 text-[#4b5565]">{submissionNote}</p>
       </section>}
       <QuotationReviewSummary lines={lines} prices={prices} subtotal={subtotal} vatRate={vatRate} tax={tax} total={total} productCostings={productCostings} showPrices={showInternalMarkups} />
-      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} pricingDefaults={pricingDefaults} editableMarkups={showInternalMarkups} editableInternalMarkups={finalApproval} visibleMarkupKeys={visibleMarkupKeys ?? (showInternalMarkups ? internalPricingMarkupKeys : ["discounts"])} canEditVat={finalApproval} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
+      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} approvedSellingPrices={approvedSellingPrices} pricingDefaults={pricingDefaults} editableMarkups={showInternalMarkups} editableInternalMarkups={finalApproval} visibleMarkupKeys={visibleMarkupKeys ?? (showInternalMarkups ? internalPricingMarkupKeys : ["discounts"])} canEditVat={finalApproval} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
       <QuotationPaymentTermsEditor
         option={paymentTermsOption}
         termDays={pdcTermDays}
@@ -17184,7 +17233,7 @@ function PriceQuotationReviewContent({
         {showInternalMarkups && displayedBankDetails.length === 0 && <p className="mt-3 rounded-lg border border-dashed border-[#ccd5e0] px-3 py-3 text-[11px] text-[#8b92a1]">Bank details are hidden from the GM review view in GM Settings.</p>}
         <div className="mt-3 flex justify-end"><Button onClick={() => setBankDetails((current) => [...current, { bank_name: "", account_name: "", account_number: "" }])}><Plus size={13} /> Add bank</Button></div>
       </section>
-      {!finalApproval && <label className="block text-[12px] font-medium text-[#202938]">Note to General Manager (optional)<textarea rows={4} value={submissionNote} onChange={(event) => setSubmissionNote(event.target.value)} placeholder="Add an optional note for the General Manager." className="input mt-1 min-h-[96px] resize-y" /></label>}
+      {!finalApproval && <label className="block text-[12px] font-medium text-[#202938]">Note to General Manager (optional)<textarea rows={4} value={submissionNote} onChange={(event) => setSubmissionNote(event.target.value)} placeholder="Add explanations or exceptions. Enter prices in the Approved Selling Price / Unit fields above." className="input mt-1 min-h-[96px] resize-y" /></label>}
       </fieldset>
       <div className="flex justify-end gap-2 border-t border-[#edf0f5] pt-4"><Button secondary onClick={close}>Close</Button>{!readOnly && !pricingRevision && <Button secondary loading={saving || working} disabled={saving || working} onClick={() => setRevisionDialogOpen(true)}><RotateCcw size={14} /> Request Revision</Button>}{!readOnly && <Button tone="green" loading={saving || working} disabled={saving || working} onClick={() => void review("approved")}><Check size={14} /> {pricingRevision ? `Resubmit ${documentLabel} to General Manager` : finalApproval ? `Approve ${documentLabel}` : `Submit ${documentLabel} to General Manager`}</Button>}</div>
       <RevisionRequestDialog
@@ -17255,6 +17304,11 @@ function PriceQuotationReview({
   const [prices, setPrices] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       lines.map((item) => [text(item.id), text(item.unit_cost, "")]),
+    ),
+  );
+  const [approvedSellingPrices, setApprovedSellingPrices] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      lines.map((item) => [text(item.id), text(item.approved_selling_price, "")]),
     ),
   );
   const [vatRate, setVatRate] = useState(initialVatRate);
@@ -17587,6 +17641,13 @@ function PriceQuotationReview({
       notice("Choose the final commission division before approving the quotation.");
       return false;
     }
+    if (!finalApproval && lines.some((line) => {
+      const value = approvedSellingPrices[text(line.id)]?.trim() ?? "";
+      return !value || !Number.isFinite(Number(value)) || Number(value) < 0;
+    })) {
+      notice("Enter an Approved Selling Price / Unit for every quotation product.");
+      return false;
+    }
     setWorking(true);
     const savedTerms = quotationTermsWithPaymentOption(
       terms
@@ -17615,8 +17676,13 @@ function PriceQuotationReview({
         calculation_type: markupCalculationType(markup),
         rate: markupCalculationType(markup) === "fixed_amount" ? 0 : n(markupValue(markup)),
         amount: markupCalculationType(markup) === "fixed_amount" ? n(markupValue(markup)) : 0,
+        locked: markup.locked === true,
       })),
       pricing_model: costing.pricingModel,
+    }));
+    const approvedSellingPricesPayload = lines.map((line) => ({
+      quotation_item_id: text(line.id),
+      approved_selling_price: n(approvedSellingPrices[text(line.id)]),
     }));
     const useCommissionWorkflow = commissionAssignmentVisible;
       const { error } = finalApproval && decision === "needs_revision"
@@ -17662,8 +17728,8 @@ function PriceQuotationReview({
       : !finalApproval
       ? await createClient().rpc(
         useCommissionWorkflow
-          ? "pricing_review_price_quotation_with_commission"
-          : "pricing_review_price_quotation",
+          ? "pricing_review_price_quotation_with_commission_and_approved_prices"
+          : "pricing_review_price_quotation_with_approved_prices",
         {
           p_quotation_id: quotation.id,
           p_decision: decision,
@@ -17680,6 +17746,7 @@ function PriceQuotationReview({
           ...(useCommissionWorkflow ? {
             p_commission_split_option: null,
           } : {}),
+          p_approved_selling_prices: approvedSellingPricesPayload,
         },
       )
       : await createClient().rpc("review_price_quotation", {
@@ -17725,6 +17792,8 @@ function PriceQuotationReview({
           productCostings={productCostings}
           pricingDefaults={activePricingDefaultSettings ?? {}}
           setProductCostings={setProductCostings}
+          approvedSellingPrices={approvedSellingPrices}
+          setApprovedSellingPrices={setApprovedSellingPrices}
           prices={prices}
           setPrices={setPrices}
           subtotal={subtotal}
@@ -17766,6 +17835,7 @@ function PriceQuotationReview({
           commissionOriginEditable={finalApproval && !transferCommissionLocked}
           commissionHandlingEditable={finalApproval && !transferCommissionLocked}
           commissionSplitEditable={finalApproval && !readOnly}
+          editableApprovedSellingPrices={!finalApproval && !readOnly}
           onCommissionOriginChange={changeCommissionOrigin}
           onCommissionHandlingModeChange={changeCommissionHandlingMode}
           onCommissionCoWorkerChange={setCommissionCoWorkerUserId}
@@ -22028,7 +22098,7 @@ function CommissionSummaryView({
 }) {
   const canManage = !readOnly && memberRole(role);
   const [commissionQuery, setCommissionQuery] = useState("");
-  const [commissionMonth, setCommissionMonth] = useState(currentMonth);
+  const [commissionMonth, setCommissionMonth] = useState("");
   const [officerFilter, setOfficerFilter] = useState("all");
   const [commissionPage, setCommissionPage] = useState(1);
 
@@ -22163,16 +22233,28 @@ function CommissionSummaryView({
               />
             </span>
           </label>
-          <label className="min-w-40 text-[11px] font-medium">
-            Month
-            <input
-              type="month"
-              value={commissionMonth}
-              onClick={(event) => event.currentTarget.showPicker?.()}
-              onChange={(event) => setCommissionMonth(event.target.value)}
-              className="input mt-1"
-            />
-          </label>
+          <div className="min-w-52 text-[11px] font-medium">
+            <span className="block">Month</span>
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                aria-label="Commission month"
+                type="month"
+                value={commissionMonth}
+                onClick={(event) => event.currentTarget.showPicker?.()}
+                onChange={(event) => setCommissionMonth(event.target.value)}
+                disabled={!commissionMonth}
+                className="input mt-0 min-w-0 flex-1 disabled:bg-[#f6f8fb] disabled:text-[#8b92a1]"
+              />
+              <button
+                type="button"
+                aria-pressed={!commissionMonth}
+                onClick={() => setCommissionMonth(commissionMonth ? "" : currentMonth())}
+                className={`button-secondary whitespace-nowrap text-[10px] ${!commissionMonth ? "border-[#b7dfc5] bg-[#f1fbf4] text-[#176b40]" : ""}`}
+              >
+                Show all
+              </button>
+            </div>
+          </div>
           {canManage && (
             <label className="min-w-48 text-[11px] font-medium">
               Pricing officer
@@ -22190,12 +22272,12 @@ function CommissionSummaryView({
               </select>
             </label>
           )}
-          {(commissionQuery || commissionMonth !== currentMonth() || officerFilter !== "all") && (
+          {(commissionQuery || commissionMonth || officerFilter !== "all") && (
             <Button
               secondary
               onClick={() => {
                 setCommissionQuery("");
-                setCommissionMonth(currentMonth());
+                setCommissionMonth("");
                 setOfficerFilter("all");
               }}
             >
@@ -22339,6 +22421,8 @@ function SettingsView({
   const [savingBankDetails, setSavingBankDetails] = useState(false);
   const [pricingDefaultsOpen, setPricingDefaultsOpen] = useState(false);
   const [pricingDefaults, setPricingDefaults] = useState<Record<string, string>>({});
+  const [pricingMarkupEditKey, setPricingMarkupEditKey] = useState<PricingMarkupKey | "">("");
+  const [pricingMarkupEditValues, setPricingMarkupEditValues] = useState<Record<string, string>>({});
   const [savingPricingDefaults, setSavingPricingDefaults] = useState(false);
   const [printCostingDefaultsOpen, setPrintCostingDefaultsOpen] = useState(false);
   const [printCostingDefaults, setPrintCostingDefaults] = useState<Record<string, string>>({});
@@ -22359,6 +22443,7 @@ function SettingsView({
     ...inactiveStandardMarkupDefinitions.map((definition) => `${definition.key}|${definition.label}`),
     "__custom__|New custom markup",
   ];
+  const editingPricingMarkup = pricingDefaultEntries.find((definition) => definition.key === pricingMarkupEditKey);
   const [profileOpen, setProfileOpen] = useState(false);
   const [profileValues, setProfileValues] = useState<Record<string, string>>(
     {},
@@ -22549,8 +22634,35 @@ function SettingsView({
       ...definition,
       calculationType: "percentage" as const,
       value: pricingDefaults[`${definition.key}_value`] ?? definition.value,
+      locked: pricingDefaults[`${definition.key}_locked`] === "locked",
     }));
     if (await persistPricingDefaults(defaults)) setPricingDefaultsOpen(false);
+  };
+  const openPricingMarkupEdit = (definition: PricingMarkupDefault) => {
+    setPricingMarkupEditKey(definition.key);
+    setPricingMarkupEditValues({
+      label: definition.label,
+      value: definition.value,
+      locked: definition.key === "vat" ? "unlocked" : definition.locked ? "locked" : "unlocked",
+    });
+  };
+  const savePricingMarkupEdit = async () => {
+    if (!editingPricingMarkup) return;
+    const updatedMarkup: PricingMarkupDefault = {
+      ...editingPricingMarkup,
+      label: editingPricingMarkup.custom
+        ? text(pricingMarkupEditValues.label, editingPricingMarkup.label).trim()
+        : editingPricingMarkup.label,
+      value: pricingMarkupEditValues.value ?? editingPricingMarkup.value,
+      locked: editingPricingMarkup.key === "vat" ? false : pricingMarkupEditValues.locked === "locked",
+    };
+    if (await persistPricingDefaults(
+      pricingDefaultEntries.map((definition) => definition.key === updatedMarkup.key ? updatedMarkup : definition),
+      `${updatedMarkup.label} updated in new quotation defaults. Existing quotations keep their saved values.`,
+    )) {
+      setPricingMarkupEditKey("");
+      setPricingMarkupEditValues({});
+    }
   };
   const openPrintCostingDefaults = () => {
     setPrintCostingDefaults(printCostingDefaultsForm(setting?.print_costing_defaults));
@@ -22612,6 +22724,7 @@ function SettingsView({
       calculationType: "percentage",
       value,
       visible: true,
+      locked: false,
       custom: isCustom,
     };
     if (await persistPricingDefaults([...pricingDefaultEntries.filter((definition) => definition.key !== markup.key), markup], "Markup added and included in new quotation computations.")) {
@@ -22653,9 +22766,9 @@ function SettingsView({
           {settingsSensitiveValuesHidden ? "Show sensitive values" : "Hide sensitive values"}
         </Button>
       </div>}
-      <Panel title="Pricing defaults - Internal" detail="Active markup rows are applied to new internal product costings and new Commission Summary rates. Existing quotations and Commission Summary rows keep their saved values. VAT remains a separate quotation field." action={memberRole(role) ? <div className="flex flex-wrap justify-end gap-2"><Button secondary disabled={settingsSensitiveValuesHidden} onClick={() => { const first = inactiveStandardMarkupDefinitions[0]; setCustomMarkupValues({ markup_key: first?.key ?? "__custom__", label: first?.label ?? "", value: first?.fallback ?? "" }); setCustomMarkupOpen(true); }}><Plus size={14} /> Add markup</Button><Button secondary disabled={settingsSensitiveValuesHidden} onClick={() => { setPricingDefaults(Object.fromEntries(pricingDefaultEntries.map((definition) => [`${definition.key}_value`, definition.value]))); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button></div> : undefined}>
-        <Table labels={["Pricing default", "Default percentage", "Actions"]}>
-          {pricingDefaultEntries.map((definition) => <tr key={definition.key} className={settingsSensitiveValuesHidden ? "bg-[#fafbfc] text-[#8b92a1]" : undefined}><td className="px-4 py-3 font-medium">{settingsSensitiveValuesHidden ? "Hidden markup" : <>{definition.label}{definition.custom && <span className="ml-2 rounded-full bg-[#f1f4f8] px-2 py-0.5 text-[10px] font-medium text-[#687386]">Custom</span>}</>}</td><td className="px-4 py-3 text-right">{settingsSensitiveValuesHidden ? "Hidden" : `${n(definition.value)}%`}</td><td className="px-2 py-2 text-center">{definition.key === "vat" ? <span className="text-[11px] text-[#8b92a1]">Separate</span> : <ActionIcon label={`Remove ${definition.label}`} tone="red" disabled={settingsSensitiveValuesHidden || savingPricingDefaults} confirmationDescription={`Remove ${definition.label} from new quotation defaults? Existing quotations keep their saved values.`} onClick={() => void removePricingMarkupDefault(definition.key)}><Trash2 size={14} /></ActionIcon>}</td></tr>)}
+      <Panel title="Pricing defaults - Internal" detail="Active markup rows are applied to new internal product costings and new Commission Summary rates. Existing quotations and Commission Summary rows keep their saved values. Locked rows stay unchanged when GM applies a Target Selling Price / Piece. VAT remains a separate quotation field." action={memberRole(role) ? <div className="flex flex-wrap justify-end gap-2"><Button secondary disabled={settingsSensitiveValuesHidden} onClick={() => { const first = inactiveStandardMarkupDefinitions[0]; setCustomMarkupValues({ markup_key: first?.key ?? "__custom__", label: first?.label ?? "", value: first?.fallback ?? "" }); setCustomMarkupOpen(true); }}><Plus size={14} /> Add markup</Button><Button secondary disabled={settingsSensitiveValuesHidden} onClick={() => { setPricingDefaults(Object.fromEntries(pricingDefaultEntries.flatMap((definition) => [[`${definition.key}_value`, definition.value], [`${definition.key}_locked`, definition.locked ? "locked" : "unlocked"]]))); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button></div> : undefined}>
+        <Table labels={["Pricing default", "Default percentage", "Target price behavior", "Actions"]}>
+          {pricingDefaultEntries.map((definition) => <tr key={definition.key} className={settingsSensitiveValuesHidden ? "bg-[#fafbfc] text-[#8b92a1]" : undefined}><td className="px-4 py-3 font-medium">{settingsSensitiveValuesHidden ? "Hidden markup" : <>{definition.label}{definition.custom && <span className="ml-2 rounded-full bg-[#f1f4f8] px-2 py-0.5 text-[10px] font-medium text-[#687386]">Custom</span>}</>}</td><td className="px-4 py-3 text-right">{settingsSensitiveValuesHidden ? "Hidden" : `${n(definition.value)}%`}</td><td className="px-4 py-3 text-center">{settingsSensitiveValuesHidden ? "Hidden" : definition.key === "vat" ? <span className="text-[11px] text-[#8b92a1]">Separate</span> : <span title={definition.locked ? "Locked — unchanged during target-price recomputation" : "Unlocked — recalculated for target price"} aria-label={definition.locked ? "Locked" : "Unlocked"} className={`inline-grid size-7 place-items-center rounded-full ${definition.locked ? "bg-[#fff9e8] text-[#8a6500]" : "bg-[#eef7f1] text-[#176b40]"}`}>{definition.locked ? <Lock size={14} /> : <Unlock size={14} />}</span>}</td><td className="px-2 py-2 text-center"><div className="flex items-center justify-center gap-1"><ActionIcon label={`Edit ${definition.label}`} disabled={settingsSensitiveValuesHidden || savingPricingDefaults} onClick={() => openPricingMarkupEdit(definition)}><Pencil size={14} /></ActionIcon>{definition.key !== "vat" && <ActionIcon label={`Remove ${definition.label}`} tone="red" disabled={settingsSensitiveValuesHidden || savingPricingDefaults} confirmationDescription={`Remove ${definition.label} from new quotation defaults? Existing quotations keep their saved values.`} onClick={() => void removePricingMarkupDefault(definition.key)}><Trash2 size={14} /></ActionIcon>}</div></td></tr>)}
         </Table>
       </Panel>
       <Panel title="Print Costing defaults" detail="These Excel-compatible values are copied into new Print Costings. Existing costings keep the saved values used when they were created." action={memberRole(role) ? <Button secondary disabled={settingsSensitiveValuesHidden} onClick={openPrintCostingDefaults}><Settings size={14} /> Edit Print Costing defaults</Button> : undefined}>
@@ -22666,7 +22779,8 @@ function SettingsView({
           <tr><td className="px-4 py-3 font-medium">Formula version</td><td className="px-4 py-3 text-right">{settingsSensitiveValuesHidden ? "Hidden" : configuredPrintCostingDefaults.formula_version}</td></tr>
         </Table>
       </Panel>
-      {pricingDefaultsOpen && <Dialog title="Pricing defaults - Internal" fields={pricingDefaultEntries.map((definition) => ({ key: `${definition.key}_value`, label: definition.label, type: "number" as const, required: true }))} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => { if (!savingPricingDefaults) setPricingDefaultsOpen(false); }} saving={savingPricingDefaults} saveLabel="Save pricing defaults" className="max-w-lg" compact />}
+      {pricingDefaultsOpen && <Dialog title="Pricing defaults - Internal" fields={pricingDefaultEntries.flatMap((definition) => [{ key: `${definition.key}_value`, label: definition.label, type: "number" as const, required: true }, ...(definition.key === "vat" ? [] : [{ key: `${definition.key}_locked`, label: `${definition.label} target price behavior`, type: "toggle" as const, options: ["unlocked|Unlocked — recompute", "locked|Locked — keep unchanged"], shortLabels: { unlocked: <Unlock size={15} />, locked: <Lock size={15} /> } }])])} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => { if (!savingPricingDefaults) setPricingDefaultsOpen(false); }} saving={savingPricingDefaults} saveLabel="Save pricing defaults" className="max-w-lg" compact />}
+      {editingPricingMarkup && <Dialog title={`Edit ${editingPricingMarkup.label}`} fields={[{ key: "label", label: "Markup name", required: true }, { key: "value", label: editingPricingMarkup.key === "vat" ? "Default VAT percentage" : "Default percentage", type: "number" as const, required: true }, ...(editingPricingMarkup.key === "vat" ? [] : [{ key: "locked", label: "Target price behavior", type: "toggle" as const, options: ["unlocked|Unlocked — recompute", "locked|Locked — keep unchanged"], shortLabels: { unlocked: <Unlock size={15} />, locked: <Lock size={15} /> } }])]} values={pricingMarkupEditValues} setValues={setPricingMarkupEditValues} save={() => void savePricingMarkupEdit()} close={() => { if (!savingPricingDefaults) { setPricingMarkupEditKey(""); setPricingMarkupEditValues({}); } }} saving={savingPricingDefaults} saveLabel="Update markup" className="max-w-lg" compact />}
       {printCostingDefaultsOpen && <Dialog title="Print Costing defaults" fields={[{ key: "hp_latex_rate", label: "HP Latex rate / sq. m.", type: "number" as const, required: true }, { key: "waste_allowance", label: "Waste allowance", type: "number" as const, required: true, hint: "Enter 5% as 0.05." }, { key: "formula_version", label: "Formula version", readOnly: true, required: true }, { key: "pp_white_roll_width_m", label: "PP White roll width (m)", type: "number" as const, required: true }, { key: "pp_white_roll_length_m", label: "PP White roll length (m)", type: "number" as const, required: true }, { key: "pp_white_roll_cost", label: "PP White roll cost", type: "number" as const, required: true }, { key: "vinyl_glossy_roll_width_m", label: "Vinyl Glossy roll width (m)", type: "number" as const, required: true }, { key: "vinyl_glossy_roll_length_m", label: "Vinyl Glossy roll length (m)", type: "number" as const, required: true }, { key: "vinyl_glossy_roll_cost", label: "Vinyl Glossy roll cost", type: "number" as const, required: true }, { key: "vinyl_matte_roll_width_m", label: "Vinyl Matte roll width (m)", type: "number" as const, required: true }, { key: "vinyl_matte_roll_length_m", label: "Vinyl Matte roll length (m)", type: "number" as const, required: true }, { key: "vinyl_matte_roll_cost", label: "Vinyl Matte roll cost", type: "number" as const, required: true }]} values={printCostingDefaults} setValues={setPrintCostingDefaults} save={() => void savePrintCostingDefaults()} close={() => { if (!savingPrintCostingDefaults) setPrintCostingDefaultsOpen(false); }} saving={savingPrintCostingDefaults} saveLabel="Save Print Costing defaults" className="max-w-2xl" compact />}
       {customMarkupOpen && <Dialog title="Add markup" fields={[{ key: "markup_key", label: "Markup category", type: "select" as const, options: addMarkupOptions, required: true }, { key: "label", label: "Markup name", required: true, readOnly: text(customMarkupValues.markup_key, "").split("|")[0] !== "__custom__" }, { key: "value", label: "Percentage", type: "number" as const, required: true }]} values={customMarkupValues} setValues={setCustomMarkupValues} onFieldChange={(key, value, current) => { if (key !== "markup_key") return { ...current, [key]: value }; const selectedKey = value.split("|")[0]; const definition = pricingMarkupDefinition(selectedKey as PricingMarkupKey); return { ...current, markup_key: value, label: selectedKey === "__custom__" ? "" : definition?.label ?? "", value: selectedKey === "__custom__" ? "" : definition?.fallback ?? "0" }; }} save={() => void addCustomMarkup()} close={() => { if (!savingPricingDefaults) setCustomMarkupOpen(false); }} saving={savingPricingDefaults} saveLabel="Add markup" className="max-w-lg" compact><p className="mt-3 rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3 text-[11px] leading-5 text-[#687386]">Choose an inactive standard category or create a custom markup. It will be included in computed pricing for new quotations. Existing quotations keep their saved markup rows.</p></Dialog>}
       {canManageSupplierCountries && (
