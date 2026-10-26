@@ -98,7 +98,7 @@ import { FileUploadControl } from "@/components/ui/file-upload-control";
 import { LoadingState } from "@/components/ui/loading-state";
 import { MultiSelect, parseMultiSelectValue } from "@/components/ui/multi-select";
 import { NumberInput } from "@/components/ui/number-input";
-import { NotificationDialog } from "@/components/ui/notification-dialog";
+import { NotificationDialog, NotificationToast } from "@/components/ui/notification-dialog";
 import { SearchableLeadSelect, type SearchableLeadOption } from "@/components/ui/searchable-lead-select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { TABLE_PAGE_SIZE, TablePagination } from "@/components/ui/table-pagination";
@@ -22766,7 +22766,7 @@ function SettingsView({
           {settingsSensitiveValuesHidden ? "Show sensitive values" : "Hide sensitive values"}
         </Button>
       </div>}
-      <Panel title="Pricing defaults - Internal" detail="Active markup rows are applied to new internal product costings and new Commission Summary rates. Existing quotations and Commission Summary rows keep their saved values. Locked rows stay unchanged when GM applies a Target Selling Price / Piece. VAT remains a separate quotation field." action={memberRole(role) ? <div className="flex flex-wrap justify-end gap-2"><Button secondary disabled={settingsSensitiveValuesHidden} onClick={() => { const first = inactiveStandardMarkupDefinitions[0]; setCustomMarkupValues({ markup_key: first?.key ?? "__custom__", label: first?.label ?? "", value: first?.fallback ?? "" }); setCustomMarkupOpen(true); }}><Plus size={14} /> Add markup</Button><Button secondary disabled={settingsSensitiveValuesHidden} onClick={() => { setPricingDefaults(Object.fromEntries(pricingDefaultEntries.flatMap((definition) => [[`${definition.key}_value`, definition.value], [`${definition.key}_locked`, definition.locked ? "locked" : "unlocked"]]))); setPricingDefaultsOpen(true); }}><Settings size={14} /> Edit pricing defaults</Button></div> : undefined}>
+      <Panel title="Pricing defaults - Internal" detail="Active markup rows are applied to new internal product costings and new Commission Summary rates. Existing quotations and Commission Summary rows keep their saved values. Locked rows stay unchanged when GM applies a Target Selling Price / Piece. VAT remains a separate quotation field." action={memberRole(role) ? <div className="flex flex-wrap justify-end gap-2"><Button secondary disabled={settingsSensitiveValuesHidden} onClick={() => { const first = inactiveStandardMarkupDefinitions[0]; setCustomMarkupValues({ markup_key: first?.key ?? "__custom__", label: first?.label ?? "", value: first?.fallback ?? "" }); setCustomMarkupOpen(true); }}><Plus size={14} /> Add markup</Button></div> : undefined}>
         <Table labels={["Pricing default", "Default percentage", "Target price behavior", "Actions"]}>
           {pricingDefaultEntries.map((definition) => <tr key={definition.key} className={settingsSensitiveValuesHidden ? "bg-[#fafbfc] text-[#8b92a1]" : undefined}><td className="px-4 py-3 font-medium">{settingsSensitiveValuesHidden ? "Hidden markup" : <>{definition.label}{definition.custom && <span className="ml-2 rounded-full bg-[#f1f4f8] px-2 py-0.5 text-[10px] font-medium text-[#687386]">Custom</span>}</>}</td><td className="px-4 py-3 text-right">{settingsSensitiveValuesHidden ? "Hidden" : `${n(definition.value)}%`}</td><td className="px-4 py-3 text-center">{settingsSensitiveValuesHidden ? "Hidden" : definition.key === "vat" ? <span className="text-[11px] text-[#8b92a1]">Separate</span> : <span title={definition.locked ? "Locked — unchanged during target-price recomputation" : "Unlocked — recalculated for target price"} aria-label={definition.locked ? "Locked" : "Unlocked"} className={`inline-grid size-7 place-items-center rounded-full ${definition.locked ? "bg-[#fff9e8] text-[#8a6500]" : "bg-[#eef7f1] text-[#176b40]"}`}>{definition.locked ? <Lock size={14} /> : <Unlock size={14} />}</span>}</td><td className="px-2 py-2 text-center"><div className="flex items-center justify-center gap-1"><ActionIcon label={`Edit ${definition.label}`} disabled={settingsSensitiveValuesHidden || savingPricingDefaults} onClick={() => openPricingMarkupEdit(definition)}><Pencil size={14} /></ActionIcon>{definition.key !== "vat" && <ActionIcon label={`Remove ${definition.label}`} tone="red" disabled={settingsSensitiveValuesHidden || savingPricingDefaults} confirmationDescription={`Remove ${definition.label} from new quotation defaults? Existing quotations keep their saved values.`} onClick={() => void removePricingMarkupDefault(definition.key)}><Trash2 size={14} /></ActionIcon>}</div></td></tr>)}
         </Table>
@@ -24631,7 +24631,7 @@ export function HuswellWorkspace({
           </div>
         </header>
         <div className={`workspace-content ${(["Projects", "Price Quotations", "Price Quotation Review", "Approvals", "Payment Monitoring", "Payment Reviews", "Announcements", "Policy"].includes(active)) ? "p-0" : "p-2 sm:p-3 lg:p-4"}`}>
-          {message && <NotificationDialog message={message} close={() => setMessage(null)} />}
+          {message && <NotificationToast message={message} close={() => setMessage(null)} />}
           {content}
         </div>
       </main>

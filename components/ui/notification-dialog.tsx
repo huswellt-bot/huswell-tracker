@@ -156,3 +156,43 @@ export function NotificationDialog({
     </div>
   );
 }
+
+export function NotificationToast({
+  message,
+  close,
+  tone = "info",
+}: Pick<NotificationDialogProps, "message" | "close" | "tone">) {
+  const closeRef = useRef(close);
+  const style = toneStyles[tone];
+  const Icon = style.icon;
+
+  useEffect(() => {
+    closeRef.current = close;
+  }, [close]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => closeRef.current(), 5000);
+    return () => window.clearTimeout(timeout);
+  }, []);
+
+  return (
+    <div className="fixed right-4 top-4 z-[1000] w-[min(24rem,calc(100vw-2rem))]" role={tone === "error" ? "alert" : "status"} aria-live={tone === "error" ? "assertive" : "polite"}>
+      <div className="flex items-start gap-3 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-3.5 shadow-lg">
+        <span className={`grid size-8 shrink-0 place-items-center rounded-full ${style.iconBackground}`}>
+          <Icon size={17} className={style.iconClass} aria-hidden="true" />
+        </span>
+        <p className="min-w-0 flex-1 whitespace-pre-wrap break-words pt-1 text-[13px] leading-[1.45] text-[var(--color-text-secondary)]">
+          {message}
+        </p>
+        <button
+          type="button"
+          onClick={close}
+          aria-label="Close notification"
+          className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-control)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)]"
+        >
+          <X size={15} strokeWidth={1.75} />
+        </button>
+      </div>
+    </div>
+  );
+}

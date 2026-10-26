@@ -4,6 +4,7 @@ import test from "node:test";
 
 const workspace = await readFile(new URL("../components/huswell-workspace.tsx", import.meta.url), "utf8");
 const migration = await readFile(new URL("../supabase/migrations/20261026163105_locked_pricing_markups.sql", import.meta.url), "utf8");
+const deletionMigration = await readFile(new URL("../supabase/migrations/20261026164338_allow_pricing_markup_removal.sql", import.meta.url), "utf8");
 
 test("pricing defaults and costing payloads carry markup lock state", () => {
   assert.match(workspace, /locked: definition\.locked === true/);
@@ -21,6 +22,9 @@ test("Target Selling Price / Piece skips locked markups", () => {
 test("individual Pricing Defaults deletion remains available", () => {
   assert.match(workspace, /Remove \$\{definition\.label\}/);
   assert.match(workspace, /removePricingMarkupDefault\(definition\.key\)/);
+  assert.match(deletionMigration, /only required row/i);
+  assert.match(deletionMigration, /if not \(p_defaults \? 'vat'\)/);
+  assert.doesNotMatch(deletionMigration, /Missing pricing default: target_profit_margin/);
 });
 
 test("each Pricing Defaults row can be edited and updated", () => {
