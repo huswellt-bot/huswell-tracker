@@ -24,6 +24,10 @@ const commissionReceiptColumnsMigrationPath = join(
   "20261025100025_commission_payout_receipt_columns_nullable.sql",
 );
 const commissionReceiptColumnsMigration = readFileSync(commissionReceiptColumnsMigrationPath, "utf8");
+const productionConfirmedPayablesMigration = readFileSync(
+  join(repoRoot, "supabase", "251_production_confirmed_commission_payables.sql"),
+  "utf8",
+);
 const workspace = readFileSync(
   join(repoRoot, "components", "huswell-workspace.tsx"),
   "utf8",
@@ -81,6 +85,16 @@ test("commission payables separate waiting projects from fully paid payout rows"
   assert.match(financeWorkspace, /commissionPayablesView === "ready_to_pay" && <th className="finance-action-column">Action<\/th>/);
   assert.match(financeWorkspace, /commissionPayablesView === "ready_to_pay" \? <StatusPill value=\{stringValue\(allocation, "status"\)\}/);
   assert.match(financeWorkspace, /bg-\[#218b55\][^>]*>Pay commission<\/button>/);
+});
+
+test("commission payables require an approved Production-page schedule", () => {
+  assert.match(productionConfirmedPayablesMigration, /commission_quotation_is_production_confirmed/);
+  assert.match(productionConfirmedPayablesMigration, /schedule\.status = 'approved'::public\.approval_status/);
+  assert.match(productionConfirmedPayablesMigration, /finance_commission_payable_quotation_ids/);
+  assert.match(productionConfirmedPayablesMigration, /enforce_commission_production_confirmation/);
+  assert.match(financeWorkspace, /productionConfirmedQuotationIdSet/);
+  assert.match(financeWorkspace, /finance_commission_payable_quotation_ids/);
+  assert.match(financeWorkspace, /Commission payouts.*approved Production schedule/s);
 });
 
 test("project transaction notes open from a note icon modal", () => {
