@@ -22126,8 +22126,8 @@ function CommissionSummaryView({
         title={readOnly ? "My Commission Summary" : "Commission Summary"}
         detail={
           readOnly
-            ? "Only your allocation from approved Price Quotations is shown."
-            : "Commission allocations are created from approved costing and the GM-approved Sales Origin / Co-Worker division."
+            ? "Only your allocation from quotations already confirmed in Production is shown."
+            : "Only commission allocations from quotations already confirmed in Production are shown."
         }
         action={
           readOnly ? (
@@ -22266,7 +22266,7 @@ function CommissionSummaryView({
             {store.commission_summaries.length
               ? "No Commission Summaries match the selected filters."
               : canManage
-                ? "Approved direct Price Quotations will appear here automatically after approval."
+                ? "Production-confirmed quotations with commission allocations will appear here automatically."
                 : "No Commission Summary records are assigned to you yet."}
           </Empty>
         )}

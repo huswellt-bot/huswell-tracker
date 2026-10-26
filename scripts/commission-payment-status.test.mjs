@@ -28,6 +28,14 @@ const productionConfirmedPayablesMigration = readFileSync(
   join(repoRoot, "supabase", "251_production_confirmed_commission_payables.sql"),
   "utf8",
 );
+const productionConfirmedSummariesMigration = readFileSync(
+  join(repoRoot, "supabase", "252_commission_summary_production_visibility.sql"),
+  "utf8",
+);
+const commissionSummaryAccessMigration = readFileSync(
+  join(repoRoot, "supabase", "253_revoke_anon_commission_summary_access.sql"),
+  "utf8",
+);
 const workspace = readFileSync(
   join(repoRoot, "components", "huswell-workspace.tsx"),
   "utf8",
@@ -95,6 +103,19 @@ test("commission payables require an approved Production-page schedule", () => {
   assert.match(financeWorkspace, /productionConfirmedQuotationIdSet/);
   assert.match(financeWorkspace, /finance_commission_payable_quotation_ids/);
   assert.match(financeWorkspace, /Commission payouts.*approved Production schedule/s);
+});
+
+test("Commission Summary rows require an approved Production-page schedule", () => {
+  assert.match(productionConfirmedSummariesMigration, /commission_quotation_is_production_confirmed/);
+  assert.match(productionConfirmedSummariesMigration, /summary\.quotation_id/);
+  assert.match(productionConfirmedPayablesMigration, /schedule\.status = 'approved'::public\.approval_status/);
+  assert.match(productionConfirmedPayablesMigration, /schedule\.due_date is not null/);
+  assert.match(workspace, /Only commission allocations from quotations already confirmed in Production are shown/);
+});
+
+test("Commission Summary RPC is not executable by anon", () => {
+  assert.match(commissionSummaryAccessMigration, /revoke all on function public\.commission_summary_rows_v3\(uuid\) from public, anon/);
+  assert.match(commissionSummaryAccessMigration, /grant execute on function public\.commission_summary_rows_v3\(uuid\) to authenticated/);
 });
 
 test("project transaction notes open from a note icon modal", () => {
