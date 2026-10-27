@@ -35,6 +35,7 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
@@ -119,6 +120,10 @@ const DynamicCostingRequestWorkspace = dynamic(
   () => import("@/components/costing-request-workspace").then((module) => module.CostingRequestWorkspace),
   { loading: () => <LoadingState variant="section" label="Loading Print Costing..." /> },
 );
+const DynamicLeadCostingWorkspace = dynamic(
+  () => import("@/components/lead-costing-workspace").then((module) => module.LeadCostingWorkspace),
+  { loading: () => <LoadingState variant="section" label="Loading Lead & Costing..." /> },
+);
 const DynamicFinanceWorkspace = dynamic(
   () => import("@/components/finance-workspace").then((module) => module.FinanceWorkspace),
   { loading: () => <LoadingState variant="section" label="Loading Finance..." /> },
@@ -137,6 +142,7 @@ PdfFont.register({
 type View =
   | "Dashboard"
   | "Leads"
+  | "Lead Costing"
   | "Projects"
   | "Quotation Costing Overview"
   | "Costing Breakdown"
@@ -176,6 +182,7 @@ type View =
   | "Profile";
 
 type FinanceActionRequest = "income" | "expense";
+type FinanceBudgetActionRequest = "grant" | "allocate";
 type SidebarWorkspace = "sales_pricing" | "finance";
 
 const financeSidebarViews: View[] = [
@@ -16289,7 +16296,7 @@ function PriceQuotationWorkspace({
                     disabled={transferCommissionLocked || commissionOriginSelectOptions.length === 0}
                     className="mt-1"
                   />
-                  <span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">{transferCommissionLocked ? "Fixed by the Lead Coordinator transfer." : "Choose the officer who originated this commission assignment."}</span>
+                  <span className="mt-1 block text-[10px] font-normal text-[#8b92a1]">{transferCommissionLocked ? "Fixed by the Lead & Costing Coordinator transfer." : "Choose the officer who originated this commission assignment."}</span>
                 </label>
                 {commissionHandlingMode === "shared" && <label className="block text-[12px] font-medium text-[#202938]">Co-Worker
                 <SearchableSelect
@@ -17728,7 +17735,7 @@ function PriceQuotationReview({
       : !finalApproval
       ? await createClient().rpc(
         useCommissionWorkflow
-          ? "pricing_review_price_quotation_with_commission_and_approved_prices"
+          ? "pricing_review_price_quotation_commission_approved_prices"
           : "pricing_review_price_quotation_with_approved_prices",
         {
           p_quotation_id: quotation.id,
@@ -23093,6 +23100,9 @@ export function HuswellWorkspace({
   const [leadMode, setLeadMode] = useState<LeadWorkspaceMode>("leads");
   const [mobile, setMobile] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [financeMenuOpen, setFinanceMenuOpen] = useState(
+    () => memberRole(role) && financeSidebarViews.includes(safeInitialView),
+  );
   const [store, setStore] = useState<Store>(blank);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -23101,6 +23111,8 @@ export function HuswellWorkspace({
   const [policyAction, setPolicyAction] = useState<"announcement" | "policy" | null>(null);
   const [financeActionRequest, setFinanceActionRequest] = useState<FinanceActionRequest | null>(null);
   const clearFinanceActionRequest = useCallback(() => setFinanceActionRequest(null), []);
+  const [financeBudgetActionRequest, setFinanceBudgetActionRequest] = useState<FinanceBudgetActionRequest | null>(null);
+  const clearFinanceBudgetActionRequest = useCallback(() => setFinanceBudgetActionRequest(null), []);
   const [signOutOpen, setSignOutOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [navigationDate, setNavigationDate] = useState(() => new Date());
@@ -23579,7 +23591,7 @@ export function HuswellWorkspace({
     accountant: ["Announcements", "Policy"],
     internal_finance: ["Finance Overview", "Finance Reports", "Finance", "Finance Approvals", "Finance Transactions", "Finance Accounts", "Finance Budget", "Finance Supplier Costing", "Finance Payables", "Paid commissions", "Payment Monitoring", "Announcements", "Policy"],
     external_finance: ["Finance Overview", "Finance Reports", "Finance", "Finance Transactions", "Finance Budget", "Finance Supplier Costing", "Payment Monitoring", "Announcements", "Policy"],
-    lead_coordinator: ["Leads", "Announcements", "Policy"],
+    lead_coordinator: ["Leads", "Lead Costing", "Announcements", "Policy"],
     payroll: ["Dashboard", "Payroll & Leave", "Letter Request", "Directory", "Announcements", "Policy"],
     production: ["Dashboard", "Production", "Inventory", "Announcements", "Policy"],
     viewer: [
@@ -23601,7 +23613,10 @@ export function HuswellWorkspace({
   const allowedRoleViews = [
     ...(allowedViews[role] ?? allowedViews.viewer),
   ];
-  if (hasInternalFinanceAccess && role === "sales_pricing_officer") {
+  if (
+    hasInternalFinanceAccess &&
+    ["admin", "sales_pricing_officer"].includes(role)
+  ) {
     allowedRoleViews.push(
       "Finance Overview",
       "Finance Reports",
@@ -23695,6 +23710,22 @@ export function HuswellWorkspace({
       ],
     });
   }
+  const managementFinanceItems: {
+    view: View;
+    icon: typeof LayoutDashboard;
+    badge?: number;
+  }[] = hasInternalFinanceAccess
+    ? [
+        { view: "Finance Approvals", icon: ClipboardCheck, badge: sidebarBadge("finance") },
+        { view: "Finance Transactions", icon: ReceiptText },
+        { view: "Finance Accounts", icon: Wallet },
+        { view: "Finance Budget", icon: FileText },
+        { view: "Finance Supplier Costing", icon: ReceiptText },
+        { view: "Finance Payables", icon: Wallet },
+        { view: "Paid commissions", icon: PhilippinePeso },
+        { view: "Payment Monitoring", icon: ReceiptText },
+      ]
+    : [{ view: "Finance Budget", icon: FileText }];
   const navBase: {
     label: string;
     items: { view: View; icon: typeof LayoutDashboard; badge?: number }[];
@@ -23716,9 +23747,12 @@ export function HuswellWorkspace({
       ],
     },
     {
+      label: "Finance",
+      items: managementFinanceItems,
+    },
+    {
       label: "Business",
       items: [
-        { view: "Finance Budget", icon: FileText },
         { view: "Commissions", icon: PhilippinePeso },
         { view: "Supplier's List", icon: UsersRound },
         { view: "Announcements", icon: MessageSquareText },
@@ -23794,6 +23828,21 @@ export function HuswellWorkspace({
         { view: "Letter Request", icon: FileText },
       ],
     },
+  ] : role === "lead_coordinator" ? [
+    {
+      label: "Lead & Costing",
+      items: [
+        { view: "Leads", icon: ClipboardCheck },
+        { view: "Lead Costing", icon: ReceiptText },
+      ],
+    },
+    {
+      label: "Company",
+      items: [
+        { view: "Announcements", icon: MessageSquareText },
+        { view: "Policy", icon: ScrollText },
+      ],
+    },
   ] : [
     {
       label: "Project operations",
@@ -23839,6 +23888,11 @@ export function HuswellWorkspace({
       ),
     }))
     .filter((group) => group.items.length > 0);
+  useEffect(() => {
+    if (isManagementRole && financeSidebarViews.includes(active)) {
+      setFinanceMenuOpen(true);
+    }
+  }, [active, isManagementRole]);
   const pageHeader: Record<View, { title: string; detail: string }> = {
     Dashboard: {
       title: isProjectOfficerRole(role) ? "KPI Dashboard" : role === "admin" ? "Performance" : "Dashboard",
@@ -23859,6 +23913,10 @@ export function HuswellWorkspace({
             : isManagementRole
               ? "Add and assign leads, then review officer-submitted lead changes from the Approval Center."
               : leads.detail,
+    },
+    "Lead Costing": {
+      title: "Lead & Costing",
+      detail: "Calculate service costs, maintain costing references, and track customer orders.",
     },
     Projects: {
       title: isManagementRole ? "Project oversight" : projects.title,
@@ -24081,6 +24139,8 @@ export function HuswellWorkspace({
       </Panel>
     ) : active === "Dashboard" ? (
       <Dashboard store={store} go={navigate} role={role} orgId={organizationId} />
+    ) : active === "Lead Costing" ? (
+      <DynamicLeadCostingWorkspace organizationId={organizationId} />
     ) : active === "Projects" ? (
       <ProjectCalendar
         store={store}
@@ -24218,30 +24278,31 @@ export function HuswellWorkspace({
         role={role}
       />
     ) : active === "Finance Overview" ? (
-      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} overviewOnly />
+      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} overviewOnly />
     ) : active === "Finance Reports" && isManagementRole ? (
       <GeneralManagerMonthlyFinanceReport orgId={organizationId} />
     ) : active === "Finance Reports" ? (
-      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} reportOnly />
+      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} reportOnly />
     ) : active === "Finance Approvals" ? (
-      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} initialTab="approvals" />
+      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} initialTab="approvals" />
     ) : active === "Finance Transactions" ? (
-      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} initialTab="transactions" openAction={financeActionRequest} onOpenActionHandled={clearFinanceActionRequest} />
+      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} initialTab="transactions" openAction={financeActionRequest} onOpenActionHandled={clearFinanceActionRequest} />
     ) : active === "Finance Accounts" ? (
-      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} initialTab="accounts" />
+      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} initialTab="accounts" />
     ) : active === "Finance Budget" ? (
-      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} initialTab="budget" />
+      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} budgetAction={financeBudgetActionRequest} onBudgetActionHandled={clearFinanceBudgetActionRequest} initialTab="budget" />
     ) : active === "Finance Supplier Costing" ? (
-      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} initialTab="supplier_costing" />
+      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} initialTab="supplier_costing" />
     ) : active === "Finance Payables" ? (
-      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} initialTab="payables" />
+      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} initialTab="payables" />
     ) : active === "Paid commissions" ? (
-      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} initialTab="commission_history" />
+      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} initialTab="commission_history" />
     ) : active === "Finance" ? (
       <DynamicFinanceWorkspace
         key={active}
         organizationId={organizationId}
         role={financeRole}
+        gmBudgetAccess={isManagementRole && hasInternalFinanceAccess}
         openAction={financeActionRequest}
         onOpenActionHandled={clearFinanceActionRequest}
       />
@@ -24330,6 +24391,102 @@ export function HuswellWorkspace({
         role={role}
       />
     );
+  const renderSidebarItem = ({
+    view,
+    icon: Icon,
+    badge,
+  }: {
+    view: View;
+    icon: typeof LayoutDashboard;
+    badge?: number;
+  }) => {
+    const navigationLabel =
+      view === "Dashboard" && isProjectOfficerRole(role)
+        ? "KPI"
+      : role === "admin" && view === "Dashboard"
+          ? "Performance"
+      : view === "Announcements"
+          ? "Announcements"
+        : view === "Policy"
+          ? "Policy"
+        : isManagementRole && view === "Leads"
+            ? "Leads"
+        : isManagementRole && view === "Supplier's List"
+            ? "Suppliers"
+        : isManagementRole && view === "Projects"
+              ? "Production Status"
+        : view === "Projects"
+              ? "Production"
+              : view === "Finance Overview" && (hasInternalFinanceAccess || role === "external_finance")
+                ? "Overview"
+              : view === "Finance Reports"
+                ? "Monthly report"
+              : view === "Finance Approvals"
+                ? "Pending approvals"
+              : view === "Finance Transactions" && role === "external_finance"
+                ? "Transaction"
+              : view === "Finance Transactions" && hasInternalFinanceAccess
+                ? "Transaction history"
+              : view === "Finance Accounts"
+                ? "Accounts"
+              : view === "Finance Budget" && role === "external_finance"
+                ? "Funding requests"
+              : view === "Finance Budget"
+                ? "Budget & allocations"
+              : view === "Finance Supplier Costing"
+                ? "Supplier costing"
+              : view === "Finance Payables"
+                ? "Payables"
+              : view === "Finance" && role === "external_finance"
+                ? "External Finance"
+              : view === "Finance" && hasInternalFinanceAccess
+                ? "Internal Finance"
+              : role === "sales_pricing_officer" && view === "Price Quotation Review"
+                ? "Quotation Review Queue"
+              : view === "Quotation Costing Overview"
+                ? "Costing"
+              : view === "PDF Costing"
+                ? "HP Latex 700W"
+              : isManagementRole && view === "Price Quotations"
+                ? "Quotation"
+              : isManagementRole && view === "Approvals"
+                ? "Approvals"
+              : view === "Approvals"
+                ? "Approval Center"
+              : view === "Payment Monitoring" && hasInternalFinanceAccess
+                ? "Approved projects"
+              : view === "Payment Monitoring"
+                ? "Project Payment History"
+              : view === "Payment Reviews"
+                ? "Payment Reviews"
+              : view;
+    return (
+      <button
+        key={view}
+        onClick={() => {
+          navigate(view);
+          setMobile(false);
+        }}
+        title={badge ? `${navigationLabel}: ${badge > 99 ? "99+" : badge} items requiring attention` : navigationLabel}
+        aria-label={badge ? `${navigationLabel}: ${badge > 99 ? "more than 99" : badge} items requiring attention` : navigationLabel}
+        style={{
+          fontSize: "var(--font-size-body)",
+          lineHeight: "var(--line-height-body)",
+        }}
+        aria-current={active === view ? "page" : undefined}
+        className={`${active === view ? "bg-[var(--color-accent)] font-medium text-[var(--color-on-accent)]" : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)]"} sidebar-item group flex min-h-7 w-full items-center gap-1.5 rounded-[var(--radius-control)] px-2.5 py-0.5 text-left text-[12px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
+      >
+        <Icon
+          size={16}
+          strokeWidth={1.75}
+          className={`${active === view ? "text-[var(--color-on-accent)]" : "text-[var(--color-text-tertiary)] group-hover:text-[var(--color-text-tertiary)]"} shrink-0 transition-colors`}
+        />
+        <span className={`min-w-0 flex-1 truncate ${sidebarCollapsed ? "lg:hidden" : ""}`}>{navigationLabel}</span>
+        {badge ? <span aria-hidden="true" className={`sidebar-badge min-w-5 rounded-full px-1.5 py-0.5 text-center text-[10px] font-semibold ${active === view ? "bg-white text-[var(--color-accent-text)]" : "bg-[var(--color-accent-subtle)] text-[var(--color-accent-text)]"}`}>{badge > 99 ? "99+" : badge}</span> : null}
+      </button>
+    );
+  };
+
   return (
     <div className={`huswell-workspace compact-ui min-h-screen bg-[var(--color-bg)] text-[var(--color-text-primary)] ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside
@@ -24390,99 +24547,49 @@ export function HuswellWorkspace({
           </div>
         )}
         <nav className="sidebar-scroll flex-1 space-y-px overflow-y-auto">
-          {nav.map((group) => (
-            <div key={group.label}>
-              <div className="space-y-px">
-                {group.items.map(({ view, icon: Icon, badge }) => {
-                  const navigationLabel =
-                    view === "Dashboard" && isProjectOfficerRole(role)
-                      ? "KPI"
-                    : role === "admin" && view === "Dashboard"
-                        ? "Performance"
-                    : view === "Announcements"
-                        ? "Announcements"
-                      : view === "Policy"
-                        ? "Policy"
-                      : isManagementRole && view === "Leads"
-                          ? "Leads"
-                      : isManagementRole && view === "Supplier's List"
-                          ? "Suppliers"
-                      : isManagementRole && view === "Projects"
-                            ? "Production Status"
-                      : view === "Projects"
-                            ? "Production"
-                            : view === "Finance Overview" && (hasInternalFinanceAccess || role === "external_finance")
-                              ? "Overview"
-                            : view === "Finance Reports"
-                              ? "Monthly report"
-                            : view === "Finance Approvals"
-                              ? "Pending approvals"
-                            : view === "Finance Transactions" && role === "external_finance"
-                              ? "Transaction"
-                            : view === "Finance Transactions" && hasInternalFinanceAccess
-                              ? "Transaction history"
-                            : view === "Finance Accounts"
-                              ? "Accounts"
-                            : view === "Finance Budget" && role === "external_finance"
-                              ? "Funding requests"
-                            : view === "Finance Budget"
-                              ? "Budget & allocations"
-                            : view === "Finance Supplier Costing"
-                              ? "Supplier costing"
-                            : view === "Finance Payables"
-                              ? "Payables"
-                            : view === "Finance" && role === "external_finance"
-                              ? "External Finance"
-                            : view === "Finance" && hasInternalFinanceAccess
-                              ? "Internal Finance"
-                            : role === "sales_pricing_officer" && view === "Price Quotation Review"
-                              ? "Quotation Review Queue"
-                            : view === "Quotation Costing Overview"
-                              ? "Costing"
-                            : view === "PDF Costing"
-                              ? "HP Latex 700W"
-                            : isManagementRole && view === "Price Quotations"
-                              ? "Quotation"
-                              : isManagementRole && view === "Approvals"
-                                ? "Approvals"
-                              : view === "Approvals"
-                                ? "Approval Center"
-                                : view === "Payment Monitoring" && hasInternalFinanceAccess
-                                  ? "Approved projects"
-                                : view === "Payment Monitoring"
-                                  ? "Project Payment History"
-                                : view === "Payment Reviews"
-                                  ? "Payment Reviews"
-                                : view;
-                  return (
-                    <button
-                    key={view}
-                    onClick={() => {
-                      navigate(view);
-                      setMobile(false);
-                    }}
-                    title={badge ? `${navigationLabel}: ${badge > 99 ? "99+" : badge} items requiring attention` : navigationLabel}
-                    aria-label={badge ? `${navigationLabel}: ${badge > 99 ? "more than 99" : badge} items requiring attention` : navigationLabel}
-                    style={{
-                      fontSize: "var(--font-size-body)",
-                      lineHeight: "var(--line-height-body)",
-                    }}
-                    aria-current={active === view ? "page" : undefined}
-                    className={`${active === view ? "bg-[var(--color-accent)] font-medium text-[var(--color-on-accent)]" : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)]"} sidebar-item group flex min-h-7 w-full items-center gap-1.5 rounded-[var(--radius-control)] px-2.5 py-0.5 text-left text-[12px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
+          {nav.map((group) => {
+            const isFinanceGroup = isManagementRole && group.label === "Finance";
+            const financeGroupActive = group.items.some((item) => item.view === active);
+            const financeBadge = group.items.find((item) => item.badge)?.badge;
+            if (isFinanceGroup) {
+              return (
+                <div key={group.label}>
+                  <button
+                    type="button"
+                    onClick={() => setFinanceMenuOpen((current) => !current)}
+                    aria-expanded={financeMenuOpen}
+                    aria-controls="management-finance-sidebar-items"
+                    aria-label="Finance menu"
+                    title="Finance"
+                    className={`${financeGroupActive ? "bg-[var(--color-accent-subtle)] font-medium text-[var(--color-accent-text)]" : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)]"} sidebar-item group flex min-h-7 w-full items-center gap-1.5 rounded-[var(--radius-control)] px-2.5 py-0.5 text-left text-[12px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)] ${sidebarCollapsed ? "lg:justify-center lg:px-2" : ""}`}
                   >
-                    <Icon
+                    <Wallet
                       size={16}
                       strokeWidth={1.75}
-                      className={`${active === view ? "text-[var(--color-on-accent)]" : "text-[var(--color-text-tertiary)] group-hover:text-[var(--color-text-tertiary)]"} shrink-0 transition-colors`}
+                      className={`${financeGroupActive ? "text-[var(--color-accent-text)]" : "text-[var(--color-text-tertiary)] group-hover:text-[var(--color-text-tertiary)]"} shrink-0 transition-colors`}
                     />
-                    <span className={`min-w-0 flex-1 truncate ${sidebarCollapsed ? "lg:hidden" : ""}`}>{navigationLabel}</span>
-                    {badge ? <span aria-hidden="true" className={`sidebar-badge min-w-5 rounded-full px-1.5 py-0.5 text-center text-[10px] font-semibold ${active === view ? "bg-white text-[var(--color-accent-text)]" : "bg-[var(--color-accent-subtle)] text-[var(--color-accent-text)]"}`}>{badge > 99 ? "99+" : badge}</span> : null}
+                    <span className={`min-w-0 flex-1 truncate ${sidebarCollapsed ? "lg:hidden" : ""}`}>Finance</span>
+                    {financeBadge ? <span aria-hidden="true" className="sidebar-badge min-w-5 rounded-full bg-[var(--color-accent-subtle)] px-1.5 py-0.5 text-center text-[10px] font-semibold text-[var(--color-accent-text)]">{financeBadge > 99 ? "99+" : financeBadge}</span> : null}
+                    <span className={sidebarCollapsed ? "lg:hidden" : ""} aria-hidden="true">
+                      {financeMenuOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                    </span>
                   </button>
-                  );
-                })}
+                  {financeMenuOpen && (
+                    <div id="management-finance-sidebar-items" className={`mt-px space-y-px border-l border-[var(--color-border)] pl-2 ${sidebarCollapsed ? "lg:hidden" : ""}`}>
+                      {group.items.map((item) => renderSidebarItem(item))}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+            return (
+              <div key={group.label}>
+                <div className="space-y-px">
+                  {group.items.map((item) => renderSidebarItem(item))}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </nav>
         <div className="mt-3 border-t border-[var(--color-border)] pt-3">
           {canEditOwnProfile && !isManagementRole && (
@@ -24582,6 +24689,18 @@ export function HuswellWorkspace({
                 <Button compact onClick={() => setFinanceActionRequest("expense")}>
                   <Plus size={13} /> <span className="hidden sm:inline">Cash Out</span><span className="sr-only sm:hidden">Cash Out</span>
                 </Button>
+              </div>
+            )}
+            {active === "Finance Budget" && isManagementRole && (
+              <div className="flex min-w-0 items-center gap-1.5">
+                <button type="button" onClick={() => setFinanceBudgetActionRequest("grant")} className="button-danger min-h-7 px-3 text-[12px]">
+                  <Plus size={13} /> <span>Budget</span>
+                </button>
+                {hasInternalFinanceAccess && (
+                  <button type="button" onClick={() => setFinanceBudgetActionRequest("allocate")} className="button-danger min-h-7 px-3 text-[12px]">
+                    <Wallet size={13} /> <span>Allocate budget</span>
+                  </button>
+                )}
               </div>
             )}
             <span className="sr-only">{activePageHeader.title}</span>

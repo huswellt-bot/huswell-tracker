@@ -60,6 +60,7 @@ export async function requireWorkspaceAccess() {
     .maybeSingle();
 
   const internalFinanceEnabled =
+    membership.role === "admin" ||
     membership.role === "internal_finance" ||
     internalFinanceCapability?.capability === "internal_finance";
 

@@ -7,6 +7,10 @@ import test from "node:test";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const workspace = readFileSync(join(repoRoot, "components", "finance-workspace.tsx"), "utf8");
 const mainWorkspace = readFileSync(join(repoRoot, "components", "huswell-workspace.tsx"), "utf8");
+const superAdminConsole = readFileSync(join(repoRoot, "components", "super-admin-console.tsx"), "utf8");
+const superAdminUsersRoute = readFileSync(join(repoRoot, "app", "api", "super-admin", "users", "route.ts"), "utf8");
+const roleLabels = readFileSync(join(repoRoot, "lib", "role-labels.ts"), "utf8");
+const workspaceAccess = readFileSync(join(repoRoot, "lib", "supabase", "workspace-access.ts"), "utf8");
 const financePage = readFileSync(join(repoRoot, "app", "finance", "page.tsx"), "utf8");
 const financeReportsPage = readFileSync(join(repoRoot, "app", "finance", "reports", "page.tsx"), "utf8");
 const accountantPage = readFileSync(join(repoRoot, "app", "accountant", "page.tsx"), "utf8");
@@ -16,6 +20,10 @@ const migration = existsSync(migrationPath) ? readFileSync(migrationPath, "utf8"
 const followUpMigrationPath = join(repoRoot, "supabase", "233_finance_gm_budget_only_and_legacy_compatibility.sql");
 const followUpMigration = existsSync(followUpMigrationPath)
   ? readFileSync(followUpMigrationPath, "utf8")
+  : "";
+const gmBudgetOperatorMigrationPath = join(repoRoot, "supabase", "migrations", "20261027072401_gm_budget_operator_admin.sql");
+const gmBudgetOperatorMigration = existsSync(gmBudgetOperatorMigrationPath)
+  ? readFileSync(gmBudgetOperatorMigrationPath, "utf8")
   : "";
 const metadataMigrationPath = join(repoRoot, "supabase", "234_finance_accounts_metadata_only.sql");
 const metadataMigration = existsSync(metadataMigrationPath)
@@ -177,11 +185,22 @@ test("budget realtime refresh includes the new monthly allocation tables", () =>
   assert.match(workspace, /finance_account_funding_requests/);
 });
 
-test("GM can grant budget but cannot operate Internal Finance allocation decisions", () => {
+test("the GM role automatically receives operational Finance access", () => {
   assert.match(workspace, /const canManageBudget = role === "internal_finance";/);
   assert.match(workspace, /const canViewBudget = internal \|\| canGrantBudget;/);
-  assert.match(workspace, /canGrantBudget &&/);
-  assert.match(workspace, /canManageBudget && <button type="button" onClick=\{\(\) => openBudgetAllocation\(\)\}/);
+  assert.match(workspace, /const canGrantBudget = budgetOnly \|\| gmBudgetAccess;/);
+  assert.match(mainWorkspace, /const financeRole = hasInternalFinanceAccess\s*\? "internal_finance"\s*:\s*role;/);
+  assert.match(workspaceAccess, /membership\.role === "admin"\s*\|\|/);
+  assert.match(superAdminUsersRoute, /member\.role === "admin"\s*\|\|/);
+  assert.match(superAdminConsole, /Enable Finance operations/);
+  assert.match(superAdminConsole, /role === "sales_pricing_officer"/);
+  assert.match(superAdminUsersRoute, /role === "sales_pricing_officer"/);
+  assert.match(roleLabels, /role === "admin" && internalFinanceEnabled/);
+  const automaticMigrationPath = join(repoRoot, "supabase", "254_gm_finance_operations_automatic.sql");
+  const automaticMigration = readFileSync(automaticMigrationPath, "utf8");
+  assert.match(automaticMigration, /array\['admin', 'internal_finance'\]/);
+  assert.match(automaticMigration, /private\.has_member_capability\(p_organization_id, 'internal_finance'\)/);
+  assert.match(workspace, /const openBudgetAllocation =/);
   assert.match(workspace, /canManageBudget && \["pending", "revision_requested"\]\.includes\(status\)/);
   assert.match(migration, /create or replace function private\.finance_is_budget_operator/);
   assert.match(migration, /not private\.finance_is_budget_operator\(v_organization_id\)/);
@@ -201,7 +220,23 @@ test("finance queue badges use new account funding requests instead of legacy bu
   assert.match(migration, /if private\.finance_is_budget_operator\(p_organization_id\) then/);
 });
 
-test("GM navigation exposes only the Finance budget view and Accountant has no Finance views", () => {
+test("GM budget actions use the navbar and the budget label", () => {
+  assert.match(mainWorkspace, /active === "Finance Budget" && isManagementRole/);
+  assert.match(mainWorkspace, /setFinanceBudgetActionRequest\("grant"\)/);
+  assert.match(mainWorkspace, /setFinanceBudgetActionRequest\("allocate"\)/);
+  assert.match(mainWorkspace, /className="button-danger min-h-7 px-3 text-\[12px\]"/);
+  assert.match(workspace, /budgetAction\?: "grant" \| "allocate" \| null/);
+  assert.doesNotMatch(workspace, /Add top-up|GM budget top-up|GM budget approval or top-up/);
+});
+
+test("full Finance GM access preserves GM budget top-ups", () => {
+  assert.match(workspace, /gmBudgetAccess\?: boolean/);
+  assert.match(workspace, /const canGrantBudget = budgetOnly \|\| gmBudgetAccess/);
+  assert.match(mainWorkspace, /gmBudgetAccess=\{isManagementRole && hasInternalFinanceAccess\}/);
+  assert.match(gmBudgetOperatorMigration, /array\['admin', 'internal_finance'\]/);
+});
+
+test("GM navigation keeps Budget-only by default and exposes full Finance with the capability", () => {
   assert.match(mainWorkspace, /\{ view: "Finance Budget", icon: FileText \}/);
   const accountantStart = mainWorkspace.indexOf('accountant: [');
   const accountantEnd = mainWorkspace.indexOf('internal_finance:', accountantStart);
@@ -211,8 +246,21 @@ test("GM navigation exposes only the Finance budget view and Accountant has no F
   const managementEnd = mainWorkspace.indexOf('] : role === "internal_finance" ?', managementStart);
   assert.ok(managementStart >= 0 && managementEnd > managementStart);
   const managementNav = mainWorkspace.slice(managementStart, managementEnd);
-  assert.match(managementNav, /\{ view: "Finance Budget", icon: FileText \}/);
-  assert.doesNotMatch(managementNav, /Finance Overview|Finance Reports|\{ view: "Finance", icon: Wallet \}|Payment Monitoring/);
+  assert.match(managementNav, /label: "Finance"/);
+  assert.match(managementNav, /label: "Business"/);
+  assert.doesNotMatch(managementNav, /label: "Business"[\s\S]*\.\.\.managementFinanceItems/);
+  const managementFinanceStart = mainWorkspace.indexOf('const managementFinanceItems');
+  const managementFinanceEnd = mainWorkspace.indexOf('const navBase', managementFinanceStart);
+  assert.ok(managementFinanceStart >= 0 && managementFinanceEnd > managementFinanceStart);
+  assert.doesNotMatch(mainWorkspace.slice(managementFinanceStart, managementFinanceEnd), /Finance Overview|Finance Reports/);
+  assert.match(mainWorkspace, /hasInternalFinanceAccess/);
+  assert.match(mainWorkspace, /Finance Overview/);
+  assert.match(mainWorkspace, /Finance Approvals/);
+  assert.match(mainWorkspace, /Finance Accounts/);
+  assert.match(mainWorkspace, /Finance Transactions/);
+  assert.match(mainWorkspace, /financeMenuOpen/);
+  assert.match(mainWorkspace, /management-finance-sidebar-items/);
+  assert.match(mainWorkspace, /aria-expanded=\{financeMenuOpen\}/);
 });
 
 test("direct Finance routes preserve the same role boundary", () => {
@@ -225,7 +273,7 @@ test("direct Finance routes preserve the same role boundary", () => {
   assert.doesNotMatch(homePage, /\["accountant", "internal_finance", "external_finance"\]\.includes\(role\)\) redirect\("\/finance"\)/);
 });
 
-test("GM does not load operational Finance data", () => {
+test("a GM without the Finance capability does not load operational Finance data", () => {
   assert.match(workspace, /const budgetOnly = isGeneralManagerRole\(role\);/);
   assert.match(workspace, /budgetOnly\s*\?\s*emptyFinanceRequest\(\)\s*:\s*client\.from\("finance_transactions"\)/);
   assert.match(workspace, /const canViewBudget = internal \|\| canGrantBudget;/);

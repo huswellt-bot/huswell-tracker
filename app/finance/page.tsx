@@ -21,7 +21,9 @@ export default async function FinancePage() {
   return <HuswellWorkspace
     {...access}
     initialView={
-      ["super_admin", "owner", "admin"].includes(access.role)
+      access.internalFinanceEnabled
+        ? "Finance Overview"
+        : ["super_admin", "owner", "admin"].includes(access.role)
         ? "Finance Budget"
         : "Finance Overview"
     }

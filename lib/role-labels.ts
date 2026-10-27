@@ -4,6 +4,8 @@ export const workspaceRoleLabel = (
 ) => {
   if (role === "sales_pricing_officer" && internalFinanceEnabled)
     return "Internal Finance + Sales & Pricing Officer";
+  if (role === "admin" && internalFinanceEnabled)
+    return "General Manager + Finance Operations";
   switch (role) {
     case "super_admin":
       return "Super Admin";
@@ -21,7 +23,7 @@ export const workspaceRoleLabel = (
     case "external_finance":
       return "External Finance";
     case "lead_coordinator":
-      return "Lead Coordinator";
+      return "Lead & Costing Coordinator";
     default:
       return role.replaceAll("_", " ");
   }

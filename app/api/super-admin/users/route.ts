@@ -31,6 +31,8 @@ const isMissingProductionApprovalTable = (
 const isMissingMemberCapabilityTable = (
   error: { code?: string } | null | undefined,
 ) => Boolean(error && ["42P01", "PGRST205"].includes(error.code ?? ""));
+const canReceiveInternalFinanceCapability = (role: string | null) =>
+  role === "sales_pricing_officer";
 
 async function getSuperAdminOrganization() {
   const supabase = await createClient();
@@ -212,6 +214,7 @@ export async function GET() {
           email: user?.email ?? "—",
           role: member.role,
           internal_finance_enabled:
+            member.role === "admin" ||
             member.role === "internal_finance" ||
             internalFinanceUserIds.has(member.user_id),
           project_types: projectTypesByUserId.get(member.user_id) ?? [],
@@ -261,7 +264,7 @@ export async function POST(request: Request) {
       : null;
   const productionApprovalEnabled = body?.production_approval_enabled === true;
   const internalFinanceEnabled =
-    role === "sales_pricing_officer" &&
+    canReceiveInternalFinanceCapability(role) &&
     body?.internal_finance_enabled === true;
   if (
     !fullName ||
@@ -466,7 +469,7 @@ export async function PATCH(request: Request) {
   )
     return json({ error: capabilityReadError.message }, 500);
   const internalFinanceEnabled =
-    role === "sales_pricing_officer" &&
+    canReceiveInternalFinanceCapability(role) &&
     (typeof body?.internal_finance_enabled === "boolean"
       ? body.internal_finance_enabled
       : existingCapability?.capability === "internal_finance");

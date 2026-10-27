@@ -46,6 +46,7 @@ type UserFormValues = {
   email: string;
   password: string;
   role: string;
+  internal_finance_enabled: boolean;
   project_types: string[];
   production_approval_enabled: boolean;
 };
@@ -53,6 +54,8 @@ type UserFormValues = {
 const displayRole = (role: string, internalFinanceEnabled = false) =>
   workspaceRoleLabel(role, internalFinanceEnabled);
 const isPricingRole = (role: string) =>
+  role === "sales_pricing_officer";
+const canReceiveInternalFinanceCapability = (role: string) =>
   role === "sales_pricing_officer";
 const titleCase = (value: string) =>
   value.replace(
@@ -87,6 +90,7 @@ export function SuperAdminConsole({
     email: "",
     password: "",
     role: "project_manager",
+    internal_finance_enabled: false,
     project_types: [],
     production_approval_enabled: false,
   });
@@ -95,6 +99,7 @@ export function SuperAdminConsole({
     email: "",
     password: "",
     role: "project_manager",
+    internal_finance_enabled: false,
     project_types: [],
     production_approval_enabled: false,
   });
@@ -217,6 +222,7 @@ export function SuperAdminConsole({
       email: "",
       password: "",
       role: "project_manager",
+      internal_finance_enabled: false,
       project_types: [],
       production_approval_enabled: false,
     });
@@ -238,6 +244,7 @@ export function SuperAdminConsole({
       email: user.email,
       password: "",
       role: user.role,
+      internal_finance_enabled: user.internal_finance_enabled,
       project_types: user.project_types ?? [],
       production_approval_enabled: user.production_approval_enabled,
     });
@@ -604,6 +611,10 @@ export function SuperAdminConsole({
                     setEditValues({
                       ...editValues,
                       role,
+                      internal_finance_enabled:
+                        canReceiveInternalFinanceCapability(role)
+                          ? editValues.internal_finance_enabled
+                          : false,
                       production_approval_enabled:
                         role === "sales_pricing_officer"
                           ? editValues.production_approval_enabled
@@ -617,7 +628,7 @@ export function SuperAdminConsole({
                   <option value="sales_pricing_officer">Sales &amp; Pricing Officer</option>
                   <option value="internal_finance">Internal Finance</option>
                   <option value="external_finance">External Finance</option>
-                  <option value="lead_coordinator">Lead Coordinator</option>
+                  <option value="lead_coordinator">Lead &amp; Costing Coordinator</option>
                 </select>
               </label>
               {isPricingRole(editValues.role) && (
@@ -645,6 +656,27 @@ export function SuperAdminConsole({
                     ))}
                   </div>
                 </fieldset>
+              )}
+              {canReceiveInternalFinanceCapability(editValues.role) && (
+                <label className="flex items-start gap-2 rounded-lg border border-[#dfe5ed] bg-white p-3 text-[13px] font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={editValues.internal_finance_enabled}
+                    onChange={(event) =>
+                      setEditValues({
+                        ...editValues,
+                        internal_finance_enabled: event.target.checked,
+                      })
+                    }
+                    className="mt-0.5 size-4 accent-[#c43b43]"
+                  />
+                  <span>
+                    <span className="block">Enable Finance operations</span>
+                    <span className="mt-0.5 block text-[12px] font-normal text-[#7d8797]">
+                      Allows this account to manage Finance accounts, budgets, and transaction approvals.
+                    </span>
+                  </span>
+                </label>
               )}
               {isPricingRole(editValues.role) && (
                 <label className="flex items-start gap-2 rounded-lg border border-[#dfe5ed] bg-white p-3 text-[13px] font-semibold">
@@ -762,7 +794,7 @@ export function SuperAdminConsole({
               <div>
                 <h2 className="text-[17px] font-semibold">Add User</h2>
                 <p className="mt-1 text-[14px] text-[#7d8797]">
-                  Create a Sales Executive, General Manager, Sales &amp; Pricing Officer, Finance, or Lead Coordinator login.
+                  Create a Sales Executive, General Manager, Sales &amp; Pricing Officer, Finance, or Lead &amp; Costing Coordinator login.
                 </p>
               </div>
               <button
@@ -812,6 +844,10 @@ export function SuperAdminConsole({
                     setValues({
                       ...values,
                       role,
+                      internal_finance_enabled:
+                        canReceiveInternalFinanceCapability(role)
+                          ? values.internal_finance_enabled
+                          : false,
                       production_approval_enabled:
                         role === "sales_pricing_officer"
                           ? values.production_approval_enabled
@@ -825,7 +861,7 @@ export function SuperAdminConsole({
                   <option value="sales_pricing_officer">Sales &amp; Pricing Officer</option>
                   <option value="internal_finance">Internal Finance</option>
                   <option value="external_finance">External Finance</option>
-                  <option value="lead_coordinator">Lead Coordinator</option>
+                  <option value="lead_coordinator">Lead &amp; Costing Coordinator</option>
                 </select>
               </label>
               {isPricingRole(values.role) && (
@@ -871,6 +907,27 @@ export function SuperAdminConsole({
                     <span className="block">Can approve production</span>
                     <span className="mt-0.5 block text-[12px] font-normal text-[#7d8797]">
                       Allows approval of new production requests, date revisions, and project completion requests.
+                    </span>
+                  </span>
+                </label>
+              )}
+              {canReceiveInternalFinanceCapability(values.role) && (
+                <label className="flex items-start gap-2 rounded-lg border border-[#dfe5ed] bg-white p-3 text-[13px] font-semibold">
+                  <input
+                    type="checkbox"
+                    checked={values.internal_finance_enabled}
+                    onChange={(event) =>
+                      setValues({
+                        ...values,
+                        internal_finance_enabled: event.target.checked,
+                      })
+                    }
+                    className="mt-0.5 size-4 accent-[#c43b43]"
+                  />
+                  <span>
+                    <span className="block">Enable Finance operations</span>
+                    <span className="mt-0.5 block text-[12px] font-normal text-[#7d8797]">
+                      Allows this account to manage Finance accounts, budgets, and transaction approvals.
                     </span>
                   </span>
                 </label>

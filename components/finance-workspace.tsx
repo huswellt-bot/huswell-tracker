@@ -1961,6 +1961,9 @@ function FinanceLoadingState({ cardCount = 4 }: { cardCount?: number }) {
 export function FinanceWorkspace({
   organizationId,
   role,
+  gmBudgetAccess = false,
+  budgetAction = null,
+  onBudgetActionHandled,
   overviewOnly = false,
   reportOnly = false,
   initialTab,
@@ -1969,6 +1972,9 @@ export function FinanceWorkspace({
 }: {
   organizationId: string;
   role: string;
+  gmBudgetAccess?: boolean;
+  budgetAction?: "grant" | "allocate" | null;
+  onBudgetActionHandled?: () => void;
   overviewOnly?: boolean;
   reportOnly?: boolean;
   initialTab?: Tab;
@@ -1977,7 +1983,7 @@ export function FinanceWorkspace({
 }) {
   const client = useMemo(() => createClient(), []);
   const budgetOnly = isGeneralManagerRole(role);
-  const canGrantBudget = budgetOnly;
+  const canGrantBudget = budgetOnly || gmBudgetAccess;
   const internal = isInternalRole(role);
   const canViewBudget = internal || canGrantBudget;
   const canCreateCategory = internal || role === "external_finance";
@@ -3903,7 +3909,7 @@ export function FinanceWorkspace({
     if (error) return setErrorMessage(error.message);
     setGrantOpen(false);
     setGrantValues({ amount: "", note: "" });
-    setMessage(currentBudgetGrants.length ? "GM budget top-up added to this month." : "GM monthly budget approved.");
+    setMessage("GM budget added to this month.");
     await load();
   };
 
@@ -3912,6 +3918,13 @@ export function FinanceWorkspace({
     setAllocationValues({ from_account_id: fromAccountId, to_account_id: "", amount: "" });
     setAllocationOpen(true);
   };
+
+  useEffect(() => {
+    if (!budgetAction) return;
+    if (budgetAction === "grant" && canGrantBudget) openBudgetGrant();
+    if (budgetAction === "allocate" && canManageBudget) openBudgetAllocation();
+    onBudgetActionHandled?.();
+  }, [budgetAction, canGrantBudget, canManageBudget, onBudgetActionHandled]);
 
   const saveBudgetAllocation = async () => {
     if (!canManageBudget) return setErrorMessage("Only Internal Finance can allocate or reallocate budget.");
@@ -4538,7 +4551,7 @@ export function FinanceWorkspace({
         <Panel
           title={canViewBudget ? "Budget & allocations" : "Account funding requests"}
           detail={canViewBudget ? "The GM approves the monthly spending limit. Internal Finance distributes it across active accounts, and each allocation is added to that account's available cash." : "Request budget for a specific active account. Internal Finance decides the approved amount from the GM monthly pool."}
-          action={canViewBudget ? <span className="flex flex-wrap gap-2">{canGrantBudget && <button type="button" onClick={openBudgetGrant} className={primaryButton}><Plus size={13} /> {currentBudgetGrants.length ? "Add top-up" : "Add budget"}</button>}{canManageBudget && <button type="button" onClick={() => openBudgetAllocation()} className="button-secondary"><Wallet size={13} /> Allocate budget</button>}</span> : <button type="button" onClick={openFundingRequest} className={primaryButton}><Plus size={13} /> Request account funding</button>}
+          action={!canViewBudget && canRequestBudget ? <button type="button" onClick={openFundingRequest} className={primaryButton}><Plus size={13} /> Request account funding</button> : undefined}
         >
           {canViewBudget ? (
             <>
@@ -5204,7 +5217,7 @@ export function FinanceWorkspace({
 
       {budgetOpen && <FinanceDialog title={budgetRevision ? "Revise account funding request" : "Request account funding"} detail="Choose the active account that needs budget. Account balances are not shown here." close={closeBudgetForm}><div className="mt-5 space-y-3"><label className="field-label">Account<SearchableSelect options={fundingRequestAccounts.map((account) => ({ value: String(account.id), label: stringValue(account, "account_name"), searchText: stringValue(account, "account_name") }))} value={budgetValues.account_id} onChange={(value) => setBudgetValues((current) => ({ ...current, account_id: value }))} placeholder={fundingRequestAccounts.length ? "Choose account" : "No active account available"} searchPlaceholder="Search account names" ariaLabel="Account for funding request" required clearable={false} disabled={!fundingRequestAccounts.length} className="mt-1" /></label><label className="field-label">Requested amount<NumberInput min="0.01" step="0.01" value={budgetValues.amount} onChange={(value) => setBudgetValues((current) => ({ ...current, amount: value }))} className="input mt-1" /></label><label className="field-label">Note<textarea value={budgetValues.note} onChange={(event) => setBudgetValues((current) => ({ ...current, note: event.target.value }))} className="input mt-1 min-h-24" placeholder="Explain why this account needs budget" /></label></div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={closeBudgetForm} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveFundingRequest()} disabled={saving} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} {budgetRevision ? "Resubmit request" : "Submit request"}</button></div></FinanceDialog>}
 
-      {grantOpen && <FinanceDialog title={currentBudgetGrants.length ? "Add GM budget top-up" : "Add GM monthly budget"} detail="This changes the approved spending-limit pool only. It does not record Cash In or increase an account's actual balance." close={() => setGrantOpen(false)} compact><div className="mt-5 space-y-3"><label className="field-label">Approved amount<NumberInput min="0.01" step="0.01" value={grantValues.amount} onChange={(value) => setGrantValues((current) => ({ ...current, amount: value }))} className="input mt-1" /></label><label className="field-label">Note<textarea value={grantValues.note} onChange={(event) => setGrantValues((current) => ({ ...current, note: event.target.value }))} className="input mt-1 min-h-24" placeholder="Explain the GM budget approval or top-up" /></label></div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setGrantOpen(false)} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveBudgetGrant()} disabled={saving} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} Save budget</button></div></FinanceDialog>}
+      {grantOpen && <FinanceDialog title="Add GM budget" detail="This changes the approved spending-limit pool only. It does not record Cash In or increase an account's actual balance." close={() => setGrantOpen(false)} compact><div className="mt-5 space-y-3"><label className="field-label">Approved amount<NumberInput min="0.01" step="0.01" value={grantValues.amount} onChange={(value) => setGrantValues((current) => ({ ...current, amount: value }))} className="input mt-1" /></label><label className="field-label">Note<textarea value={grantValues.note} onChange={(event) => setGrantValues((current) => ({ ...current, note: event.target.value }))} className="input mt-1 min-h-24" placeholder="Explain the GM budget approval" /></label></div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setGrantOpen(false)} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveBudgetGrant()} disabled={saving} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} Save budget</button></div></FinanceDialog>}
 
       {allocationOpen && <FinanceDialog title={allocationMode === "reallocate" ? "Reallocate account budget" : "Allocate budget to account"} detail={allocationMode === "reallocate" ? "Only unused and uncommitted budget can move from the source account." : "Distribute the current GM pool to an active account."} close={() => setAllocationOpen(false)} compact><div className="mt-5 space-y-3">{allocationMode === "reallocate" && <label className="field-label">From account<select value={allocationValues.from_account_id} onChange={(event) => setAllocationValues((current) => ({ ...current, from_account_id: event.target.value }))} className="input mt-1"><option value="">Choose source account</option>{activeAccounts.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")}</option>)}</select></label>}<label className="field-label">{allocationMode === "reallocate" ? "To account" : "Account"}<select value={allocationValues.to_account_id} onChange={(event) => setAllocationValues((current) => ({ ...current, to_account_id: event.target.value }))} className="input mt-1"><option value="">Choose account</option>{activeAccounts.filter((account) => allocationMode !== "reallocate" || String(account.id) !== allocationValues.from_account_id).map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")}</option>)}</select></label><label className="field-label">Amount<NumberInput min="0.01" step="0.01" value={allocationValues.amount} onChange={(value) => setAllocationValues((current) => ({ ...current, amount: value }))} className="input mt-1" /></label></div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setAllocationOpen(false)} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveBudgetAllocation()} disabled={saving} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} {allocationMode === "reallocate" ? "Reallocate" : "Allocate"}</button></div></FinanceDialog>}
 

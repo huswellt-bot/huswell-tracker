@@ -13,7 +13,7 @@ test("Pricing Officer UI exposes one approved price input per quotation item", (
 
 test("review submission uses the structured approved-price RPCs", () => {
   assert.match(workspace, /pricing_review_price_quotation_with_approved_prices/);
-  assert.match(workspace, /pricing_review_price_quotation_with_commission_and_approved_prices/);
+  assert.match(workspace, /pricing_review_price_quotation_commission_approved_prices/);
   assert.match(workspace, /p_approved_selling_prices: approvedSellingPricesPayload/);
 });
 
