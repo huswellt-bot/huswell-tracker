@@ -16068,7 +16068,7 @@ function PriceQuotationWorkspace({
   };
   const showPaymentStatus = quotationTab === "approved";
   const quotationSectionTabs = isGeneralManager
-    ? (["pending", "needs_revision", "approved"] as const)
+    ? (["approved"] as const)
     : (["draft", "pending", "needs_revision", "approved"] as const);
   const quotationTableLabels = isProjectOfficerRole(role)
     ? ["Quotation", "Project", "Client's Name", "Company Name", "Status", "Revision", "Note", ...(showPaymentStatus ? ["Payment status", "Verified", "Total"] : []), "Date", "Actions"]
