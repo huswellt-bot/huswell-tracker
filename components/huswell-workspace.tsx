@@ -1171,40 +1171,6 @@ const isAssignedPricingOfficerVisible = (quote: Row, userId: string | null) => {
   const status = text(quote.status, "");
   return [`pending`, `pending_gm_approval`, `approved`].includes(status) || isPricingOfficerRevision(quote);
 };
-const comparableDisplayText = (value: unknown) =>
-  text(value, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
-const stackedCell = (
-  primary: unknown,
-  secondary?: unknown | unknown[],
-  separator = " - ",
-) => {
-  const primaryText = text(primary);
-  const primaryComparable = comparableDisplayText(primaryText);
-  const detailText = (Array.isArray(secondary) ? secondary : [secondary])
-    .map((value) => text(value, "").trim())
-    .filter(Boolean)
-    .filter((value, index, values) => {
-      const comparable = comparableDisplayText(value);
-      return comparable && comparable !== primaryComparable && values.findIndex((item) => comparableDisplayText(item) === comparable) === index;
-    })
-    .join(separator);
-
-  return (
-    <>
-      <b>{primaryText}</b>
-      {detailText && <small>{detailText}</small>}
-    </>
-  );
-};
-const distinctQuotationProject = (quotation: Row, companyName: unknown) => {
-  const projectName = text(quotation.project_name, "").trim();
-  return comparableDisplayText(projectName) === comparableDisplayText(companyName)
-    ? ""
-    : projectName;
-};
 const policyStoragePath = (value: unknown, organizationId: string) => {
   const rawValue = text(value, "").trim();
   if (!rawValue) return "";
@@ -2438,10 +2404,8 @@ const directory: Module = {
     { key: "tin", label: "TIN" },
   ],
   columns: [
-    {
-      label: "Customer",
-      value: (r) => stackedCell(r.company_name, r.contact_name),
-    },
+    { label: "Company name", value: (r) => text(r.company_name, "—") },
+    { label: "Client's Name", value: (r) => text(r.contact_name, "—") },
     { label: "Contact", value: (r) => text(r.phone) },
     { label: "Email", value: (r) => text(r.email) },
     {
@@ -2522,8 +2486,8 @@ const leads: Module = {
   ],
   columns: [
     {
-      label: "Lead / project",
-      value: (r) => stackedCell(r.project_name, r.client_name),
+      label: "Project",
+      value: (r) => text(r.project_name, "—"),
     },
     { label: "Client's Name", value: (r) => text(r.contact_name, "—") },
     { label: "Company name", value: (r) => text(r.client_name, "—") },
@@ -2585,10 +2549,8 @@ const supplierDirectory: Module = {
     { key: "address", label: "Address", type: "textarea" },
   ],
   columns: [
-    {
-      label: "Supplier",
-      value: (r) => stackedCell(r.company_name, r.contact_name),
-    },
+    { label: "Supplier", value: (r) => text(r.company_name, "—") },
+    { label: "Contact person", value: (r) => text(r.contact_name, "—") },
     { label: "Address", value: (r) => text(r.address) },
     { label: "Email", value: (r) => text(r.email) },
     { label: "Phone", value: (r) => text(r.phone) },
@@ -2636,10 +2598,8 @@ const catalog: Module = {
     { key: "reorder_level", label: "Low-stock alert", type: "number" },
   ],
   columns: [
-    {
-      label: "Item",
-      value: (r) => stackedCell(r.name, r.sku),
-    },
+    { label: "Item", value: (r) => text(r.name, "—") },
+    { label: "SKU", value: (r) => text(r.sku, "—") },
     { label: "Type", value: (r) => <Status value={r.item_type} /> },
     {
       label: "Total cost",
@@ -2707,14 +2667,13 @@ const inventory: Module = {
     { key: "reorder_level", label: "Low-stock alert", type: "number" },
   ],
   columns: [
-    {
-      label: "Supply",
-      value: (r) => stackedCell(r.name, r.sku),
-    },
+    { label: "Supply", value: (r) => text(r.name, "—") },
+    { label: "SKU", value: (r) => text(r.sku, "—") },
     {
       label: "Available",
-      value: (r) => `${n(r.quantity_on_hand)} ${text(r.unit)}`,
+      value: (r) => n(r.quantity_on_hand),
     },
+    { label: "Unit", value: (r) => text(r.unit, "—") },
     { label: "Unit cost", value: (r) => peso.format(n(r.standard_cost)) },
     {
       label: "Value",
@@ -4290,7 +4249,8 @@ function LeadCoordinatorTransferredLeads({
               <Table
                 labels={[
                   "Date transferred",
-                  "Name / Company",
+                  "Client's Name",
+                  "Company Name",
                   "Project",
                   "Transferred to",
                   "Lead status",
@@ -4298,15 +4258,14 @@ function LeadCoordinatorTransferredLeads({
                 minWidth={980}
                 scrollable
                 scrollContainerClassName="max-h-[560px]"
-                columnWidths={["145px", "260px", "240px", "240px", "150px"]}
+                columnWidths={["145px", "160px", "190px", "220px", "220px", "150px"]}
                 className="lead-coordinator-table modern-page-table"
               >
                 {filteredRows.map((row) => (
                   <tr key={text(row.transfer_id, text(row.lead_id))} className="hover:bg-[#fbfcff]">
                     <td className="px-5 py-3 align-middle">{day(row.transferred_at)}</td>
-                    <td className="px-5 py-3 align-middle">
-                      {stackedCell(row.contact_name, row.client_name)}
-                    </td>
+                    <td className="px-5 py-3 align-middle">{text(row.contact_name, "—")}</td>
+                    <td className="px-5 py-3 align-middle">{text(row.client_name, "—")}</td>
                     <td className="px-5 py-3 align-middle">
                       {text(row.project_name, "-")}
                     </td>
@@ -4472,7 +4431,8 @@ function PricingOfficerActiveEndorsements({
               <Table
                 labels={[
                   "Date endorsed",
-                  "Name / Company",
+                  "Client's Name",
+                  "Company Name",
                   "Project",
                   "Endorsed to",
                   "Lead status",
@@ -4480,15 +4440,14 @@ function PricingOfficerActiveEndorsements({
                 minWidth={980}
                 scrollable
                 scrollContainerClassName="max-h-[560px]"
-                columnWidths={["145px", "260px", "240px", "240px", "150px"]}
+                columnWidths={["145px", "160px", "190px", "220px", "220px", "150px"]}
                 className="lead-coordinator-table modern-page-table"
               >
                 {filteredRows.map((row) => (
                   <tr key={text(row.lead_id)} className="hover:bg-[#fbfcff]">
                     <td className="px-5 py-3 align-middle">{day(row.endorsed_at)}</td>
-                    <td className="px-5 py-3 align-middle">
-                      {stackedCell(row.contact_name, row.client_name)}
-                    </td>
+                    <td className="px-5 py-3 align-middle">{text(row.contact_name, "—")}</td>
+                    <td className="px-5 py-3 align-middle">{text(row.client_name, "—")}</td>
                     <td className="px-5 py-3 align-middle">
                       {text(row.project_name, "-")}
                     </td>
@@ -6346,22 +6305,8 @@ function Records({
             (column) =>
               column.label !== "Outbound caller" &&
               (isProjectsPage || column.label !== "Lead / project") &&
-              (!(isProjectsPage || isLeadCoordinator) ||
-                !["Endorse By", "Endorse To", "Endorse Date"].includes(column.label)),
+              !["Endorse By", "Endorse To", "Endorse Date"].includes(column.label),
           )
-          .map((column) => {
-            if (column.label === "Endorse By" || column.label === "Endorse To") {
-              const field = column.label === "Endorse By" ? "endorsed_by" : "endorsed_to";
-              return {
-                ...column,
-                value: (row: Row) => {
-                  const name = text(profileNameById.get(text(row[field], "")), "-");
-                  return name.includes("@") ? name.split("@")[0] : name;
-                },
-              };
-            }
-            return column;
-          })
       : module.columns;
   const assignmentColumn = {
     label: "Sales Officer",
@@ -7355,10 +7300,10 @@ function Records({
               {visibleOwnLeadChangeRequests.length ? (
                 <div className="lead-change-request-shell">
                   <Table
-                    labels={["Name / Company", "Request", "Submitted", "Status", "Your note", "GM note", "Actions"]}
+                    labels={["Client's Name", "Company Name", "Request", "Submitted", "Status", "Your note", "GM note", "Actions"]}
                     minWidth={1120}
                     scrollable
-                    columnWidths={["24%", "21%", "11%", "12%", "11%", "11%", "10%"]}
+                    columnWidths={["13%", "15%", "18%", "10%", "11%", "11%", "11%", "11%"]}
                     className="lead-change-request-table modern-page-table"
                   >
                     {visibleOwnLeadChangeRequests.map((request) => {
@@ -7372,10 +7317,11 @@ function Records({
                         : labels.length <= 2
                           ? labels.join(", ")
                           : `${labels.slice(0, 2).join(", ")} +${labels.length - 2} more`;
-                      const name = display.contactName || display.clientName || (display.deleted ? "Deleted lead" : "Lead record unavailable");
+                      const clientName = display.contactName || (display.deleted ? "Deleted lead" : "Lead record unavailable");
                       return (
                         <tr key={text(request.id)} className="hover:bg-[#fbfcff]">
-                          <td className="px-5 py-3">{stackedCell(name, [display.clientName, display.projectName, display.deleted ? "Deleted lead" : ""])}</td>
+                          <td className="px-5 py-3">{clientName}</td>
+                          <td className="px-5 py-3">{display.clientName || "—"}</td>
                           <td className="px-5 py-3">{changeSummary || "-"}</td>
                           <td className="px-5 py-3">{day(request.submitted_at)}</td>
                           <td className="px-5 py-3"><Status value={request.status} /></td>
@@ -9254,7 +9200,7 @@ function QuotationPaymentDialog({
                 {summary.pending > 0 && <span className="text-[11px] font-medium text-[#a76605]">{peso.format(summary.pending)} pending review</span>}
               </div>
               {records.length ? <div className="overflow-x-auto rounded-[8px] border border-[#e1e6ee]">
-                <Table labels={["Paid date", "Type", "Amount", "Received into", "Receipt", "Status", "Notes", "Review"]} minWidth={1020}>
+                <Table labels={["Paid date", "Type", "Amount", "Received into", "Payment method", "Reference", "Receipt", "Status", "Notes", "Review"]} minWidth={1180}>
                   {records.map((payment) => {
                     const paymentId = text(payment.id);
                     const status = text(payment.status);
@@ -9269,10 +9215,11 @@ function QuotationPaymentDialog({
                       <td className="px-3 py-2.5">
                         <div className="space-y-1">
                           <span className="block">{paymentAccount?.account_name ?? (paymentAccountId ? "Account no longer active" : "Legacy account mapping")}</span>
-                          <small>{paymentAccount ? quotationPaymentMethodLabel(paymentAccount.payment_method) : quotationPaymentMethodLabel(payment.method)}{text(payment.reference_no) ? ` · Ref ${text(payment.reference_no)}` : ""}</small>
                           {canManagePaymentAccount && status === "pending" && <button type="button" disabled={accountSaving || working} onClick={() => openAccountRequest(payment)} className="inline-flex items-center gap-1 text-[10px] font-medium text-[#c43b43] hover:text-[#9f2934] disabled:cursor-not-allowed disabled:opacity-50"><Pencil size={11} /> {paymentAccountId ? "Change account" : "Assign account"}</button>}
                         </div>
                       </td>
+                      <td className="px-3 py-2.5">{paymentAccount ? quotationPaymentMethodLabel(paymentAccount.payment_method) : quotationPaymentMethodLabel(payment.method)}</td>
+                      <td className="px-3 py-2.5">{text(payment.reference_no, "—")}</td>
                       <td className="px-3 py-2.5">{receiptUrls[paymentId] ? <a href={receiptUrls[paymentId]} target="_blank" rel="noreferrer" className="inline-flex size-11 overflow-hidden rounded-[6px] border border-[#d9e0e9] bg-[#fafbfc]"><img src={receiptUrls[paymentId]} alt={text(payment.receipt_file_name, "Payment receipt")} className="size-full object-cover" /></a> : <span className="inline-flex items-center gap-1 text-[11px] text-[#8b92a1]"><ReceiptText size={14} /> Loading</span>}</td>
                       <td className="px-3 py-2.5"><Status value={status === "revision_requested" ? "needs revision" : status} /></td>
                       <td className="px-3 py-2.5">
@@ -9577,7 +9524,7 @@ function PaymentMonitoring({
         {rows.length ? (
           <>
           <div className="modern-table-shell">
-          <Table labels={["Project", "Client", "Prepared by", "Payment status", "Pending", "Verified / Total", "Last receipt", isExternalFinance ? "Payments" : isInternalFinance ? "View" : "Review"]} minWidth={1120}>
+          <Table labels={["Quotation", "Project", "Client's Name", "Company Name", "Prepared by", "Payment status", "Pending", "Verified", "Total", "Last receipt", isExternalFinance ? "Payments" : isInternalFinance ? "View" : "Review"]} minWidth={1400}>
             {visiblePaymentRows.map(({ quote, allRecords, pendingForReview, summary }) => {
               const party = quotationParty(quote, store);
               const preparedBy = text(store.profiles.find((profile) => profile.id === (quote.prepared_by_user_id ?? quote.created_by))?.full_name, text(quote.representative, "Sales Executive"));
@@ -9585,12 +9532,15 @@ function PaymentMonitoring({
                 ? pendingForReview.reduce((sum, payment) => sum + n(payment.amount), 0)
                 : summary.pending;
               return <tr key={text(quote.id)}>
-                <td className="px-5 py-3">{stackedCell(quote.quotation_no, ["Price Quotation", quote.project_name])}</td>
-                <td className="px-5 py-3">{stackedCell(party.clientName, party.companyName)}</td>
+                <td className="px-5 py-3">{text(quote.quotation_no, "—")}</td>
+                <td className="px-5 py-3">{text(quote.project_name, "—")}</td>
+                <td className="px-5 py-3">{party.clientName}</td>
+                <td className="px-5 py-3">{party.companyName}</td>
                 <td className="px-5 py-3">{preparedBy}</td>
                 <td className="px-5 py-3"><PaymentStatusBadge status={summary.status} /></td>
                 <td className="px-5 py-3 font-medium text-[#a76605]">{peso.format(pendingAmountForRow)}</td>
-                <td className="px-5 py-3">{peso.format(summary.verified)} / {peso.format(summary.total)}</td>
+                <td className="px-5 py-3">{peso.format(summary.verified)}</td>
+                <td className="px-5 py-3">{peso.format(summary.total)}</td>
                 <td className="px-5 py-3">{allRecords[0] ? day(allRecords[0].paid_at ?? allRecords[0].submitted_at ?? allRecords[0].created_at) : "-"}</td>
                 <td className="px-5 py-3"><ActionIcon label={paymentActionLabel} confirm={false} onClick={() => setPaymentQuote(quote)}><ReceiptText size={15} /></ActionIcon></td>
               </tr>;
@@ -9888,7 +9838,7 @@ function QuotationCostingOverview({
         )}
         {filteredCostedQuotations.length ? (
           <div className="modern-table-shell">
-          <Table labels={isGeneralManager ? ["Select", "Price Quotation", "Client", "Project Type", "Status", "Costed", "Actions"] : ["Price Quotation", "Client", "Project Type", "Status", "Costed", "Actions"]} minWidth={isGeneralManager ? 960 : 900} className="!w-full">
+          <Table labels={isGeneralManager ? ["Select", "Price Quotation", "Project", "Client's Name", "Company Name", "Project Type", "Status", "Costed", "Actions"] : ["Price Quotation", "Project", "Client's Name", "Company Name", "Project Type", "Status", "Costed", "Actions"]} minWidth={isGeneralManager ? 1260 : 1200} className="!w-full">
             {filteredCostedQuotations.map((quote) => {
               const party = quotationParty(quote, store);
               return (
@@ -9903,8 +9853,10 @@ function QuotationCostingOverview({
                       />
                     </td>
                   )}
-                  <td className="px-5 py-3">{stackedCell(quote.quotation_no, quote.project_name)}</td>
-                  <td className="px-5 py-3">{stackedCell(party.clientName, party.companyName)}</td>
+                  <td className="px-5 py-3">{text(quote.quotation_no, "—")}</td>
+                  <td className="px-5 py-3">{text(quote.project_name, "—")}</td>
+                  <td className="px-5 py-3">{party.clientName}</td>
+                  <td className="px-5 py-3">{party.companyName}</td>
                   <td className="px-5 py-3">{text(quote.project_types)}</td>
                   <td className="px-5 py-3"><Status value={quote.status} /></td>
                   <td className="px-5 py-3">{day(quote.pricing_reviewed_at ?? quote.updated_at)}</td>
@@ -14238,11 +14190,11 @@ function Quotations({
                   ? "modern-page-table quotation-list-table"
                   : undefined
               }
-              minWidth={760}
+              minWidth={isCosting ? 980 : 820}
               scrollable={pageLayout}
               labels={[
                 isCosting ? "Costing Breakdown" : "Price Quotation",
-                isCosting ? "Client's Name / Company" : "Customer / project",
+                ...(isCosting ? ["Client's Name", "Company Name"] : ["Project"]),
                 "Estimated COGS",
                 "Prepared by",
                 isCosting ? "Approval" : "GM approval",
@@ -14269,14 +14221,12 @@ function Quotations({
                     ?.full_name,
                   "Sales Officer",
                 );
+                const party = quotationParty(q, store);
                 return (
                 <tr key={text(q.id)}>
-                  <td className="px-5 py-3">
-                    {stackedCell(q.quotation_no, day(q.issue_date))}
-                  </td>
-                  <td className="px-5 py-3">
-                    <b>{text(q.project_name)}</b>
-                  </td>
+                  <td className="px-5 py-3">{text(q.quotation_no, "—")}</td>
+                  <td className="px-5 py-3">{isCosting ? party.clientName : text(q.project_name, "—")}</td>
+                  {isCosting && <td className="px-5 py-3">{party.companyName}</td>}
                   <td className="px-5 py-3 text-right tabular-nums">
                     {peso.format(n(q.total_cost))}
                   </td>
@@ -14286,9 +14236,6 @@ function Quotations({
                   <td className="px-5 py-3 text-center">
                     <div className="flex items-center justify-center gap-1.5">
                       <Status value={q.status} />
-                      {revisionRequest && (
-                        <span className="text-[11px] text-[#a76605]">Revision requested</span>
-                      )}
                       {isCosting && text(q.status) === "needs_revision" && text(q.revision_note, "") && (
                           <NoteAction
                             label="View revision note"
@@ -15425,15 +15372,17 @@ function PriceQuotationSubmissions({
       ) : activeSubmissions.length ? (
         <>
         <div className="modern-table-shell">
-        <Table labels={["Price Quotation", "Client's Name", "Company Name", "Assigned to", queueStage === "gm_revision" ? "Returned" : "Submitted", "Note", "Review"]} minWidth={940}>
+        <Table labels={["Price Quotation", "Project", "Client's Name", "Company Name", "Status", "Assigned to", queueStage === "gm_revision" ? "Returned" : "Submitted", "Note", "Review"]} minWidth={1120}>
           {visibleSubmissions.map((quotation) => {
             const lead = store.leads.find((item) => item.id === quotation.lead_id);
             const party = quotationParty(quotation, store);
             return (
               <tr key={text(quotation.id)}>
-                <td className="px-5 py-3"><div className="flex items-center gap-2"><b>{text(quotation.quotation_no)}</b><span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${queueStage === "gm_revision" ? "bg-[#fff4dd] text-[#9a6700]" : n(quotation.resubmission_count) > 0 ? "bg-[#fff4dd] text-[#9a6700]" : "bg-[#edf5ff] text-[#175cd3]"}`}>{queueStage === "gm_revision" ? "GM Revision" : submissionLabel(quotation)}</span></div>{comparableDisplayText(text(quotation.project_name, text(lead?.project_name))) !== comparableDisplayText(quotation.quotation_no) && <small>{text(quotation.project_name, text(lead?.project_name))}</small>}</td>
+                <td className="px-5 py-3">{text(quotation.quotation_no, "—")}</td>
+                <td className="px-5 py-3">{text(quotation.project_name, text(lead?.project_name, "—"))}</td>
                 <td className="px-5 py-3 font-medium">{party.clientName}</td>
                 <td className="px-5 py-3">{party.companyName}</td>
+                <td className="px-5 py-3"><Status value={queueStage === "gm_revision" ? "gm revision" : submissionLabel(quotation)} /></td>
                 <td className="px-5 py-3">{officerName(quotation)}</td>
                 <td className="px-5 py-3">{day(queueStage === "gm_revision" ? quotation.revision_requested_at ?? quotation.updated_at ?? quotation.created_at : quotation.submitted_at)}</td>
                 <td className="px-5 py-3">
@@ -16122,8 +16071,8 @@ function PriceQuotationWorkspace({
     ? (["pending", "needs_revision", "approved"] as const)
     : (["draft", "pending", "needs_revision", "approved"] as const);
   const quotationTableLabels = isProjectOfficerRole(role)
-    ? ["Quotation", "Client's Name", "Company Name", "Status", ...(showPaymentStatus ? ["Payment"] : []), "Date", "Actions"]
-    : ["Quotation", "Client's Name", "Company Name", "Prepared by", "Status", ...(showPaymentStatus ? ["Payment"] : []), "Date", "Actions"];
+    ? ["Quotation", "Project", "Client's Name", "Company Name", "Status", "Revision", "Note", ...(showPaymentStatus ? ["Payment status", "Verified", "Total"] : []), "Date", "Actions"]
+    : ["Quotation", "Project", "Client's Name", "Company Name", "Prepared by", "Status", "Revision", "Note", ...(showPaymentStatus ? ["Payment status", "Verified", "Total"] : []), "Date", "Actions"];
   return (
     <Panel
       title="Price Quotations"
@@ -16169,7 +16118,7 @@ function PriceQuotationWorkspace({
         <div className="modern-table-shell">
         <Table
           labels={quotationTableLabels}
-          minWidth={isProjectOfficerRole(role) ? (showPaymentStatus ? 980 : 880) : (showPaymentStatus ? 1120 : 1020)}
+          minWidth={isProjectOfficerRole(role) ? (showPaymentStatus ? 1320 : 1120) : (showPaymentStatus ? 1460 : 1260)}
           className="!w-full"
         >
           {visibleQuotations.map((quote) => {
@@ -16196,12 +16145,15 @@ function PriceQuotationWorkspace({
               ).length;
             return (
               <tr key={text(quote.id)}>
-                <td className="px-5 py-3">{stackedCell(quote.quotation_no, day(quote.issue_date))}</td>
-                <td className="px-5 py-3">{stackedCell(party.clientName, text(quote.project_name, text(lead?.project_name)))}</td>
+                <td className="px-5 py-3">{text(quote.quotation_no, "—")}</td>
+                <td className="px-5 py-3">{text(quote.project_name, text(lead?.project_name, "—"))}</td>
+                <td className="px-5 py-3">{party.clientName}</td>
                 <td className="px-5 py-3">{party.companyName}</td>
                 {!isProjectOfficerRole(role) && <td className="px-5 py-3">{preparedBy}</td>}
-                <td className="px-5 py-3"><div className="flex items-center gap-1.5"><Status value={quote.status} />{priceRevisionRequest && <span className="text-[11px] text-[#a76605]">Revision requested</span>}{text(quote.status) === "needs_revision" && <NoteAction label="View revision note" tone="amber" onClick={() => setRevisionNoteQuote(quote)} />}</div></td>
-                {paymentSummary && <td className="px-5 py-3"><PaymentStatusBadge status={paymentSummary.status} /><small>{peso.format(paymentSummary.verified)} / {peso.format(paymentSummary.total)} verified</small></td>}
+                <td className="px-5 py-3"><Status value={quote.status} /></td>
+                <td className="px-5 py-3">{priceRevisionRequest ? "Requested" : "—"}</td>
+                <td className="px-5 py-3">{text(quote.status) === "needs_revision" ? <NoteAction label="View revision note" tone="amber" onClick={() => setRevisionNoteQuote(quote)} /> : "—"}</td>
+                {paymentSummary && <><td className="px-5 py-3"><PaymentStatusBadge status={paymentSummary.status} /></td><td className="px-5 py-3">{peso.format(paymentSummary.verified)}</td><td className="px-5 py-3">{peso.format(paymentSummary.total)}</td></>}
                 <td className="px-5 py-3">{text(quote.status) === "approved" ? day(quote.approved_at) : day(quote.submitted_at)}</td>
                 <td className="px-5 py-3"><div className="flex items-center gap-1">
                   {editable && canPrepare && (
@@ -17185,8 +17137,8 @@ function PriceQuotationReviewContent({
       </section>}
       {!showInternalMarkups && <section className="rounded-xl border border-[#e1e6ee] bg-[#f8fbff] p-4">
         <div>
-          <h3 className="text-[14px] font-semibold">Approved Selling Price / Unit</h3>
-          <p className="mt-1 text-[12px] text-[#687386]">Enter the price the client approved for each finished product. This is separate from the General Manager&apos;s internal target price.</p>
+          <h3 className="text-[14px] font-semibold">Approved Selling Price / Unit (optional)</h3>
+          <p className="mt-1 text-[12px] text-[#687386]">Enter the client-approved price when available. This is separate from the General Manager&apos;s internal target price and does not block GM costing review.</p>
         </div>
         <div className="mt-3 overflow-x-auto">
           <Table labels={["#", "Finished product", "Quantity", "Approved Selling Price / Unit"]} minWidth={680}>
@@ -17650,9 +17602,9 @@ function PriceQuotationReview({
     }
     if (!finalApproval && lines.some((line) => {
       const value = approvedSellingPrices[text(line.id)]?.trim() ?? "";
-      return !value || !Number.isFinite(Number(value)) || Number(value) < 0;
+      return value && (!Number.isFinite(Number(value)) || Number(value) < 0);
     })) {
-      notice("Enter an Approved Selling Price / Unit for every quotation product.");
+      notice("Enter a valid non-negative Approved Selling Price / Unit or leave it blank.");
       return false;
     }
     setWorking(true);
@@ -17687,10 +17639,13 @@ function PriceQuotationReview({
       })),
       pricing_model: costing.pricingModel,
     }));
-    const approvedSellingPricesPayload = lines.map((line) => ({
-      quotation_item_id: text(line.id),
-      approved_selling_price: n(approvedSellingPrices[text(line.id)]),
-    }));
+    const approvedSellingPricesPayload = lines.map((line) => {
+      const approvedSellingPrice = approvedSellingPrices[text(line.id)]?.trim() ?? "";
+      return {
+        quotation_item_id: text(line.id),
+        approved_selling_price: approvedSellingPrice ? n(approvedSellingPrice) : null,
+      };
+    });
     const useCommissionWorkflow = commissionAssignmentVisible;
       const { error } = finalApproval && decision === "needs_revision"
         ? await createClient().rpc("return_price_quotation_from_gm_with_edits_and_costings_v2", {
@@ -19410,12 +19365,13 @@ function Submissions({
       ) : null}
       <div className="modern-table-shell">
       {tab === "all" && (approvalQueueItems.length ? (
-        <Table labels={["Select", "Category", "Request", "Requester", "Submitted", "Review"]} minWidth={940}>
+        <Table labels={["Select", "Category", "Request", "Request detail", "Requester", "Submitted", "Review"]} minWidth={1080}>
           {approvalQueueItems.sort((left, right) => text(right.submittedAt).localeCompare(text(left.submittedAt))).map((item) => (
             <tr key={item.key}>
               {renderSelectionCell(item.key)}
               <td className="px-5 py-3"><Status value={item.category} /></td>
-              <td className="px-5 py-3">{stackedCell(item.title, item.detail)}</td>
+              <td className="px-5 py-3">{text(item.title, "—")}</td>
+              <td className="px-5 py-3">{text(item.detail, "—")}</td>
               <td className="px-5 py-3">{item.requester}</td>
               <td className="px-5 py-3">{day(item.submittedAt)}</td>
               <td className="px-5 py-3"><div className="flex items-center gap-1">{item.action}</div></td>
@@ -19424,20 +19380,20 @@ function Submissions({
         </Table>
       ) : <Empty>{productionOnly ? "No production approvals are awaiting review." : "No management approvals are awaiting review."}</Empty>)}
       {tab === "quotations" && (visiblePendingPriceQuotations.length ? (
-        <Table labels={["Select", "Price Quotation", "Client's Name", "Company Name", "Prepared by", "Submitted", "Note", "Review"]} minWidth={1060}>
+        <Table labels={["Select", "Price Quotation", "Project", "Client's Name", "Company Name", "Prepared by", "Submitted", "Note", "Review"]} minWidth={1180}>
           {visiblePendingPriceQuotations.map((quotation) => {
             const party = quotationParty(quotation, store);
             const note = text(quotation.pricing_submission_note, "").trim();
-            return <tr key={text(quotation.id)}>{renderSelectionCell(`price-${text(quotation.id)}`)}<td className="px-5 py-3">{stackedCell(quotation.quotation_no, distinctQuotationProject(quotation, party.companyName))}</td><td className="px-5 py-3 font-medium">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3">{note ? <NoteAction label="View Pricing Officer note" tone="amber" onClick={() => setSubmissionNoteQuotation(quotation)} /> : <span className="text-[11px] text-[#8b92a1]">â€”</span>}</td><td className="px-5 py-3"><ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>;
+            return <tr key={text(quotation.id)}>{renderSelectionCell(`price-${text(quotation.id)}`)}<td className="px-5 py-3">{text(quotation.quotation_no, "—")}</td><td className="px-5 py-3">{text(quotation.project_name, "—")}</td><td className="px-5 py-3 font-medium">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3">{note ? <NoteAction label="View Pricing Officer note" tone="amber" onClick={() => setSubmissionNoteQuotation(quotation)} /> : <span className="text-[11px] text-[#8b92a1]">â€”</span>}</td><td className="px-5 py-3"><ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>;
           })}
         </Table>
       ) : <Empty>No Price Quotations are awaiting review.</Empty>)}
       {tab === "price_revisions" && (visiblePendingPriceQuotationRevisions.length ? (
-        <Table labels={["Select", "Price Quotation", "Client's Name", "Company Name", "Sales Executive", "Requested", "Review"]} minWidth={900}>
+        <Table labels={["Select", "Price Quotation", "Project", "Client's Name", "Company Name", "Sales Executive", "Requested", "Review"]} minWidth={1040}>
           {visiblePendingPriceQuotationRevisions.map((request) => {
             const quotation = store.quotations.find((item) => item.id === request.quotation_id);
             const party = quotation ? quotationParty(quotation, store) : { clientName: "-", companyName: "-" };
-            return <tr key={text(request.id)}>{renderSelectionCell(`price-revision-${text(request.id)}`)}<td className="px-5 py-3">{stackedCell(text(quotation?.quotation_no, "Price Quotation"), quotation ? distinctQuotationProject(quotation, party.companyName) : "")}</td><td className="px-5 py-3">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{projectOfficerName(request)}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>;
+            return <tr key={text(request.id)}>{renderSelectionCell(`price-revision-${text(request.id)}`)}<td className="px-5 py-3">{text(quotation?.quotation_no, "Price Quotation")}</td><td className="px-5 py-3">{text(quotation?.project_name, "—")}</td><td className="px-5 py-3">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{projectOfficerName(request)}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>;
           })}
         </Table>
       ) : <Empty>No Price Quotation revisions are awaiting review.</Empty>)}
@@ -19445,6 +19401,8 @@ function Submissions({
         <Table
           labels={[
             "Costing Breakdown",
+            "Price Quotation",
+            "Project",
             "Client",
             "Sales Executive",
             "Submitted",
@@ -19458,18 +19416,11 @@ function Submissions({
             );
             return (
               <tr key={text(quotation.id)}>
-                <td className="px-5 py-3">
-                  <b>Costing Breakdown</b>
-                  <small>
-                    {text(quotation.quotation_no)} ·{" "}
-                    {text(quotation.project_name)}
-                  </small>
-                </td>
+                <td className="px-5 py-3">Costing Breakdown</td>
+                <td className="px-5 py-3">{text(quotation.quotation_no, "—")}</td>
+                <td className="px-5 py-3">{text(quotation.project_name, "—")}</td>
                 <td className="px-5 py-3 font-medium">
-                  {text(
-                    quotation.client_name,
-                    text(lead?.client_name, text(lead?.contact_name)),
-                  )}
+                  {text(quotation.client_contact_name, text(lead?.contact_name, "—"))}
                 </td>
                 <td className="px-5 py-3 font-medium">
                   {officerName(quotation)}
@@ -19497,12 +19448,13 @@ function Submissions({
         </Table>
       ) : <Empty>No costing breakdowns are awaiting review.</Empty>)}
       {tab === "revisions" && (visiblePendingQuotationRevisions.length ? (
-        <Table labels={["Select", "Costing Breakdown", "Sales Executive", "Requested", "Review"]}>
+        <Table labels={["Select", "Costing Breakdown", "Project", "Sales Executive", "Requested", "Review"]}>
           {visiblePendingQuotationRevisions.map((request) => {
             const costing = store.quotations.find((item) => item.id === request.costing_id);
             return <tr key={text(request.id)}>
               {renderSelectionCell(`costing-revision-${text(request.id)}`)}
-              <td className="px-5 py-3">{stackedCell(text(costing?.quotation_no, "Costing Breakdown"), costing?.project_name)}</td>
+              <td className="px-5 py-3">{text(costing?.quotation_no, "Costing Breakdown")}</td>
+              <td className="px-5 py-3">{text(costing?.project_name, "—")}</td>
               <td className="px-5 py-3">{projectOfficerName(request)}</td>
               <td className="px-5 py-3">{day(request.submitted_at)}</td>
               <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve costing revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject costing revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td>
@@ -19511,15 +19463,17 @@ function Submissions({
         </Table>
       ) : <Empty>No Costing Breakdown revisions are awaiting review.</Empty>)}
       {tab === "calendar_projects" && (visiblePendingProjectSchedules.length ? (
-        <Table labels={["Select", "Assigned Sales Executive", "Price Quotation", "Client's Name / Company", "Quantity", "Project Type", "Assigned Box Makers", "Agreement", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1500}>
+        <Table labels={["Select", "Assigned Sales Executive", "Price Quotation", "Client's Name", "Company Name", "Quantity", "Project Type", "Assigned Box Makers", "Agreement", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1640}>
           {visiblePendingProjectSchedules.map((schedule) => {
             const quotation = store.quotations.find((item) => item.id === schedule.quotation_id);
+            const party = quotation ? quotationParty(quotation, store) : { clientName: text(schedule.client_contact_name, "—"), companyName: text(schedule.client_name, "—") };
             return (
             <tr key={text(schedule.id)}>
               {renderSelectionCell(`production-${text(schedule.id)}`)}
               <td className="px-5 py-3">{scheduleOfficerName(schedule)}</td>
               <td className="px-5 py-3">{text(schedule.quotation_no)}</td>
-              <td className="px-5 py-3">{text(schedule.client_name)}</td>
+              <td className="px-5 py-3">{party.clientName}</td>
+              <td className="px-5 py-3">{party.companyName}</td>
               <td className="px-5 py-3">{n(schedule.quantity).toLocaleString()}</td>
               <td className="px-5 py-3">{text(schedule.product_name)}</td>
               <td className="px-5 py-3 whitespace-normal">{assignedBoxMakerLabel(schedule)}</td>
@@ -19534,21 +19488,26 @@ function Submissions({
         </Table>
       ) : <Empty>No production requests are awaiting review.</Empty>)}
       {tab === "calendar_revisions" && (visiblePendingProjectScheduleRevisions.length ? (
-        <Table labels={["Select", "Assigned Sales Executive", "Quotation Code", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1180}>
+        <Table labels={["Select", "Assigned Sales Executive", "Quotation Code", "Client's Name", "Company Name", "Quantity", "Project Type", "Proposed Start", "Current Start", "Proposed Due", "Current Due", "Project Status", "Review"]} minWidth={1480}>
           {visiblePendingProjectScheduleRevisions.map((request) => {
             const schedule = store.project_schedules.find(
               (item) => item.id === request.schedule_id,
             );
+            const quotation = store.quotations.find((item) => item.id === schedule?.quotation_id);
+            const party = quotation ? quotationParty(quotation, store) : { clientName: text(schedule?.client_contact_name, "—"), companyName: text(schedule?.client_name, "—") };
             return (
               <tr key={text(request.id)}>
                 {renderSelectionCell(`schedule-revision-${text(request.id)}`)}
                 <td className="px-5 py-3">{projectOfficerName(request)}</td>
                 <td className="px-5 py-3">{text(schedule?.quotation_no)}</td>
-                <td className="px-5 py-3">{text(schedule?.client_name)}</td>
+                <td className="px-5 py-3">{party.clientName}</td>
+                <td className="px-5 py-3">{party.companyName}</td>
                 <td className="px-5 py-3">{n(schedule?.quantity).toLocaleString()}</td>
                 <td className="px-5 py-3">{text(schedule?.product_name)}</td>
-                <td className="px-5 py-3"><b>{day(request.proposed_start_date)}</b><small>Current: {day(schedule?.start_date)}</small></td>
-                <td className="px-5 py-3"><b>{day(request.proposed_due_date)}</b><small>Current: {day(schedule?.due_date)}</small></td>
+                <td className="px-5 py-3">{day(request.proposed_start_date)}</td>
+                <td className="px-5 py-3">{day(schedule?.start_date)}</td>
+                <td className="px-5 py-3">{day(request.proposed_due_date)}</td>
+                <td className="px-5 py-3">{day(schedule?.due_date)}</td>
                 <td className="px-5 py-3"><Status value="revision pending" /></td>
                 <td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve project schedule revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideProjectScheduleRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject project schedule revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideProjectScheduleRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td>
               </tr>
@@ -19557,17 +19516,20 @@ function Submissions({
         </Table>
       ) : <Empty>No Project Calendar revisions are awaiting review.</Empty>)}
       {tab === "calendar_completions" && (visiblePendingProjectScheduleCompletions.length ? (
-        <Table labels={["Select", "Assigned Sales Executive", "Quotation Code", "Client's Name / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1180}>
+        <Table labels={["Select", "Assigned Sales Executive", "Quotation Code", "Client's Name", "Company Name", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1320}>
           {visiblePendingProjectScheduleCompletions.map((request) => {
             const schedule = store.project_schedules.find(
               (item) => item.id === request.schedule_id,
             );
+            const quotation = store.quotations.find((item) => item.id === schedule?.quotation_id);
+            const party = quotation ? quotationParty(quotation, store) : { clientName: text(schedule?.client_contact_name, "—"), companyName: text(schedule?.client_name, "—") };
             return (
               <tr key={text(request.id)}>
                 {renderSelectionCell(`completion-${text(request.id)}`)}
                 <td className="px-5 py-3">{projectOfficerName(request)}</td>
                 <td className="px-5 py-3">{text(schedule?.quotation_no)}</td>
-                <td className="px-5 py-3">{text(schedule?.client_name)}</td>
+                <td className="px-5 py-3">{party.clientName}</td>
+                <td className="px-5 py-3">{party.companyName}</td>
                 <td className="px-5 py-3">{n(schedule?.quantity).toLocaleString()}</td>
                 <td className="px-5 py-3">{text(schedule?.product_name)}</td>
                 <td className="px-5 py-3">{day(schedule?.start_date)}</td>
@@ -19580,12 +19542,14 @@ function Submissions({
         </Table>
       ) : <Empty>No Project Calendar completion requests are awaiting review.</Empty>)}
       {tab === "projects" && (visiblePendingProjectEdits.length ? (
-        <Table labels={["Project", "Sales Executive", "Submitted", "Requested changes", "Review"]}>
+        <Table labels={["Project", "Client's Name", "Company Name", "Sales Executive", "Submitted", "Requested changes", "Review"]}>
           {visiblePendingProjectEdits.map((request) => {
             const project = store.leads.find((lead) => lead.id === request.project_id);
             const changes = request.proposed_changes && typeof request.proposed_changes === "object" ? Object.keys(request.proposed_changes as Record<string, unknown>) : [];
             return <tr key={text(request.id)}>
-              <td className="px-5 py-3">{stackedCell(project?.project_name, [project?.client_name, project?.contact_name], " · ")}</td>
+              <td className="px-5 py-3">{text(project?.project_name, "—")}</td>
+              <td className="px-5 py-3">{text(project?.contact_name, "—")}</td>
+              <td className="px-5 py-3">{text(project?.client_name, "—")}</td>
               <td className="px-5 py-3">{projectOfficerName(request)}</td>
               <td className="px-5 py-3">{day(request.submitted_at)}</td>
               <td className="px-5 py-3">{changes.map((change) => change.replaceAll("_", " ")).join(", ")}</td>
@@ -19595,7 +19559,7 @@ function Submissions({
         </Table>
       ) : <Empty>No project edits are awaiting review.</Empty>)}
       {tab === "leads" && (visiblePendingLeadChanges.length ? (
-        <Table labels={["Lead", "Sales Executive", "Requested", "Change", "Review"]}>
+        <Table labels={["Lead", "Client's Name", "Company Name", "Sales Executive", "Requested", "Change", "Review"]}>
           {visiblePendingLeadChanges.map((request) => {
             const lead = store.leads.find((item) => item.id === request.lead_id);
             const changes = request.proposed_changes && typeof request.proposed_changes === "object" ? Object.keys(request.proposed_changes as Record<string, unknown>) : [];
@@ -19607,7 +19571,9 @@ function Submissions({
                 ? changeLabels.join(", ")
                 : `${changeLabels.slice(0, 2).join(", ")} +${changeLabels.length - 2} more`;
             return <tr key={text(request.id)}>
-              <td className="px-5 py-3">{stackedCell(lead?.project_name, [lead?.client_name, lead?.contact_name], " · ")}</td>
+              <td className="px-5 py-3">{text(lead?.project_name, "—")}</td>
+              <td className="px-5 py-3">{text(lead?.contact_name, "—")}</td>
+              <td className="px-5 py-3">{text(lead?.client_name, "—")}</td>
               <td className="px-5 py-3">{projectOfficerName(request)}</td>
               <td className="px-5 py-3">{day(request.submitted_at)}</td>
               <td className="px-5 py-3">{changeSummary || "-"}</td>
@@ -19617,12 +19583,14 @@ function Submissions({
         </Table>
       ) : <Empty>No lead changes are awaiting review.</Empty>)}
       {tab === "lead_unendorsements" && (visiblePendingLeadUnendorsements.length ? (
-        <Table labels={["Select", "Lead", "Original owner", "Endorsed officer", "Requested", "Review"]} minWidth={980}>
+        <Table labels={["Select", "Lead", "Client's Name", "Company Name", "Original owner", "Endorsed officer", "Requested", "Review"]} minWidth={1160}>
           {visiblePendingLeadUnendorsements.map((request) => {
             const lead = store.leads.find((item) => item.id === request.lead_id);
             return <tr key={text(request.id)}>
               {renderSelectionCell(`lead-unendorsement-${text(request.id)}`)}
-              <td className="px-5 py-3">{stackedCell(lead?.project_name, [lead?.client_name, lead?.contact_name], " · ")}</td>
+              <td className="px-5 py-3">{text(lead?.project_name, "—")}</td>
+              <td className="px-5 py-3">{text(lead?.contact_name, "—")}</td>
+              <td className="px-5 py-3">{text(lead?.client_name, "—")}</td>
               <td className="px-5 py-3">{approvalStaffName(request.requested_by)}</td>
               <td className="px-5 py-3">{approvalStaffName(request.endorsed_to)}</td>
               <td className="px-5 py-3">{day(request.requested_at ?? request.created_at)}</td>
@@ -19632,8 +19600,8 @@ function Submissions({
         </Table>
       ) : <Empty>No lead unendorsement requests are awaiting review.</Empty>)}
       {tab === "other" && (visiblePendingApprovalRequests.length ? (
-        <Table labels={["Select", "Request", "Submitted by", "Submitted", "Review"]} minWidth={800}>
-          {visiblePendingApprovalRequests.map((request) => <tr key={text(request.id)}>{renderSelectionCell(`approval-${text(request.id)}`)}<td className="px-5 py-3"><b className="capitalize">{text(request.resource_type, "Approval request").replaceAll("_", " ")}</b><small>{text(request.resource_id)}</small></td><td className="px-5 py-3">{text(store.profiles.find((profile) => profile.id === request.submitted_by)?.full_name, "Team member")}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve request" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideApprovalRequest(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject request" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideApprovalRequest(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>)}
+        <Table labels={["Select", "Request", "Request ID", "Submitted by", "Submitted", "Review"]} minWidth={900}>
+          {visiblePendingApprovalRequests.map((request) => <tr key={text(request.id)}>{renderSelectionCell(`approval-${text(request.id)}`)}<td className="px-5 py-3"><span className="capitalize">{text(request.resource_type, "Approval request").replaceAll("_", " ")}</span></td><td className="px-5 py-3">{text(request.resource_id, "—")}</td><td className="px-5 py-3">{text(store.profiles.find((profile) => profile.id === request.submitted_by)?.full_name, "Team member")}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve request" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideApprovalRequest(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject request" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decideApprovalRequest(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>)}
         </Table>
       ) : <Empty>No other approval requests are awaiting review.</Empty>)}
       </div>
@@ -19796,12 +19764,16 @@ function Production({
         {store.production_jobs.length ? (
           <Table
             labels={[
-              "Job",
-              "Customer / due",
+              "Job number",
+              "Job title",
+              "Customer",
+              "Due date",
               "Box Makers",
               "Agreement",
               "Stage",
-              "Payment",
+              "Payment status",
+              "Verified",
+              "Total",
               "Material use",
               "Actions",
             ]}
@@ -19826,25 +19798,18 @@ function Production({
                 );
               return (
                 <tr key={text(job.id)}>
-                  <td className="px-5 py-3">
-                    {stackedCell(job.job_no, job.title)}
-                  </td>
-                  <td className="px-5 py-3">
-                    {text(
-                      store.customers.find((c) => c.id === job.customer_id)
-                        ?.company_name,
-                    )}
-                    <small className={late ? "text-[#b42318]" : ""}>
-                      Due {day(job.due_date)}
-                      {late ? " · Delayed" : ""}
-                    </small>
-                  </td>
+                  <td className="px-5 py-3">{text(job.job_no, "—")}</td>
+                  <td className="px-5 py-3">{text(job.title, "—")}</td>
+                  <td className="px-5 py-3">{text(store.customers.find((c) => c.id === job.customer_id)?.company_name, "—")}</td>
+                  <td className={`px-5 py-3 ${late ? "text-[#b42318]" : ""}`}>{day(job.due_date)}</td>
               <td className="px-5 py-3 whitespace-normal">{assignedBoxMakerLabel(job)}</td>
                   <td className="px-5 py-3"><AgreementAction storagePath={job.agreement_storage_path} notice={notice} /></td>
                   <td className="px-5 py-3">
                     <Status value={job.status} />
                   </td>
-                  <td className="px-5 py-3">{paymentSummary ? <div><PaymentStatusBadge status={paymentSummary.status} /><small>{peso.format(paymentSummary.verified)} / {peso.format(paymentSummary.total)}</small></div> : "-"}</td>
+                  <td className="px-5 py-3">{paymentSummary ? <PaymentStatusBadge status={paymentSummary.status} /> : "-"}</td>
+                  <td className="px-5 py-3">{paymentSummary ? peso.format(paymentSummary.verified) : "—"}</td>
+                  <td className="px-5 py-3">{paymentSummary ? peso.format(paymentSummary.total) : "—"}</td>
                   <td className="px-5 py-3">
                     {used} line{used === 1 ? "" : "s"}
                   </td>
@@ -21872,14 +21837,8 @@ function Directory({
         { key: "address", label: "Address", type: "textarea" },
       ],
       columns: [
-        {
-          label: "Supplier",
-          value: (r) => (
-            <>
-              {stackedCell(r.company_name, r.contact_name)}
-            </>
-          ),
-        },
+        { label: "Supplier", value: (r) => text(r.company_name, "—") },
+        { label: "Contact person", value: (r) => text(r.contact_name, "—") },
         { label: "Phone", value: (r) => text(r.phone) },
         {
           label: "Linked materials",
@@ -21924,14 +21883,8 @@ function Directory({
         { key: "hire_date", label: "Hire date", type: "date" },
       ],
       columns: [
-        {
-          label: "Employee",
-          value: (r) => (
-            <>
-              {stackedCell(r.full_name, r.employee_no)}
-            </>
-          ),
-        },
+        { label: "Employee", value: (r) => text(r.full_name, "—") },
+        { label: "Employee number", value: (r) => text(r.employee_no, "—") },
         { label: "Position", value: (r) => text(r.position) },
         { label: "Daily rate", value: (r) => peso.format(n(r.daily_rate)) },
         { label: "Started", value: (r) => day(r.hire_date) },
@@ -22022,10 +21975,9 @@ function Approvals({
           {visibleApprovalRequests.map((r) => (
             <tr key={text(r.id)}>
               <td className="px-5 py-3">
-                <b className="capitalize">
+                <span className="capitalize">
                   {text(r.resource_type).replaceAll("_", " ")}
-                </b>
-                <small>{day(r.submitted_at)}</small>
+                </span>
               </td>
               <td className="px-5 py-3">{day(r.submitted_at)}</td>
               <td className="px-5 py-3">
@@ -22295,11 +22247,11 @@ function CommissionSummaryView({
         {filteredRows.length ? (
           <>
           <Table
-            labels={["Quotation", "Name / Company", "Sales Origin", "Co-Worker", "Grand Total", "Client payment", "Remaining client balance", "Commission payout"]}
-            minWidth={1180}
+            labels={["Quotation", "Quotation date", "Client's Name", "Company Name", "Sales Origin", "Co-Worker", "Grand Total", "Client payment", "Pending payment", "Remaining client balance", "Commission amount", "Payout status"]}
+            minWidth={1640}
             className="commission-summary-table table-fixed"
-            columnWidths={["12%", "18%", "14%", "14%", "10%", "12%", "10%", "10%"]}
-            alignRightLabels={["Grand Total", "Remaining client balance", "Commission payout"]}
+            columnWidths={["10%", "8%", "14%", "12%", "11%", "11%", "10%", "9%", "9%", "10%", "10%", "9%"]}
+            alignRightLabels={["Grand Total", "Pending payment", "Remaining client balance", "Commission amount"]}
           >
             {visibleCommissionRows.map((summary) => {
               const allocations = allocationRowsFor(summary);
@@ -22315,29 +22267,35 @@ function CommissionSummaryView({
               const originName = originAllocation
                 ? text(originAllocation.recipient_name, userName(originAllocation.recipient_user_id))
                 : "—";
-              const originDetail = "";
               const selfHandled = text(originAllocation?.allocation_role) === "self_handled_se";
               const coworkerName = selfHandled
                 ? "Self-handled"
                 : coworkerAllocation
                   ? text(coworkerAllocation.recipient_name, userName(coworkerAllocation.recipient_user_id))
                   : "—";
-              const coworkerDetail = selfHandled ? "No co-worker" : "";
+              const quotation = store.quotations.find((item) => item.id === summary.quotation_id);
+              const party = quotation
+                ? quotationParty(quotation, store)
+                : {
+                    clientName: text(summary.client_contact_name, "—"),
+                    companyName: text(summary.client_name, "—"),
+                  };
               return (
                 <tr key={text(summary.id)}>
-                  <td className="px-4 py-3">{stackedCell(summary.quotation_no, text(summary.created_at, "").slice(0, 10))}</td>
-                  <td className="px-4 py-3">{stackedCell(summary.client_name, summary.project_name)}</td>
-                  <td className="px-4 py-3">{stackedCell(originName, originDetail)}</td>
-                  <td className="px-4 py-3">{stackedCell(coworkerName, coworkerDetail)}</td>
+                  <td className="px-4 py-3">{text(summary.quotation_no, "—")}</td>
+                  <td className="px-4 py-3">{text(summary.created_at, "").slice(0, 10) || "—"}</td>
+                  <td className="px-4 py-3">{party.clientName}</td>
+                  <td className="px-4 py-3">{party.companyName}</td>
+                  <td className="px-4 py-3">{text(originName, "—")}</td>
+                  <td className="px-4 py-3">{text(coworkerName, "—")}</td>
                   <td className="px-4 py-3 text-right font-medium">{peso.format(n(summary.grand_total))}</td>
-                  <td className="px-4 py-3">
-                    <Status value={clientPaymentStatus} />
-                    {clientPendingPayment > 0 && <small>{peso.format(clientPendingPayment)} pending review</small>}
-                  </td>
+                  <td className="px-4 py-3"><Status value={clientPaymentStatus} /></td>
+                  <td className="px-4 py-3 text-right font-medium">{peso.format(clientPendingPayment)}</td>
                   <td className="px-4 py-3 text-right font-medium">
                     {hasClientPaymentData ? peso.format(n(summary.client_remaining_balance)) : "Unavailable"}
                   </td>
-                  <td className="px-4 py-3 text-right font-semibold text-[#176b40]">{stackedCell(peso.format(totalCommissionAmount(summary)), formatStatus(summary))}</td>
+                  <td className="px-4 py-3 text-right font-semibold text-[#176b40]">{peso.format(totalCommissionAmount(summary))}</td>
+                  <td className="px-4 py-3"><Status value={formatStatus(summary)} /></td>
                 </tr>
               );
             })}
@@ -22879,8 +22837,7 @@ function SettingsView({
           {store.organization_members.map((m) => (
             <tr key={text(m.user_id)}>
               <td className="px-5 py-3">
-                <b>{staffNames[text(m.user_id)] ?? "Loading staff name…"}</b>
-                <small>{text(m.user_id)}</small>
+                {staffNames[text(m.user_id)] ?? "Loading staff name…"}
               </td>
               <td className="px-5 py-3">
                 {memberRole(role) &&
@@ -24448,7 +24405,7 @@ export function HuswellWorkspace({
               : view === "PDF Costing"
                 ? "HP Latex 700W"
               : isManagementRole && view === "Price Quotations"
-                ? "Quotation"
+                ? "Quotations"
               : isManagementRole && view === "Approvals"
                 ? "Approvals"
               : view === "Approvals"

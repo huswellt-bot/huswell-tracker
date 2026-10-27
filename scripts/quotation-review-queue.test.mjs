@@ -10,17 +10,13 @@ const workspace = readFileSync(
   "utf8",
 );
 
-test("quotation review queue does not repeat the company as the project detail", () => {
-  assert.match(
-    workspace,
-    /const distinctQuotationProject = \(quotation: Row, companyName: unknown\)/,
-  );
-  assert.match(
-    workspace,
-    /stackedCell\(quotation\.quotation_no, distinctQuotationProject\(quotation, party\.companyName\)\)/,
-  );
-  assert.match(
-    workspace,
-    /stackedCell\(text\(quotation\?\.quotation_no, "Price Quotation"\), quotation \? distinctQuotationProject\(quotation, party\.companyName\) : ""\)/,
-  );
+test("quotation review queue keeps quotation and project in separate cells", () => {
+  assert.match(workspace, /"Price Quotation", "Project", "Client's Name", "Company Name"/);
+  assert.match(workspace, /<td className="px-5 py-3">\{text\(quotation\.quotation_no, "—"\)\}<\/td>\s*<td className="px-5 py-3">\{text\(quotation\.project_name, "—"\)\}<\/td>/);
+});
+
+test("client and company are separate table values", () => {
+  assert.match(workspace, /"Client's Name", "Company Name"/);
+  assert.doesNotMatch(workspace, /stackedCell\(party\.clientName, party\.companyName\)/);
+  assert.match(workspace, /<td className="px-5 py-3">\{party\.clientName\}<\/td>\s*<td className="px-5 py-3">\{party\.companyName\}<\/td>/);
 });

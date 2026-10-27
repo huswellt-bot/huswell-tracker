@@ -52,7 +52,7 @@ test("commission summaries expose client payment status and remaining balance", 
   assert.match(migration, /client_remaining_balance numeric/);
   assert.match(migration, /payment\.status = 'verified'/);
   assert.match(migration, /payment\.status = 'pending'/);
-  assert.match(workspace, /"Client payment", "Remaining client balance", "Commission payout"/);
+  assert.match(workspace, /"Client payment", "Pending payment", "Remaining client balance", "Commission amount", "Payout status"/);
   assert.match(workspace, /summary\.client_remaining_balance/);
   assert.match(workspace, /summary\.client_pending_payment_amount/);
 });

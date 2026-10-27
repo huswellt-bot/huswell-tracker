@@ -73,7 +73,7 @@ test("all commission pages default to Show all month filters", () => {
 });
 
 test("Pricing Officer commission rows do not duplicate allocation rates and amounts", () => {
-  assert.match(workspace, /const originDetail = ""/);
-  assert.match(workspace, /const coworkerDetail = selfHandled \? "No co-worker" : ""/);
+  assert.match(workspace, /"Sales Origin", "Co-Worker", "Grand Total", "Client payment"/);
+  assert.doesNotMatch(workspace, /stackedCell/);
   assert.doesNotMatch(workspace, /share_rate\)\}% - \$\{peso\.format/);
 });

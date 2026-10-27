@@ -264,7 +264,7 @@ test("Finance uses Project terminology without changing technical quotation iden
   assert.match(workspace, /label: "Project payments"/);
   assert.match(workspace, /<TransactionDetailField label="Project">/);
   assert.match(workspace, /<TransactionDetailField label="Project total">/);
-  assert.match(workspace, /<th>Project<\/th><th>Project<\/th>/);
+  assert.match(workspace, /<th>Project<\/th><th>Quotations<\/th>/);
   assert.match(workspace, /quotation_id/);
   assert.match(workspaceShell, /Approved projects/);
   assert.match(workspaceShell, /Project Payment History/);
