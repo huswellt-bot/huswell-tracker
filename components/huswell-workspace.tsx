@@ -17022,11 +17022,11 @@ function ProductCostingsSectionWithPricing({
           </div>
           <div className="mt-2 grid grid-cols-[auto_auto_auto_minmax(0,1fr)] items-center gap-3">
             <span className="text-[11px] font-medium text-[#344054]">VAT rate</span>
-            <div className="flex items-center gap-1">{canEditVat && !readOnly ? <NumberInput aria-label="VAT percentage" min="0" max="100" step="any" value={vatValue} onChange={(value) => setVatValue(value)} className="input mt-0 px-2 py-1.5" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /> : <output aria-label="VAT percentage" className="flex min-h-9 w-28 items-center justify-center rounded-md border border-[#d9e0e9] bg-[#fafbfc] px-2 py-1.5 tabular-nums">{n(vatValue)}</output>}<span className="text-[11px] text-[#687386]">%</span></div>
+            <div className="flex items-center gap-1"><output aria-label="VAT percentage from GM Settings" className="flex min-h-9 w-28 items-center justify-center rounded-md border border-[#d9e0e9] bg-[#fafbfc] px-2 py-1.5 tabular-nums">{n(vatValue)}</output><span className="text-[11px] text-[#687386]">%</span></div>
             <button type="button" aria-label={`${vatLockState === true ? "Unlock" : "Lock"} VAT for target selling price recomputation`} aria-pressed={vatLockState === true} title={`${vatLockState === true ? "Unlock" : "Lock"} VAT for target selling price recomputation`} disabled={!canToggleVatLock} onClick={toggleVatLock} className={`grid size-7 place-items-center rounded border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] ${vatLockState === true ? "border-[#ead7a8] bg-[#fff9e8] text-[#8a6500]" : "border-[#d9e0e9] bg-white text-[#687386] hover:bg-[#f5f7fa]"} disabled:cursor-not-allowed disabled:opacity-50`}>{vatLockState === null ? <span className="text-[9px] font-semibold">Mix</span> : vatLockState ? <Lock size={13} /> : <Unlock size={13} />}</button>
             <output aria-label="VAT total" className="min-w-20 text-right text-[12px] font-semibold text-[#344054]">{peso.format(vatTotal)}</output>
           </div>
-          <p className="mt-2 text-[10px] leading-4 text-[#687386]">{vatInclusive ? "VAT will be added to the VAT-exclusive selling price." : "No VAT will be added to this quotation."} {canEditVat ? "GM can edit the rate before final approval." : "The rate comes from GM Settings."}</p>
+          <p className="mt-2 text-[10px] leading-4 text-[#687386]">{vatInclusive ? "VAT will be added to the VAT-exclusive selling price." : "No VAT will be added to this quotation."} The rate comes from the single VAT purpose in GM Settings.</p>
         </div>
       </div>}
     </section>
@@ -17260,13 +17260,10 @@ function PriceQuotationReview({
   );
   const quotationVatSnapshot = quotation.vat_rate_snapshot;
   const initialVatRate = () => {
-    if (quotationVatSnapshot !== undefined && quotationVatSnapshot !== null) {
-      return text(quotationVatSnapshot, configuredVatRate);
-    }
     if (text(quotation.status, "") === "approved" || readOnly) {
-      return text(quotationVatRate(quotation), "0");
+      return text(quotationVatSnapshot ?? quotationVatRate(quotation), "0");
     }
-    return n(quotation.vat_rate) > 0 ? text(quotation.vat_rate) : configuredVatRate;
+    return configuredVatRate;
   };
   const initialVatInclusive = () => quotation.vat_inclusive === undefined
     ? n(quotation.vat_rate) > 0
@@ -22660,7 +22657,7 @@ function SettingsView({
   };
   const savePricingMarkupEdit = async () => {
     if (!editingPricingMarkup) return;
-    const purpose = (pricingMarkupEditValues.purpose || editingPricingMarkup.purpose) as PricingMarkupPurpose;
+    const purpose = (pricingMarkupEditValues.purpose || editingPricingMarkup.purpose).split("|")[0] as PricingMarkupPurpose;
     const updatedMarkup: PricingMarkupDefault = {
       ...editingPricingMarkup,
       // Keep the canonical markup key stable for calculations and commission

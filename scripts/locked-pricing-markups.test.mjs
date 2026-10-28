@@ -8,6 +8,8 @@ const vatMigration = await readFile(new URL("../supabase/migrations/202610280518
 const vatFlowMigration = await readFile(new URL("../supabase/migrations/20261028065024_quotation_vat_treatment_flow.sql", import.meta.url), "utf8");
 const vatServerGuardMigration = await readFile(new URL("../supabase/migrations/20261028065342_quotation_vat_server_rate_guard.sql", import.meta.url), "utf8");
 const vatSnapshotMigration = await readFile(new URL("../supabase/migrations/20261028065606_quotation_vat_snapshot_preservation.sql", import.meta.url), "utf8");
+const singleVatSourceMigration = await readFile(new URL("../supabase/migrations/20261028071758_single_vat_settings_source.sql", import.meta.url), "utf8");
+const legacyVatMigration = await readFile(new URL("../supabase/migrations/20261028071817_normalize_legacy_vat_markup.sql", import.meta.url), "utf8");
 const deletionMigration = await readFile(new URL("../supabase/migrations/20261026164338_allow_pricing_markup_removal.sql", import.meta.url), "utf8");
 const roleMigration = await readFile(new URL("../supabase/migrations/20261028040711_pricing_markup_role_assignments.sql", import.meta.url), "utf8");
 const snapshotLabelMigration = await readFile(new URL("../supabase/migrations/20261028041726_preserve_pricing_markup_snapshot_labels.sql", import.meta.url), "utf8");
@@ -128,4 +130,15 @@ test("VAT Exclusive preserves the editable snapshot without applying VAT", () =>
   assert.match(vatSnapshotMigration, /v_vat_snapshot_rate := case when v_vat_inclusive/);
   assert.match(vatSnapshotMigration, /else v_vat_snapshot_rate/);
   assert.match(vatSnapshotMigration, /vat_rate_snapshot = v_vat_snapshot_rate/);
+});
+
+test("Approval Center uses the single GM Settings VAT source", () => {
+  assert.match(workspace, /VAT percentage from GM Settings/);
+  assert.match(workspace, /single VAT purpose in GM Settings/);
+  assert.doesNotMatch(workspace, /GM can edit the rate before final approval/);
+  assert.match(singleVatSourceMigration, /v_rate := v_default_rate/);
+  assert.match(singleVatSourceMigration, /pricing_markup_purpose\(entry.key, entry.value\) = 'vat'/);
+  assert.match(legacyVatMigration, /'vat'/);
+  assert.match(legacyVatMigration, /'third_party_markup'/);
+  assert.match(legacyVatMigration, /system_role', 'vat'/);
 });
