@@ -39,6 +39,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
+  ClipboardList,
   Download,
   FileSpreadsheet,
   PhilippinePeso,
@@ -167,6 +168,7 @@ type View =
   | "Finance Supplier Costing"
   | "Finance Payables"
   | "Paid commissions"
+  | "Finance Activity History"
   | "Payroll & Leave"
   | "Letter Request"
   | "Directory"
@@ -197,6 +199,7 @@ const financeSidebarViews: View[] = [
   "Finance Payables",
   "Paid commissions",
   "Payment Monitoring",
+  "Finance Activity History",
 ];
 
 type SidebarQueueCountKey =
@@ -23632,6 +23635,7 @@ export function HuswellWorkspace({
       "PDF Costing",
       "Approvals",
       "Finance Budget",
+      "Finance Activity History",
       "Commissions",
       "Settings",
     ],
@@ -23645,6 +23649,7 @@ export function HuswellWorkspace({
       "PDF Costing",
       "Approvals",
       "Finance Budget",
+      "Finance Activity History",
       "Commissions",
       "Letter Request",
       "Announcements",
@@ -23661,6 +23666,7 @@ export function HuswellWorkspace({
       "PDF Costing",
       "Approvals",
       "Finance Budget",
+      "Finance Activity History",
       "Commissions",
       "Letter Request",
       "Announcements",
@@ -23692,7 +23698,7 @@ export function HuswellWorkspace({
     sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Announcements", "Policy"],
     warehouse: ["Dashboard", "Catalog", "Inventory", "Production", "Announcements", "Policy"],
     accountant: ["Announcements", "Policy"],
-    internal_finance: ["Finance Overview", "Finance Reports", "Finance", "Finance Approvals", "Finance Transactions", "Finance Accounts", "Finance Budget", "Finance Supplier Costing", "Finance Payables", "Paid commissions", "Payment Monitoring", "Announcements", "Policy"],
+    internal_finance: ["Finance Overview", "Finance Reports", "Finance", "Finance Approvals", "Finance Transactions", "Finance Accounts", "Finance Budget", "Finance Supplier Costing", "Finance Payables", "Paid commissions", "Finance Activity History", "Payment Monitoring", "Announcements", "Policy"],
     external_finance: ["Finance Overview", "Finance Reports", "Finance", "Finance Transactions", "Finance Budget", "Finance Supplier Costing", "Payment Monitoring", "Announcements", "Policy"],
     lead_coordinator: ["Leads", "Lead Costing", "Announcements", "Policy"],
     payroll: ["Dashboard", "Payroll & Leave", "Letter Request", "Directory", "Announcements", "Policy"],
@@ -23730,6 +23736,7 @@ export function HuswellWorkspace({
       "Finance Supplier Costing",
       "Finance Payables",
       "Paid commissions",
+      "Finance Activity History",
       "Payment Monitoring",
     );
   }
@@ -23775,6 +23782,7 @@ export function HuswellWorkspace({
             { view: "Finance Payables", icon: Wallet },
             { view: "Paid commissions", icon: PhilippinePeso },
             { view: "Payment Monitoring", icon: ReceiptText },
+            { view: "Finance Activity History", icon: ClipboardList },
           ],
         },
       ]
@@ -23827,8 +23835,9 @@ export function HuswellWorkspace({
         { view: "Finance Payables", icon: Wallet },
         { view: "Paid commissions", icon: PhilippinePeso },
         { view: "Payment Monitoring", icon: ReceiptText },
+        { view: "Finance Activity History", icon: ClipboardList },
       ]
-    : [{ view: "Finance Budget", icon: FileText }];
+    : [{ view: "Finance Budget", icon: FileText }, { view: "Finance Activity History", icon: ClipboardList }];
   const navBase: {
     label: string;
     items: { view: View; icon: typeof LayoutDashboard; badge?: number }[];
@@ -23879,6 +23888,7 @@ export function HuswellWorkspace({
         { view: "Finance Payables", icon: Wallet },
         { view: "Paid commissions", icon: PhilippinePeso },
         { view: "Payment Monitoring", icon: ReceiptText },
+        { view: "Finance Activity History", icon: ClipboardList },
         { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
       ],
@@ -24135,6 +24145,10 @@ export function HuswellWorkspace({
     "Paid commissions": {
       title: "Paid commissions",
       detail: "Review completed commission payouts by project and pricing officer.",
+    },
+    "Finance Activity History": {
+      title: "Finance activity history",
+      detail: "Review budget, account, transaction, funding, and commission activity.",
     },
     Finance: {
       title: role === "external_finance" ? "External Finance" : hasInternalFinanceAccess ? "Internal Finance" : "Finance",
@@ -24394,6 +24408,8 @@ export function HuswellWorkspace({
       <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} initialTab="accounts" />
     ) : active === "Finance Budget" ? (
       <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} budgetAction={financeBudgetActionRequest} onBudgetActionHandled={clearFinanceBudgetActionRequest} initialTab="budget" />
+    ) : active === "Finance Activity History" ? (
+      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} initialTab="activity_history" />
     ) : active === "Finance Supplier Costing" ? (
       <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} initialTab="supplier_costing" />
     ) : active === "Finance Payables" ? (
@@ -24540,6 +24556,8 @@ export function HuswellWorkspace({
                 ? "Supplier costing"
               : view === "Finance Payables"
                 ? "Payables"
+              : view === "Finance Activity History"
+                ? "Finance activity history"
               : view === "Finance" && role === "external_finance"
                 ? "External Finance"
               : view === "Finance" && hasInternalFinanceAccess

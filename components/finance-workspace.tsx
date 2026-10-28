@@ -44,7 +44,7 @@ type FinanceRemoveTarget = { kind: "category" | "account_type"; id: string; labe
 type Direction = "income" | "expense";
 type CashInSource = "other_income" | "quotation_payment";
 type ExpenseMode = "regular" | "project" | "supplier";
-type Tab = "overview" | "reports" | "approvals" | "transactions" | "accounts" | "budget" | "supplier_costing" | "payables" | "commission_history";
+type Tab = "overview" | "reports" | "approvals" | "transactions" | "accounts" | "budget" | "supplier_costing" | "payables" | "commission_history" | "activity_history";
 type PayablesSection = "commission" | "supplier";
 type CommissionPayablesView = "awaiting_payment" | "ready_to_pay";
 type Period = "all" | "weekly" | "monthly" | "yearly";
@@ -812,6 +812,49 @@ function ProjectHistoryTable({
         </table>
       </div>
     </div>
+  );
+}
+
+function FinanceActivityHistoryTable({
+  rows,
+  page,
+  pageCount,
+  total,
+  onPageChange,
+}: {
+  rows: Row[];
+  page: number;
+  pageCount: number;
+  total: number;
+  onPageChange: (page: number) => void;
+}) {
+  return (
+    <>
+      <div className="table-shell overflow-x-auto">
+        <table className="app-table w-full min-w-[1040px]">
+          <thead><tr><th>Date &amp; time</th><th>Activity</th><th>Status</th><th>Amount</th><th>Source account</th><th>Destination account</th><th>Performed by</th></tr></thead>
+          <tbody>
+            {rows.map((row) => {
+              const rawAmount = row.amount;
+              const hasAmount = rawAmount !== null && rawAmount !== undefined && rawAmount !== "";
+              return (
+                <tr key={String(row.id)}>
+                  <td>{displayDate(row.activity_at)}</td>
+                  <td className="font-medium">{stringValue(row, "activity", "Finance activity")}</td>
+                  <td><StatusPill value={stringValue(row, "status", "—")} /></td>
+                  <td className="font-semibold">{hasAmount ? peso.format(Number(rawAmount)) : "—"}</td>
+                  <td>{stringValue(row, "source_account", "—")}</td>
+                  <td>{stringValue(row, "destination_account", "—")}</td>
+                  <td>{stringValue(row, "performed_by", "—")}</td>
+                </tr>
+              );
+            })}
+            {!rows.length && <tr><td colSpan={7} className="text-center text-[#7d8797]">No Finance activity matches your search.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <TablePagination page={page} pageCount={pageCount} total={total} onPageChange={onPageChange} label="Finance activity history pagination" />
+    </>
   );
 }
 
@@ -1985,6 +2028,7 @@ export function FinanceWorkspace({
   const canGrantBudget = budgetOnly || gmBudgetAccess;
   const internal = isInternalRole(role);
   const canViewBudget = internal || canGrantBudget;
+  const canReturnBudget = canViewBudget && (budgetOnly || internal);
   const canCreateCategory = internal || role === "external_finance";
   const canRequestBudget = role === "external_finance";
   const canManageBudget = role === "internal_finance";
@@ -1993,7 +2037,7 @@ export function FinanceWorkspace({
   const canRecordSupplierCosting = role === "external_finance";
   const financeTabs = useMemo<[Tab, string][]>(
     () => budgetOnly
-      ? [["budget", "Budget & allocations"]]
+      ? [["budget", "Budget & allocations"], ["activity_history", "Finance activity history"]]
       : [
           ...(internal ? [["approvals", "Pending approvals"] as [Tab, string]] : []),
           ["transactions", role === "external_finance" ? "Transaction" : "Transaction history"],
@@ -2002,6 +2046,7 @@ export function FinanceWorkspace({
           ...(internal || canRecordSupplierCosting ? [["supplier_costing", "Supplier costing"] as [Tab, string]] : []),
           ...(internal ? [["payables", "Payables"] as [Tab, string]] : []),
           ...(internal ? [["commission_history", "Paid commissions"] as [Tab, string]] : []),
+          ...(internal ? [["activity_history", "Finance activity history"] as [Tab, string]] : []),
         ],
     [budgetOnly, canRecordSupplierCosting, internal, role],
   );
@@ -2015,11 +2060,13 @@ export function FinanceWorkspace({
   const [payablesPage, setPayablesPage] = useState(1);
   const [paidCommissionPage, setPaidCommissionPage] = useState(1);
   const [budgetPage, setBudgetPage] = useState(1);
+  const [activityPage, setActivityPage] = useState(1);
   const [supplierCostingPage, setSupplierCostingPage] = useState(1);
   const [transactionsPage, setTransactionsPage] = useState(1);
   const [transactionPeriod] = useState<Period>("all");
   const [transactionQuery, setTransactionQuery] = useState("");
   const [transactionStatusView, setTransactionStatusView] = useState<TransactionStatusView>("pending");
+  const [activityQuery, setActivityQuery] = useState("");
   const [pendingApprovalFilter, setPendingApprovalFilter] = useState<PendingApprovalFilter>("income");
   const [pendingApprovalSection, setPendingApprovalSection] = useState<PendingApprovalSection>("income");
   const [selectedTransaction, setSelectedTransaction] = useState<Row | null>(null);
@@ -2036,6 +2083,7 @@ export function FinanceWorkspace({
   const [budgetPeriods, setBudgetPeriods] = useState<Row[]>([]);
   const [budgetGrants, setBudgetGrants] = useState<Row[]>([]);
   const [accountBudgetAllocations, setAccountBudgetAllocations] = useState<Row[]>([]);
+  const [financeActivityRows, setFinanceActivityRows] = useState<Row[]>([]);
   const [accountFundingRequests, setAccountFundingRequests] = useState<Row[]>([]);
   const [leads, setLeads] = useState<Row[]>([]);
   const [quotations, setQuotations] = useState<Row[]>([]);
@@ -2085,6 +2133,8 @@ export function FinanceWorkspace({
   const [allocationOpen, setAllocationOpen] = useState(false);
   const [allocationMode, setAllocationMode] = useState<"allocate" | "reallocate">("allocate");
   const [allocationValues, setAllocationValues] = useState({ from_account_id: "", to_account_id: "", amount: "" });
+  const [returnAllocation, setReturnAllocation] = useState<Row | null>(null);
+  const [returnAmount, setReturnAmount] = useState("");
   const [budgetSection, setBudgetSection] = useState<"allocations" | "requests">("allocations");
   const [budgetReviewRequest, setBudgetReviewRequest] = useState<Row | null>(null);
   const [fundingReviewRequest, setFundingReviewRequest] = useState<Row | null>(null);
@@ -2185,6 +2235,9 @@ export function FinanceWorkspace({
             .eq("organization_id", organizationId)
             .order("paid_at", { ascending: false })
             .order("created_at", { ascending: false });
+      const financeActivityRequest = canViewBudget
+        ? client.rpc("get_finance_activity_history", { p_organization_id: organizationId })
+        : emptyFinanceRequest();
       const requests = await Promise.all([
         budgetOnly
           ? emptyFinanceRequest()
@@ -2236,6 +2289,7 @@ export function FinanceWorkspace({
         accountTypesRequest,
         commissionSummariesRequest,
         productionConfirmedQuotationIdsRequest,
+        financeActivityRequest,
       ]);
       const failed = requests.find((request) => request.error);
       if (failed?.error) {
@@ -2272,6 +2326,7 @@ export function FinanceWorkspace({
           .map((row) => stringValue(row, "quotation_id"))
           .filter(Boolean),
       );
+      setFinanceActivityRows((requests[26].data ?? []) as Row[]);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Finance data could not load.");
     } finally {
@@ -2288,11 +2343,14 @@ export function FinanceWorkspace({
   useEffect(() => {
     const realtimeTables = budgetOnly
       ? [
+          "finance_transactions",
+          "finance_accounts",
           "finance_budget_periods",
           "finance_budget_grants",
           "finance_account_budget_allocations",
           "finance_account_funding_requests",
           "finance_account_budget_allocation_events",
+          "activity_log",
           "profiles",
         ]
       : [
@@ -2307,6 +2365,7 @@ export function FinanceWorkspace({
           "supplier_payables",
           "commission_summary_allocations",
           "quotation_payment_records",
+          "activity_log",
           "project_schedules",
           "leads",
           "quotations",
@@ -2795,6 +2854,27 @@ export function FinanceWorkspace({
   const visibleProjectHistoryRows = projectHistoryRows.slice(
     (activeProjectHistoryPage - 1) * TABLE_PAGE_SIZE,
     activeProjectHistoryPage * TABLE_PAGE_SIZE,
+  );
+  const filteredActivityRows = useMemo(
+    () => {
+      const normalized = activityQuery.trim().toLowerCase();
+      return [...financeActivityRows]
+        .filter((row) => !normalized || [
+          stringValue(row, "activity"),
+          stringValue(row, "status"),
+          stringValue(row, "source_account"),
+          stringValue(row, "destination_account"),
+          stringValue(row, "performed_by"),
+        ].join(" ").toLowerCase().includes(normalized))
+        .sort((left, right) => String(right.activity_at ?? "").localeCompare(String(left.activity_at ?? "")));
+    },
+    [activityQuery, financeActivityRows],
+  );
+  const activityPageCount = Math.max(1, Math.ceil(filteredActivityRows.length / TABLE_PAGE_SIZE));
+  const activeActivityPage = Math.min(activityPage, activityPageCount);
+  const visibleActivityRows = filteredActivityRows.slice(
+    (activeActivityPage - 1) * TABLE_PAGE_SIZE,
+    activeActivityPage * TABLE_PAGE_SIZE,
   );
   const recentTransactions = transactions.slice(0, 8);
   const pendingApprovalTransactions = useMemo(
@@ -3952,6 +4032,35 @@ export function FinanceWorkspace({
     await load();
   };
 
+  const openBudgetReturn = (allocation: Row) => {
+    setReturnAllocation(allocation);
+    setReturnAmount("");
+  };
+
+  const closeBudgetReturn = () => {
+    setReturnAllocation(null);
+    setReturnAmount("");
+  };
+
+  const saveBudgetReturn = async () => {
+    if (!canReturnBudget) return setErrorMessage("Only the General Manager or Internal Finance can return budget to the pool.");
+    const amount = Number(returnAmount);
+    const available = numericValue(returnAllocation, "available_amount");
+    if (!Number.isFinite(amount) || amount <= 0) return setErrorMessage("Enter a return amount greater than zero.");
+    if (amount > available + 0.001) return setErrorMessage(`The return cannot exceed the available amount of ${peso.format(available)}.`);
+    setSaving(true);
+    const result = await client.rpc("return_finance_account_budget", {
+      p_account_id: returnAllocation?.account_id,
+      p_amount: amount,
+      p_organization_id: organizationId,
+    });
+    setSaving(false);
+    if (result.error) return setErrorMessage(result.error.message);
+    closeBudgetReturn();
+    setMessage("Budget returned to the undistributed pool.");
+    await load();
+  };
+
   const approveAndPay = async (transactionId: string, decisionNote: string | null = null) => {
     setSaving(true);
     const { error } = await client.rpc("approve_and_pay_finance_transaction", {
@@ -4574,8 +4683,8 @@ export function FinanceWorkspace({
               </nav>
               {budgetSection === "allocations" ? (
                 <section id="finance-budget-allocations" role="tabpanel" aria-label="Active account allocations">
-                  <div className="px-4 py-4 sm:px-5"><h3 className="text-[13px] font-semibold text-[#202938]">Active account allocations</h3><p className="mt-1 text-[11px] text-[#7d8797]">{canManageBudget ? "Only unused and uncommitted allocation can be moved to another active account." : "Internal Finance distributes and reallocates the GM-approved budget."}</p></div>
-                  <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[940px]"><thead><tr><th>Account</th><th>Allocated</th><th>Used</th><th>Committed</th><th>Available</th>{canManageBudget && <th>Action</th>}</tr></thead><tbody>{currentAccountAllocations.map((allocation) => <tr key={String(allocation.id)}><td>{stringValue(allocation, "account_name", accountName(allocation.account_id))}</td><td className="font-semibold">{peso.format(numericValue(allocation, "allocated_amount"))}</td><td className="text-[#b42318]">{peso.format(numericValue(allocation, "used_amount"))}</td><td className="text-[#a76605]">{peso.format(numericValue(allocation, "committed_amount"))}</td><td className="font-semibold text-[#218b55]">{peso.format(numericValue(allocation, "available_amount"))}</td>{canManageBudget && <td><button type="button" disabled={saving || numericValue(allocation, "available_amount") <= 0} onClick={() => openBudgetAllocation("reallocate", String(allocation.account_id))} className="button-secondary text-[10px]">Reallocate</button></td>}</tr>)}{!currentAccountAllocations.length && <tr><td colSpan={canManageBudget ? 6 : 5} className="text-center text-[#7d8797]">No account allocations yet. Add a GM budget, then allocate it to active accounts.</td></tr>}</tbody></table></div>
+                  <div className="px-4 py-4 sm:px-5"><h3 className="text-[13px] font-semibold text-[#202938]">Active account allocations</h3><p className="mt-1 text-[11px] text-[#7d8797]">{canReturnBudget ? "Unused and uncommitted budget can be returned to the undistributed pool. Internal Finance can also reallocate it between active accounts." : "Internal Finance distributes and reallocates the GM-approved budget."}</p></div>
+                  <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[1040px]"><thead><tr><th>Account</th><th>Allocated</th><th>Used</th><th>Committed</th><th>Available</th>{(canManageBudget || canReturnBudget) && <th>Action</th>}</tr></thead><tbody>{currentAccountAllocations.map((allocation) => { const available = numericValue(allocation, "available_amount"); const effectiveAllocated = Math.max(numericValue(allocation, "allocated_amount") - numericValue(allocation, "returned_amount"), 0); return <tr key={String(allocation.id)}><td>{stringValue(allocation, "account_name", accountName(allocation.account_id))}</td><td className="font-semibold">{peso.format(effectiveAllocated)}</td><td className="text-[#b42318]">{peso.format(numericValue(allocation, "used_amount"))}</td><td className="text-[#a76605]">{peso.format(numericValue(allocation, "committed_amount"))}</td><td className="font-semibold text-[#218b55]">{peso.format(available)}</td>{(canManageBudget || canReturnBudget) && <td><span className="flex flex-wrap gap-1">{canManageBudget && <button type="button" disabled={saving || available <= 0} onClick={() => openBudgetAllocation("reallocate", String(allocation.account_id))} className="button-secondary text-[10px]">Reallocate</button>}{canReturnBudget && <button type="button" disabled={saving || available <= 0} onClick={() => openBudgetReturn(allocation)} className="button-danger text-[10px]">Return to pool</button>}</span></td>}</tr>; })}{!currentAccountAllocations.length && <tr><td colSpan={(canManageBudget || canReturnBudget) ? 6 : 5} className="text-center text-[#7d8797]">No account allocations yet. Add a GM budget, then allocate it to active accounts.</td></tr>}</tbody></table></div>
                 </section>
               ) : (
                 <section id="finance-budget-requests" role="tabpanel" aria-label="Account funding requests">
@@ -4588,6 +4697,16 @@ export function FinanceWorkspace({
             <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[980px]"><thead><tr><th>Account</th><th>Requested by</th><th>Requested on</th><th>Requested</th><th>Approved</th><th>Status</th><th>Decision note</th><th>Action</th></tr></thead><tbody>{visibleFundingRequests.map((request) => { const status = stringValue(request, "status"); return <tr key={String(request.id)}><td>{accountName(request.account_id)}</td><td>{financeUserName(request.requested_by)}</td><td>{displayDate(request.requested_at)}</td><td className="font-semibold">{peso.format(numericValue(request, "requested_amount"))}</td><td className="font-semibold text-[#218b55]">{request.approved_amount == null ? "-" : peso.format(numericValue(request, "approved_amount"))}</td><td><StatusPill value={status} /></td><td>{stringValue(request, "decision_note") || stringValue(request, "note") || "-"}</td><td>{canManageBudget && ["pending", "revision_requested"].includes(status) ? <span className="flex gap-1"><button type="button" disabled={saving} onClick={() => requestFundingReview(request, "approved")} className="icon-button text-[#218b55]" title="Approve account funding" aria-label="Approve account funding"><Check size={15} /></button><button type="button" disabled={saving} onClick={() => requestFundingReview(request, "rejected")} className="icon-button text-[#b42318]" title="Reject account funding" aria-label="Reject account funding"><XCircle size={15} /></button><button type="button" disabled={saving} onClick={() => requestFundingReview(request, "revision_requested")} className="icon-button text-[#6941c6]" title="Return account funding for revision" aria-label="Return account funding for revision"><Undo2 size={15} /></button></span> : canRequestBudget && status === "revision_requested" ? <button type="button" disabled={saving} onClick={() => openFundingRequestRevision(request)} className="button-secondary whitespace-nowrap text-[10px]" title="Edit and resubmit account funding request"><Undo2 size={13} /> Edit &amp; resubmit</button> : "-"}</td></tr>; })}{!accountFundingRequests.length && <tr><td colSpan={8} className="text-center text-[#7d8797]">No account funding requests yet.</td></tr>}</tbody></table></div>
             <TablePagination page={activeBudgetPage} pageCount={budgetPageCount} total={accountFundingRequests.length} onPageChange={setBudgetPage} label="Account funding requests pagination" />
           </>}
+        </Panel>
+      )}
+
+      {tab === "activity_history" && canViewBudget && (
+        <Panel title="Finance activity history" detail="Review budget, account, transaction, funding, and commission activity in one consistent history.">
+          <div className="border-b border-[#edf0f5] p-4 sm:px-5">
+            <label className="relative block max-w-md"><Search size={15} className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]" /><input value={activityQuery} onChange={(event) => { setActivityQuery(event.target.value); setActivityPage(1); }} className="input mt-0 w-full search-input text-[12px]" placeholder="Search Finance activity" aria-label="Search Finance activity history" /></label>
+          </div>
+          <div className="px-4 py-3 text-[11px] text-[#7d8797] sm:px-5">Showing {visibleActivityRows.length ? (activeActivityPage - 1) * TABLE_PAGE_SIZE + 1 : 0}-{Math.min(activeActivityPage * TABLE_PAGE_SIZE, filteredActivityRows.length)} of {filteredActivityRows.length} activities</div>
+          <FinanceActivityHistoryTable rows={visibleActivityRows} page={activeActivityPage} pageCount={activityPageCount} total={filteredActivityRows.length} onPageChange={setActivityPage} />
         </Panel>
       )}
 
@@ -5226,6 +5345,8 @@ export function FinanceWorkspace({
       {grantOpen && <FinanceDialog title="Add GM budget" detail="This changes the approved spending-limit pool only. It does not record Cash In or increase an account's actual balance." close={() => setGrantOpen(false)} compact><div className="mt-5 space-y-3"><label className="field-label">Approved amount<NumberInput min="0.01" step="0.01" value={grantValues.amount} onChange={(value) => setGrantValues((current) => ({ ...current, amount: value }))} className="input mt-1" /></label><label className="field-label">Note<textarea value={grantValues.note} onChange={(event) => setGrantValues((current) => ({ ...current, note: event.target.value }))} className="input mt-1 min-h-24" placeholder="Explain the GM budget approval" /></label></div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setGrantOpen(false)} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveBudgetGrant()} disabled={saving} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} Save budget</button></div></FinanceDialog>}
 
       {allocationOpen && <FinanceDialog title={allocationMode === "reallocate" ? "Reallocate account budget" : "Allocate budget to account"} detail={allocationMode === "reallocate" ? "Only unused and uncommitted budget can move from the source account." : "Distribute the current GM pool to an active account."} close={() => setAllocationOpen(false)} compact><div className="mt-5 space-y-3">{allocationMode === "reallocate" && <label className="field-label">From account<select value={allocationValues.from_account_id} onChange={(event) => setAllocationValues((current) => ({ ...current, from_account_id: event.target.value }))} className="input mt-1"><option value="">Choose source account</option>{activeAccounts.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")}</option>)}</select></label>}<label className="field-label">{allocationMode === "reallocate" ? "To account" : "Account"}<select value={allocationValues.to_account_id} onChange={(event) => setAllocationValues((current) => ({ ...current, to_account_id: event.target.value }))} className="input mt-1"><option value="">Choose account</option>{activeAccounts.filter((account) => allocationMode !== "reallocate" || String(account.id) !== allocationValues.from_account_id).map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")}</option>)}</select></label><label className="field-label">Amount<NumberInput min="0.01" step="0.01" value={allocationValues.amount} onChange={(value) => setAllocationValues((current) => ({ ...current, amount: value }))} className="input mt-1" /></label></div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setAllocationOpen(false)} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveBudgetAllocation()} disabled={saving} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} {allocationMode === "reallocate" ? "Reallocate" : "Allocate"}</button></div></FinanceDialog>}
+
+      {returnAllocation && <FinanceDialog title="Return budget to pool" detail="Only unused and uncommitted budget can be returned. The original allocation history will be preserved." close={closeBudgetReturn} compact><div className="mt-5 space-y-3"><div className="rounded-md border border-[#d9e0e9] bg-[#fafbfc] px-3 py-2 text-[11px]"><span className="text-[#7d8797]">Account</span><strong className="mt-1 block text-[#202938]">{stringValue(returnAllocation, "account_name", accountName(returnAllocation.account_id))}</strong><span className="mt-2 block text-[#7d8797]">Available to return</span><strong className="mt-1 block text-[#202938]">{peso.format(numericValue(returnAllocation, "available_amount"))}</strong></div><label className="field-label">Amount<NumberInput min="0.01" max={numericValue(returnAllocation, "available_amount")} step="0.01" value={returnAmount} onChange={setReturnAmount} className="input mt-1" /></label></div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={closeBudgetReturn} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveBudgetReturn()} disabled={saving} className="button-danger">{saving && <LoaderCircle size={14} className="animate-spin" />} Return to pool</button></div></FinanceDialog>}
 
       {fundingReviewRequest && <FinanceDialog title="Approve account funding request" detail="The approved amount is added to the selected account allocation and deducted from the undistributed GM pool." close={() => setFundingReviewRequest(null)} compact><div className="mt-5 space-y-3"><div className="rounded-md border border-[#d9e0e9] bg-[#fafbfc] px-3 py-2 text-[11px]"><span className="text-[#7d8797]">Account</span><strong className="mt-1 block text-[#202938]">{accountName(fundingReviewRequest.account_id)}</strong><span className="mt-2 block text-[#7d8797]">Requested</span><strong className="mt-1 block text-[#202938]">{peso.format(numericValue(fundingReviewRequest, "requested_amount"))}</strong></div><label className="field-label">Approved amount<NumberInput min="0.01" max={numericValue(fundingReviewRequest, "requested_amount")} step="0.01" value={fundingApprovedAmount} onChange={setFundingApprovedAmount} className="input mt-1" /></label></div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={() => setFundingReviewRequest(null)} className="button-secondary">Cancel</button><button type="button" onClick={() => void submitFundingApproval()} disabled={saving} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} Approve and allocate</button></div></FinanceDialog>}
 
