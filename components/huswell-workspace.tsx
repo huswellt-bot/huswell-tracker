@@ -17457,7 +17457,9 @@ function PriceQuotationReview({
   const [submissionNote, setSubmissionNote] = useState(() => text(quotation.pricing_submission_note, ""));
   const [working, setWorking] = useState(false);
   const [productCostingsLoading, setProductCostingsLoading] = useState(true);
-  const shouldRefreshGmMarkups = finalApproval && text(quotation.status, "") === "pending_gm_approval";
+  const [productCostingsError, setProductCostingsError] = useState("");
+  const [productCostingsLoadAttempt, setProductCostingsLoadAttempt] = useState(0);
+  const useCurrentGmMarkups = finalApproval && text(quotation.status, "") === "pending_gm_approval";
   const [productCostings, setProductCostings] = useState<ProductCostingDraft[]>(() => {
     const savedCostings = productCostingDrafts(
       store.price_quotation_product_costings.filter(
@@ -17467,26 +17469,16 @@ function PriceQuotationReview({
       store.price_quotation_costing_markups,
       lines,
     );
-    return shouldRefreshGmMarkups
+    return useCurrentGmMarkups
       ? savedCostings.map((costing) => applyCurrentPricingDefaultsToCosting(costing, defaultPricingDefaults))
       : savedCostings;
   });
   useEffect(() => {
     let active = true;
     setProductCostingsLoading(true);
+    setProductCostingsError("");
     const loadProductCostings = async () => {
       const client = createClient();
-      if (shouldRefreshGmMarkups) {
-        const { error: refreshError } = await client.rpc("refresh_gm_price_quotation_markups", {
-          p_quotation_id: quotation.id,
-        });
-        if (!active) return;
-        if (refreshError) {
-          setProductCostingsLoading(false);
-          notice(refreshError.message);
-          return;
-        }
-      }
       const { data: costingData, error: costingError } = await client
         .from("price_quotation_product_costings")
         .select("*")
@@ -17494,6 +17486,7 @@ function PriceQuotationReview({
       if (!active) return;
       if (costingError) {
         setProductCostingsLoading(false);
+        setProductCostingsError("Quotation costing data could not be loaded. Please retry.");
         return;
       }
 
@@ -17517,6 +17510,7 @@ function PriceQuotationReview({
       if (!active) return;
       if (costLineResult.error || markupResult.error) {
         setProductCostingsLoading(false);
+        setProductCostingsError("Quotation costing lines or markups could not be loaded. Please retry.");
         return;
       }
       const loadedCostings = productCostingDrafts(
@@ -17525,7 +17519,7 @@ function PriceQuotationReview({
         (markupResult.data ?? []) as Row[],
         lines,
       );
-      setProductCostings(shouldRefreshGmMarkups
+      setProductCostings(useCurrentGmMarkups
         ? loadedCostings.map((costing) => applyCurrentPricingDefaultsToCosting(costing, defaultPricingDefaults))
         : loadedCostings);
       setProductCostingsLoading(false);
@@ -17534,7 +17528,7 @@ function PriceQuotationReview({
     return () => {
       active = false;
     };
-  }, [defaultPricingDefaults, lines, quotation.id, shouldRefreshGmMarkups]);
+  }, [defaultPricingDefaults, lines, productCostingsLoadAttempt, quotation.id, useCurrentGmMarkups]);
   const [galleryIllustrations, setGalleryIllustrations] = useState<Row[]>(() =>
     store.price_quotation_illustrations.filter(
       (illustration) => illustration.quotation_id === illustrationQuotationId,
@@ -17824,7 +17818,16 @@ function PriceQuotationReview({
           </div>
           <button type="button" onClick={close} aria-label="Close review" className="grid size-8 shrink-0 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button>
         </div>
-        <PriceQuotationReviewContent
+        {productCostingsLoading ? (
+          <LoadingState variant="section" label="Loading quotation costing data..." className="mt-5" />
+        ) : productCostingsError ? (
+          <div role="alert" className="mt-5 rounded-lg border border-[#f0c7c7] bg-[#fff7f7] px-4 py-4 text-[12px] text-[#8f1d1d]">
+            <p className="font-medium">{productCostingsError}</p>
+            <div className="mt-3 flex justify-end">
+              <Button secondary onClick={() => setProductCostingsLoadAttempt((current) => current + 1)}>Retry loading</Button>
+            </div>
+          </div>
+        ) : <PriceQuotationReviewContent
           lines={lines}
           projectName={text(quotation.project_name, "")}
           projectType={text(quotation.project_types, "")}
@@ -17885,7 +17888,7 @@ function PriceQuotationReview({
           onCommissionCoWorkerChange={setCommissionCoWorkerUserId}
           onCommissionSplitOptionChange={setCommissionSplitOption}
           readOnly={readOnly}
-        />
+        />}
       </section>
     </div>
   );

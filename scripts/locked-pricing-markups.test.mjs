@@ -144,13 +144,17 @@ test("Approval Center uses the single GM Settings VAT source", () => {
   assert.match(legacyVatMigration, /system_role', 'vat'/);
 });
 
-test("GM Approval Center refreshes pending markup rows from current Settings", () => {
+test("GM Approval Center uses current Settings while loading pending markup rows", () => {
   assert.match(workspace, /applyCurrentPricingDefaultsToCosting/);
-  assert.match(workspace, /shouldRefreshGmMarkups\s*=\s*finalApproval\s*&&\s*text\(quotation\.status, ""\) === "pending_gm_approval"/);
-  assert.match(workspace, /shouldRefreshGmMarkups\s*\?\s*savedCostings\.map/);
-  assert.match(workspace, /shouldRefreshGmMarkups\s*\?\s*loadedCostings\.map/);
+  assert.match(workspace, /useCurrentGmMarkups\s*=\s*finalApproval\s*&&\s*text\(quotation\.status, ""\) === "pending_gm_approval"/);
+  assert.match(workspace, /useCurrentGmMarkups\s*\?\s*savedCostings\.map/);
+  assert.match(workspace, /useCurrentGmMarkups\s*\?\s*loadedCostings\.map/);
   assert.match(workspace, /defaults\s*\.filter\(\(definition\) => definition\.purpose !== "vat"\)/);
   assert.match(workspace, /refresh_gm_price_quotation_markups/);
+  assert.match(workspace, /Loading quotation costing data/);
+  assert.match(workspace, /productCostingsError/);
+  assert.match(workspace, /Retry loading/);
+  assert.doesNotMatch(workspace, /if\s*\(useCurrentGmMarkups\)\s*\{\s*const\s+\{ error: refreshError \}/);
   assert.match(gmMarkupRefreshMigration, /create or replace function public\.refresh_gm_price_quotation_markups/);
   assert.match(gmMarkupRefreshMigration, /Only the General Manager can refresh quotation markups/);
   assert.match(gmMarkupRefreshMigration, /pricing_markup_purpose\(entry.key, entry.value\) <> 'vat'/);
