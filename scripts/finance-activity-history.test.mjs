@@ -11,6 +11,10 @@ const migration = readFileSync(
   join(repoRoot, "supabase", "migrations", "20261028125014_finance_activity_history_and_returns.sql"),
   "utf8",
 ).toLowerCase();
+const cutoffMigration = readFileSync(
+  join(repoRoot, "supabase", "migrations", "20261028131007_finance_activity_history_cutoff.sql"),
+  "utf8",
+).toLowerCase();
 
 test("Finance activity history is a separate final Finance navigation item for GM and Internal Finance", () => {
   assert.match(mainWorkspace, /\| "Finance Activity History"/);
@@ -31,6 +35,10 @@ test("activity history uses one consistent table schema and server-side role aut
   assert.match(migration, /grant execute on function public\.get_finance_activity_history\(uuid\) to authenticated/);
   assert.match(workspace, /get_finance_activity_history/);
   assert.match(workspace, /Date &amp; time.*Activity.*Status.*Amount.*Source account.*Destination account.*Performed by/);
+  assert.match(cutoffMigration, /finance_activity_history_started_at/);
+  assert.match(cutoffMigration, /grant_row\.granted_at >= v_started_at/);
+  assert.match(cutoffMigration, /event\.created_at >= v_started_at/);
+  assert.match(cutoffMigration, /log\.created_at >= v_started_at/);
 });
 
 test("return-to-pool preserves allocation history and prevents returning used budget", () => {
@@ -41,6 +49,9 @@ test("return-to-pool preserves allocation history and prevents returning used bu
   assert.match(migration, /only % of unused and uncommitted budget can be returned/);
   assert.match(workspace, /return_finance_account_budget/);
   assert.match(workspace, /Return to pool/);
+  assert.match(workspace, /<th>Status<\/th>/);
+  assert.match(workspace, /Returned to pool/);
+  assert.match(workspace, /Partially returned/);
   assert.doesNotMatch(workspace, /Explain why.*return|Return reason/i);
 });
 
