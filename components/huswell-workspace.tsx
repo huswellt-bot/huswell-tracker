@@ -601,7 +601,6 @@ type ProductCostingDraft = {
   key: string;
   quotationItemId: string;
   pricingModel: "legacy_markup" | "target_margin";
-  internalVatRate: string;
   vatLocked: boolean;
   costLines: {
     key: string;
@@ -647,7 +646,6 @@ const newProductCostingDraft = (
   key: `product-costing-${crypto.randomUUID()}`,
   quotationItemId,
   pricingModel: "target_margin",
-  internalVatRate: "12",
   vatLocked,
   costLines: [
     {
@@ -700,7 +698,6 @@ const productCostingDrafts = (
     key: text(costing.id, `product-costing-${costingIndex}`),
     quotationItemId: text(costing.quotation_item_id),
     pricingModel,
-    internalVatRate: text(costing.internal_vat_rate, "12"),
     vatLocked: costing.vat_locked === undefined ? true : costing.vat_locked === true,
     costLines: costLines
       .filter((line) => line.product_costing_id === costing.id)
@@ -738,7 +735,6 @@ const productCostingTotals = (
   );
   const markupAmounts: Record<string, number> = {};
   let markupTotal = 0;
-  const internalVatAmount = rounded(cogs * n(costing.internalVatRate) / 100);
   let costBase = cogs;
   let profitAmount = 0;
   let discountAmount = 0;
@@ -752,9 +748,6 @@ const productCostingTotals = (
       markupAmounts[markup.key] = amount;
       return sum + amount;
     }, 0);
-    // The Internal VAT is the seventh internal markup for every costing
-    // model, including quotations created before target-margin pricing.
-    markupTotal = rounded(markupTotal + internalVatAmount);
     sellingExVat = rounded(cogs + markupTotal);
     listSellingExVat = sellingExVat;
   } else {
@@ -769,7 +762,6 @@ const productCostingTotals = (
       markupTotal += amount;
       if (key === "target_profit_margin") profitAmount = amount;
     }
-    markupTotal = rounded(markupTotal + internalVatAmount);
     costBase = rounded(cogs + markupTotal);
     listSellingExVat = costBase;
     if (discount) {
@@ -792,7 +784,6 @@ const productCostingTotals = (
     listSellingExVat,
     markupTotal,
     markupAmounts,
-    internalVatAmount,
     sellingExVat,
     vat,
     sellingIncVat,
@@ -3509,7 +3500,6 @@ export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = 
           <PdfView style={priceQuotationPdfStyles.internalSummary}>
             <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>TOTAL DIRECT COST</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(cogs)}</PriceQuotationPdfCell></PdfView>
             {costingDraft.markups.map((markup, index) => { const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label); const type = markupCalculationType(markup); const value = n(markupValue(markup)); const label = pricingMarkupDefinition(key as PricingMarkupKey)?.label ?? markup.label; return <PdfView key={text(markup.key, String(index))} style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>{`${label} (${type === "fixed_amount" ? currency(value) : `${value}%`})`}</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.markupAmounts[markup.key] ?? 0)}</PriceQuotationPdfCell></PdfView>; })}
-            <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>{`INTERNAL VAT (${n(costingDraft.internalVatRate)}%)`}</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.internalVatAmount)}</PriceQuotationPdfCell></PdfView>
             <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>TOTAL BEFORE DISCOUNT</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.listSellingExVat)}</PriceQuotationPdfCell></PdfView>
             <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>LIST PRICE VAT EX (TOTAL)</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.listSellingExVat)}</PriceQuotationPdfCell></PdfView>
             <PdfView style={priceQuotationPdfStyles.row}><PriceQuotationPdfCell width="58%" description style={priceQuotationPdfStyles.totalLabel}>NET SELLING PRICE VAT EX (TOTAL)</PriceQuotationPdfCell><PriceQuotationPdfCell width="42%" style={priceQuotationPdfStyles.totalValue}>{currency(totals.sellingExVat)}</PriceQuotationPdfCell></PdfView>
@@ -3731,21 +3721,6 @@ function InternalCostingBreakdownPdf({
                           </PdfView>
                         );
                       })}
-                      <PdfView style={priceQuotationPdfStyles.row}>
-                        <PriceQuotationPdfCell
-                          width="58%"
-                          description
-                          style={priceQuotationPdfStyles.totalLabel}
-                        >
-                          {`INTERNAL VAT (${n(costing.internalVatRate)}%)`}
-                        </PriceQuotationPdfCell>
-                        <PriceQuotationPdfCell
-                          width="42%"
-                          style={priceQuotationPdfStyles.totalValue}
-                        >
-                          {currency(totals.internalVatAmount)}
-                        </PriceQuotationPdfCell>
-                      </PdfView>
                       <PdfView style={priceQuotationPdfStyles.row}>
                         <PriceQuotationPdfCell
                           width="58%"
@@ -16415,7 +16390,6 @@ function PricingMarkupEditor({
   markupDefaults,
   update,
   heading,
-  showInternalVat = false,
   sensitiveValuesHidden = false,
   toggleSensitiveValues,
   readOnly = false,
@@ -16426,7 +16400,6 @@ function PricingMarkupEditor({
   markupDefaults: PricingMarkupDefault[];
   update: (next: ProductCostingDraft) => void;
   heading?: string;
-  showInternalVat?: boolean;
   sensitiveValuesHidden?: boolean;
   toggleSensitiveValues: () => void;
   readOnly?: boolean;
@@ -16544,7 +16517,7 @@ function PricingMarkupEditor({
           const amount = totals.markupAmounts[markup.key] ?? 0;
           return (
             <tr key={markup.key} className="hover:bg-[#fbfcff]">
-              <td className="px-3 py-2 font-medium text-[#344054]">{label}{markup.locked === true && <span className="ml-2 rounded-full border border-[#ead7a8] bg-[#fff9e8] px-1.5 py-0.5 text-[10px] font-medium text-[#8a6500]">Locked</span>}</td>
+              <td className="px-3 py-2 font-medium text-[#344054]">{label}</td>
               {includesDiscount && <td className="px-2 py-2">
                 {isDiscount && editable ? <SegmentedToggle ariaLabel={`${label} calculation basis`} value={rowCalculationType} options={markupBasisOptions} onChange={(value) => update({ ...costing, markups: costing.markups.map((item) => item.key === markup.key ? { ...item, calculationType: value as MarkupCalculationType } : item) })} size="compact" className="w-16" /> : <span className="block text-right text-[#687386]">{rowCalculationType === "fixed_amount" ? "Amount" : "Percent"}</span>}
               </td>}
@@ -16556,12 +16529,6 @@ function PricingMarkupEditor({
             </tr>
           );
         })}
-        {showInternalVat && <tr className="bg-[#fafbfc]">
-          <td className="px-3 py-2 font-medium text-[#344054]">Internal VAT</td>
-          {includesDiscount && <td className="px-2 py-2"><span className="block text-right text-[#687386]">Percent</span></td>}
-          <td className="px-2 py-2">{editable ? <div className="flex items-center justify-end gap-1"><input aria-label="Internal VAT percentage" type={sensitiveValuesHidden ? "password" : "number"} min="0" max="100" step="any" value={costing.internalVatRate} onChange={(event) => update({ ...costing, internalVatRate: event.target.value })} className="input mt-0 px-2 py-1.5 tabular-nums" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /><span className="w-4 text-[11px] text-[#687386]">{sensitiveValuesHidden ? confidentialPricingValue : "%"}</span></div> : <span className="block text-right tabular-nums text-[#687386]">{sensitiveValuesHidden ? confidentialPricingValue : `${n(costing.internalVatRate)}%`}</span>}</td>
-          <td className="px-3 py-2 text-right font-medium tabular-nums">{sensitiveValuesHidden ? confidentialPricingValue : peso.format(totals.internalVatAmount)}</td>
-        </tr>}
       </Table>
       </fieldset>
     </div>
@@ -16812,7 +16779,6 @@ function ProductCostingsSectionWithPricing({
   vatValue,
   setVatValue,
   vatInclusive,
-  setVatInclusive,
   costings,
   setCostings,
   approvedSellingPrices,
@@ -16830,7 +16796,6 @@ function ProductCostingsSectionWithPricing({
   vatValue: string;
   setVatValue: (value: string) => void;
   vatInclusive: boolean;
-  setVatInclusive: (value: boolean) => void;
   costings: ProductCostingDraft[];
   setCostings: (next: ProductCostingDraft[] | ((current: ProductCostingDraft[]) => ProductCostingDraft[])) => void;
   approvedSellingPrices: Record<string, string>;
@@ -16865,10 +16830,6 @@ function ProductCostingsSectionWithPricing({
     }
   };
   const canAddCosting = costings.length < lines.length;
-  const vatTotal = costings.reduce((sum, costing) => {
-    const product = lines.find((line) => line.id === costing.quotationItemId);
-    return sum + productCostingTotals(costing, n(product?.quantity), effectiveVatRate).vat;
-  }, 0);
   const orderedCostings = orderedProductCostingDrafts(costings, lines);
   const vatLockState = costings.length === 0
     ? defaults.find((definition) => definition.key === "vat")?.locked === true
@@ -16877,13 +16838,6 @@ function ProductCostingsSectionWithPricing({
       : costings.every((costing) => costing.vatLocked === false)
         ? false
         : null;
-  const canToggleVatLock = editableInternalMarkups && !readOnly && costings.length > 0;
-  const toggleVatLock = () => {
-    if (!canToggleVatLock) return;
-    const nextLocked = vatLockState !== true;
-    setCostings((current) => current.map((costing) => ({ ...costing, vatLocked: nextLocked })));
-  };
-
   return (
     <section className="rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4">
       {canEditVat && <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-[#edf0f5] pb-3">
@@ -16985,7 +16939,7 @@ function ProductCostingsSectionWithPricing({
 
                 <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
                   {editableMarkups && <div className="space-y-4">
-                    <PricingMarkupEditor costing={costing} editable={editableInternalMarkups} visibleMarkupKeys={visibleMarkupKeys} markupDefaults={defaults} update={(next) => updateCosting(costing.key, () => next)} showInternalVat={canEditVat} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
+                    <PricingMarkupEditor costing={costing} editable={editableInternalMarkups} visibleMarkupKeys={visibleMarkupKeys} markupDefaults={defaults} update={(next) => updateCosting(costing.key, () => next)} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
                     <div className="rounded-lg border border-[#d9e0e9] bg-white p-3">
                       <div className="flex flex-wrap items-end justify-between gap-3">
                         <div className="min-w-52 flex-1">
@@ -17012,7 +16966,7 @@ function ProductCostingsSectionWithPricing({
                           </div>
                         </label> : <output aria-label={`Target selling price per piece for ${product ? text(product.description, "finished product") : "product"}`} className="text-[13px] font-semibold text-[#176b40]">{peso.format(totals.unitIncVat)}</output>}
                       </div>
-                    <p className="mt-2 text-[11px] text-[#687386]">Unlocked percentage markups are recalculated to reach this target. Locked markups, Pricing Officer Commission, Internal VAT and Discount remain as entered. {vatInclusive ? vatLockState === true ? "Locked VAT remains unchanged." : vatLockState === false ? "Unlocked VAT may be adjusted with the target." : "VAT has mixed lock states; use the VAT control below to sync them." : "VAT is excluded from this target because the quotation is VAT Exclusive."} GM markup percentages may exceed 100%.</p>
+                    <p className="mt-2 text-[11px] text-[#687386]">Unlocked percentage markups are recalculated to reach this target. Locked markups, Sales Executive Commission and Discount remain as entered. {vatInclusive ? vatLockState === true ? "Locked VAT remains unchanged." : vatLockState === false ? "Unlocked VAT may be adjusted with the target." : "VAT has mixed lock states; use the VAT control above to sync them." : "VAT is excluded from this target because the quotation is VAT Exclusive."} GM markup percentages may exceed 100%.</p>
                       {targetBudgetErrors[costing.key] && <p className="mt-2 text-[11px] font-medium text-[#b42318]">{targetBudgetErrors[costing.key]}</p>}
                     </div>
                   </div>}
@@ -17037,21 +16991,69 @@ function ProductCostingsSectionWithPricing({
         </div>
       )}
 
-      {(!readOnly || editableMarkups || canEditVat) && <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="rounded-lg border border-[#d9e0e9] bg-white p-3">
-          <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[#edf0f5] pb-2">
-            <div><h4 className="text-[12px] font-semibold text-[#344054]">Quotation VAT</h4><p className="mt-0.5 text-[11px] text-[#687386]">Use the GM Settings VAT rate and choose how this quotation is presented.</p></div>
-            <SegmentedToggle ariaLabel="Quotation VAT treatment" value={vatInclusive ? "inclusive" : "exclusive"} options={[{ value: "inclusive", label: "VAT Inclusive" }, { value: "exclusive", label: "VAT Exclusive" }]} onChange={(value) => setVatInclusive(value === "inclusive")} disabled={readOnly} size="compact" />
-          </div>
-          <div className="mt-2 grid grid-cols-[auto_auto_auto_minmax(0,1fr)] items-center gap-3">
-            <span className="text-[11px] font-medium text-[#344054]">VAT rate</span>
-            <div className="flex items-center gap-1"><output aria-label="VAT percentage from GM Settings" className="flex min-h-9 w-28 items-center justify-center rounded-md border border-[#d9e0e9] bg-[#fafbfc] px-2 py-1.5 tabular-nums">{n(vatValue)}</output><span className="text-[11px] text-[#687386]">%</span></div>
-            <button type="button" aria-label={`${vatLockState === true ? "Unlock" : "Lock"} VAT for target selling price recomputation`} aria-pressed={vatLockState === true} title={`${vatLockState === true ? "Unlock" : "Lock"} VAT for target selling price recomputation`} disabled={!canToggleVatLock} onClick={toggleVatLock} className={`grid size-7 place-items-center rounded border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] ${vatLockState === true ? "border-[#ead7a8] bg-[#fff9e8] text-[#8a6500]" : "border-[#d9e0e9] bg-white text-[#687386] hover:bg-[#f5f7fa]"} disabled:cursor-not-allowed disabled:opacity-50`}>{vatLockState === null ? <span className="text-[9px] font-semibold">Mix</span> : vatLockState ? <Lock size={13} /> : <Unlock size={13} />}</button>
-            <output aria-label="VAT total" className="min-w-20 text-right text-[12px] font-semibold text-[#344054]">{peso.format(vatTotal)}</output>
-          </div>
-          <p className="mt-2 text-[10px] leading-4 text-[#687386]">{vatInclusive ? "VAT will be added to the VAT-exclusive selling price." : "No VAT will be added to this quotation."} The rate comes from the single VAT purpose in GM Settings.</p>
+    </section>
+  );
+}
+
+function QuotationVatControl({
+  vatValue,
+  setVatValue,
+  vatInclusive,
+  setVatInclusive,
+  vatTotal,
+  vatLockState,
+  canToggleVatLock,
+  toggleVatLock,
+  editableRate,
+  readOnly,
+}: {
+  vatValue: string;
+  setVatValue: (value: string) => void;
+  vatInclusive: boolean;
+  setVatInclusive: (value: boolean) => void;
+  vatTotal: number;
+  vatLockState: boolean | null;
+  canToggleVatLock: boolean;
+  toggleVatLock: () => void;
+  editableRate: boolean;
+  readOnly: boolean;
+}) {
+  return (
+    <section className="rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4">
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[#edf0f5] pb-3">
+        <div>
+          <h3 className="text-[14px] font-semibold text-[#202938]">Quotation VAT</h3>
+          <p className="mt-1 text-[12px] text-[#687386]">Use the GM Settings VAT rate and choose how this quotation is presented.</p>
         </div>
-      </div>}
+        <SegmentedToggle
+          ariaLabel="Quotation VAT treatment"
+          value={vatInclusive ? "inclusive" : "exclusive"}
+          options={[{ value: "inclusive", label: "VAT Inclusive" }, { value: "exclusive", label: "VAT Exclusive" }]}
+          onChange={(value) => setVatInclusive(value === "inclusive")}
+          disabled={readOnly}
+          size="compact"
+        />
+      </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-[auto_auto_auto_minmax(0,1fr)] sm:items-center">
+        <span className="text-[11px] font-medium text-[#344054]">VAT rate</span>
+        <div className="flex items-center gap-1">
+          {editableRate && !readOnly ? <input aria-label="VAT rate for this quotation" type="number" min="0" max="100" step="any" value={vatValue} onChange={(event) => setVatValue(event.target.value)} className="input mt-0 w-28 px-2 py-1.5 text-center tabular-nums" /> : <output aria-label="VAT percentage from GM Settings" className="flex min-h-9 w-28 items-center justify-center rounded-md border border-[#d9e0e9] bg-white px-2 py-1.5 tabular-nums">{n(vatValue)}</output>}
+          <span className="text-[11px] text-[#687386]">%</span>
+        </div>
+        <button
+          type="button"
+          aria-label={`${vatLockState === true ? "Unlock" : "Lock"} VAT for target selling price recomputation`}
+          aria-pressed={vatLockState === true}
+          title={`${vatLockState === true ? "Unlock" : "Lock"} VAT for target selling price recomputation`}
+          disabled={!canToggleVatLock}
+          onClick={toggleVatLock}
+          className={`grid size-7 place-items-center rounded border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] ${vatLockState === true ? "border-[#ead7a8] bg-[#fff9e8] text-[#8a6500]" : "border-[#d9e0e9] bg-white text-[#687386] hover:bg-[#f5f7fa]"} disabled:cursor-not-allowed disabled:opacity-50`}
+        >
+          {vatLockState === null ? <span className="text-[9px] font-semibold">Mix</span> : vatLockState ? <Lock size={13} /> : <Unlock size={13} />}
+        </button>
+        <output aria-label="VAT total" className="min-w-20 text-left text-[12px] font-semibold text-[#344054] sm:text-right">{peso.format(vatTotal)}</output>
+      </div>
+      <p className="mt-2 text-[10px] leading-4 text-[#687386]">{vatInclusive ? "VAT will be added to the VAT-exclusive selling price." : "No VAT will be added to this quotation."} {editableRate ? "The rate starts from GM Settings and may be adjusted for this quotation." : "The rate comes from the single VAT purpose in GM Settings."}</p>
     </section>
   );
 }
@@ -17087,8 +17089,39 @@ function PriceQuotationReviewContent({
   const displayedBankDetails = bankDetails
     .map((bank, index) => ({ bank, index }))
     .filter(({ index }) => !showInternalMarkups || bankVisibility?.[index] !== false);
+  const vatDefaults = pricingMarkupDefaults(pricingDefaults.pricing_markup_defaults, pricingDefaults);
+  const vatLockState = productCostings.length === 0
+    ? vatDefaults.find((definition) => definition.key === "vat")?.locked === true
+    : productCostings.every((costing) => costing.vatLocked === true)
+      ? true
+      : productCostings.every((costing) => costing.vatLocked === false)
+        ? false
+        : null;
+  const canToggleVatLock = finalApproval && !readOnly && productCostings.length > 0;
+  const toggleVatLock = () => {
+    if (!canToggleVatLock) return;
+    const nextLocked = vatLockState !== true;
+    setProductCostings((current) => current.map((costing) => ({ ...costing, vatLocked: nextLocked })));
+  };
+  const effectiveVatRate = vatInclusive ? n(vatRate) : 0;
+  const vatTotal = productCostings.reduce((sum, costing) => {
+    const product = lines.find((line) => line.id === costing.quotationItemId);
+    return sum + productCostingTotals(costing, n(product?.quantity), effectiveVatRate).vat;
+  }, 0);
   return (
     <div className="mt-5 space-y-5">
+      {(!readOnly || showInternalMarkups || finalApproval) && <QuotationVatControl
+        vatValue={vatRate}
+        setVatValue={setVatRate}
+        vatInclusive={vatInclusive}
+        setVatInclusive={setVatInclusive}
+        vatTotal={vatTotal}
+        vatLockState={vatLockState}
+        canToggleVatLock={canToggleVatLock}
+        toggleVatLock={toggleVatLock}
+        editableRate={finalApproval}
+        readOnly={readOnly}
+      />}
       {commissionAssignmentVisible && <section className="rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4">
         <div>
           <h3 className="text-[14px] font-semibold">Commission assignment</h3>
@@ -17185,7 +17218,7 @@ function PriceQuotationReviewContent({
         <p className="mt-2 whitespace-pre-wrap text-[13px] leading-5 text-[#4b5565]">{submissionNote}</p>
       </section>}
       <QuotationReviewSummary lines={lines} prices={prices} subtotal={subtotal} vatRate={vatInclusive ? vatRate : "0"} tax={tax} total={total} productCostings={productCostings} showPrices={showInternalMarkups} />
-      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} vatInclusive={vatInclusive} setVatInclusive={setVatInclusive} costings={productCostings} setCostings={setProductCostings} approvedSellingPrices={approvedSellingPrices} pricingDefaults={pricingDefaults} editableMarkups={showInternalMarkups} editableInternalMarkups={finalApproval} visibleMarkupKeys={visibleMarkupKeys ?? (showInternalMarkups ? internalPricingMarkupKeys : ["discounts"])} canEditVat={finalApproval} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
+      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} vatInclusive={vatInclusive} costings={productCostings} setCostings={setProductCostings} approvedSellingPrices={approvedSellingPrices} pricingDefaults={pricingDefaults} editableMarkups={showInternalMarkups} editableInternalMarkups={finalApproval} visibleMarkupKeys={visibleMarkupKeys ?? (showInternalMarkups ? internalPricingMarkupKeys : ["discounts"])} canEditVat={finalApproval} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
       <QuotationPaymentTermsEditor
         option={paymentTermsOption}
         termDays={pdcTermDays}
@@ -17680,7 +17713,9 @@ function PriceQuotationReview({
     const appliedVatRate = vatInclusive ? n(vatRate) : 0;
     const costingsPayload = orderedProductCostingDrafts(productCostings, lines).map((costing) => ({
       quotation_item_id: costing.quotationItemId,
-      internal_vat_rate: n(costing.internalVatRate),
+      // Kept only for the legacy database column; quotation VAT is now the
+      // single VAT calculation and is stored through the VAT preference flow.
+      internal_vat_rate: 0,
       vat_locked: costing.vatLocked === true,
       vat_inclusive: vatInclusive,
       vat_rate_snapshot: n(vatRate),

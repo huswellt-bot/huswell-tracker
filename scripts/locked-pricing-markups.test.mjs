@@ -9,8 +9,10 @@ const vatFlowMigration = await readFile(new URL("../supabase/migrations/20261028
 const vatServerGuardMigration = await readFile(new URL("../supabase/migrations/20261028065342_quotation_vat_server_rate_guard.sql", import.meta.url), "utf8");
 const vatSnapshotMigration = await readFile(new URL("../supabase/migrations/20261028065606_quotation_vat_snapshot_preservation.sql", import.meta.url), "utf8");
 const singleVatSourceMigration = await readFile(new URL("../supabase/migrations/20261028071758_single_vat_settings_source.sql", import.meta.url), "utf8");
+const gmVatOverrideMigration = await readFile(new URL("../supabase/migrations/20261028081416_allow_gm_quotation_vat_override.sql", import.meta.url), "utf8");
 const legacyVatMigration = await readFile(new URL("../supabase/migrations/20261028071817_normalize_legacy_vat_markup.sql", import.meta.url), "utf8");
 const gmMarkupRefreshMigration = await readFile(new URL("../supabase/migrations/20261028073156_refresh_gm_quotation_markups_from_settings.sql", import.meta.url), "utf8");
+const internalVatMigration = await readFile(new URL("../supabase/migrations/20261028080844_remove_internal_vat_from_product_costing.sql", import.meta.url), "utf8");
 const deletionMigration = await readFile(new URL("../supabase/migrations/20261026164338_allow_pricing_markup_removal.sql", import.meta.url), "utf8");
 const roleMigration = await readFile(new URL("../supabase/migrations/20261028040711_pricing_markup_role_assignments.sql", import.meta.url), "utf8");
 const snapshotLabelMigration = await readFile(new URL("../supabase/migrations/20261028041726_preserve_pricing_markup_snapshot_labels.sql", import.meta.url), "utf8");
@@ -136,12 +138,28 @@ test("VAT Exclusive preserves the editable snapshot without applying VAT", () =>
 test("Approval Center uses the single GM Settings VAT source", () => {
   assert.match(workspace, /VAT percentage from GM Settings/);
   assert.match(workspace, /single VAT purpose in GM Settings/);
-  assert.doesNotMatch(workspace, /GM can edit the rate before final approval/);
+  assert.match(workspace, /VAT rate for this quotation/);
+  assert.match(workspace, /editableRate=\{finalApproval\}/);
   assert.match(singleVatSourceMigration, /v_rate := v_default_rate/);
   assert.match(singleVatSourceMigration, /pricing_markup_purpose\(entry.key, entry.value\) = 'vat'/);
   assert.match(legacyVatMigration, /'vat'/);
   assert.match(legacyVatMigration, /'third_party_markup'/);
   assert.match(legacyVatMigration, /system_role', 'vat'/);
+  assert.match(gmVatOverrideMigration, /v_rate := greatest\(least\(coalesce\(p_vat_rate, v_default_rate\), 100\), 0\)/);
+  assert.match(gmVatOverrideMigration, /v_rate := v_default_rate/);
+  assert.match(gmVatOverrideMigration, /grant execute on function public\.set_price_quotation_vat_preferences/);
+});
+
+test("Quotation VAT is the only VAT calculation and is shown before the review summary", () => {
+  const reviewContentStart = workspace.indexOf("function PriceQuotationReviewContent");
+  const vatControlPosition = workspace.indexOf("<QuotationVatControl", reviewContentStart);
+  const summaryPosition = workspace.indexOf("<QuotationReviewSummary", reviewContentStart);
+  assert.ok(vatControlPosition >= 0 && summaryPosition >= 0 && vatControlPosition < summaryPosition);
+  assert.doesNotMatch(workspace, /Internal VAT/);
+  assert.match(workspace, /internal_vat_rate: 0/);
+  assert.match(internalVatMigration, /alter column internal_vat_rate set default 0/);
+  assert.match(internalVatMigration, /zero_legacy_internal_vat_rate/);
+  assert.doesNotMatch(internalVatMigration, /v_internal_vat_rate/);
 });
 
 test("GM Approval Center uses current Settings while loading pending markup rows", () => {
