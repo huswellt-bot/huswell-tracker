@@ -5,6 +5,9 @@ import test from "node:test";
 const workspace = await readFile(new URL("../components/huswell-workspace.tsx", import.meta.url), "utf8");
 const migration = await readFile(new URL("../supabase/migrations/20261026163105_locked_pricing_markups.sql", import.meta.url), "utf8");
 const vatMigration = await readFile(new URL("../supabase/migrations/20261028051802_vat_lock_target_price_behavior.sql", import.meta.url), "utf8");
+const vatFlowMigration = await readFile(new URL("../supabase/migrations/20261028065024_quotation_vat_treatment_flow.sql", import.meta.url), "utf8");
+const vatServerGuardMigration = await readFile(new URL("../supabase/migrations/20261028065342_quotation_vat_server_rate_guard.sql", import.meta.url), "utf8");
+const vatSnapshotMigration = await readFile(new URL("../supabase/migrations/20261028065606_quotation_vat_snapshot_preservation.sql", import.meta.url), "utf8");
 const deletionMigration = await readFile(new URL("../supabase/migrations/20261026164338_allow_pricing_markup_removal.sql", import.meta.url), "utf8");
 const roleMigration = await readFile(new URL("../supabase/migrations/20261028040711_pricing_markup_role_assignments.sql", import.meta.url), "utf8");
 const snapshotLabelMigration = await readFile(new URL("../supabase/migrations/20261028041726_preserve_pricing_markup_snapshot_labels.sql", import.meta.url), "utf8");
@@ -21,7 +24,7 @@ test("pricing defaults and costing payloads carry markup lock state", () => {
 test("Target Selling Price / Piece skips locked markups", () => {
   assert.match(workspace, /!isProtectedCommission\(markup\) && markup\.locked !== true/);
   assert.match(workspace, /isProtectedCommission\(markup\) \|\| markup\.locked === true/);
-  assert.match(workspace, /const hasAdjustableVat = !vatLocked/);
+  assert.match(workspace, /const hasAdjustableVat = vatInclusive && !vatLocked/);
   assert.match(workspace, /Unlock at least one percentage markup or VAT before applying a Target Budget/);
 });
 
@@ -30,7 +33,7 @@ test("VAT lock state is persisted and participates in target-price recomputation
   assert.match(workspace, /const vatLockState/);
   assert.match(workspace, /toggleVatLock/);
   assert.match(workspace, /vatLocked: nextLocked/);
-  assert.match(workspace, /vatLocked \? customerVatRate : roundRate/);
+  assert.match(workspace, /vatInclusive\s*\?\s*vatLocked/);
   assert.match(vatMigration, /add column if not exists vat_locked boolean not null default true/);
   assert.match(vatMigration, /coalesce\(\(v_costing ->> 'vat_locked'\)::boolean, true\)/);
   assert.match(vatMigration, /'vat_locked', pc\.vat_locked/);
@@ -96,4 +99,33 @@ test("migration persists and validates lock state", () => {
   assert.match(migration, /lock state must be true or false/);
   assert.match(migration, /'locked', v_locked/);
   assert.match(migration, /'locked', cm\.locked/);
+});
+
+test("VAT treatment uses one GM default, quotation mode, and guarded override", () => {
+  assert.match(workspace, /const \[vatInclusive, setVatInclusive\]/);
+  assert.match(workspace, /Quotation VAT treatment/);
+  assert.match(workspace, /p_vat_inclusive: vatInclusive/);
+  assert.match(workspace, /p_vat_rate: appliedVatRate/);
+  assert.match(workspace, /set_price_quotation_vat_preferences/);
+  assert.match(vatFlowMigration, /add column if not exists vat_inclusive boolean not null default false/);
+  assert.match(vatFlowMigration, /add column if not exists vat_rate_snapshot numeric\(5,2\) not null default 0/);
+  assert.match(vatFlowMigration, /create or replace function public\.set_price_quotation_vat_preferences/);
+  assert.match(vatFlowMigration, /Only the assigned Sales & Pricing Officer can choose VAT treatment/);
+  assert.match(vatFlowMigration, /grant execute on function public\.set_price_quotation_vat_preferences/);
+});
+
+test("Pricing Officer submission cannot overwrite the server VAT snapshot", () => {
+  assert.match(vatServerGuardMigration, /create or replace function private\.persist_product_quotation_totals/);
+  assert.match(vatServerGuardMigration, /if p_status = 'pending_gm_approval'/);
+  assert.match(vatServerGuardMigration, /case when v_vat_inclusive then v_vat_rate else 0 end/);
+  assert.match(vatServerGuardMigration, /vat_rate_snapshot = v_vat_rate/);
+  assert.match(vatServerGuardMigration, /vat_rate = v_vat_rate/);
+});
+
+test("VAT Exclusive preserves the editable snapshot without applying VAT", () => {
+  assert.match(vatSnapshotMigration, /v_vat_rate := case when v_vat_inclusive/);
+  assert.match(vatSnapshotMigration, /else 0/);
+  assert.match(vatSnapshotMigration, /v_vat_snapshot_rate := case when v_vat_inclusive/);
+  assert.match(vatSnapshotMigration, /else v_vat_snapshot_rate/);
+  assert.match(vatSnapshotMigration, /vat_rate_snapshot = v_vat_snapshot_rate/);
 });

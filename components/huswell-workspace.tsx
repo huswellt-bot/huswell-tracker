@@ -789,6 +789,7 @@ const adjustCostingToTargetBudget = (
   targetBudgetValue: string,
   productQuantity: number,
   vatValue: number,
+  vatInclusive = true,
 ): TargetBudgetAdjustment => {
   const rawTarget = targetBudgetValue.trim();
   if (!rawTarget) return { costing };
@@ -823,7 +824,7 @@ const adjustCostingToTargetBudget = (
   }
 
   const roundRate = (value: number) => Math.round(value * 10000) / 10000;
-  const hasAdjustableVat = !vatLocked && customerVatRate > 0;
+  const hasAdjustableVat = vatInclusive && !vatLocked && customerVatRate > 0;
   if (!adjustableMarkups.length && !hasAdjustableVat) {
     return { costing, error: "Unlock at least one percentage markup or VAT before applying a Target Budget." };
   }
@@ -836,7 +837,11 @@ const adjustCostingToTargetBudget = (
     });
     return {
       costing: { ...costing, markups: scaledMarkups },
-      vatValue: vatLocked ? customerVatRate : roundRate(Math.min(100, Math.max(0, customerVatRate * factor))),
+      vatValue: vatInclusive
+        ? vatLocked
+          ? customerVatRate
+          : roundRate(Math.min(100, Math.max(0, customerVatRate * factor)))
+        : 0,
     };
   };
   const evaluate = (factor: number) => {
@@ -16612,6 +16617,8 @@ type PriceQuotationReviewContentProps = {
   subtotal: number;
   vatRate: string;
   setVatRate: (value: string) => void;
+  vatInclusive: boolean;
+  setVatInclusive: (value: boolean) => void;
   tax: number;
   total: number;
   terms: string[];
@@ -16781,6 +16788,8 @@ function ProductCostingsSectionWithPricing({
   lines,
   vatValue,
   setVatValue,
+  vatInclusive,
+  setVatInclusive,
   costings,
   setCostings,
   approvedSellingPrices,
@@ -16797,6 +16806,8 @@ function ProductCostingsSectionWithPricing({
   lines: Row[];
   vatValue: string;
   setVatValue: (value: string) => void;
+  vatInclusive: boolean;
+  setVatInclusive: (value: boolean) => void;
   costings: ProductCostingDraft[];
   setCostings: (next: ProductCostingDraft[] | ((current: ProductCostingDraft[]) => ProductCostingDraft[])) => void;
   approvedSellingPrices: Record<string, string>;
@@ -16815,9 +16826,10 @@ function ProductCostingsSectionWithPricing({
     setCostings((current) => current.map((costing) => costing.key === key ? update(costing) : costing));
   const [targetBudgetValues, setTargetBudgetValues] = useState<Record<string, string>>({});
   const [targetBudgetErrors, setTargetBudgetErrors] = useState<Record<string, string>>({});
+  const effectiveVatRate = vatInclusive ? n(vatValue) : 0;
   const applyTargetBudget = (costing: ProductCostingDraft, value: string, productQuantity: number) => {
     setTargetBudgetValues((current) => ({ ...current, [costing.key]: value }));
-    const result = adjustCostingToTargetBudget(costing, value, productQuantity, n(vatValue));
+    const result = adjustCostingToTargetBudget(costing, value, productQuantity, effectiveVatRate, vatInclusive);
     setTargetBudgetErrors((current) => {
       const next = { ...current };
       if (result.error) next[costing.key] = result.error;
@@ -16826,13 +16838,13 @@ function ProductCostingsSectionWithPricing({
     });
     if (!result.error && value.trim()) {
       updateCosting(costing.key, () => result.costing);
-      if (result.vatValue !== undefined && result.vatValue !== n(vatValue)) setVatValue(String(result.vatValue));
+      if (vatInclusive && result.vatValue !== undefined && result.vatValue !== n(vatValue)) setVatValue(String(result.vatValue));
     }
   };
   const canAddCosting = costings.length < lines.length;
   const vatTotal = costings.reduce((sum, costing) => {
     const product = lines.find((line) => line.id === costing.quotationItemId);
-    return sum + productCostingTotals(costing, n(product?.quantity), n(vatValue)).vat;
+    return sum + productCostingTotals(costing, n(product?.quantity), effectiveVatRate).vat;
   }, 0);
   const orderedCostings = orderedProductCostingDrafts(costings, lines);
   const vatLockState = costings.length === 0
@@ -16881,7 +16893,7 @@ function ProductCostingsSectionWithPricing({
         <div className="mt-4 space-y-4">
           {orderedCostings.map((costing, costingIndex) => {
             const product = lines.find((line) => line.id === costing.quotationItemId);
-            const totals = productCostingTotals(costing, n(product?.quantity), n(vatValue));
+            const totals = productCostingTotals(costing, n(product?.quantity), effectiveVatRate);
             const approvedSellingPrice = product ? approvedSellingPrices[text(product.id)] : "";
             return (
               <article key={costing.key} className="overflow-hidden rounded-xl border border-[#d9e0e9] bg-white p-4 shadow-sm">
@@ -16955,7 +16967,7 @@ function ProductCostingsSectionWithPricing({
                       <div className="flex flex-wrap items-end justify-between gap-3">
                         <div className="min-w-52 flex-1">
                           <h4 className="text-[12px] font-semibold text-[#344054]">Target Budget</h4>
-                          <p className="mt-0.5 text-[11px] text-[#687386]">Target selling price per piece, VAT included. Direct costs stay unchanged.</p>
+                          <p className="mt-0.5 text-[11px] text-[#687386]">Target selling price per piece, VAT {vatInclusive ? "included" : "excluded"}. Direct costs stay unchanged.</p>
                         </div>
                         <div className="min-w-44 rounded-md border border-[#d9e0e9] bg-[#f8fbff] px-3 py-2">
                           <p className="text-[10px] font-semibold uppercase tracking-[0.06em] text-[#687386]">Approved Selling Price / Unit</p>
@@ -16977,7 +16989,7 @@ function ProductCostingsSectionWithPricing({
                           </div>
                         </label> : <output aria-label={`Target selling price per piece for ${product ? text(product.description, "finished product") : "product"}`} className="text-[13px] font-semibold text-[#176b40]">{peso.format(totals.unitIncVat)}</output>}
                       </div>
-                    <p className="mt-2 text-[11px] text-[#687386]">Unlocked percentage markups are recalculated to reach this target. Locked markups, Pricing Officer Commission, Internal VAT and Discount remain as entered. {vatLockState === true ? "Locked customer VAT remains unchanged." : vatLockState === false ? "Unlocked customer VAT may be adjusted with the target." : "Customer VAT has mixed lock states; use the VAT control below to sync them."} GM markup percentages may exceed 100%.</p>
+                    <p className="mt-2 text-[11px] text-[#687386]">Unlocked percentage markups are recalculated to reach this target. Locked markups, Pricing Officer Commission, Internal VAT and Discount remain as entered. {vatInclusive ? vatLockState === true ? "Locked VAT remains unchanged." : vatLockState === false ? "Unlocked VAT may be adjusted with the target." : "VAT has mixed lock states; use the VAT control below to sync them." : "VAT is excluded from this target because the quotation is VAT Exclusive."} GM markup percentages may exceed 100%.</p>
                       {targetBudgetErrors[costing.key] && <p className="mt-2 text-[11px] font-medium text-[#b42318]">{targetBudgetErrors[costing.key]}</p>}
                     </div>
                   </div>}
@@ -17002,15 +17014,19 @@ function ProductCostingsSectionWithPricing({
         </div>
       )}
 
-      {canEditVat && <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+      {(!readOnly || editableMarkups || canEditVat) && <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="rounded-lg border border-[#d9e0e9] bg-white p-3">
-          <div className="grid grid-cols-[auto_auto_auto_minmax(0,1fr)] items-center gap-3 border-b border-[#edf0f5] pb-2 text-[10px] font-medium text-[#687386]"><span>Category</span><span>Percentage</span><span>Target price behavior</span><span className="text-right">Calculated Amount</span></div>
+          <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[#edf0f5] pb-2">
+            <div><h4 className="text-[12px] font-semibold text-[#344054]">Quotation VAT</h4><p className="mt-0.5 text-[11px] text-[#687386]">Use the GM Settings VAT rate and choose how this quotation is presented.</p></div>
+            <SegmentedToggle ariaLabel="Quotation VAT treatment" value={vatInclusive ? "inclusive" : "exclusive"} options={[{ value: "inclusive", label: "VAT Inclusive" }, { value: "exclusive", label: "VAT Exclusive" }]} onChange={(value) => setVatInclusive(value === "inclusive")} disabled={readOnly} size="compact" />
+          </div>
           <div className="mt-2 grid grid-cols-[auto_auto_auto_minmax(0,1fr)] items-center gap-3">
-            <span className="text-[11px] font-medium text-[#344054]">VAT</span>
-            <div className="flex items-center gap-1"><NumberInput aria-label="VAT percentage" min="0" max="100" step="any" value={vatValue} onChange={(value) => setVatValue(value)} disabled={readOnly} className="input mt-0 px-2 py-1.5" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /><span className="text-[11px] text-[#687386]">%</span></div>
+            <span className="text-[11px] font-medium text-[#344054]">VAT rate</span>
+            <div className="flex items-center gap-1">{canEditVat && !readOnly ? <NumberInput aria-label="VAT percentage" min="0" max="100" step="any" value={vatValue} onChange={(value) => setVatValue(value)} className="input mt-0 px-2 py-1.5" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /> : <output aria-label="VAT percentage" className="flex min-h-9 w-28 items-center justify-center rounded-md border border-[#d9e0e9] bg-[#fafbfc] px-2 py-1.5 tabular-nums">{n(vatValue)}</output>}<span className="text-[11px] text-[#687386]">%</span></div>
             <button type="button" aria-label={`${vatLockState === true ? "Unlock" : "Lock"} VAT for target selling price recomputation`} aria-pressed={vatLockState === true} title={`${vatLockState === true ? "Unlock" : "Lock"} VAT for target selling price recomputation`} disabled={!canToggleVatLock} onClick={toggleVatLock} className={`grid size-7 place-items-center rounded border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] ${vatLockState === true ? "border-[#ead7a8] bg-[#fff9e8] text-[#8a6500]" : "border-[#d9e0e9] bg-white text-[#687386] hover:bg-[#f5f7fa]"} disabled:cursor-not-allowed disabled:opacity-50`}>{vatLockState === null ? <span className="text-[9px] font-semibold">Mix</span> : vatLockState ? <Lock size={13} /> : <Unlock size={13} />}</button>
             <output aria-label="VAT total" className="min-w-20 text-right text-[12px] font-semibold text-[#344054]">{peso.format(vatTotal)}</output>
           </div>
+          <p className="mt-2 text-[10px] leading-4 text-[#687386]">{vatInclusive ? "VAT will be added to the VAT-exclusive selling price." : "No VAT will be added to this quotation."} {canEditVat ? "GM can edit the rate before final approval." : "The rate comes from GM Settings."}</p>
         </div>
       </div>}
     </section>
@@ -17018,7 +17034,7 @@ function ProductCostingsSectionWithPricing({
 }
 
 function PriceQuotationReviewContent({
-  lines, projectName, projectType, illustrations, productCostings, pricingDefaults, setProductCostings, approvedSellingPrices, setApprovedSellingPrices, prices, setPrices, subtotal, vatRate, setVatRate, tax,
+  lines, projectName, projectType, illustrations, productCostings, pricingDefaults, setProductCostings, approvedSellingPrices, setApprovedSellingPrices, prices, setPrices, subtotal, vatRate, setVatRate, vatInclusive, setVatInclusive, tax,
   total, terms, setTerms, paymentTermsOption, pdcTermDays, onPaymentTermsOptionChange, onPdcTermDaysChange, bankDetails, setBankDetails,
   revisionNote, setRevisionNote, submissionNote, setSubmissionNote, close, saving, working, costingsLoading, review, finalApproval, showInternalMarkups, sensitiveValuesHidden, toggleSensitiveValues, visibleMarkupKeys, bankVisibility, pricingRevision, readOnly = false,
   documentLabel = "Price Quotation", sourceQuotationNo, commissionAssignmentVisible, commissionOriginUserId, commissionOriginName, commissionOriginOptions, commissionHandlingMode, commissionCoWorkerUserId, commissionSplitOption, commissionOfficerOptions, commissionOriginEditable, commissionHandlingEditable, commissionSplitEditable, editableApprovedSellingPrices, onCommissionOriginChange, onCommissionHandlingModeChange, onCommissionCoWorkerChange, onCommissionSplitOptionChange,
@@ -17145,8 +17161,8 @@ function PriceQuotationReviewContent({
         <h3 className="text-[14px] font-semibold">Note to General Manager</h3>
         <p className="mt-2 whitespace-pre-wrap text-[13px] leading-5 text-[#4b5565]">{submissionNote}</p>
       </section>}
-      <QuotationReviewSummary lines={lines} prices={prices} subtotal={subtotal} vatRate={vatRate} tax={tax} total={total} productCostings={productCostings} showPrices={showInternalMarkups} />
-      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} costings={productCostings} setCostings={setProductCostings} approvedSellingPrices={approvedSellingPrices} pricingDefaults={pricingDefaults} editableMarkups={showInternalMarkups} editableInternalMarkups={finalApproval} visibleMarkupKeys={visibleMarkupKeys ?? (showInternalMarkups ? internalPricingMarkupKeys : ["discounts"])} canEditVat={finalApproval} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
+      <QuotationReviewSummary lines={lines} prices={prices} subtotal={subtotal} vatRate={vatInclusive ? vatRate : "0"} tax={tax} total={total} productCostings={productCostings} showPrices={showInternalMarkups} />
+      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} vatInclusive={vatInclusive} setVatInclusive={setVatInclusive} costings={productCostings} setCostings={setProductCostings} approvedSellingPrices={approvedSellingPrices} pricingDefaults={pricingDefaults} editableMarkups={showInternalMarkups} editableInternalMarkups={finalApproval} visibleMarkupKeys={visibleMarkupKeys ?? (showInternalMarkups ? internalPricingMarkupKeys : ["discounts"])} canEditVat={finalApproval} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
       <QuotationPaymentTermsEditor
         option={paymentTermsOption}
         termDays={pdcTermDays}
@@ -17238,9 +17254,23 @@ function PriceQuotationReview({
     () => quotationItemsForQuote(store.quotation_items, quotation.id),
     [quotation.id, store.quotation_items],
   );
-  const initialVatRate = () => finalApproval
-    ? text(defaultPricingDefaults.find((definition) => definition.purpose === "vat")?.value, "0")
-    : "0";
+  const configuredVatRate = text(
+    defaultPricingDefaults.find((definition) => definition.purpose === "vat")?.value,
+    "0",
+  );
+  const quotationVatSnapshot = quotation.vat_rate_snapshot;
+  const initialVatRate = () => {
+    if (quotationVatSnapshot !== undefined && quotationVatSnapshot !== null) {
+      return text(quotationVatSnapshot, configuredVatRate);
+    }
+    if (text(quotation.status, "") === "approved" || readOnly) {
+      return text(quotationVatRate(quotation), "0");
+    }
+    return n(quotation.vat_rate) > 0 ? text(quotation.vat_rate) : configuredVatRate;
+  };
+  const initialVatInclusive = () => quotation.vat_inclusive === undefined
+    ? n(quotation.vat_rate) > 0
+    : quotation.vat_inclusive === true;
   const [prices, setPrices] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       lines.map((item) => [text(item.id), text(item.unit_cost, "")]),
@@ -17252,6 +17282,7 @@ function PriceQuotationReview({
     ),
   );
   const [vatRate, setVatRate] = useState(initialVatRate);
+  const [vatInclusive, setVatInclusive] = useState(initialVatInclusive);
   const [paymentTermsOption, setPaymentTermsOption] = useState<QuotationPaymentTermsOption>(
     quotationPaymentTermsOption(quotation.payment_terms_option),
   );
@@ -17498,9 +17529,9 @@ function PriceQuotationReview({
         const totals = productCostingTotals(
           costing,
           n(product.quantity),
-          finalApproval ? n(vatRate) : 0,
+          vatInclusive ? n(vatRate) : 0,
         );
-        const unitPrice = (finalApproval ? totals.unitIncVat : totals.unitExVat).toFixed(2);
+        const unitPrice = (vatInclusive ? totals.unitIncVat : totals.unitExVat).toFixed(2);
         if (next[text(product.id)] !== unitPrice) {
           next[text(product.id)] = unitPrice;
           changed = true;
@@ -17508,7 +17539,7 @@ function PriceQuotationReview({
       });
       return changed ? next : current;
     });
-  }, [finalApproval, lines, productCostings, vatRate]);
+  }, [finalApproval, lines, productCostings, vatInclusive, vatRate]);
   const illustrations = [
     ...galleryIllustrations
       .sort((left, right) => n(left.sort_order) - n(right.sort_order))
@@ -17531,8 +17562,8 @@ function PriceQuotationReview({
   }, 0);
   const total = productCostings.reduce((sum, costing) => {
     const product = lines.find((line) => line.id === costing.quotationItemId);
-    const totals = productCostingTotals(costing, n(product?.quantity), finalApproval ? n(vatRate) : 0);
-    const unitPrice = finalApproval ? totals.unitIncVat : totals.unitExVat;
+    const totals = productCostingTotals(costing, n(product?.quantity), vatInclusive ? n(vatRate) : 0);
+    const unitPrice = vatInclusive ? totals.unitIncVat : totals.unitExVat;
     return sum + Math.round(unitPrice * n(product?.quantity) * 100) / 100;
   }, 0);
   const tax = Math.round((total - subtotal) * 100) / 100;
@@ -17608,7 +17639,7 @@ function PriceQuotationReview({
     const savedTerms = quotationTermsWithPaymentOption(
       terms
       .filter((term) => term.trim())
-      .filter((term) => !finalApproval || n(vatRate) > 0 || !/vat\s+inclusive/i.test(term))
+      .filter((term) => vatInclusive || !/vat\s+inclusive/i.test(term))
       .join("\n"),
       {
         ...quotation,
@@ -17616,10 +17647,13 @@ function PriceQuotationReview({
         pdc_term_days: pdcTermDays,
       },
     );
+    const appliedVatRate = vatInclusive ? n(vatRate) : 0;
     const costingsPayload = orderedProductCostingDrafts(productCostings, lines).map((costing) => ({
       quotation_item_id: costing.quotationItemId,
       internal_vat_rate: n(costing.internalVatRate),
       vat_locked: costing.vatLocked === true,
+      vat_inclusive: vatInclusive,
+      vat_rate_snapshot: n(vatRate),
       cost_lines: costing.costLines.map((line) => ({
         description: line.description,
         calculation_type: line.calculationType,
@@ -17645,12 +17679,23 @@ function PriceQuotationReview({
       };
     });
     const useCommissionWorkflow = commissionAssignmentVisible;
-      const { error } = finalApproval && decision === "needs_revision"
-        ? await createClient().rpc("return_price_quotation_from_gm_with_edits_and_costings_v2", {
+    const client = createClient();
+    const { error: vatPreferenceError } = await client.rpc("set_price_quotation_vat_preferences", {
+      p_quotation_id: quotation.id,
+      p_vat_inclusive: vatInclusive,
+      p_vat_rate: n(vatRate),
+    });
+    if (vatPreferenceError) {
+      setWorking(false);
+      notice(vatPreferenceError.message);
+      return false;
+    }
+    const { error } = finalApproval && decision === "needs_revision"
+        ? await client.rpc("return_price_quotation_from_gm_with_edits_and_costings_v2", {
           p_quotation_id: quotation.id,
           p_se_origin_user_id: useCommissionWorkflow ? commissionOriginUserId : null,
           p_note: revisionNote,
-          p_vat_rate: n(vatRate),
+          p_vat_rate: appliedVatRate,
           p_terms_conditions: savedTerms,
           p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
           p_costings: costingsPayload,
@@ -17663,14 +17708,14 @@ function PriceQuotationReview({
           p_commission_split_option: useCommissionWorkflow ? commissionSplitOption || null : null,
         })
         : finalApproval && decision === "approved"
-        ? await createClient().rpc(
+        ? await client.rpc(
           useCommissionWorkflow
             ? "final_approve_price_quotation_with_commission_v2"
             : "final_approve_price_quotation_with_edits",
           {
             p_quotation_id: quotation.id,
             ...(useCommissionWorkflow ? { p_se_origin_user_id: commissionOriginUserId } : {}),
-            p_vat_rate: n(vatRate),
+            p_vat_rate: appliedVatRate,
             p_vat_calculation_type: "percentage",
             p_vat_fixed_amount: 0,
             p_terms_conditions: savedTerms,
@@ -17686,14 +17731,14 @@ function PriceQuotationReview({
           },
         )
       : !finalApproval
-      ? await createClient().rpc(
+      ? await client.rpc(
         useCommissionWorkflow
           ? "pricing_review_price_quotation_commission_approved_prices"
           : "pricing_review_price_quotation_with_approved_prices",
         {
           p_quotation_id: quotation.id,
           p_decision: decision,
-          p_vat_rate: 0,
+          p_vat_rate: appliedVatRate,
           p_vat_calculation_type: "percentage",
           p_vat_fixed_amount: 0,
           p_terms_conditions: savedTerms,
@@ -17709,10 +17754,10 @@ function PriceQuotationReview({
           p_approved_selling_prices: approvedSellingPricesPayload,
         },
       )
-      : await createClient().rpc("review_price_quotation", {
+      : await client.rpc("review_price_quotation", {
           p_quotation_id: quotation.id,
           p_decision: decision,
-          p_vat_rate: n(vatRate),
+          p_vat_rate: appliedVatRate,
           p_shipping_handling: 0,
           p_terms_conditions: savedTerms,
           p_bank_details: bankDetails.filter((bank) => bank.bank_name || bank.account_name || bank.account_number),
@@ -17759,6 +17804,8 @@ function PriceQuotationReview({
           subtotal={subtotal}
           vatRate={vatRate}
           setVatRate={setVatRate}
+          vatInclusive={vatInclusive}
+          setVatInclusive={setVatInclusive}
           tax={tax}
           total={total}
           terms={terms}
