@@ -579,6 +579,7 @@ type ProductCostingDraft = {
   quotationItemId: string;
   pricingModel: "legacy_markup" | "target_margin";
   internalVatRate: string;
+  vatLocked: boolean;
   costLines: {
     key: string;
     description: string;
@@ -618,11 +619,13 @@ const markupValue = (markup: ProductCostingDraft["markups"][number]) =>
 const newProductCostingDraft = (
   quotationItemId: string,
   defaults = pricingMarkupDefaults(null),
+  vatLocked = defaults.find((definition) => definition.key === "vat")?.locked === true,
 ): ProductCostingDraft => ({
   key: `product-costing-${crypto.randomUUID()}`,
   quotationItemId,
   pricingModel: "target_margin",
   internalVatRate: "12",
+  vatLocked,
   costLines: [
     {
       key: `cost-line-${crypto.randomUUID()}`,
@@ -675,6 +678,7 @@ const productCostingDrafts = (
     quotationItemId: text(costing.quotation_item_id),
     pricingModel,
     internalVatRate: text(costing.internal_vat_rate, "12"),
+    vatLocked: costing.vat_locked === undefined ? true : costing.vat_locked === true,
     costLines: costLines
       .filter((line) => line.product_costing_id === costing.id)
       .sort((left, right) => n(left.sort_order) - n(right.sort_order))
@@ -776,6 +780,7 @@ const productCostingTotals = (
 
 type TargetBudgetAdjustment = {
   costing: ProductCostingDraft;
+  vatValue?: number;
   error?: string;
 };
 
@@ -793,8 +798,8 @@ const adjustCostingToTargetBudget = (
   }
 
   const quantity = n(productQuantity);
-  const targetMarginPricing = costing.pricingModel === "target_margin";
   const customerVatRate = Math.max(0, n(vatValue));
+  const vatLocked = costing.vatLocked !== false;
   const currentTotals = productCostingTotals(costing, quantity, customerVatRate);
   if (currentTotals.cogs <= 0 || quantity <= 0) {
     return { costing, error: "Add a direct cost and product quantity before applying a Target Budget." };
@@ -804,44 +809,11 @@ const adjustCostingToTargetBudget = (
     const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
     return key === "discounts";
   });
-  const discountValue = discount ? Math.max(0, n(markupValue(discount))) : 0;
-  const discountType = discount ? markupCalculationType(discount) : "percentage";
-  const targetNetTotal = targetBudget * quantity / (1 + customerVatRate / 100);
-  let targetBeforeDiscount = targetNetTotal;
-  if (targetMarginPricing) {
-    if (discountType === "fixed_amount") {
-      targetBeforeDiscount += discountValue;
-    } else {
-      if (discountValue >= 100) {
-        return { costing, error: "Reduce the Discount below 100% before applying a Target Budget." };
-      }
-      targetBeforeDiscount /= 1 - discountValue / 100;
-    }
-  } else {
-    targetBeforeDiscount -= discountType === "fixed_amount"
-      ? discountValue
-      : currentTotals.cogs * discountValue / 100;
-  }
-
-  const requiredMarkupTotal = targetBeforeDiscount - currentTotals.cogs;
-  if (requiredMarkupTotal < -0.01) {
-    return { costing, error: "The Target Budget is below the unchanged direct cost after the current Discount." };
-  }
-
   const protectedCommissionKeys = new Set(["sales_commission"]);
   const isProtectedCommission = (markup: ProductCostingDraft["markups"][number]) => {
     const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
     return protectedCommissionKeys.has(key);
   };
-  const protectedCommissionAmount = costing.markups.reduce(
-    (sum, markup) => sum + (isProtectedCommission(markup) ? currentTotals.markupAmounts[markup.key] ?? 0 : 0),
-    0,
-  );
-  const lockedMarkupAmount = costing.markups.reduce((sum, markup) => {
-    const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
-    if (markup.locked !== true || key === "discounts" || key === "vat" || isProtectedCommission(markup)) return sum;
-    return sum + (currentTotals.markupAmounts[markup.key] ?? 0);
-  }, 0);
   const adjustableMarkups = costing.markups.filter((markup) => {
     const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
     return key !== "discounts" && key !== "vat" && !isProtectedCommission(markup) && markup.locked !== true;
@@ -850,63 +822,50 @@ const adjustCostingToTargetBudget = (
     return { costing, error: "Change non-discount markup rows to Percentage before applying a Target Budget." };
   }
 
-  const currentAdjustableMarkupTotal = adjustableMarkups.reduce(
-    (sum, markup) => sum + currentTotals.cogs * Math.max(0, n(markupValue(markup))) / 100,
-    0,
-  );
-  const unchangedInternalVatAmount = currentTotals.internalVatAmount;
-  const requiredAdjustableMarkupAmount = requiredMarkupTotal
-    - unchangedInternalVatAmount
-    - protectedCommissionAmount
-    - lockedMarkupAmount;
-  if (requiredAdjustableMarkupAmount < -0.01) {
-    return { costing, error: "The Target Budget is below the unchanged direct cost, locked markups, Internal VAT, and commissions after the current Discount." };
-  }
-  if (currentAdjustableMarkupTotal <= 0) {
-    if (Math.abs(requiredAdjustableMarkupAmount) <= 0.01) return { costing };
-    return { costing, error: "Unlock at least one percentage markup before applying a Target Budget." };
-  }
-
-  const factor = Math.max(0, requiredAdjustableMarkupAmount) / currentAdjustableMarkupTotal;
-  if (!Number.isFinite(factor) || factor < 0) {
-    return { costing, error: "This Target Budget cannot be reached with the current percentage markups." };
-  }
   const roundRate = (value: number) => Math.round(value * 10000) / 10000;
-  const scaledMarkups = costing.markups.map((markup) => {
-    const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
-    if (key === "discounts" || key === "vat" || isProtectedCommission(markup) || markup.locked === true) return markup;
-    const nextValue = roundRate(Math.max(0, n(markupValue(markup))) * factor);
-    return { ...markup, calculationType: "percentage" as MarkupCalculationType, value: String(nextValue) };
-  });
-  const nextInternalVatRate = roundRate(Math.max(0, n(costing.internalVatRate)));
-
-  let nextCosting: ProductCostingDraft = {
-    ...costing,
-    internalVatRate: String(nextInternalVatRate),
-    markups: scaledMarkups,
-  };
-  const preferredMarkup = adjustableMarkups.find((markup) => {
-    const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
-    return key === "target_profit_margin";
-  }) ?? adjustableMarkups[0];
-  const nextTotals = productCostingTotals(nextCosting, quantity, customerVatRate);
-  const differencePerPiece = targetBudget - nextTotals.unitIncVat;
-  if (preferredMarkup && Math.abs(differencePerPiece) > 0.005) {
-    const discountFactor = targetMarginPricing && discountType === "percentage" ? 1 - discountValue / 100 : 1;
-    const correctionRate = differencePerPiece * quantity * 100
-      / ((1 + customerVatRate / 100) * discountFactor * currentTotals.cogs);
-    const correctionMarkupKey = preferredMarkup.key;
-    const correctedMarkups = nextCosting.markups.map((markup) => {
-      if (markup.key !== correctionMarkupKey || markup.locked === true) return markup;
-      const correctedValue = roundRate(n(markupValue(markup)) + correctionRate);
-      return { ...markup, value: String(correctedValue) };
-    });
-    const correctedMarkup = correctedMarkups.find((markup) => markup.key === correctionMarkupKey);
-    if (correctedMarkup && n(markupValue(correctedMarkup)) >= 0 && n(markupValue(correctedMarkup)) <= 100) {
-      nextCosting = { ...nextCosting, markups: correctedMarkups };
-    }
+  const hasAdjustableVat = !vatLocked && customerVatRate > 0;
+  if (!adjustableMarkups.length && !hasAdjustableVat) {
+    return { costing, error: "Unlock at least one percentage markup or VAT before applying a Target Budget." };
   }
-  return { costing: nextCosting };
+  const scaleCosting = (factor: number) => {
+    const scaledMarkups = costing.markups.map((markup) => {
+      const key = markup.markupKey || pricingMarkupKeyForLabel(markup.label);
+      if (key === "discounts" || key === "vat" || isProtectedCommission(markup) || markup.locked === true) return markup;
+      const nextValue = roundRate(Math.max(0, n(markupValue(markup))) * factor);
+      return { ...markup, calculationType: "percentage" as MarkupCalculationType, value: String(nextValue) };
+    });
+    return {
+      costing: { ...costing, markups: scaledMarkups },
+      vatValue: vatLocked ? customerVatRate : roundRate(Math.min(100, Math.max(0, customerVatRate * factor))),
+    };
+  };
+  const evaluate = (factor: number) => {
+    const candidate = scaleCosting(factor);
+    return { ...candidate, totals: productCostingTotals(candidate.costing, quantity, candidate.vatValue) };
+  };
+  const targetTolerance = 0.005;
+  const minimum = evaluate(0);
+  if (minimum.totals.unitIncVat > targetBudget + targetTolerance) {
+    return { costing, error: "The Target Budget is below the unchanged direct cost and locked pricing values." };
+  }
+  let upperFactor = 1;
+  let upper = evaluate(upperFactor);
+  while (upper.totals.unitIncVat < targetBudget - targetTolerance && upperFactor < 1_000_000) {
+    upperFactor *= 2;
+    upper = evaluate(upperFactor);
+  }
+  if (upper.totals.unitIncVat < targetBudget - targetTolerance) {
+    return { costing, error: "This Target Budget cannot be reached with the current unlocked markups and VAT." };
+  }
+  let lowerFactor = 0;
+  for (let iteration = 0; iteration < 60; iteration += 1) {
+    const middleFactor = (lowerFactor + upperFactor) / 2;
+    const middle = evaluate(middleFactor);
+    if (middle.totals.unitIncVat < targetBudget) lowerFactor = middleFactor;
+    else upperFactor = middleFactor;
+  }
+  const result = evaluate((lowerFactor + upperFactor) / 2);
+  return { costing: result.costing, vatValue: result.vatValue };
 };
 
 type Field = {
@@ -16865,7 +16824,10 @@ function ProductCostingsSectionWithPricing({
       else delete next[costing.key];
       return next;
     });
-    if (!result.error && value.trim()) updateCosting(costing.key, () => result.costing);
+    if (!result.error && value.trim()) {
+      updateCosting(costing.key, () => result.costing);
+      if (result.vatValue !== undefined && result.vatValue !== n(vatValue)) setVatValue(String(result.vatValue));
+    }
   };
   const canAddCosting = costings.length < lines.length;
   const vatTotal = costings.reduce((sum, costing) => {
@@ -16873,6 +16835,19 @@ function ProductCostingsSectionWithPricing({
     return sum + productCostingTotals(costing, n(product?.quantity), n(vatValue)).vat;
   }, 0);
   const orderedCostings = orderedProductCostingDrafts(costings, lines);
+  const vatLockState = costings.length === 0
+    ? defaults.find((definition) => definition.key === "vat")?.locked === true
+    : costings.every((costing) => costing.vatLocked === true)
+      ? true
+      : costings.every((costing) => costing.vatLocked === false)
+        ? false
+        : null;
+  const canToggleVatLock = editableInternalMarkups && !readOnly && costings.length > 0;
+  const toggleVatLock = () => {
+    if (!canToggleVatLock) return;
+    const nextLocked = vatLockState !== true;
+    setCostings((current) => current.map((costing) => ({ ...costing, vatLocked: nextLocked })));
+  };
 
   return (
     <section className="rounded-xl border border-[#e1e6ee] bg-[#fafbfc] p-4">
@@ -16889,7 +16864,7 @@ function ProductCostingsSectionWithPricing({
             onClick={() => {
               const nextLine = lines.find((line) => !costings.some((costing) => costing.quotationItemId === line.id));
               if (nextLine?.id) {
-                const nextCosting = newProductCostingDraft(text(nextLine.id), defaults);
+                const nextCosting = newProductCostingDraft(text(nextLine.id), defaults, costings[0]?.vatLocked);
                 setCostings((current) => [
                   ...current,
                   nextCosting,
@@ -17002,7 +16977,7 @@ function ProductCostingsSectionWithPricing({
                           </div>
                         </label> : <output aria-label={`Target selling price per piece for ${product ? text(product.description, "finished product") : "product"}`} className="text-[13px] font-semibold text-[#176b40]">{peso.format(totals.unitIncVat)}</output>}
                       </div>
-                    <p className="mt-2 text-[11px] text-[#687386]">Unlocked percentage markups are recalculated to reach this target. Locked markups, Pricing Officer Commission, Internal VAT, Discount and customer VAT remain as entered. GM markup percentages may exceed 100%.</p>
+                    <p className="mt-2 text-[11px] text-[#687386]">Unlocked percentage markups are recalculated to reach this target. Locked markups, Pricing Officer Commission, Internal VAT and Discount remain as entered. {vatLockState === true ? "Locked customer VAT remains unchanged." : vatLockState === false ? "Unlocked customer VAT may be adjusted with the target." : "Customer VAT has mixed lock states; use the VAT control below to sync them."} GM markup percentages may exceed 100%.</p>
                       {targetBudgetErrors[costing.key] && <p className="mt-2 text-[11px] font-medium text-[#b42318]">{targetBudgetErrors[costing.key]}</p>}
                     </div>
                   </div>}
@@ -17029,10 +17004,11 @@ function ProductCostingsSectionWithPricing({
 
       {canEditVat && <div className="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="rounded-lg border border-[#d9e0e9] bg-white p-3">
-          <div className="grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-3 border-b border-[#edf0f5] pb-2 text-[10px] font-medium text-[#687386]"><span>Category</span><span>Percentage</span><span className="text-right">Calculated Amount</span></div>
-          <div className="mt-2 grid grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-3">
+          <div className="grid grid-cols-[auto_auto_auto_minmax(0,1fr)] items-center gap-3 border-b border-[#edf0f5] pb-2 text-[10px] font-medium text-[#687386]"><span>Category</span><span>Percentage</span><span>Target price behavior</span><span className="text-right">Calculated Amount</span></div>
+          <div className="mt-2 grid grid-cols-[auto_auto_auto_minmax(0,1fr)] items-center gap-3">
             <span className="text-[11px] font-medium text-[#344054]">VAT</span>
             <div className="flex items-center gap-1"><NumberInput aria-label="VAT percentage" min="0" max="100" step="any" value={vatValue} onChange={(value) => setVatValue(value)} disabled={readOnly} className="input mt-0 px-2 py-1.5" style={{ width: "7rem", minWidth: "7rem", maxWidth: "7rem", textAlign: "center" }} /><span className="text-[11px] text-[#687386]">%</span></div>
+            <button type="button" aria-label={`${vatLockState === true ? "Unlock" : "Lock"} VAT for target selling price recomputation`} aria-pressed={vatLockState === true} title={`${vatLockState === true ? "Unlock" : "Lock"} VAT for target selling price recomputation`} disabled={!canToggleVatLock} onClick={toggleVatLock} className={`grid size-7 place-items-center rounded border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--color-accent)] ${vatLockState === true ? "border-[#ead7a8] bg-[#fff9e8] text-[#8a6500]" : "border-[#d9e0e9] bg-white text-[#687386] hover:bg-[#f5f7fa]"} disabled:cursor-not-allowed disabled:opacity-50`}>{vatLockState === null ? <span className="text-[9px] font-semibold">Mix</span> : vatLockState ? <Lock size={13} /> : <Unlock size={13} />}</button>
             <output aria-label="VAT total" className="min-w-20 text-right text-[12px] font-semibold text-[#344054]">{peso.format(vatTotal)}</output>
           </div>
         </div>
@@ -17643,6 +17619,7 @@ function PriceQuotationReview({
     const costingsPayload = orderedProductCostingDrafts(productCostings, lines).map((costing) => ({
       quotation_item_id: costing.quotationItemId,
       internal_vat_rate: n(costing.internalVatRate),
+      vat_locked: costing.vatLocked === true,
       cost_lines: costing.costLines.map((line) => ({
         description: line.description,
         calculation_type: line.calculationType,
@@ -22631,7 +22608,7 @@ function SettingsView({
       label: definition.label,
       value: definition.value,
       purpose: definition.purpose,
-      locked: definition.purpose === "vat" ? "unlocked" : definition.locked ? "locked" : "unlocked",
+      locked: definition.locked ? "locked" : "unlocked",
     });
   };
   const savePricingMarkupEdit = async () => {
@@ -22644,7 +22621,7 @@ function SettingsView({
       label: text(pricingMarkupEditValues.label, editingPricingMarkup.label).trim(),
       purpose,
       value: pricingMarkupEditValues.value ?? editingPricingMarkup.value,
-      locked: purpose === "vat" ? false : pricingMarkupEditValues.locked === "locked",
+      locked: pricingMarkupEditValues.locked === "locked",
     };
     const nextDefaults = pricingDefaultEntries.map((definition) => {
       if (definition.key === updatedMarkup.key) return updatedMarkup;
@@ -22765,7 +22742,7 @@ function SettingsView({
       </div>}
       <Panel title="Pricing defaults - Internal" detail="Assign each row as a Regular markup, VAT, or Sales Executive Commission. The purpose controls the calculation; the display name can be changed safely. Existing quotations and Commission Summary rows keep their saved values." action={memberRole(role) ? <div className="flex flex-wrap justify-end gap-2"><Button secondary disabled={settingsSensitiveValuesHidden} onClick={() => { const first = inactiveStandardMarkupDefinitions[0]; setCustomMarkupValues({ markup_key: first?.key ?? "__custom__", label: first?.label ?? "", value: first?.fallback ?? "" }); setCustomMarkupOpen(true); }}><Plus size={14} /> Add markup</Button></div> : undefined}>
         <Table labels={["Pricing default", "Purpose", "Default percentage", "Target price behavior", "Actions"]}>
-          {pricingDefaultEntries.map((definition) => <tr key={definition.key} className={settingsSensitiveValuesHidden ? "bg-[#fafbfc] text-[#8b92a1]" : undefined}><td className="px-4 py-3 font-medium">{settingsSensitiveValuesHidden ? "Hidden markup" : <>{definition.label}{definition.custom && <span className="ml-2 rounded-full bg-[#f1f4f8] px-2 py-0.5 text-[10px] font-medium text-[#687386]">Custom</span>}</>}</td><td className="px-4 py-3">{settingsSensitiveValuesHidden ? "Hidden" : pricingMarkupPurposeLabel(definition.purpose)}</td><td className="px-4 py-3 text-right">{settingsSensitiveValuesHidden ? "Hidden" : `${n(definition.value)}%`}</td><td className="px-4 py-3 text-center">{settingsSensitiveValuesHidden ? "Hidden" : definition.purpose === "vat" ? <span className="text-[11px] text-[#8b92a1]">Separate calculation</span> : <span title={definition.locked ? "Locked — unchanged during target-price recomputation" : "Unlocked — recalculated for target price"} aria-label={definition.locked ? "Locked" : "Unlocked"} className={`inline-grid size-7 place-items-center rounded-full ${definition.locked ? "bg-[#fff9e8] text-[#8a6500]" : "bg-[#eef7f1] text-[#176b40]"}`}>{definition.locked ? <Lock size={14} /> : <Unlock size={14} />}</span>}</td><td className="px-2 py-2 text-center"><div className="flex items-center justify-center gap-1"><ActionIcon label={`Edit ${definition.label}`} confirm={false} disabled={settingsSensitiveValuesHidden || savingPricingDefaults} onClick={() => openPricingMarkupEdit(definition)}><Pencil size={14} /></ActionIcon><ActionIcon label={`Remove ${definition.label}`} tone="red" disabled={settingsSensitiveValuesHidden || savingPricingDefaults} confirmationDescription={`Remove ${definition.label} from new quotation defaults? Existing quotations and commission assignments keep their saved values.`} onClick={() => void removePricingMarkupDefault(definition.key)}><Trash2 size={14} /></ActionIcon></div></td></tr>)}
+          {pricingDefaultEntries.map((definition) => <tr key={definition.key} className={settingsSensitiveValuesHidden ? "bg-[#fafbfc] text-[#8b92a1]" : undefined}><td className="px-4 py-3 font-medium">{settingsSensitiveValuesHidden ? "Hidden markup" : <>{definition.label}{definition.custom && <span className="ml-2 rounded-full bg-[#f1f4f8] px-2 py-0.5 text-[10px] font-medium text-[#687386]">Custom</span>}</>}</td><td className="px-4 py-3">{settingsSensitiveValuesHidden ? "Hidden" : pricingMarkupPurposeLabel(definition.purpose)}</td><td className="px-4 py-3 text-right">{settingsSensitiveValuesHidden ? "Hidden" : `${n(definition.value)}%`}</td><td className="px-4 py-3 text-center">{settingsSensitiveValuesHidden ? "Hidden" : <span title={definition.locked ? "Locked — unchanged during target-price recomputation" : "Unlocked — recalculated for target price"} aria-label={definition.locked ? "Locked" : "Unlocked"} className={`inline-grid size-7 place-items-center rounded-full ${definition.locked ? "bg-[#fff9e8] text-[#8a6500]" : "bg-[#eef7f1] text-[#176b40]"}`}>{definition.locked ? <Lock size={14} /> : <Unlock size={14} />}</span>}</td><td className="px-2 py-2 text-center"><div className="flex items-center justify-center gap-1"><ActionIcon label={`Edit ${definition.label}`} confirm={false} disabled={settingsSensitiveValuesHidden || savingPricingDefaults} onClick={() => openPricingMarkupEdit(definition)}><Pencil size={14} /></ActionIcon><ActionIcon label={`Remove ${definition.label}`} tone="red" disabled={settingsSensitiveValuesHidden || savingPricingDefaults} confirmationDescription={`Remove ${definition.label} from new quotation defaults? Existing quotations and commission assignments keep their saved values.`} onClick={() => void removePricingMarkupDefault(definition.key)}><Trash2 size={14} /></ActionIcon></div></td></tr>)}
         </Table>
       </Panel>
       <Panel title="Print Costing defaults" detail="These Excel-compatible values are copied into new Print Costings. Existing costings keep the saved values used when they were created." action={memberRole(role) ? <Button secondary disabled={settingsSensitiveValuesHidden} onClick={openPrintCostingDefaults}><Settings size={14} /> Edit Print Costing defaults</Button> : undefined}>
@@ -22776,8 +22753,8 @@ function SettingsView({
           <tr><td className="px-4 py-3 font-medium">Formula version</td><td className="px-4 py-3 text-right">{settingsSensitiveValuesHidden ? "Hidden" : configuredPrintCostingDefaults.formula_version}</td></tr>
         </Table>
       </Panel>
-      {pricingDefaultsOpen && <Dialog title="Pricing defaults - Internal" fields={pricingDefaultEntries.flatMap((definition) => [{ key: `${definition.key}_value`, label: definition.label, type: "number" as const, required: true }, ...(definition.key === "vat" ? [] : [{ key: `${definition.key}_locked`, label: `${definition.label} target price behavior`, type: "toggle" as const, options: ["unlocked|Unlocked — recompute", "locked|Locked — keep unchanged"], shortLabels: { unlocked: <Unlock size={15} />, locked: <Lock size={15} /> } }])])} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => { if (!savingPricingDefaults) setPricingDefaultsOpen(false); }} saving={savingPricingDefaults} saveLabel="Save pricing defaults" className="max-w-lg" compact />}
-      {editingPricingMarkup && <Dialog title={`Edit ${editingPricingMarkup.label}`} fields={[{ key: "label", label: "Markup name", required: true, hint: "The internal key stays unchanged, so existing pricing and commission logic remains connected." }, { key: "purpose", label: "Purpose", type: "select" as const, options: ["regular|Regular markup", "vat|VAT", "sales_commission|Sales Executive Commission"], required: true }, { key: "value", label: "Default percentage", type: "number" as const, required: true, hint: editingPricingMarkup.purpose === "vat" ? "VAT is calculated separately after the selling price before VAT. Delete the row to use 0% for new quotations." : undefined }, ...(editingPricingMarkup.purpose === "vat" ? [] : [{ key: "locked", label: "Target price behavior", type: "toggle" as const, options: ["unlocked|Unlocked — recompute", "locked|Locked — keep unchanged"], shortLabels: { unlocked: <Unlock size={15} />, locked: <Lock size={15} /> } }])]} values={pricingMarkupEditValues} setValues={setPricingMarkupEditValues} save={() => void savePricingMarkupEdit()} close={() => { if (!savingPricingDefaults) { setPricingMarkupEditKey(""); setPricingMarkupEditValues({}); } }} saving={savingPricingDefaults} saveLabel="Update markup" className="max-w-lg" compact />}
+      {pricingDefaultsOpen && <Dialog title="Pricing defaults - Internal" fields={pricingDefaultEntries.flatMap((definition) => [{ key: `${definition.key}_value`, label: definition.label, type: "number" as const, required: true }, { key: `${definition.key}_locked`, label: `${definition.label} target price behavior`, type: "toggle" as const, options: ["unlocked|Unlocked — recompute", "locked|Locked — keep unchanged"], shortLabels: { unlocked: <Unlock size={15} />, locked: <Lock size={15} /> } }])} values={pricingDefaults} setValues={setPricingDefaults} save={() => void savePricingDefaults()} close={() => { if (!savingPricingDefaults) setPricingDefaultsOpen(false); }} saving={savingPricingDefaults} saveLabel="Save pricing defaults" className="max-w-lg" compact />}
+      {editingPricingMarkup && <Dialog title={`Edit ${editingPricingMarkup.label}`} fields={[{ key: "label", label: "Markup name", required: true }, { key: "purpose", label: "Purpose", type: "select" as const, options: ["regular|Regular markup", "vat|VAT", "sales_commission|Sales Executive Commission"], required: true }, { key: "value", label: "Default percentage", type: "number" as const, required: true, hint: editingPricingMarkup.purpose === "vat" ? "VAT is calculated after the selling price before VAT. When unlocked, target-price recomputation may adjust this rate. Delete the row to use 0% for new quotations." : undefined }, { key: "locked", label: "Target price behavior", type: "toggle" as const, options: ["unlocked|Unlocked — recompute", "locked|Locked — keep unchanged"], shortLabels: { unlocked: <Unlock size={15} />, locked: <Lock size={15} /> } }]} values={pricingMarkupEditValues} setValues={setPricingMarkupEditValues} save={() => void savePricingMarkupEdit()} close={() => { if (!savingPricingDefaults) { setPricingMarkupEditKey(""); setPricingMarkupEditValues({}); } }} saving={savingPricingDefaults} saveLabel="Update markup" className="max-w-lg" compact />}
       {printCostingDefaultsOpen && <Dialog title="Print Costing defaults" fields={[{ key: "hp_latex_rate", label: "HP Latex rate / sq. m.", type: "number" as const, required: true }, { key: "waste_allowance", label: "Waste allowance", type: "number" as const, required: true, hint: "Enter 5% as 0.05." }, { key: "formula_version", label: "Formula version", readOnly: true, required: true }, { key: "pp_white_roll_width_m", label: "PP White roll width (m)", type: "number" as const, required: true }, { key: "pp_white_roll_length_m", label: "PP White roll length (m)", type: "number" as const, required: true }, { key: "pp_white_roll_cost", label: "PP White roll cost", type: "number" as const, required: true }, { key: "vinyl_glossy_roll_width_m", label: "Vinyl Glossy roll width (m)", type: "number" as const, required: true }, { key: "vinyl_glossy_roll_length_m", label: "Vinyl Glossy roll length (m)", type: "number" as const, required: true }, { key: "vinyl_glossy_roll_cost", label: "Vinyl Glossy roll cost", type: "number" as const, required: true }, { key: "vinyl_matte_roll_width_m", label: "Vinyl Matte roll width (m)", type: "number" as const, required: true }, { key: "vinyl_matte_roll_length_m", label: "Vinyl Matte roll length (m)", type: "number" as const, required: true }, { key: "vinyl_matte_roll_cost", label: "Vinyl Matte roll cost", type: "number" as const, required: true }]} values={printCostingDefaults} setValues={setPrintCostingDefaults} save={() => void savePrintCostingDefaults()} close={() => { if (!savingPrintCostingDefaults) setPrintCostingDefaultsOpen(false); }} saving={savingPrintCostingDefaults} saveLabel="Save Print Costing defaults" className="max-w-2xl" compact />}
       {customMarkupOpen && <Dialog title="Add markup" fields={[{ key: "markup_key", label: "Markup category", type: "select" as const, options: addMarkupOptions, required: true }, { key: "label", label: "Markup name", required: true, readOnly: text(customMarkupValues.markup_key, "").split("|")[0] !== "__custom__" }, { key: "value", label: "Percentage", type: "number" as const, required: true }]} values={customMarkupValues} setValues={setCustomMarkupValues} onFieldChange={(key, value, current) => { if (key !== "markup_key") return { ...current, [key]: value }; const selectedKey = value.split("|")[0]; const definition = pricingMarkupDefinition(selectedKey as PricingMarkupKey); return { ...current, markup_key: value, label: selectedKey === "__custom__" ? "" : definition?.label ?? "", value: selectedKey === "__custom__" ? "" : definition?.fallback ?? "0" }; }} save={() => void addCustomMarkup()} close={() => { if (!savingPricingDefaults) setCustomMarkupOpen(false); }} saving={savingPricingDefaults} saveLabel="Add markup" className="max-w-lg" compact><p className="mt-3 rounded-lg border border-[#e1e6ee] bg-[#fafbfc] p-3 text-[11px] leading-5 text-[#687386]">Choose an inactive standard category or create a custom markup. It will be included in computed pricing for new quotations. Existing quotations keep their saved markup rows.</p></Dialog>}
       {canManageSupplierCountries && (

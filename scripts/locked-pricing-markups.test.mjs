@@ -4,6 +4,7 @@ import test from "node:test";
 
 const workspace = await readFile(new URL("../components/huswell-workspace.tsx", import.meta.url), "utf8");
 const migration = await readFile(new URL("../supabase/migrations/20261026163105_locked_pricing_markups.sql", import.meta.url), "utf8");
+const vatMigration = await readFile(new URL("../supabase/migrations/20261028051802_vat_lock_target_price_behavior.sql", import.meta.url), "utf8");
 const deletionMigration = await readFile(new URL("../supabase/migrations/20261026164338_allow_pricing_markup_removal.sql", import.meta.url), "utf8");
 const roleMigration = await readFile(new URL("../supabase/migrations/20261028040711_pricing_markup_role_assignments.sql", import.meta.url), "utf8");
 const snapshotLabelMigration = await readFile(new URL("../supabase/migrations/20261028041726_preserve_pricing_markup_snapshot_labels.sql", import.meta.url), "utf8");
@@ -12,13 +13,27 @@ test("pricing defaults and costing payloads carry markup lock state", () => {
   assert.match(workspace, /locked: definition\.locked === true/);
   assert.match(workspace, /locked: markup\.locked === true/);
   assert.match(workspace, /locked: markup\.locked === true,/);
+  assert.match(workspace, /vat_locked: costing\.vatLocked === true/);
+  assert.match(workspace, /vatLocked: costing\.vat_locked === undefined \? true : costing\.vat_locked === true/);
   assert.match(workspace, /target price behavior/);
 });
 
 test("Target Selling Price / Piece skips locked markups", () => {
   assert.match(workspace, /!isProtectedCommission\(markup\) && markup\.locked !== true/);
   assert.match(workspace, /isProtectedCommission\(markup\) \|\| markup\.locked === true/);
-  assert.match(workspace, /Unlock at least one percentage markup before applying a Target Budget/);
+  assert.match(workspace, /const hasAdjustableVat = !vatLocked/);
+  assert.match(workspace, /Unlock at least one percentage markup or VAT before applying a Target Budget/);
+});
+
+test("VAT lock state is persisted and participates in target-price recomputation", () => {
+  assert.match(workspace, /vatLocked: boolean/);
+  assert.match(workspace, /const vatLockState/);
+  assert.match(workspace, /toggleVatLock/);
+  assert.match(workspace, /vatLocked: nextLocked/);
+  assert.match(workspace, /vatLocked \? customerVatRate : roundRate/);
+  assert.match(vatMigration, /add column if not exists vat_locked boolean not null default true/);
+  assert.match(vatMigration, /coalesce\(\(v_costing ->> 'vat_locked'\)::boolean, true\)/);
+  assert.match(vatMigration, /'vat_locked', pc\.vat_locked/);
 });
 
 test("individual Pricing Defaults deletion remains available", () => {
@@ -73,6 +88,7 @@ test("markup purpose assignment is stored and limited to one special role", () =
 test("lock status uses compact accessible icons", () => {
   assert.match(workspace, /shortLabels: \{ unlocked: <Unlock size=\{15\} \/>, locked: <Lock size=\{15\} \/> \}/);
   assert.match(workspace, /definition\.locked \? <Lock size=\{14\} \/> : <Unlock size=\{14\} \/>/);
+  assert.match(workspace, /aria-label=\{`\$\{vatLockState === true \? "Unlock" : "Lock"\} VAT/);
 });
 
 test("migration persists and validates lock state", () => {
