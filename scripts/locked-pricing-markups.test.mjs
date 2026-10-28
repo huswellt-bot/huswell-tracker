@@ -10,6 +10,7 @@ const vatServerGuardMigration = await readFile(new URL("../supabase/migrations/2
 const vatSnapshotMigration = await readFile(new URL("../supabase/migrations/20261028065606_quotation_vat_snapshot_preservation.sql", import.meta.url), "utf8");
 const singleVatSourceMigration = await readFile(new URL("../supabase/migrations/20261028071758_single_vat_settings_source.sql", import.meta.url), "utf8");
 const legacyVatMigration = await readFile(new URL("../supabase/migrations/20261028071817_normalize_legacy_vat_markup.sql", import.meta.url), "utf8");
+const gmMarkupRefreshMigration = await readFile(new URL("../supabase/migrations/20261028073156_refresh_gm_quotation_markups_from_settings.sql", import.meta.url), "utf8");
 const deletionMigration = await readFile(new URL("../supabase/migrations/20261026164338_allow_pricing_markup_removal.sql", import.meta.url), "utf8");
 const roleMigration = await readFile(new URL("../supabase/migrations/20261028040711_pricing_markup_role_assignments.sql", import.meta.url), "utf8");
 const snapshotLabelMigration = await readFile(new URL("../supabase/migrations/20261028041726_preserve_pricing_markup_snapshot_labels.sql", import.meta.url), "utf8");
@@ -141,4 +142,16 @@ test("Approval Center uses the single GM Settings VAT source", () => {
   assert.match(legacyVatMigration, /'vat'/);
   assert.match(legacyVatMigration, /'third_party_markup'/);
   assert.match(legacyVatMigration, /system_role', 'vat'/);
+});
+
+test("GM Approval Center refreshes pending markup rows from current Settings", () => {
+  assert.match(workspace, /applyCurrentPricingDefaultsToCosting/);
+  assert.match(workspace, /shouldRefreshGmMarkups\s*=\s*finalApproval\s*&&\s*text\(quotation\.status, ""\) === "pending_gm_approval"/);
+  assert.match(workspace, /shouldRefreshGmMarkups\s*\?\s*savedCostings\.map/);
+  assert.match(workspace, /shouldRefreshGmMarkups\s*\?\s*loadedCostings\.map/);
+  assert.match(workspace, /defaults\s*\.filter\(\(definition\) => definition\.purpose !== "vat"\)/);
+  assert.match(workspace, /refresh_gm_price_quotation_markups/);
+  assert.match(gmMarkupRefreshMigration, /create or replace function public\.refresh_gm_price_quotation_markups/);
+  assert.match(gmMarkupRefreshMigration, /Only the General Manager can refresh quotation markups/);
+  assert.match(gmMarkupRefreshMigration, /pricing_markup_purpose\(entry.key, entry.value\) <> 'vat'/);
 });

@@ -568,6 +568,29 @@ const pricingMarkupDefaultPayload = (defaults: PricingMarkupDefault[]) =>
       },
     ]),
   );
+const applyCurrentPricingDefaultsToCosting = (
+  costing: ProductCostingDraft,
+  defaults: PricingMarkupDefault[],
+): ProductCostingDraft => {
+  const existingByKey = new Map(
+    costing.markups.map((markup) => [markup.markupKey || pricingMarkupKeyForLabel(markup.label), markup]),
+  );
+  const markups = defaults
+    .filter((definition) => definition.purpose !== "vat")
+    .map((definition) => {
+      const existing = existingByKey.get(definition.key);
+      return {
+        key: existing?.key ?? `settings-markup-${definition.key}`,
+        markupKey: definition.key,
+        label: definition.label,
+        calculationType: definition.calculationType,
+        value: definition.value,
+        rate: definition.value,
+        locked: definition.locked,
+      };
+    });
+  return { ...costing, markups };
+};
 const pricingMarkupPurposeLabel = (purpose: PricingMarkupPurpose) =>
   purpose === "vat"
     ? "VAT"
@@ -17434,6 +17457,7 @@ function PriceQuotationReview({
   const [submissionNote, setSubmissionNote] = useState(() => text(quotation.pricing_submission_note, ""));
   const [working, setWorking] = useState(false);
   const [productCostingsLoading, setProductCostingsLoading] = useState(true);
+  const shouldRefreshGmMarkups = finalApproval && text(quotation.status, "") === "pending_gm_approval";
   const [productCostings, setProductCostings] = useState<ProductCostingDraft[]>(() => {
     const savedCostings = productCostingDrafts(
       store.price_quotation_product_costings.filter(
@@ -17443,13 +17467,26 @@ function PriceQuotationReview({
       store.price_quotation_costing_markups,
       lines,
     );
-    return savedCostings;
+    return shouldRefreshGmMarkups
+      ? savedCostings.map((costing) => applyCurrentPricingDefaultsToCosting(costing, defaultPricingDefaults))
+      : savedCostings;
   });
   useEffect(() => {
     let active = true;
     setProductCostingsLoading(true);
     const loadProductCostings = async () => {
       const client = createClient();
+      if (shouldRefreshGmMarkups) {
+        const { error: refreshError } = await client.rpc("refresh_gm_price_quotation_markups", {
+          p_quotation_id: quotation.id,
+        });
+        if (!active) return;
+        if (refreshError) {
+          setProductCostingsLoading(false);
+          notice(refreshError.message);
+          return;
+        }
+      }
       const { data: costingData, error: costingError } = await client
         .from("price_quotation_product_costings")
         .select("*")
@@ -17488,14 +17525,16 @@ function PriceQuotationReview({
         (markupResult.data ?? []) as Row[],
         lines,
       );
-      setProductCostings(loadedCostings);
+      setProductCostings(shouldRefreshGmMarkups
+        ? loadedCostings.map((costing) => applyCurrentPricingDefaultsToCosting(costing, defaultPricingDefaults))
+        : loadedCostings);
       setProductCostingsLoading(false);
     };
     void loadProductCostings();
     return () => {
       active = false;
     };
-  }, [defaultPricingDefaults, finalApproval, lines, quotation.id]);
+  }, [defaultPricingDefaults, lines, quotation.id, shouldRefreshGmMarkups]);
   const [galleryIllustrations, setGalleryIllustrations] = useState<Row[]>(() =>
     store.price_quotation_illustrations.filter(
       (illustration) => illustration.quotation_id === illustrationQuotationId,
@@ -19003,7 +19042,12 @@ function Submissions({
         if (decision !== "approved") {
           return { error: { message: "Direct Price Quotations can only be approved in bulk." } };
         }
-        return createClient().rpc("final_approve_price_quotation_from_saved_state", {
+        const client = createClient();
+        const { error: refreshError } = await client.rpc("refresh_gm_price_quotation_markups", {
+          p_quotation_id: text(quotation.id),
+        });
+        if (refreshError) return { error: refreshError };
+        return client.rpc("final_approve_price_quotation_from_saved_state", {
           p_quotation_id: text(quotation.id),
         });
       },
