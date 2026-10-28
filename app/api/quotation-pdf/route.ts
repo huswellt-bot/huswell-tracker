@@ -13,8 +13,9 @@ type PdfRequest = {
 };
 
 const PDF_RENDER_TIMEOUT_MS = 45_000;
+const defaultPdfProfileRoot = process.platform === "win32" ? "D:\\Temp\\agent-scratch" : "/tmp";
 const PDF_BROWSER_PROFILE_ROOT = join(
-  process.env.PDF_BROWSER_PROFILE_DIR ?? "D:\\Temp\\agent-scratch",
+  process.env.PDF_BROWSER_PROFILE_DIR ?? defaultPdfProfileRoot,
   "huswell-pdf-renderer",
 );
 
@@ -35,8 +36,8 @@ async function createPdf(html: string) {
   const pdfPath = join(profileDir, "quotation.pdf");
   try {
     await writeFile(htmlPath, enforcePortraitPageSize(html));
-    const edge = process.env.PDF_RENDERER_EXECUTABLE ?? "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
-    const child = spawn(edge, ["--headless=new", "--disable-gpu", "--no-first-run", "--no-pdf-header-footer", `--user-data-dir=${join(profileDir, "profile")}`, `--print-to-pdf=${pdfPath}`, `file:///${htmlPath.replace(/\\/g, "/")}`], { windowsHide: true });
+    const edge = process.env.PDF_RENDERER_EXECUTABLE ?? (process.platform === "win32" ? "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe" : "microsoft-edge");
+    const child = spawn(/* turbopackIgnore: true */ edge, ["--headless=new", "--disable-gpu", "--no-first-run", "--no-pdf-header-footer", `--user-data-dir=${join(profileDir, "profile")}`, `--print-to-pdf=${pdfPath}`, `file:///${htmlPath.replace(/\\/g, "/")}`], { windowsHide: true });
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => { child.kill(); reject(new Error("PDF rendering timed out. Please try again.")); }, PDF_RENDER_TIMEOUT_MS);
       child.once("error", (error) => { clearTimeout(timer); reject(error); });

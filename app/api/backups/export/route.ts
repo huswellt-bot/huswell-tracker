@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -180,9 +180,10 @@ const makeWorkbook = (
 ) => {
   const metadata = resources[resource];
   const columns = columnsFor(resource, rows);
-  const workbook = XLSX.utils.book_new();
+  const workbook = new ExcelJS.Workbook();
   const generatedAt = new Date().toISOString();
-  const infoSheet = XLSX.utils.aoa_to_sheet([
+  const infoSheet = workbook.addWorksheet("Backup Info");
+  infoSheet.addRows([
     ["Backup type", "Organization data backup"],
     ["Source table", resource],
     ["Organization ID", organizationId],
@@ -190,29 +191,25 @@ const makeWorkbook = (
     ["Record count", rows.length],
     ["Scope", "All organization records; page filters ignored"],
   ]);
-  infoSheet["!cols"] = [{ wch: 24 }, { wch: 72 }];
-  XLSX.utils.book_append_sheet(workbook, infoSheet, "Backup Info");
+  infoSheet.getColumn(1).width = 24;
+  infoSheet.getColumn(2).width = 72;
 
-  const sheetRows = rows.map((row) =>
-    Object.fromEntries(
-      columns.map((column) => [column, spreadsheetValue(row[column])]),
-    ),
-  );
-  const dataSheet = XLSX.utils.json_to_sheet(sheetRows, { header: columns });
-  dataSheet["!cols"] = columns.map((column) => ({
-    wch: Math.min(Math.max(column.length + 2, 14), 36),
-  }));
+  const dataSheet = workbook.addWorksheet(metadata.sheetName);
+  dataSheet.addRow(columns);
+  rows.forEach((row) => dataSheet.addRow(columns.map((column) => spreadsheetValue(row[column]))));
+  columns.forEach((column, index) => {
+    dataSheet.getColumn(index + 1).width = Math.min(Math.max(column.length + 2, 14), 36);
+  });
   if (columns.length) {
-    dataSheet["!autofilter"] = {
-      ref: `A1:${columnName(columns.length - 1)}${rows.length + 1}`,
+    dataSheet.autoFilter = {
+      from: "A1",
+      to: `${columnName(columns.length - 1)}${rows.length + 1}`,
     };
   }
-  XLSX.utils.book_append_sheet(workbook, dataSheet, metadata.sheetName);
-  workbook.Props = {
-    Title: `${metadata.sheetName} backup`,
-    Subject: "Huswell Tracker organization data backup",
-    CreatedDate: new Date(),
-  };
+  workbook.creator = "Huswell Tracker";
+  workbook.title = `${metadata.sheetName} backup`;
+  workbook.subject = "Huswell Tracker organization data backup";
+  workbook.created = new Date();
   return workbook;
 };
 
@@ -246,7 +243,7 @@ export async function GET(request: Request) {
   try {
     const rows = await fetchAllRows(client, resource, organizationId);
     const workbook = makeWorkbook(resource, organizationId, rows);
-    const output = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
+    const output = await workbook.xlsx.writeBuffer();
     const metadata = resources[resource];
     return new Response(new Uint8Array(output), {
       status: 200,

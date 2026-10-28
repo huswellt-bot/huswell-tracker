@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 export const MAX_FILE_SIZE = 5 * 1024 * 1024;
 export const MAX_ROWS = 1000;
@@ -73,6 +73,9 @@ export type ParsedWorkbook = {
   rows: PreviewRow[];
 };
 
+export type LeadWorkbook = ExcelJS.Workbook;
+export type LeadWorksheet = ExcelJS.Worksheet;
+
 const headerAliases: Record<string, ImportField> = {
   daterecorded: "date_sent",
   datesent: "date_sent",
@@ -121,10 +124,21 @@ export const compact = (value: unknown) =>
     .replace(/[\u2019']/g, "")
     .replace(/[^a-z0-9]+/g, "");
 
-export const textCell = (value: unknown) => {
+export const textCell = (value: unknown): string => {
   if (value === null || value === undefined) return "";
   if (value instanceof Date) return value.toISOString();
   if (typeof value === "boolean") return value ? "TRUE" : "FALSE";
+  if (typeof value === "object") {
+    const cellValue = value as Record<string, unknown>;
+    if (Array.isArray(cellValue.richText)) {
+      return cellValue.richText
+        .map((part) => textCell((part as Record<string, unknown>).text))
+        .join("")
+        .trim();
+    }
+    if ("result" in cellValue) return textCell(cellValue.result);
+    if ("text" in cellValue) return textCell(cellValue.text);
+  }
   return String(value).trim();
 };
 
@@ -160,9 +174,13 @@ const normalizeDate = (value: unknown) => {
   }
 
   if (typeof value === "number") {
-    const parsed = XLSX.SSF.parse_date_code(value);
-    if (!parsed) return { value: null, error: "Invalid date" };
-    const normalized = dateFromParts(parsed.y, parsed.m, parsed.d);
+    if (!Number.isFinite(value) || value < 1) return { value: null, error: "Invalid date" };
+    const serialDate = new Date(Date.UTC(1899, 11, 30) + Math.round(value * 86_400_000));
+    const normalized = dateFromParts(
+      serialDate.getUTCFullYear(),
+      serialDate.getUTCMonth() + 1,
+      serialDate.getUTCDate(),
+    );
     return normalized
       ? { value: normalized }
       : { value: null, error: "Invalid date" };
@@ -244,13 +262,14 @@ export const getHeaderIndexes = (headerRow: unknown[]) => {
   return indexes;
 };
 
-export const getSheetRows = (sheet: XLSX.WorkSheet) =>
-  XLSX.utils.sheet_to_json<unknown[]>(sheet, {
-    header: 1,
-    raw: true,
-    defval: "",
-    blankrows: true,
+export const getSheetRows = (sheet: LeadWorksheet) => {
+  const rows: unknown[][] = [];
+  sheet.eachRow({ includeEmpty: true }, (row) => {
+    const values = Array.isArray(row.values) ? row.values.slice(1) : [];
+    rows[row.number - 1] = values as unknown[];
   });
+  return rows.map((row) => row ?? []);
+};
 
 const findHeaderRowIndex = (rows: unknown[][]) => {
   let bestIndex = 0;
@@ -268,7 +287,7 @@ const findHeaderRowIndex = (rows: unknown[][]) => {
 };
 
 export const parseRows = (
-  sheet: XLSX.WorkSheet,
+  sheet: LeadWorksheet,
   options: ParseRowsOptions = {},
 ) => {
   const rows = getSheetRows(sheet);
@@ -338,27 +357,34 @@ export const parseRows = (
 };
 
 export const parseWorkbook = (
-  workbook: XLSX.WorkBook,
+  workbook: LeadWorkbook,
   options: {
     sheetName?: string;
     headerRowIndex?: number;
     headerIndexes?: Map<ImportField, number>;
   } = {},
 ): ParsedWorkbook => {
-  const sheetName = options.sheetName ?? workbook.SheetNames[0];
-  if (!sheetName || !workbook.Sheets[sheetName]) {
+  const sheetName = options.sheetName ?? workbook.worksheets[0]?.name;
+  const sheet = sheetName ? workbook.getWorksheet(sheetName) : undefined;
+  if (!sheetName || !sheet) {
     throw new Error("The Excel file has no worksheet.");
   }
-  const rows = getSheetRows(workbook.Sheets[sheetName]);
+  const rows = getSheetRows(sheet);
   const headerRowIndex = options.headerRowIndex ?? findHeaderRowIndex(rows);
   return {
     sheetName,
     headerRowIndex,
-    rows: parseRows(workbook.Sheets[sheetName], {
+    rows: parseRows(sheet, {
       headerIndexes: options.headerIndexes,
       headerRowIndex,
     }),
   };
+};
+
+export const readLeadWorkbook = async (data: ArrayBuffer | Buffer) => {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(data as Parameters<typeof workbook.xlsx.load>[0]);
+  return workbook;
 };
 
 export const importRows = (rows: PreviewRow[]): ImportRow[] =>

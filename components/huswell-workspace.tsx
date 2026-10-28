@@ -23119,10 +23119,20 @@ export function HuswellWorkspace({
   const pendingRealtimeTables = useRef(new Set<TableName>());
   const [sidebarQueueCounts, setSidebarQueueCounts] = useState<SidebarQueueCounts | null>(null);
   const refreshSidebarQueueCounts = useCallback(async () => {
+    if (!currentUserLoaded || !currentUserId) {
+      setSidebarQueueCounts(null);
+      return;
+    }
     const { data, error } = await client.rpc("finance_sidebar_queue_counts", {
       p_organization_id: organizationId,
     });
-    if (error) return;
+    if (error) {
+      if ((error as typeof error & { status?: number }).status === 401) {
+        setCurrentUserId(null);
+        setSidebarQueueCounts(null);
+      }
+      return;
+    }
     const parsed = parseSidebarQueueCounts(data);
     if (!parsed) return;
     if (hasInternalFinanceAccess) {
@@ -23134,7 +23144,7 @@ export function HuswellWorkspace({
       return;
     }
     setSidebarQueueCounts(parsed);
-  }, [client, hasInternalFinanceAccess, organizationId]);
+  }, [client, currentUserId, currentUserLoaded, hasInternalFinanceAccess, organizationId]);
   const canEditOwnProfile = ["owner", "admin", "project_manager", "sales_pricing_officer", "internal_finance", "external_finance", "lead_coordinator"].includes(
     role,
   );
@@ -23433,12 +23443,13 @@ export function HuswellWorkspace({
   }, [active, client, leadMode, organizationId, productionApprovalEnabled, refreshTables, role]);
   useEffect(() => {
     setSidebarQueueCounts(null);
+    if (!currentUserLoaded || !currentUserId) return;
     void refreshSidebarQueueCounts();
     const interval = window.setInterval(() => {
       void refreshSidebarQueueCounts();
     }, 30_000);
     return () => window.clearInterval(interval);
-  }, [refreshSidebarQueueCounts]);
+  }, [currentUserId, currentUserLoaded, refreshSidebarQueueCounts]);
   useEffect(() => {
     const isManagement = memberRole(role);
     const isFinance = hasInternalFinanceAccess || role === "external_finance";

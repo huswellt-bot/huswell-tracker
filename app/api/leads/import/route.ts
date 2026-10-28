@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { createClient } from "@/lib/supabase/server";
 import {
   LEAD_HEADERS,
@@ -7,6 +7,7 @@ import {
   MAX_ROWS,
   importRows,
   parseWorkbook,
+  readLeadWorkbook,
 } from "@/lib/lead-import";
 import type { ImportRow } from "@/lib/lead-import";
 
@@ -52,12 +53,14 @@ export async function GET(request: Request) {
     return jsonError("Use ?template=1 to download the lead import template.", 404);
   }
 
-  const workbook = XLSX.utils.book_new();
-  const sheet = XLSX.utils.aoa_to_sheet([[...LEAD_HEADERS]]);
-  sheet["!cols"] = LEAD_TEMPLATE_COLUMN_WIDTHS.map((wch) => ({ wch }));
-  XLSX.utils.book_append_sheet(workbook, sheet, "Leads");
-  const output = XLSX.write(workbook, { bookType: "xlsx", type: "array" });
-  return new Response(new Uint8Array(output), {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Leads");
+  sheet.addRow([...LEAD_HEADERS]);
+  LEAD_TEMPLATE_COLUMN_WIDTHS.forEach((width, index) => {
+    sheet.getColumn(index + 1).width = width;
+  });
+  const output = await workbook.xlsx.writeBuffer();
+  return new Response(output, {
     status: 200,
     headers: {
       "Content-Type":
@@ -84,12 +87,9 @@ export async function POST(request: Request) {
       return jsonError("Excel files must be smaller than 5 MB.");
     }
 
-    let workbook: XLSX.WorkBook;
+    let workbook: Awaited<ReturnType<typeof readLeadWorkbook>>;
     try {
-      workbook = XLSX.read(await file.arrayBuffer(), {
-        type: "array",
-        cellDates: true,
-      });
+      workbook = await readLeadWorkbook(Buffer.from(await file.arrayBuffer()));
     } catch (error) {
       return jsonError(error instanceof Error ? error.message : "Unable to read the Excel file.");
     }

@@ -2092,6 +2092,7 @@ export function FinanceWorkspace({
   const [supplierCostOpen, setSupplierCostOpen] = useState(false);
   const [supplierCostValues, setSupplierCostValues] = useState({ supplier_id: "", quotation_id: "", lead_id: "", description: "", amount: "", due_date: "", notes: "" });
   const financeRefreshTimer = useRef<number | null>(null);
+  const financeLoadInFlight = useRef(false);
 
   useEffect(() => {
     let active = true;
@@ -2109,6 +2110,8 @@ export function FinanceWorkspace({
   }, [financeTabs, overviewOnly, reportOnly, tab]);
 
   const load = useCallback(async () => {
+    if (financeLoadInFlight.current) return;
+    financeLoadInFlight.current = true;
     setLoading(true);
     setLoadError(null);
     try {
@@ -2272,6 +2275,7 @@ export function FinanceWorkspace({
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Finance data could not load.");
     } finally {
+      financeLoadInFlight.current = false;
       setHasLoadedOnce(true);
       setLoading(false);
     }
