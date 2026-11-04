@@ -13,7 +13,7 @@ const securityMigration = readFileSync(
   "utf8",
 );
 const indexMigration = readFileSync(
-  join(repoRoot, "supabase", "migrations", "20261104000000_lead_costing_index_reference_data.sql"),
+  join(repoRoot, "supabase", "migrations", "20261104115933_lead_costing_index_reference_data.sql"),
   "utf8",
 );
 
