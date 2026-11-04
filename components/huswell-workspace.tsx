@@ -122,7 +122,7 @@ const DynamicCostingRequestWorkspace = dynamic(
   { loading: () => <LoadingState variant="section" label="Loading Print Costing..." /> },
 );
 const DynamicLeadCostingWorkspace = dynamic(
-  () => import("@/components/lead-costing-workspace").then((module) => module.LeadCostingWorkspace),
+  () => import("@/components/lead-costing-index-workspace").then((module) => module.LeadCostingIndexWorkspace),
   { loading: () => <LoadingState variant="section" label="Loading Lead & Costing..." /> },
 );
 const DynamicFinanceWorkspace = dynamic(
