@@ -1624,6 +1624,56 @@ select option[value=""] {
   color: var(--color-accent-text);
 }
 
+/* Lead Costing was adapted from a standalone calculator with its own blue
+   palette. Keep its behavior intact while bringing the workspace onto the
+   Huswell brand and shared compact-workflow tokens. */
+.lead-costing-workspace {
+  color: var(--color-text-primary);
+}
+
+.lead-costing-workspace [class*="bg-[#1f4e79]"],
+.lead-costing-workspace [class*="bg-[#173b5c]"] {
+  background-color: var(--color-accent) !important;
+  color: var(--color-on-accent) !important;
+}
+
+.lead-costing-workspace [class*="hover:bg-[#173b5c]"]:hover {
+  background-color: var(--color-accent-hover) !important;
+}
+
+.lead-costing-workspace [class*="text-[#1f4e79]"],
+.lead-costing-workspace [class*="text-[#2378d4]"] {
+  color: var(--color-accent-text) !important;
+}
+
+.lead-costing-workspace [class*="border-[#cfd8e3]"],
+.lead-costing-workspace [class*="border-[#dfe5ed]"],
+.lead-costing-workspace [class*="border-[#e4e8ef]"],
+.lead-costing-workspace [class*="border-[#edf0f5]"] {
+  border-color: var(--color-border) !important;
+}
+
+.lead-costing-workspace [class*="bg-[#f4f7fb]"],
+.lead-costing-workspace [class*="bg-[#edf0f5]"] {
+  background-color: var(--color-surface-subtle) !important;
+}
+
+.lead-costing-workspace [class*="text-[#202938]"],
+.lead-costing-workspace [class*="text-[#465a74]"],
+.lead-costing-workspace [class*="text-[#687386]"] {
+  color: var(--color-text-secondary) !important;
+}
+
+.lead-costing-workspace .app-table thead,
+.lead-costing-workspace .app-table thead th {
+  border-color: var(--color-accent) !important;
+  background: var(--color-accent) !important;
+}
+
+.lead-costing-workspace .app-table tbody tr:hover {
+  background: var(--color-surface-subtle) !important;
+}
+
 .app-tab:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 1px;
