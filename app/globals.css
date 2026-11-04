@@ -1643,7 +1643,7 @@ select option[value=""] {
 
 .lead-costing-workspace [class*="text-[#1f4e79]"],
 .lead-costing-workspace [class*="text-[#2378d4]"] {
-  color: var(--color-accent-text) !important;
+  color: var(--color-text-primary) !important;
 }
 
 .lead-costing-workspace [class*="border-[#cfd8e3]"],
@@ -1658,10 +1658,13 @@ select option[value=""] {
   background-color: var(--color-surface-subtle) !important;
 }
 
-.lead-costing-workspace [class*="text-[#202938]"],
 .lead-costing-workspace [class*="text-[#465a74]"],
 .lead-costing-workspace [class*="text-[#687386]"] {
   color: var(--color-text-secondary) !important;
+}
+
+.lead-costing-workspace [class*="text-[#202938]"] {
+  color: var(--color-text-primary) !important;
 }
 
 .lead-costing-workspace .app-table thead,
