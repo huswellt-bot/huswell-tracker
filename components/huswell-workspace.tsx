@@ -3338,7 +3338,8 @@ function PriceQuotationSignature({ label, name, signatureSource, compact = false
 
 export function PriceQuotationPdf({ quote, store, origin, showInternalCosting = false }: { quote: QuotationPdfRow; store: QuotationPdfStore; origin: string; showInternalCosting?: boolean }) {
   const isMockupQuotation = text(quote.document_type) === "mockup_quotation";
-  const documentLabel = isMockupQuotation ? "Mockup Quotation" : "Price Quotation";
+  const isPrintingQuotation = text(quote.quotation_source) === "lead_costing_printing";
+  const documentLabel = isMockupQuotation ? "Mockup Quotation" : isPrintingQuotation ? "Printing Quotation" : "Price Quotation";
   const documentTitle = documentLabel.toUpperCase();
   const sourceQuotation = isMockupQuotation
     ? store.quotations.find((item) => item.id === quote.source_price_quotation_id)

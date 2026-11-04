@@ -1,4 +1,4 @@
-export type LeadCostingUnit = "ft" | "in" | "m";
+export type LeadCostingUnit = "ft" | "in" | "m" | "px";
 export type LeadCostingLamination = "none" | "matte" | "glossy";
 
 export type LeadCostingMaterial = {
@@ -62,10 +62,10 @@ export const numberValue = (value: string | number | null | undefined) => {
 };
 
 export const areaFactor = (unit: LeadCostingUnit) =>
-  unit === "m" ? 1 : unit === "in" ? 1550.0031 : 10.7639104167;
+  unit === "m" ? 1 : unit === "in" ? 1550.0031 : unit === "px" ? 0 : 10.7639104167;
 
 export const unitLabel = (unit: LeadCostingUnit) =>
-  unit === "m" ? "m²" : unit === "in" ? "sq in" : "sq ft";
+  unit === "m" ? "m²" : unit === "in" ? "sq in" : unit === "px" ? "px" : "sq ft";
 
 export const calculateLayoutPlan = (
   input: Pick<LeadCostingCalculatorInput, "width" | "height" | "quantity" | "unit">,
@@ -74,7 +74,7 @@ export const calculateLayoutPlan = (
   const width = Math.max(0, numberValue(input.width));
   const height = Math.max(0, numberValue(input.height));
   const quantity = Math.max(1, Math.floor(numberValue(input.quantity) || 1));
-  const factor = input.unit === "ft" ? 0.3048 : input.unit === "in" ? 0.0254 : 1;
+  const factor = input.unit === "ft" ? 0.3048 : input.unit === "in" ? 0.0254 : input.unit === "px" ? 0 : 1;
   const widthM = width * factor;
   const heightM = height * factor;
   const rollWidth = numberValue(material?.roll_width_m);
@@ -202,7 +202,7 @@ export const calculateLeadCosting = (
   const width = Math.max(0, numberValue(input.width));
   const height = Math.max(0, numberValue(input.height));
   const quantity = Math.max(1, Math.floor(numberValue(input.quantity) || 1));
-  const factor = input.unit === "ft" ? 0.3048 : input.unit === "in" ? 0.0254 : 1;
+  const factor = input.unit === "ft" ? 0.3048 : input.unit === "in" ? 0.0254 : input.unit === "px" ? 0 : 1;
   const widthM = width * factor;
   const heightM = height * factor;
   const areaPerItem = width * height;
@@ -227,7 +227,7 @@ export const calculateLeadCosting = (
 
   return {
     ...layout,
-    valid: width > 0 && height > 0 && Boolean(material),
+    valid: input.unit !== "px" && width > 0 && height > 0 && Boolean(material),
     width,
     height,
     quantity,

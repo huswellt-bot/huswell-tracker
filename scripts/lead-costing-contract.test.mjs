@@ -16,6 +16,14 @@ const indexMigration = readFileSync(
   join(repoRoot, "supabase", "migrations", "20261104115933_lead_costing_index_reference_data.sql"),
   "utf8",
 );
+const printingQuotation = readFileSync(
+  join(repoRoot, "components", "lead-costing-printing-quotation.tsx"),
+  "utf8",
+);
+const printingQuotationMigration = readFileSync(
+  join(repoRoot, "supabase", "migrations", "20261104132346_lead_costing_printing_quotations.sql"),
+  "utf8",
+);
 
 test("Lead & Costing is exposed only in the Lead Coordinator workspace", () => {
   assert.match(workspace, /lead_coordinator: \["Leads", "Lead Costing", "Announcements", "Policy"\]/);
@@ -66,4 +74,10 @@ test("calculator preserves the target costing areas and print workflows", () => 
   assert.match(indexMigration, /"printerCosts":\[/);
   assert.match(indexMigration, /Saturn Digital/);
   assert.match(indexMigration, /Brand Maximizers Inc\. \(BMI\)/);
+  assert.match(printingQuotation, /Printing Quotations/);
+  assert.match(printingQuotation, /Collateral type/);
+  assert.match(printingQuotation, /submit_lead_costing_printing_quotation/);
+  assert.match(printingQuotationMigration, /quotation_source/);
+  assert.match(printingQuotationMigration, /pending_gm_approval/);
+  assert.match(printingQuotationMigration, /costing_metadata/);
 });

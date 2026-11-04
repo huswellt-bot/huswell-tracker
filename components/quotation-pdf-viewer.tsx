@@ -61,7 +61,9 @@ export function QuotationPdfViewer({
             <h1 className="text-[16px] font-semibold text-[var(--color-text-primary)]">
               {quote.document_type === "mockup_quotation"
                 ? "Mockup Quotation"
-                : "Price Quotation"}
+                : quote.quotation_source === "lead_costing_printing"
+                  ? "Printing Quotation"
+                  : "Price Quotation"}
             </h1>
             <p className="mt-0.5 text-[12px] text-[var(--color-text-secondary)]">
               {String(quote.quotation_no ?? "Quotation")}
