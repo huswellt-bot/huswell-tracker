@@ -1666,8 +1666,8 @@ select option[value=""] {
 
 .lead-costing-workspace .app-table thead,
 .lead-costing-workspace .app-table thead th {
-  border-color: var(--color-accent) !important;
-  background: var(--color-accent) !important;
+  border-color: #1f4e79 !important;
+  background: #1f4e79 !important;
 }
 
 .lead-costing-workspace .app-table tbody tr:hover {
