@@ -117,10 +117,6 @@ import {
 } from "@/lib/quotation-project-types";
 import { workspaceAccountLabel } from "@/lib/role-labels";
 
-const DynamicCostingRequestWorkspace = dynamic(
-  () => import("@/components/costing-request-workspace").then((module) => module.CostingRequestWorkspace),
-  { loading: () => <LoadingState variant="section" label="Loading Print Costing..." /> },
-);
 const DynamicLeadCostingWorkspace = dynamic(
   () => import("@/components/lead-costing-index-workspace").then((module) => module.LeadCostingIndexWorkspace),
   { loading: () => <LoadingState variant="section" label="Loading Lead & Costing..." /> },
@@ -147,7 +143,6 @@ type View =
   | "Projects"
   | "Quotation Costing Overview"
   | "Costing Breakdown"
-  | "PDF Costing"
   | "Price Quotations"
   | "Price Quotation Review"
   | "Materials List"
@@ -2173,17 +2168,6 @@ const workspaceViewTables = (
     ];
   if (view === "Quotation Costing Overview")
     return ["quotations", "quotation_items", "price_quotation_product_costings", "price_quotation_costing_lines", "price_quotation_costing_markups", "price_quotation_illustrations", "quotation_payment_records", "leads", "customers", "business_settings", "profiles", "organization_members", "pricing_officer_project_types"];
-  if (view === "PDF Costing")
-    return [
-      "leads",
-      "business_settings",
-      "costing_requests",
-      "costing_request_items",
-      "costing_request_materials",
-      "costing_request_additional_costs",
-      "costing_request_events",
-      "profiles",
-    ];
   if (view === "Price Quotation Review")
     return ["quotations", "quotation_items", "leads", "customers", "profiles", "organization_members", "pricing_officer_project_types"];
   if (view === "Price Quotations" || (view === "Leads" && leadMode === "quotation"))
@@ -2317,8 +2301,6 @@ const workspaceViewCriticalTables = (
       "customers",
       "profiles",
     ];
-  } else if (view === "PDF Costing") {
-    criticalTables = ["costing_requests", "leads", "profiles", "business_settings"];
   } else if (view === "Price Quotations" || view === "Price Quotation Review") {
     criticalTables = [
       "quotations",
@@ -23632,7 +23614,6 @@ export function HuswellWorkspace({
       "Supplier's List",
       "Projects",
       "Price Quotations",
-      "PDF Costing",
       "Approvals",
       "Finance Budget",
       "Finance Activity History",
@@ -23646,7 +23627,6 @@ export function HuswellWorkspace({
       "Projects",
       "Price Quotations",
       "Quotation Costing Overview",
-      "PDF Costing",
       "Approvals",
       "Finance Budget",
       "Finance Activity History",
@@ -23663,7 +23643,6 @@ export function HuswellWorkspace({
       "Projects",
       "Price Quotations",
       "Quotation Costing Overview",
-      "PDF Costing",
       "Approvals",
       "Finance Budget",
       "Finance Activity History",
@@ -23689,7 +23668,6 @@ export function HuswellWorkspace({
       "Price Quotations",
       "Price Quotation Review",
       "Quotation Costing Overview",
-      "PDF Costing",
       "Commissions",
       "Letter Request",
       "Announcements",
@@ -23799,7 +23777,6 @@ export function HuswellWorkspace({
             { view: "Price Quotations", icon: FileText },
             { view: "Price Quotation Review", icon: ClipboardCheck, badge: sidebarBadge("pricing_review") },
             { view: "Quotation Costing Overview", icon: ReceiptText },
-            { view: "PDF Costing", icon: FileSpreadsheet, badge: sidebarBadge("pdf_costing") },
             { view: "Commissions", icon: PhilippinePeso },
           ],
         },
@@ -23871,7 +23848,6 @@ export function HuswellWorkspace({
         { view: "Policy", icon: ScrollText },
         { view: "Settings", icon: Settings },
         { view: "Letter Request", icon: FileText, badge: sidebarBadge("letter_requests") },
-        { view: "PDF Costing", icon: FileSpreadsheet, badge: sidebarBadge("pdf_costing") },
       ],
     },
   ] : role === "internal_finance" ? [
@@ -23922,7 +23898,6 @@ export function HuswellWorkspace({
         { view: "Price Quotations", icon: FileText },
         { view: "Price Quotation Review", icon: ClipboardCheck, badge: sidebarBadge("pricing_review") },
         { view: "Quotation Costing Overview", icon: ReceiptText },
-        { view: "PDF Costing", icon: FileSpreadsheet, badge: sidebarBadge("pdf_costing") },
       ],
     },
     {
@@ -24042,12 +24017,6 @@ export function HuswellWorkspace({
       detail: isManagementRole
         ? "Review all costed Price Quotations and their current statuses."
         : "Review Price Quotations that you have costed and their current statuses.",
-    },
-    "PDF Costing": {
-      title: "Print Costing",
-      detail: isManagementRole
-        ? "Review submitted workbook-compatible costings, approve them, or return them for revision."
-        : "Select a Lead, upload a client PDF or Word file, verify the extracted details, and submit the costing for General Manager approval.",
     },
     "Costing Breakdown": {
       title: "Costing Breakdown",
@@ -24238,17 +24207,17 @@ export function HuswellWorkspace({
     ) : loading ? (
       <Panel
         title={
-          active === "Leads" ? leads.title : active === "Projects" ? projects.title : active === "Price Quotation Review" ? "Price Quotation Review" : active === "PDF Costing" ? "Print Costing" : active === "Approvals" || active === "Submissions" ? (productionApprovalOnly ? "Production Approval Center" : "Management Approval Center") : active === "Payment Monitoring" ? (hasInternalFinanceAccess ? "Approved projects" : "Project Payment History") : active === "Payment Reviews" ? "Payment Reviews" : "Loading workspace"
+          active === "Leads" ? leads.title : active === "Projects" ? projects.title : active === "Price Quotation Review" ? "Price Quotation Review" : active === "Approvals" || active === "Submissions" ? (productionApprovalOnly ? "Production Approval Center" : "Management Approval Center") : active === "Payment Monitoring" ? (hasInternalFinanceAccess ? "Approved projects" : "Project Payment History") : active === "Payment Reviews" ? "Payment Reviews" : "Loading workspace"
         }
         detail={
-          active === "Leads" || active === "Projects" || active === "Price Quotation Review" || active === "PDF Costing" || active === "Approvals" || active === "Submissions" || active === "Payment Monitoring" || active === "Payment Reviews"
-            ? (active === "Projects" ? projects.detail : active === "Price Quotation Review" ? "Loading Price Quotation review queue." : active === "PDF Costing" ? "Loading Print Costing requests." : active === "Approvals" || active === "Submissions" ? (productionApprovalOnly ? "Loading production approval queue." : "Loading management approval queue.") : active === "Payment Monitoring" ? (hasInternalFinanceAccess ? "Loading approved projects." : "Loading project payment history.") : active === "Payment Reviews" ? "Loading assigned payment reviews." : leads.detail)
+          active === "Leads" || active === "Projects" || active === "Price Quotation Review" || active === "Approvals" || active === "Submissions" || active === "Payment Monitoring" || active === "Payment Reviews"
+            ? (active === "Projects" ? projects.detail : active === "Price Quotation Review" ? "Loading Price Quotation review queue." : active === "Approvals" || active === "Submissions" ? (productionApprovalOnly ? "Loading production approval queue." : "Loading management approval queue.") : active === "Payment Monitoring" ? (hasInternalFinanceAccess ? "Loading approved projects." : "Loading project payment history.") : active === "Payment Reviews" ? "Loading assigned payment reviews." : leads.detail)
             : "Loading business data."
         }
       >
         <div
           className={
-            active === "Leads" || active === "Projects" || active === "Price Quotation Review" || active === "PDF Costing" || active === "Approvals" || active === "Submissions" || active === "Payment Monitoring" || active === "Payment Reviews" ? "min-h-[280px]" : undefined
+            active === "Leads" || active === "Projects" || active === "Price Quotation Review" || active === "Approvals" || active === "Submissions" || active === "Payment Monitoring" || active === "Payment Reviews" ? "min-h-[280px]" : undefined
           }
         >
           <LoadingState variant="page" label="Loading records..." />
@@ -24272,15 +24241,6 @@ export function HuswellWorkspace({
         reload={reload}
         notice={setMessage}
         role={role}
-      />
-    ) : active === "PDF Costing" ? (
-      <DynamicCostingRequestWorkspace
-        store={store}
-        orgId={organizationId}
-        role={role}
-        currentUserId={currentUserId}
-        reload={reload}
-        notice={setMessage}
       />
     ) : active === "Letter Request" ? (
       <LetterRequestWorkspace
@@ -24566,8 +24526,6 @@ export function HuswellWorkspace({
                 ? "Quotation Review Queue"
               : view === "Quotation Costing Overview"
                 ? "Costing"
-              : view === "PDF Costing"
-                ? "HP Latex 700W"
               : isManagementRole && view === "Price Quotations"
                 ? "Quotations"
               : isManagementRole && view === "Approvals"

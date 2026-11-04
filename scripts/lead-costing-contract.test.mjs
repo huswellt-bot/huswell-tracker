@@ -26,6 +26,12 @@ test("Lead & Costing is exposed only in the Lead Coordinator workspace", () => {
   assert.match(workspace, /lead-costing-index-workspace/);
 });
 
+test("retired HP Latex 700W page is not mounted or shown in workspace navigation", () => {
+  assert.doesNotMatch(workspace, /PDF Costing/);
+  assert.doesNotMatch(workspace, /CostingRequestWorkspace/);
+  assert.doesNotMatch(workspace, /HP Latex 700W/);
+});
+
 test("Lead costing persistence is organization-scoped and server-authorized", () => {
   assert.match(securityMigration, /create table if not exists public\.lead_costing_orders/);
   assert.match(securityMigration, /create or replace function private\.lead_costing_is_operator/);
