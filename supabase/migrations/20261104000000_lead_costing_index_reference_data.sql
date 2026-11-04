@@ -56,30 +56,52 @@ begin
       and existing.name = seed.name
   );
 
+  with source_rows as (
+    select org.id as organization_id, seed.*,
+           row_number() over (
+             partition by org.id, seed.supplier_source, seed.name,
+               coalesce(seed.product_code, '')
+             order by seed.roll_width_m nulls last,
+               seed.roll_length_m nulls last, seed.roll_description
+           ) as variant_no
+    from public.organizations org
+    cross join jsonb_to_recordset(v_data->'materials') as seed(
+      supplier_source text, name text, product_code text, roll_description text,
+      roll_width_m numeric, roll_length_m numeric, roll_area_m2 numeric,
+      roll_price numeric, cost_per_m2 numeric, supplier_cost_per_m2 numeric,
+      supplier_cost_per_sq_ft numeric, source_note text, is_sheet boolean,
+      is_finishing boolean
+    )
+  ), normalized_rows as (
+    select organization_id, supplier_source, name,
+           case
+             when variant_no = 1 or product_code is null then product_code
+             else product_code || ' [' || coalesce(roll_description, 'variant ' || variant_no::text) || ']'
+           end as product_code,
+           roll_description, roll_width_m, roll_length_m, roll_area_m2,
+           roll_price, cost_per_m2, supplier_cost_per_m2,
+           supplier_cost_per_sq_ft, source_note, is_sheet, is_finishing
+    from source_rows
+  )
   insert into public.lead_costing_materials (
     organization_id, supplier_source, name, product_code, roll_description,
     roll_width_m, roll_length_m, roll_area_m2, roll_price, cost_per_m2,
     supplier_cost_per_m2, supplier_cost_per_sq_ft, source_note, is_sheet, is_finishing
   )
-  select org.id, seed.supplier_source, seed.name, seed.product_code, seed.roll_description,
-         seed.roll_width_m, seed.roll_length_m, seed.roll_area_m2, seed.roll_price,
-         seed.cost_per_m2, seed.supplier_cost_per_m2, seed.supplier_cost_per_sq_ft,
-         seed.source_note, seed.is_sheet, seed.is_finishing
-  from public.organizations org
-  cross join jsonb_to_recordset(v_data->'materials') as seed(
-    supplier_source text, name text, product_code text, roll_description text,
-    roll_width_m numeric, roll_length_m numeric, roll_area_m2 numeric,
-    roll_price numeric, cost_per_m2 numeric, supplier_cost_per_m2 numeric,
-    supplier_cost_per_sq_ft numeric, source_note text, is_sheet boolean,
-    is_finishing boolean
-  )
+  select normalized.organization_id, normalized.supplier_source, normalized.name,
+         normalized.product_code, normalized.roll_description,
+         normalized.roll_width_m, normalized.roll_length_m, normalized.roll_area_m2,
+         normalized.roll_price, normalized.cost_per_m2,
+         normalized.supplier_cost_per_m2, normalized.supplier_cost_per_sq_ft,
+         normalized.source_note, normalized.is_sheet, normalized.is_finishing
+  from normalized_rows normalized
   where not exists (
     select 1
     from public.lead_costing_materials existing
-    where existing.organization_id = org.id
-      and existing.supplier_source = seed.supplier_source
-      and existing.name = seed.name
-      and coalesce(existing.product_code, '') = coalesce(seed.product_code, '')
+    where existing.organization_id = normalized.organization_id
+      and existing.supplier_source = normalized.supplier_source
+      and existing.name = normalized.name
+      and coalesce(existing.product_code, '') = coalesce(normalized.product_code, '')
   );
 
   update public.lead_costing_printer_costs printer
