@@ -5,6 +5,19 @@ export type LeadCostingMaterial = {
   roll_width_m: number | null;
   roll_length_m: number | null;
   is_sheet?: boolean | null;
+  is_finishing?: boolean | null;
+  is_active?: boolean | null;
+};
+
+export type LeadCostingPrinterRateRow = {
+  item: string;
+  cost_per_unit: number | null | undefined;
+};
+
+export type LeadCostingProductionReadiness = {
+  ready: boolean;
+  manualConfirmationAllowed: boolean;
+  reason: string;
 };
 
 export type LeadCostingCalculatorInput = {
@@ -64,6 +77,46 @@ export const areaFactor = (unit: LeadCostingUnit) =>
 export const unitLabel = (unit: LeadCostingUnit) =>
   unit === "m" || unit === "px" ? "m²" : unit === "in" ? "sq in" : "sq ft";
 
+export const DEFAULT_PRINT_COST_PER_SQ_FT = 9.27;
+const SQ_FT_TO_M2 = 10.7639104167;
+
+export const printCostBasePerSqFt = (rows: LeadCostingPrinterRateRow[]) => {
+  const perSqFt = rows.find((row) => row.item === "Average total print cost / sq ft")?.cost_per_unit;
+  if (perSqFt != null) return numberValue(perSqFt);
+  const perM2 = rows.find((row) => row.item === "Average total print cost / m²")?.cost_per_unit;
+  if (perM2 != null) return numberValue(perM2) / SQ_FT_TO_M2;
+  const perSqIn = rows.find((row) => row.item === "Average total print cost / sq in")?.cost_per_unit;
+  return perSqIn == null ? DEFAULT_PRINT_COST_PER_SQ_FT : numberValue(perSqIn) * 144;
+};
+
+export const printCostRateForUnit = (rows: LeadCostingPrinterRateRow[], unit: LeadCostingUnit) => {
+  const basePerSqFt = printCostBasePerSqFt(rows);
+  return unit === "ft" ? basePerSqFt : unit === "in" ? basePerSqFt / 144 : basePerSqFt * SQ_FT_TO_M2;
+};
+
+export const isPrintableLeadCostingMaterial = (material: LeadCostingMaterial | undefined) =>
+  Boolean(material) && material?.is_active !== false && material?.is_finishing !== true;
+
+export const calculateProductionReadiness = (
+  input: Pick<LeadCostingCalculatorInput, "width" | "height" | "quantity" | "unit" | "dpi">,
+  material: LeadCostingMaterial | undefined,
+): LeadCostingProductionReadiness => {
+  if (!isPrintableLeadCostingMaterial(material)) {
+    return { ready: false, manualConfirmationAllowed: false, reason: "Select an active printable material." };
+  }
+  if (input.unit === "px" && numberValue(input.dpi) <= 0) {
+    return { ready: false, manualConfirmationAllowed: false, reason: "Enter a positive DPI for pixel dimensions." };
+  }
+  const plan = calculateLayoutPlan(input, material);
+  if (plan.valid) {
+    return { ready: true, manualConfirmationAllowed: false, reason: "Layout fits the configured stock." };
+  }
+  if (material?.is_sheet && (!numberValue(material.roll_width_m) || !numberValue(material.roll_length_m))) {
+    return { ready: false, manualConfirmationAllowed: true, reason: "Sheet dimensions are not configured; confirm the available sheet stock manually." };
+  }
+  return { ready: false, manualConfirmationAllowed: false, reason: plan.reason };
+};
+
 export const calculateLayoutPlan = (
   input: Pick<LeadCostingCalculatorInput, "width" | "height" | "quantity" | "unit" | "dpi">,
   material: LeadCostingMaterial | undefined,
@@ -119,12 +172,12 @@ export const calculateLayoutPlan = (
         rollLengthM: rollLength,
       } as LeadCostingLayoutPlan;
     })
-    .filter((candidate): candidate is LeadCostingLayoutPlan => candidate !== null);
+    .filter((candidate): candidate is LeadCostingLayoutPlan => candidate !== null && candidate.lengthM <= rollLength + 0.000000001);
 
   if (!candidates.length) {
     return {
       valid: false,
-      reason: `Job does not fit the selected roll width (${rollWidth} m) in either orientation.`,
+      reason: `Job does not fit the selected roll width (${rollWidth} m) and length (${rollLength} m).`,
       printedArea,
       usedArea: 0,
       lengthM: 0,
@@ -145,19 +198,35 @@ export const calculateStockFit = ({
   material,
   fullRolls,
   remainingMeters,
+  availableSheets,
 }: {
   input: Pick<LeadCostingCalculatorInput, "width" | "height" | "quantity" | "unit" | "dpi">;
   material: LeadCostingMaterial | undefined;
   fullRolls: string | number | null | undefined;
   remainingMeters: string | number | null | undefined;
+  availableSheets?: string | number | null | undefined;
 }) => {
   const plan = calculateLayoutPlan(input, material);
+  if (material?.is_sheet) {
+    const hasSheetInventory = availableSheets != null;
+    return {
+      plan,
+      requiredLength: 0,
+      requiredRolls: 0,
+      availableMeters: null as number | null,
+      availableSheets: hasSheetInventory ? numberValue(availableSheets) : null,
+      status: hasSheetInventory
+        ? `${numberValue(availableSheets).toFixed(0)} sheet${numberValue(availableSheets) === 1 ? "" : "s"} recorded; confirm sheet fit manually`
+        : "Enter available sheets",
+    };
+  }
   if (!plan.rollWidthM || !plan.rollLengthM) {
     return {
       plan,
       requiredLength: 0,
       requiredRolls: 0,
       availableMeters: null as number | null,
+      availableSheets: null as number | null,
       status: "Roll dimensions unavailable",
     };
   }
@@ -167,6 +236,7 @@ export const calculateStockFit = ({
       requiredLength: 0,
       requiredRolls: 0,
       availableMeters: null as number | null,
+      availableSheets: null as number | null,
       status: plan.reason,
     };
   }
@@ -183,6 +253,7 @@ export const calculateStockFit = ({
     requiredLength,
     requiredRolls,
     availableMeters,
+    availableSheets: null as number | null,
     status:
       availableMeters == null
         ? "Enter roll count or remaining meters"
@@ -220,10 +291,13 @@ export const calculateLeadCosting = (
   const wastePerItem = wasteProject / quantity;
   const totalCostPerItem = mediaPerItem + wastePerItem + inkPerItem + laminationPerItem;
   const totalOrderCost = totalCostPerItem * quantity;
+  const numericInputsAreValid = [input.width, input.height, input.quantity, input.mediaRate, input.inkRate, input.wasteRate]
+    .every((value) => String(value ?? "").trim() !== "" && Number.isFinite(Number(value)) && Number(value) >= 0);
+  const quantityIsValid = Number.isInteger(Number(input.quantity)) && Number(input.quantity) > 0;
 
   return {
     ...layout,
-    valid: width > 0 && height > 0 && Boolean(material) && (input.unit !== "px" || numberValue(input.dpi) > 0),
+    valid: width > 0 && height > 0 && quantityIsValid && numericInputsAreValid && isPrintableLeadCostingMaterial(material) && (input.unit !== "px" || numberValue(input.dpi) > 0),
     width,
     height,
     quantity,

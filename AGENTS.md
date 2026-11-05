@@ -1,40 +1,80 @@
-# Development Standards
+# AGENTS.md
 
-Act as a senior software engineer and web developer. Deliver secure, maintainable, production-quality solutions without unnecessary complexity.
+## Development Standards
+- Write clean, secure, maintainable, production-quality code.
+- Follow existing project architecture and conventions.
+- Inspect relevant code before making changes.
+- Make the smallest complete change necessary.
+- Avoid unnecessary dependencies and refactoring.
+- Never modify unrelated functionality.
 
-## Workflow
-- Inspect the relevant code and project conventions before editing; preserve the existing architecture and stack.
-- Implement the requested scope with the smallest coherent changes. Do not refactor unrelated code or alter working features without a clear reason.
-- For ambiguous requirements, make reasonable, reversible assumptions; ask only when the choice materially affects behavior or security.
-- Prefer simple, established solutions over clever abstractions, premature optimization, or new dependencies.
-- Do not invoke optional skills or elaborate planning workflows unless explicitly requested.
+## UI/UX Standards
+- Build modern, professional, responsive interfaces.
+- Prefer shadcn/ui and Tailwind CSS when appropriate.
+- Customize components to match the project's identity.
+- Use Geist Sans and Lucide Icons when appropriate.
+- Prefer flat design, solid colors, and consistent spacing.
+- Maintain clear visual hierarchy and standard component sizes.
+- Use consistent border radius, typically 4–12px.
+- Ensure accessibility and mobile responsiveness.
+- Preserve existing designs unless redesign is requested.
 
-## Change Impact & Regression Prevention
-- Before every change, trace affected callers, consumers, shared components, data flows, user roles, and direct or indirect dependencies.
-- Identify coordinated updates needed across UI, state, APIs, backend, database/schema, validation, permissions, integrations, and tests; inspect only relevant areas.
-- Implement the requested change and its necessary dependent updates together, without unrelated refactoring.
-- Add or update focused tests for changed behavior, affected workflows, edge cases, and authorization boundaries.
-- For cross-module or high-risk changes, verify impacted workflows end-to-end and run broader regression checks when available.
-- Never assume all impacts are covered; explicitly report untested paths, unresolved risks, and checks that could not run.
+## Avoid AI-Slop Design
+- Avoid generic AI-generated website layouts.
+- Avoid excessive gradients, shadows, glow, and blur.
+- Avoid glassmorphism and unnecessary 3D effects.
+- Avoid oversized headings, cards, buttons, and spacing.
+- Avoid excessive rounded corners and pill-shaped elements.
+- Avoid unnecessary animations and decorative elements.
+- Avoid repetitive card layouts and generic SaaS templates.
+- Prioritize usability, clarity, and professional appearance.
 
-## UI / UX
-- Use conventional, accessible, responsive interfaces that feel professionally designed, not generic AI-generated templates.
-- Follow the existing design system; otherwise use a restrained palette, clear hierarchy, consistent spacing, typography, and component sizing.
-- Avoid oversized headings, cards, buttons, padding, excessive gradients, shadows, decoration, and unnecessary animations.
-- Border radius is allowed; apply it consistently and proportionately.
-- Use semantic HTML, keyboard-accessible controls, visible focus states, readable contrast, and helpful loading, empty, and error states.
-- Check mobile and desktop layouts; prevent overflow and awkward spacing.
+## Security
+- Validate inputs on the server.
+- Enforce authentication and authorization.
+- Protect sensitive data and environment variables.
+- Prevent SQL injection, XSS, and unauthorized access.
+- Follow secure database and API practices.
+- Never expose secrets or bypass security checks.
 
-## Engineering & Security
-- Keep code readable, typed where the project uses types, modular where useful, and consistent with existing patterns.
-- Validate untrusted input on the server; encode output and use safe queries to prevent injection.
-- Enforce authentication and authorization server-side for every protected action and resource; never trust client-side checks alone.
-- Protect secrets, personal data, and credentials; use environment variables and least-privilege access. Never expose secrets in client code or logs.
-- Handle errors safely, preserve data integrity, and use transactions or constraints when appropriate.
-- Consider performance and edge cases without overengineering.
+## Change Impact and Regression Prevention
+- Identify affected components before modifying code.
+- Check dependencies across frontend, backend, APIs, database, authentication, and user roles.
+- Update related functionality when necessary.
+- Preserve existing features and expected behavior.
+- Check for regressions after implementing changes.
 
-## Verification & Communication
-- Run the most relevant available tests, linting, type checks, or build checks for changed code; do not claim checks passed unless run.
-- Verify affected flows end-to-end when feasible, including UI, API, database, and permission boundaries.
-- Report briefly what changed, what was verified, and any remaining risks or checks that could not be performed.
-- Keep responses concise; avoid repetitive explanations, unnecessary documentation, and unrelated suggestions.
+## Automatic Testing and Verification
+- Automatically verify every added or modified feature.
+- Prefer the official Playwright CLI for interactive browser testing.
+- If Playwright CLI is unavailable, request permission to install or configure it; report blocked verification rather than claiming success.
+- Test affected buttons, forms, navigation, and user workflows.
+- Verify actual behavior, not just successful builds or page rendering.
+- Check browser errors and relevant failed network requests.
+- Verify database operations when applicable, using isolated test data.
+- Run relevant build, type-check, lint, and existing automated tests.
+- Fix detected errors and retest; report unresolved failures.
+- Check related functionality for regressions.
+- Never perform destructive tests against production data.
+- Minimize snapshots, screenshots, and browser output to save tokens.
+- Never claim success without actual verification.
+- Report what passed, failed, or could not be tested.
+- Keep testing proportional to the changes made.
+
+## Development Workflow
+1. Understand the request and inspect relevant code.
+2. Identify affected functionality and dependencies.
+3. Implement the smallest complete solution.
+4. Run relevant static checks and existing tests.
+5. Use Playwright CLI to verify affected user-facing behavior.
+6. Fix detected errors and retest.
+7. Check related functionality for regressions.
+8. Briefly report verification results and limitations.
+
+## Efficiency
+- Keep explanations and responses concise.
+- Avoid unnecessary planning and documentation.
+- Do not automatically invoke optional skills.
+- Avoid redundant tool calls and repeated analysis.
+- Focus on implementation, correctness, and verification.
+- Do not sacrifice code quality or essential testing for speed.

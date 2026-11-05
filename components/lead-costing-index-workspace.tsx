@@ -7,7 +7,10 @@ import {
   areaFactor,
   calculateLeadCosting,
   calculateStockFit,
+  DEFAULT_PRINT_COST_PER_SQ_FT,
+  isPrintableLeadCostingMaterial,
   numberValue,
+  printCostRateForUnit,
   unitLabel,
   type LeadCostingLamination,
   type LeadCostingUnit,
@@ -15,8 +18,8 @@ import {
 import { LeadCostingPrintingQuotation, type LeadCostingPrintingQuotationPrefill } from "@/components/lead-costing-printing-quotation";
 
 type Service = { id: string; name: string; examples: string | null; material_guidance: string | null; pricing_basis: string | null; notes: string | null };
-type Material = { id: string; supplier_source: string; name: string; product_code: string | null; roll_description: string | null; roll_width_m: number | null; roll_length_m: number | null; roll_area_m2: number | null; roll_price: number | null; cost_per_m2: number | null; supplier_cost_per_m2: number | null; supplier_cost_per_sq_ft: number | null; source_note: string | null; is_sheet: boolean; is_finishing: boolean };
-type Inventory = { id: string; material_id: string; full_rolls_on_hand: number | null; remaining_meters: number | null };
+type Material = { id: string; supplier_source: string; name: string; product_code: string | null; roll_description: string | null; roll_width_m: number | null; roll_length_m: number | null; roll_area_m2: number | null; roll_price: number | null; cost_per_m2: number | null; supplier_cost_per_m2: number | null; supplier_cost_per_sq_ft: number | null; source_note: string | null; is_sheet: boolean; is_finishing: boolean; is_active: boolean };
+type Inventory = { id: string; material_id: string; full_rolls_on_hand: number | null; remaining_meters: number | null; available_sheets: number | null };
 type PrinterCost = { id: string; item: string; unit: string | null; listed_cost: number | null; cost_per_unit: number | null; notes: string | null };
 type Customer = { id: string; name: string; contact_details: string | null; inquiry: string | null; inquiry_status: string; follow_up_date: string | null; notes: string | null };
 type Costing = { id: string; order_no: string; order_date: string; customer_name: string; order_description: string; service_id: string | null; material_id: string | null; quantity: number; width: number; height: number; measurement_unit: LeadCostingUnit; resolution_dpi: number | null; total_production_cost: number; stock_fit_status: string | null };
@@ -28,25 +31,15 @@ const inquiryStatuses = ["New inquiry", "Replied", "Awaiting customer", "Follow-
 const money = (value: number) => "₱" + (Number.isFinite(value) ? value : 0).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const csvCell = (value: unknown) => "\"" + String(value ?? "").replaceAll("\"", "\"\"") + "\"";
 const today = () => new Date().toISOString().slice(0, 10);
-const blankCalculator = (): CalculatorForm => ({ serviceId: "", customServiceName: "", materialId: "", customerName: "", orderDescription: "", orderDate: today(), width: "3", height: "5", unit: "ft", dpi: "300", quantity: "1", mediaRate: "4.48", inkRate: "9.27", wasteRate: "0", lamination: "none" });
+const blankCalculator = (): CalculatorForm => ({ serviceId: "", customServiceName: "", materialId: "", customerName: "", orderDescription: "", orderDate: today(), width: "3", height: "5", unit: "ft", dpi: "300", quantity: "1", mediaRate: "4.48", inkRate: String(DEFAULT_PRINT_COST_PER_SQ_FT), wasteRate: "0", lamination: "none" });
 const blankCustomer = (): CustomerForm => ({ id: null, name: "", contactDetails: "", inquiry: "", status: "New inquiry", followUpDate: "", notes: "" });
 const inputClass = "mt-1 w-full rounded-md border border-[#cfd8e3] bg-white px-3 py-2 text-[13px] text-[#202938] outline-none focus:border-[#1f4e79]";
 const compactButton = "inline-flex items-center justify-center gap-1.5 rounded-md border border-[#cfd8e3] bg-white px-3 py-2 text-[12px] font-medium text-[#1f4e79] hover:bg-[#f4f7fb] disabled:cursor-not-allowed disabled:opacity-60";
 const primaryButton = "inline-flex items-center justify-center gap-1.5 rounded-md bg-[#1f4e79] px-3 py-2 text-[12px] font-medium text-white hover:bg-[#173b5c] disabled:cursor-not-allowed disabled:opacity-60";
 const tableClass = "app-table w-full min-w-[900px] text-[12px]";
-const printerBasePerSqFt = (rows: PrinterCost[]) => {
-  const ft = rows.find((row) => row.item === "Average total print cost / sq ft")?.cost_per_unit;
-  if (ft != null) return numberValue(ft);
-  const m2 = rows.find((row) => row.item === "Average total print cost / m²")?.cost_per_unit;
-  if (m2 != null) return numberValue(m2) / 10.7639104167;
-  const inch = rows.find((row) => row.item === "Average total print cost / sq in")?.cost_per_unit;
-  return inch == null ? 9.27 : numberValue(inch) * 144;
-};
-const printerRateForUnit = (rows: PrinterCost[], unit: LeadCostingUnit) => {
-  const base = printerBasePerSqFt(rows);
-  return unit === "ft" ? base : unit === "in" ? base / 144 : base * 10.7639104167;
-};
 const costPerUnit = (costPerM2: number | null | undefined, unit: LeadCostingUnit) => numberValue(costPerM2) / areaFactor(unit);
+const printableMaterials = (rows: Material[]) => rows.filter((material) => isPrintableLeadCostingMaterial(material));
+const preferredPrintableMaterial = (rows: Material[]) => printableMaterials(rows).find((material) => !material.is_sheet && material.roll_width_m && material.roll_length_m) ?? printableMaterials(rows)[0];
 
 export function LeadCostingIndexWorkspace({ organizationId }: { organizationId: string }) {
   const client = useMemo(() => createClient(), []);
@@ -92,7 +85,14 @@ export function LeadCostingIndexWorkspace({ organizationId }: { organizationId: 
       setPrinterCosts(values[3]);
       setCustomers(values[4]);
       setCostings(values[5]);
-      setForm((current) => ({ ...current, serviceId: current.serviceId || values[0][0]?.id || "", materialId: current.materialId || values[1][0]?.id || "" }));
+      const defaultMaterial = preferredPrintableMaterial(values[1]);
+      setForm((current) => ({
+        ...current,
+        serviceId: current.serviceId || values[0][0]?.id || "",
+        materialId: current.materialId && values[1].some((material) => material.id === current.materialId && isPrintableLeadCostingMaterial(material))
+          ? current.materialId
+          : defaultMaterial?.id || "",
+      }));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Lead costing data could not load.");
     } finally {
@@ -111,6 +111,7 @@ export function LeadCostingIndexWorkspace({ organizationId }: { organizationId: 
     return () => { void client.removeChannel(channel); };
   }, [client, load, organizationId]);
 
+  const printableMaterialRows = useMemo(() => printableMaterials(materials), [materials]);
   const selectedMaterial = materials.find((material) => material.id === form.materialId);
   const selectedService = services.find((service) => service.id === form.serviceId);
   const serviceName = form.serviceId === "__custom__" ? form.customServiceName.trim() || "Custom service" : selectedService?.name || "Print service";
@@ -118,7 +119,7 @@ export function LeadCostingIndexWorkspace({ organizationId }: { organizationId: 
   const calculation = useMemo(() => calculateLeadCosting(form, selectedMaterial), [form, selectedMaterial]);
   const stockCheck = useMemo(() => {
     const stock = selectedMaterial ? inventoryByMaterial.get(selectedMaterial.id) : undefined;
-    return calculateStockFit({ input: form, material: selectedMaterial, fullRolls: stock?.full_rolls_on_hand, remainingMeters: stock?.remaining_meters });
+    return calculateStockFit({ input: form, material: selectedMaterial, fullRolls: stock?.full_rolls_on_hand, remainingMeters: stock?.remaining_meters, availableSheets: stock?.available_sheets });
   }, [form, inventoryByMaterial, selectedMaterial]);
   const filteredMaterials = useMemo(() => {
     const query = mediaSearch.trim().toLowerCase();
@@ -137,9 +138,9 @@ export function LeadCostingIndexWorkspace({ organizationId }: { organizationId: 
     return materials.filter((material) => !query || [material.supplier_source, material.name, material.product_code, material.roll_description].map((value) => String(value ?? "").toLowerCase()).join(" ").includes(query));
   }, [inventorySearch, materials]);
   const setField = <K extends keyof CalculatorForm>(key: K, value: CalculatorForm[K]) => setForm((current) => ({ ...current, [key]: value }));
-  const handleUnitChange = (unit: LeadCostingUnit) => setForm((current) => ({ ...current, unit, mediaRate: selectedMaterial ? String(costPerUnit(selectedMaterial.cost_per_m2, unit)) : current.mediaRate, inkRate: String(printerRateForUnit(printerCosts, unit)) }));
+  const handleUnitChange = (unit: LeadCostingUnit) => setForm((current) => ({ ...current, unit, mediaRate: selectedMaterial ? String(costPerUnit(selectedMaterial.cost_per_m2, unit)) : current.mediaRate, inkRate: String(printCostRateForUnit(printerCosts, unit)) }));
   const handleMaterialChange = (materialId: string) => {
-    const material = materials.find((row) => row.id === materialId);
+    const material = printableMaterialRows.find((row) => row.id === materialId);
     setForm((current) => ({ ...current, materialId, mediaRate: material ? String(costPerUnit(material.cost_per_m2, current.unit)) : current.mediaRate }));
   };
 
@@ -219,9 +220,19 @@ export function LeadCostingIndexWorkspace({ organizationId }: { organizationId: 
       setCustomerForm(blankCustomer()); setMessage("Customer record saved."); await load();
     } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Customer record could not be saved."); } finally { setSaving(false); }
   };
-  const updateInventory = async (row: Inventory, fullRolls: string, remainingMeters: string) => {
-    const result = await client.from("lead_costing_inventory").update({ full_rolls_on_hand: fullRolls === "" ? null : numberValue(fullRolls), remaining_meters: remainingMeters === "" ? null : numberValue(remainingMeters) }).eq("id", row.id).eq("organization_id", organizationId);
-    if (result.error) setError(result.error.message); else { setMessage("Inventory updated."); await load(); }
+  const updateInventory = async (material: Material, fullRolls: string, remainingMeters: string, availableSheets: string) => {
+    const optionalNumber = (value: string) => value.trim() === "" ? null : Math.max(0, numberValue(value));
+    const { data: userData } = await client.auth.getUser();
+    if (!userData.user) { setError("Sign in again before saving inventory."); return; }
+    const result = await client.from("lead_costing_inventory").upsert({
+      organization_id: organizationId,
+      material_id: material.id,
+      full_rolls_on_hand: material.is_sheet ? null : optionalNumber(fullRolls),
+      remaining_meters: material.is_sheet ? null : optionalNumber(remainingMeters),
+      available_sheets: material.is_sheet ? optionalNumber(availableSheets) : null,
+      updated_by: userData.user.id,
+    }, { onConflict: "organization_id,material_id" });
+    if (result.error) setError(result.error.message); else { setMessage("Inventory saved."); await load(); }
   };
   const updateMaterialCost = async (material: Material, value: string) => {
     const result = await client.from("lead_costing_materials").update({ cost_per_m2: Math.max(0, numberValue(value)) }).eq("id", material.id).eq("organization_id", organizationId);
@@ -292,7 +303,7 @@ export function LeadCostingIndexWorkspace({ organizationId }: { organizationId: 
       {error && <div className="rounded-md border border-[#efc4c8] bg-[#fff5f5] px-3 py-2 text-[12px] text-[#9d2831]" role="alert">{error}</div>}
       <nav className="lead-costing-tabs app-tabs overflow-x-auto">{([
         ["calculator", "Direct Cost Calculator"], ["printing-quotations", "Printing Quotations"], ["saved-costings", "Saved Costings"],
-        ["services", "Service Menu"], ["materials", "Media Price List"], ["inventory", "Material Inventory"], ["customers", "Customer Records"], ["printer", "Ink"],
+        ["services", "Service Menu"], ["materials", "Media Price List"], ["inventory", "Material Inventory"], ["customers", "Customer Records"], ["printer", "Print Rates"],
       ] as [Tab, string][]).map(([id, label]) => <button key={id} type="button" aria-current={tab === id ? "page" : undefined} onClick={() => setTab(id)} className="app-tab" data-active={tab === id ? "true" : "false"}>{label}</button>)}</nav>
 
       {tab === "printing-quotations" && <LeadCostingPrintingQuotation organizationId={organizationId} materials={materials} printerCosts={printerCosts} prefill={quotationPrefill} onPrefillConsumed={() => setQuotationPrefill(null)} />}
@@ -303,7 +314,7 @@ export function LeadCostingIndexWorkspace({ organizationId }: { organizationId: 
             <h3 className="mb-3 text-[15px] font-medium text-[#1f4e79]">Direct production costing</h3>
             <div className="grid gap-3 md:grid-cols-2">
               <label className="text-[12px] font-medium text-[#465a74] md:col-span-2">Service type<select className={inputClass} value={form.serviceId} onChange={(event) => setField("serviceId", event.target.value)}><option value="">Select service</option>{services.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}<option value="__custom__">＋ Manual type / Custom service</option></select>{form.serviceId === "__custom__" && <input className={inputClass} value={form.customServiceName} onChange={(event) => setField("customServiceName", event.target.value)} placeholder="Type service / collateral name" />}</label>
-              <label className="text-[12px] font-medium text-[#465a74] md:col-span-2">Media / material<select className={inputClass} value={form.materialId} onChange={(event) => handleMaterialChange(event.target.value)}><option value="">Select material</option>{materials.map((material) => <option key={material.id} value={material.id}>{material.name} — {material.supplier_source}</option>)}</select>{selectedMaterial && <span className="mt-1 block text-[11px] font-normal text-[#687386]">{selectedMaterial.supplier_source} · {selectedMaterial.product_code || "No product code"} · {selectedMaterial.roll_description || "Dimensions unavailable"}</span>}</label>
+              <label className="text-[12px] font-medium text-[#465a74] md:col-span-2">Media / material<select className={inputClass} value={form.materialId} onChange={(event) => handleMaterialChange(event.target.value)}><option value="">Select material</option>{printableMaterialRows.map((material) => <option key={material.id} value={material.id}>{material.name} — {material.supplier_source}</option>)}</select>{selectedMaterial && <span className="mt-1 block text-[11px] font-normal text-[#687386]">{selectedMaterial.supplier_source} · {selectedMaterial.product_code || "No product code"} · {selectedMaterial.roll_description || "Dimensions unavailable"}</span>}</label>
               <div className="border-b border-[#e4e8ef] pb-1 text-[11px] font-semibold uppercase tracking-[0.07em] text-[#2378d4] md:col-span-2">Lead / job details</div>
               <label className="text-[12px] font-medium text-[#465a74]">Customer name<input className={inputClass} value={form.customerName} onChange={(event) => setField("customerName", event.target.value)} /></label>
               <label className="text-[12px] font-medium text-[#465a74]">Job description<input className={inputClass} value={form.orderDescription} onChange={(event) => setField("orderDescription", event.target.value)} /></label>
@@ -317,7 +328,7 @@ export function LeadCostingIndexWorkspace({ organizationId }: { organizationId: 
               <label className="text-[12px] font-medium text-[#465a74]">Quantity<input className={inputClass} type="number" min="1" step="1" value={form.quantity} onChange={(event) => setField("quantity", event.target.value)} /></label>
               <div className="border-b border-[#e4e8ef] pb-1 text-[11px] font-semibold uppercase tracking-[0.07em] text-[#2378d4] md:col-span-2">Direct-cost inputs</div>
               <label className="text-[12px] font-medium text-[#465a74]">Media cost (₱ / {unitLabel(form.unit)})<input className={inputClass} type="number" min="0" step="any" value={form.mediaRate} onChange={(event) => setField("mediaRate", event.target.value)} /></label>
-              <label className="text-[12px] font-medium text-[#465a74]">Ink (₱ / {unitLabel(form.unit)})<input className={inputClass} type="number" min="0" step="any" value={form.inkRate} onChange={(event) => setField("inkRate", event.target.value)} /></label>
+              <label className="text-[12px] font-medium text-[#465a74]">Print operating cost (₱ / {unitLabel(form.unit)})<input className={inputClass} type="number" min="0" step="any" value={form.inkRate} onChange={(event) => setField("inkRate", event.target.value)} /></label>
               <label className="text-[12px] font-medium text-[#465a74]">Media wastage allowance (₱ per project)<input className={inputClass} type="number" min="0" step="0.01" value={form.wasteRate} onChange={(event) => setField("wasteRate", event.target.value)} /></label>
               <label className="text-[12px] font-medium text-[#465a74]">Lamination finish<select className={inputClass} value={form.lamination} onChange={(event) => setField("lamination", event.target.value as LeadCostingLamination)}><option value="none">No lamination</option><option value="matte">Matte</option><option value="glossy">Glossy</option></select></label>
             </div>
@@ -325,7 +336,7 @@ export function LeadCostingIndexWorkspace({ organizationId }: { organizationId: 
               <button type="button" className={primaryButton} disabled={saving || !calculation.valid} onClick={() => void saveCosting()}><Save size={14} />{saving ? "Saving…" : "Save direct costing"}</button>
               <button type="button" className={compactButton} onClick={() => { void navigator.clipboard.writeText(["Customer: " + (form.customerName || "Not specified"), "Service: " + serviceName, "Direct production cost: " + money(calculation.totalOrderCost)].join("\\n")); setMessage("Direct-cost summary copied."); }}>Copy direct-cost summary</button>
               <button type="button" className={compactButton} onClick={createPrintingQuotationFromCalculator}>Create Printing Quotation</button>
-              <button type="button" className={compactButton} onClick={() => setForm({ ...blankCalculator(), serviceId: services[0]?.id || "", materialId: materials[0]?.id || "" })}>Reset</button>
+              <button type="button" className={compactButton} onClick={() => { const defaultMaterial = preferredPrintableMaterial(materials); setForm({ ...blankCalculator(), serviceId: services[0]?.id || "", materialId: defaultMaterial?.id || "", mediaRate: defaultMaterial ? String(costPerUnit(defaultMaterial.cost_per_m2, "ft")) : blankCalculator().mediaRate, inkRate: String(printCostRateForUnit(printerCosts, "ft")) }); }}>Reset</button>
             </div>
           </section>
           <section className="space-y-3">
@@ -337,7 +348,7 @@ export function LeadCostingIndexWorkspace({ organizationId }: { organizationId: 
                   ["Equivalent area (m²)", calculation.areaM2PerItem.toLocaleString("en-PH", { maximumFractionDigits: 4 }) + " m²"],
                   ["Media cost / item", money(calculation.mediaPerItem)],
                   ["Media wastage / item", money(calculation.wastePerItem)],
-                  ["Ink cost / item", money(calculation.inkPerItem)],
+                   ["Print cost / item", money(calculation.inkPerItem)],
                   ["Lamination / item", money(calculation.laminationPerItem)],
                   ["Direct cost / item", money(calculation.totalCostPerItem)],
                   ["Direct cost (quantity)", money(calculation.totalOrderCost)],
@@ -347,7 +358,7 @@ export function LeadCostingIndexWorkspace({ organizationId }: { organizationId: 
             </div>
             <div className="rounded-md border border-[#dfe5ed] bg-white p-4">
               <h3 className="mb-3 text-[15px] font-medium text-[#1f4e79]">Material quantity check</h3>
-              <div className="grid gap-2 text-[13px]"><div className="flex justify-between"><span className="text-[#687386]">Selected roll width</span><strong>{stockCheck.plan.rollWidthM ? stockCheck.plan.rollWidthM.toFixed(2) + " m" : "Not available"}</strong></div><div className="flex justify-between"><span className="text-[#687386]">Estimated length required</span><strong>{stockCheck.requiredLength ? stockCheck.requiredLength.toFixed(2) + " m incl. 10% reserve" : "Cannot estimate"}</strong></div><div className="flex justify-between"><span className="text-[#687386]">Estimated rolls required</span><strong>{stockCheck.requiredRolls || "—"}</strong></div><div className="flex justify-between"><span className="text-[#687386]">Stock check</span><strong>{stockCheck.status}</strong></div></div>
+              <div className="grid gap-2 text-[13px]">{selectedMaterial?.is_sheet ? <><div className="flex justify-between"><span className="text-[#687386]">Available sheets</span><strong>{stockCheck.availableSheets == null ? "Not entered" : stockCheck.availableSheets}</strong></div><div className="flex justify-between"><span className="text-[#687386]">Stock check</span><strong>{stockCheck.status}</strong></div></> : <><div className="flex justify-between"><span className="text-[#687386]">Selected roll width</span><strong>{stockCheck.plan.rollWidthM ? stockCheck.plan.rollWidthM.toFixed(2) + " m" : "Not available"}</strong></div><div className="flex justify-between"><span className="text-[#687386]">Estimated length required</span><strong>{stockCheck.requiredLength ? stockCheck.requiredLength.toFixed(2) + " m incl. 10% reserve" : "Cannot estimate"}</strong></div><div className="flex justify-between"><span className="text-[#687386]">Estimated rolls required</span><strong>{stockCheck.requiredRolls || "—"}</strong></div><div className="flex justify-between"><span className="text-[#687386]">Stock check</span><strong>{stockCheck.status}</strong></div></>}</div>
               <button type="button" className={compactButton + " mt-3"} onClick={() => setTab("inventory")}>Update material inventory</button>
             </div>
           </section>
@@ -359,7 +370,7 @@ export function LeadCostingIndexWorkspace({ organizationId }: { organizationId: 
       {tab === "materials" && <MaterialList materials={filteredMaterials} search={mediaSearch} setSearch={setMediaSearch} onSave={saveMaterial} saving={saving} onUpdate={updateMaterialCost} onDelete={(id) => void deleteRow("lead_costing_materials", id, "material")} />}
       {tab === "inventory" && <InventoryList materials={filteredInventory} inventoryByMaterial={inventoryByMaterial} search={inventorySearch} setSearch={setInventorySearch} onSave={updateInventory} />}
       {tab === "customers" && <CustomerList customers={filteredCustomers} search={customerSearch} setSearch={setCustomerSearch} status={customerStatus} setStatus={setCustomerStatus} form={customerForm} setForm={setCustomerForm} onSave={saveCustomer} saving={saving} onDelete={(id) => void deleteRow("lead_costing_customers", id, "customer")} />}
-      {tab === "printer" && <section className="overflow-x-auto rounded-md border border-[#dfe5ed] bg-white"><table className={tableClass}><thead><tr><th>Ink cost reference</th><th>Unit</th><th>Cost / unit</th><th>Notes</th></tr></thead><tbody>{printerCosts.map((row) => <tr key={row.id}><td className="font-medium">{row.item}</td><td>{row.unit || "—"}</td><td>{row.cost_per_unit == null ? "—" : money(numberValue(row.cost_per_unit))}</td><td>{row.notes || "—"}</td></tr>)}</tbody></table></section>}
+      {tab === "printer" && <section className="overflow-x-auto rounded-md border border-[#dfe5ed] bg-white"><table className={tableClass}><thead><tr><th>Print cost reference</th><th>Unit</th><th>Cost / unit</th><th>Notes</th></tr></thead><tbody>{printerCosts.map((row) => <tr key={row.id}><td className="font-medium">{row.item}</td><td>{row.unit || "—"}</td><td>{row.cost_per_unit == null ? "—" : money(numberValue(row.cost_per_unit))}</td><td>{row.notes || "—"}</td></tr>)}</tbody></table></section>}
     </div>
   );
 }
@@ -387,14 +398,16 @@ function MaterialList({ materials, search, setSearch, onSave, saving, onUpdate, 
   return <section className="space-y-3"><form className="grid gap-3 rounded-md border border-[#dfe5ed] bg-white p-4 md:grid-cols-4" onSubmit={(event) => void onSave(event)}><div className="md:col-span-4"><h3 className="text-[15px] font-medium text-[#1f4e79]">Add media / material</h3><p className="mt-1 text-[11px] text-[#687386]">Rates here feed direct production cost only.</p></div><label className="text-[12px] font-medium text-[#465a74]">Supplier<input className={inputClass} name="supplierSource" required /></label><label className="text-[12px] font-medium text-[#465a74]">Material name<input className={inputClass} name="materialName" required /></label><label className="text-[12px] font-medium text-[#465a74]">Product code<input className={inputClass} name="productCode" /></label><label className="text-[12px] font-medium text-[#465a74]">Cost / m²<input className={inputClass} name="costPerM2" type="number" min="0" step="any" defaultValue="0" /></label><label className="text-[12px] font-medium text-[#465a74]">Roll description<input className={inputClass} name="rollDescription" placeholder="1.37 × 50 m / Sheet 4 × 8 ft" /></label><label className="text-[12px] font-medium text-[#465a74]">Roll width (m)<input className={inputClass} name="rollWidthM" type="number" min="0" step="any" /></label><label className="text-[12px] font-medium text-[#465a74]">Roll length (m)<input className={inputClass} name="rollLengthM" type="number" min="0" step="any" /></label><label className="text-[12px] font-medium text-[#465a74]">Roll price<input className={inputClass} name="rollPrice" type="number" min="0" step="any" /></label><label className="text-[12px] font-medium text-[#465a74] md:col-span-3">Source note<input className={inputClass} name="sourceNote" /></label><div className="flex items-end"><button type="submit" className={primaryButton + " w-full"} disabled={saving}><Plus size={14} />Save material</button></div></form><div className="flex flex-wrap items-center justify-between gap-2"><input className={inputClass + " mt-0 max-w-[360px]"} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search media, code, supplier" /><span className="text-[11px] text-[#687386]">{materials.length} materials</span></div><div className="overflow-x-auto rounded-md border border-[#dfe5ed] bg-white"><table className={tableClass + " min-w-[1250px]"}><thead><tr><th>Supplier</th><th>Material</th><th>Code</th><th>Roll</th><th>Cost / m²</th><th>Type</th><th>Action</th></tr></thead><tbody>{materials.map((material) => <tr key={material.id}><td>{material.supplier_source}</td><td className="font-medium">{material.name}</td><td>{material.product_code || "—"}</td><td>{material.roll_description || "—"}</td><td><input className="input mt-0 w-28" type="number" min="0" step="any" defaultValue={material.cost_per_m2 ?? 0} onBlur={(event) => void onUpdate(material, event.target.value)} /></td><td>{material.is_finishing ? "Finishing" : material.is_sheet ? "Sheet" : "Roll"}</td><td><button type="button" className="text-[#a12d36]" onClick={() => onDelete(material.id)}>Delete</button></td></tr>)}</tbody></table></div></section>;
 }
 
-function InventoryList({ materials, inventoryByMaterial, search, setSearch, onSave }: { materials: Material[]; inventoryByMaterial: Map<string, Inventory>; search: string; setSearch: (value: string) => void; onSave: (row: Inventory, fullRolls: string, remainingMeters: string) => Promise<void> }) {
-  return <section className="space-y-3"><input className={inputClass + " mt-0 max-w-[360px]"} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search material, code, supplier" /><div className="overflow-x-auto rounded-md border border-[#dfe5ed] bg-white"><table className={tableClass + " min-w-[1050px]"}><thead><tr><th>Material</th><th>Roll size</th><th>Full rolls</th><th>Remaining meters</th><th>Action</th></tr></thead><tbody>{materials.map((material) => { const row = inventoryByMaterial.get(material.id); return row ? <InventoryRow key={row.id} material={material} row={row} onSave={onSave} /> : <tr key={material.id}><td>{material.name}</td><td>{material.roll_description || "—"}</td><td colSpan={3} className="text-[#687386]">No inventory row</td></tr>; })}</tbody></table></div></section>;
+function InventoryList({ materials, inventoryByMaterial, search, setSearch, onSave }: { materials: Material[]; inventoryByMaterial: Map<string, Inventory>; search: string; setSearch: (value: string) => void; onSave: (material: Material, fullRolls: string, remainingMeters: string, availableSheets: string) => Promise<void> }) {
+  return <section className="space-y-3"><p className="text-[12px] text-[#687386]">Roll materials use full rolls and remaining meters. Sheet materials use available sheets; remaining meters does not apply.</p><input className={inputClass + " mt-0 max-w-[360px]"} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search material, code, supplier" /><div className="overflow-x-auto rounded-md border border-[#dfe5ed] bg-white"><table className={tableClass + " min-w-[1150px]"}><thead><tr><th>Material</th><th>Pack / sheet size</th><th>Stock quantity</th><th>Remaining meters</th><th>Action</th></tr></thead><tbody>{materials.map((material) => <InventoryRow key={material.id} material={material} row={inventoryByMaterial.get(material.id)} onSave={onSave} />)}</tbody></table></div></section>;
 }
 
-function InventoryRow({ material, row, onSave }: { material: Material; row: Inventory; onSave: (row: Inventory, fullRolls: string, remainingMeters: string) => Promise<void> }) {
-  const [fullRolls, setFullRolls] = useState(row.full_rolls_on_hand == null ? "" : String(row.full_rolls_on_hand));
-  const [remainingMeters, setRemainingMeters] = useState(row.remaining_meters == null ? "" : String(row.remaining_meters));
-  return <tr><td className="font-medium">{material.name}<div className="text-[10px] text-[#687386]">{material.supplier_source}</div></td><td>{material.roll_description || "—"}</td><td><input className="input mt-0 w-24" type="number" min="0" step="any" value={fullRolls} onChange={(event) => setFullRolls(event.target.value)} /></td><td><input className="input mt-0 w-28" type="number" min="0" step="any" value={remainingMeters} onChange={(event) => setRemainingMeters(event.target.value)} /></td><td><button type="button" className={compactButton} onClick={() => void onSave(row, fullRolls, remainingMeters)}>Save</button></td></tr>;
+function InventoryRow({ material, row, onSave }: { material: Material; row: Inventory | undefined; onSave: (material: Material, fullRolls: string, remainingMeters: string, availableSheets: string) => Promise<void> }) {
+  const [fullRolls, setFullRolls] = useState(row?.full_rolls_on_hand == null ? "" : String(row.full_rolls_on_hand));
+  const [remainingMeters, setRemainingMeters] = useState(row?.remaining_meters == null ? "" : String(row.remaining_meters));
+  const [availableSheets, setAvailableSheets] = useState(row?.available_sheets == null ? "" : String(row.available_sheets));
+  const isSheet = material.is_sheet;
+  return <tr><td className="font-medium">{material.name}<div className="text-[10px] text-[#687386]">{material.supplier_source}</div>{!row && <div className="text-[10px] font-normal text-[#a76605]">Not recorded yet</div>}</td><td>{material.roll_description || "—"}</td><td><div className="mb-1 text-[10px] text-[#687386]">{isSheet ? "Available sheets" : "Full rolls"}</div>{isSheet ? <input aria-label={`Available sheets for ${material.name}`} className="input mt-0 w-28" type="number" min="0" step="1" value={availableSheets} onChange={(event) => setAvailableSheets(event.target.value)} /> : <input aria-label={`Full rolls for ${material.name}`} className="input mt-0 w-28" type="number" min="0" step="1" value={fullRolls} onChange={(event) => setFullRolls(event.target.value)} />}</td><td>{isSheet ? <span className="text-[#687386]">Not applicable</span> : <><div className="mb-1 text-[10px] text-[#687386]">Remaining meters</div><input aria-label={`Remaining meters for ${material.name}`} className="input mt-0 w-28" type="number" min="0" step="0.01" value={remainingMeters} onChange={(event) => setRemainingMeters(event.target.value)} /></>}</td><td><button type="button" className={compactButton} onClick={() => void onSave(material, fullRolls, remainingMeters, availableSheets)}>Save</button></td></tr>;
 }
 
 function CustomerList({ customers, search, setSearch, status, setStatus, form, setForm, onSave, saving, onDelete }: { customers: Customer[]; search: string; setSearch: (value: string) => void; status: string; setStatus: (value: string) => void; form: CustomerForm; setForm: Dispatch<SetStateAction<CustomerForm>>; onSave: (event: FormEvent<HTMLFormElement>) => Promise<void>; saving: boolean; onDelete: (id: string) => void }) {

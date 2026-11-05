@@ -16824,16 +16824,20 @@ function ProductCostingsSectionWithPricing({
   const importPrintingComputation = (costingKey: string, computationId: string) => {
     const computation = printingComputations.find((item) => item.id === computationId);
     if (!computation) return;
-    const description = `Printing computation ${computation.order_no} · ${computation.order_description} · Qty ${computation.quantity}`;
+    const targetCosting = costings.find((costing) => costing.key === costingKey);
+    const targetProduct = targetCosting ? lines.find((line) => text(line.id) === targetCosting.quotationItemId) : undefined;
+    const targetQuantity = Math.max(1, Math.floor(n(targetProduct?.quantity) || 1));
+    const unitCost = Math.max(0, n(computation.direct_cost_per_item));
+    const description = `Direct printing cost · ${computation.order_no} · Source ID ${computation.id} · Source qty ${computation.quantity} · ${computation.order_description}`;
     updateCosting(costingKey, (current) => {
-      if (current.costLines.some((line) => line.description.includes(`Printing computation ${computation.order_no}`))) return current;
+      if (current.costLines.some((line) => line.description.includes(`Source ID ${computation.id}`))) return current;
       const importedLine = {
         key: `cost-line-${crypto.randomUUID()}`,
         description,
-        calculationType: "fixed_amount" as const,
-        quantity: "1",
-        unitCost: String(n(computation.total_production_cost)),
-        amount: String(n(computation.total_production_cost)),
+        calculationType: "quantity_unit_cost" as const,
+        quantity: String(targetQuantity),
+        unitCost: String(unitCost),
+        amount: String(targetQuantity * unitCost),
       };
       const hasOnlyBlankLine = current.costLines.length === 1 && !current.costLines[0].description.trim() && n(current.costLines[0].unitCost) === 0 && n(current.costLines[0].amount) === 0;
       return { ...current, costLines: hasOnlyBlankLine ? [importedLine] : [...current.costLines, importedLine] };
@@ -16936,7 +16940,7 @@ function ProductCostingsSectionWithPricing({
                           }}
                         >
                           <option value="">Choose a direct-cost computation</option>
-                          {printingComputations.map((computation) => <option key={computation.id} value={computation.id}>{computation.order_no} · {computation.order_description} · {peso.format(n(computation.total_production_cost))}</option>)}
+                          {printingComputations.map((computation) => <option key={computation.id} value={computation.id}>{computation.order_no} · {computation.order_description} · {peso.format(n(computation.direct_cost_per_item))} / item</option>)}
                         </select>
                       </label>}
                     </div>

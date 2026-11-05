@@ -32,6 +32,14 @@ const printingQuotationMigration = readFileSync(
   join(repoRoot, "supabase", "migrations", "20261104132346_lead_costing_printing_quotations.sql"),
   "utf8",
 );
+const printingSecurityValidationMigration = readFileSync(
+  join(repoRoot, "supabase", "migrations", "20261105145557_lead_costing_printing_security_validation.sql"),
+  "utf8",
+);
+const sheetInventoryMigration = readFileSync(
+  join(repoRoot, "supabase", "migrations", "20261105152102_lead_costing_sheet_inventory_fields.sql"),
+  "utf8",
+);
 
 test("Lead & Costing is exposed only in the Lead Coordinator workspace", () => {
   assert.match(workspace, /lead_coordinator: \["Leads", "Lead Costing", "Announcements", "Policy"\]/);
@@ -71,6 +79,9 @@ test("calculator is direct-cost only and quotation pricing stays in the GM workf
   assert.doesNotMatch(costingWorkspace, /Target gross profit margin/);
   assert.doesNotMatch(costingWorkspace, /Print Customer Copy/);
   assert.match(calculator, /totalOrderCost/);
+  assert.match(calculator, /calculateProductionReadiness/);
+  assert.match(calculator, /isPrintableLeadCostingMaterial/);
+  assert.match(calculator, /printCostRateForUnit/);
   assert.doesNotMatch(calculator, /sellingPricePerItem/);
   assert.doesNotMatch(calculator, /estimatedProfit/);
   assert.match(costingWorkspace, /lead-costing-data-/);
@@ -83,6 +94,8 @@ test("calculator is direct-cost only and quotation pricing stays in the GM workf
   assert.match(printingQuotation, /Collateral type/);
   assert.match(printingQuotation, /production_cost: productionCost/);
   assert.match(printingQuotation, /submit_lead_costing_printing_quotation/);
+  assert.match(printingQuotation, /Stock readiness/);
+  assert.match(printingQuotation, /manual_stock_confirmed/);
   assert.match(costingWorkspace, /createPrintingQuotationFromCalculator/);
   assert.match(printingQuotation, /LeadCostingPrintingQuotationPrefill/);
   assert.match(printingQuotationMigration, /quotation_source/);
@@ -100,4 +113,18 @@ test("calculator is direct-cost only and quotation pricing stays in the GM workf
   assert.match(directWorkflowMigration, /create or replace function public\.list_lead_costing_print_computations/);
   assert.match(workspace, /Add saved print computation/);
   assert.match(workspace, /list_lead_costing_print_computations/);
+  assert.match(workspace, /Source ID/);
+  assert.match(workspace, /direct_cost_per_item/);
+  assert.match(printingSecurityValidationMigration, /lead_costing_can_access_lead/);
+  assert.match(printingSecurityValidationMigration, /validate_lead_costing_printing_item/);
+  assert.match(printingSecurityValidationMigration, /costing_mode = 'direct_printing'/);
+  assert.match(printingSecurityValidationMigration, /manual_stock_confirmed/);
+  assert.match(printingSecurityValidationMigration, /revoke all on function private\.seed_lead_costing_printing_product_costings/);
+  assert.match(printingSecurityValidationMigration, /security definer[\s\S]*create_lead_costing_order_from_index_direct/);
+  assert.match(printingSecurityValidationMigration, /revoke all on function public\.create_lead_costing_order_from_index\(/);
+  assert.match(costingWorkspace, /available_sheets/);
+  assert.match(costingWorkspace, /Available sheets/);
+  assert.match(costingWorkspace, /upsert/);
+  assert.match(calculator, /availableSheets/);
+  assert.match(sheetInventoryMigration, /add column if not exists available_sheets/);
 });
