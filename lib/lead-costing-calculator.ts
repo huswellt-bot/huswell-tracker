@@ -12,11 +12,11 @@ export type LeadCostingCalculatorInput = {
   height: string | number;
   quantity: string | number;
   unit: LeadCostingUnit;
+  dpi: string | number;
   mediaRate: string | number;
   inkRate: string | number;
   wasteRate: string | number;
   lamination: LeadCostingLamination;
-  amountPaid: string | number;
 };
 
 export type LeadCostingLayoutPlan = {
@@ -50,9 +50,6 @@ export type LeadCostingCalculation = LeadCostingLayoutPlan & {
   laminationPerItem: number;
   totalCostPerItem: number;
   totalOrderCost: number;
-  amountPaid: number;
-  balance: number;
-  paymentStatus: "Unpaid" | "Partially paid" | "Paid in full";
   stockFit: string;
 };
 
@@ -62,19 +59,19 @@ export const numberValue = (value: string | number | null | undefined) => {
 };
 
 export const areaFactor = (unit: LeadCostingUnit) =>
-  unit === "m" ? 1 : unit === "in" ? 1550.0031 : unit === "px" ? 0 : 10.7639104167;
+  unit === "m" || unit === "px" ? 1 : unit === "in" ? 1550.0031 : 10.7639104167;
 
 export const unitLabel = (unit: LeadCostingUnit) =>
-  unit === "m" ? "m²" : unit === "in" ? "sq in" : unit === "px" ? "px" : "sq ft";
+  unit === "m" || unit === "px" ? "m²" : unit === "in" ? "sq in" : "sq ft";
 
 export const calculateLayoutPlan = (
-  input: Pick<LeadCostingCalculatorInput, "width" | "height" | "quantity" | "unit">,
+  input: Pick<LeadCostingCalculatorInput, "width" | "height" | "quantity" | "unit" | "dpi">,
   material: LeadCostingMaterial | undefined,
 ): LeadCostingLayoutPlan => {
   const width = Math.max(0, numberValue(input.width));
   const height = Math.max(0, numberValue(input.height));
   const quantity = Math.max(1, Math.floor(numberValue(input.quantity) || 1));
-  const factor = input.unit === "ft" ? 0.3048 : input.unit === "in" ? 0.0254 : input.unit === "px" ? 0 : 1;
+  const factor = input.unit === "ft" ? 0.3048 : input.unit === "in" ? 0.0254 : input.unit === "px" ? 0.0254 / Math.max(1, numberValue(input.dpi) || 300) : 1;
   const widthM = width * factor;
   const heightM = height * factor;
   const rollWidth = numberValue(material?.roll_width_m);
@@ -149,7 +146,7 @@ export const calculateStockFit = ({
   fullRolls,
   remainingMeters,
 }: {
-  input: Pick<LeadCostingCalculatorInput, "width" | "height" | "quantity" | "unit">;
+  input: Pick<LeadCostingCalculatorInput, "width" | "height" | "quantity" | "unit" | "dpi">;
   material: LeadCostingMaterial | undefined;
   fullRolls: string | number | null | undefined;
   remainingMeters: string | number | null | undefined;
@@ -202,14 +199,15 @@ export const calculateLeadCosting = (
   const width = Math.max(0, numberValue(input.width));
   const height = Math.max(0, numberValue(input.height));
   const quantity = Math.max(1, Math.floor(numberValue(input.quantity) || 1));
-  const factor = input.unit === "ft" ? 0.3048 : input.unit === "in" ? 0.0254 : input.unit === "px" ? 0 : 1;
+  const factor = input.unit === "ft" ? 0.3048 : input.unit === "in" ? 0.0254 : input.unit === "px" ? 0.0254 / Math.max(1, numberValue(input.dpi) || 300) : 1;
   const widthM = width * factor;
   const heightM = height * factor;
   const areaPerItem = width * height;
   const areaM2PerItem = widthM * heightM;
   const layout = calculateLayoutPlan(input, material);
-  const mediaPerItem = areaPerItem * Math.max(0, numberValue(input.mediaRate));
-  const inkPerItem = areaPerItem * Math.max(0, numberValue(input.inkRate));
+  const rateArea = input.unit === "px" ? areaM2PerItem : areaPerItem;
+  const mediaPerItem = rateArea * Math.max(0, numberValue(input.mediaRate));
+  const inkPerItem = rateArea * Math.max(0, numberValue(input.inkRate));
   const areaIn2 = (widthM / 0.0254) * (heightM / 0.0254);
   const laminationPerItem =
     areaIn2 *
@@ -222,12 +220,10 @@ export const calculateLeadCosting = (
   const wastePerItem = wasteProject / quantity;
   const totalCostPerItem = mediaPerItem + wastePerItem + inkPerItem + laminationPerItem;
   const totalOrderCost = totalCostPerItem * quantity;
-  const amountPaid = Math.min(totalOrderCost, Math.max(0, numberValue(input.amountPaid)));
-  const balance = Math.max(0, totalOrderCost - amountPaid);
 
   return {
     ...layout,
-    valid: input.unit !== "px" && width > 0 && height > 0 && Boolean(material),
+    valid: width > 0 && height > 0 && Boolean(material) && (input.unit !== "px" || numberValue(input.dpi) > 0),
     width,
     height,
     quantity,
@@ -243,10 +239,6 @@ export const calculateLeadCosting = (
     laminationPerItem,
     totalCostPerItem,
     totalOrderCost,
-    amountPaid,
-    balance,
-    paymentStatus:
-      balance <= 0.009 ? "Paid in full" : amountPaid > 0 ? "Partially paid" : "Unpaid",
     stockFit: layout.valid ? "Calculated" : layout.reason,
   };
 };

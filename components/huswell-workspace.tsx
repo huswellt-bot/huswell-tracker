@@ -618,6 +618,21 @@ type ProductCostingDraft = {
     locked?: boolean;
   }[];
 };
+type PrintingComputation = {
+  id: string;
+  order_no: string;
+  order_date: string;
+  customer_name: string;
+  order_description: string;
+  width: number;
+  height: number;
+  measurement_unit: string;
+  resolution_dpi: number | null;
+  quantity: number;
+  direct_cost_per_item: number;
+  total_production_cost: number;
+  stock_fit_status: string | null;
+};
 const orderedProductCostingDrafts = (
   costings: ProductCostingDraft[],
   quotationItems: Row[],
@@ -12381,7 +12396,8 @@ function QuotationDocument({
     (item) => item.id === quote.costing_source_id,
   );
   const isMockupQuotation = text(quote.document_type) === "mockup_quotation";
-  const documentLabel = isMockupQuotation ? "Mockup Quotation" : "Price Quotation";
+  const isPrintingQuotation = text(quote.quotation_source) === "lead_costing_printing";
+  const documentLabel = isMockupQuotation ? "Mockup Quotation" : isPrintingQuotation ? "Printing Quotation" : "Price Quotation";
   const sourceQuotation = isMockupQuotation
     ? store.quotations.find((item) => item.id === quote.source_price_quotation_id)
     : null;
@@ -15381,6 +15397,7 @@ function PriceQuotationSubmissions({
           quotation={selectedPriceQuotation}
           store={store}
           saving={false}
+          allowPrintingComputations={role === "sales_pricing_officer"}
           close={() => setSelectedPriceQuotation(null)}
           notice={notice}
           reload={reload}
@@ -16299,7 +16316,7 @@ function PriceQuotationWorkspace({
         </div>
       )}
       {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); notice(message); }} autoExportPdf pdfWindow={pdfWindow} printAfterOpen={printAfterOpen} hidden showInternalCosting={isGeneralManager} />}
-      {reviewing && <PriceQuotationReview quotation={reviewing} store={store} saving={saving} showInternalMarkups={isGeneralManager} close={() => setReviewing(null)} notice={notice} reload={reload} />}
+      {reviewing && <PriceQuotationReview quotation={reviewing} store={store} saving={saving} showInternalMarkups={isGeneralManager} allowPrintingComputations={role === "sales_pricing_officer"} close={() => setReviewing(null)} notice={notice} reload={reload} />}
       {paymentQuote && <QuotationPaymentDialog quote={paymentQuote} store={store} orgId={orgId} role={role} historyOnly={role === "external_finance"} close={() => setPaymentQuote(null)} reload={reload} />}
     </Panel>
   );
@@ -16584,6 +16601,8 @@ type PriceQuotationReviewContentProps = {
   projectType: string;
   illustrations: { id: string; description: string; imageUrl: string; fileName?: string; contentType?: string }[];
   productCostings: ProductCostingDraft[];
+  printingComputations: PrintingComputation[];
+  printingComputationsError?: string;
   pricingDefaults: Row;
   setProductCostings: (next: ProductCostingDraft[] | ((current: ProductCostingDraft[]) => ProductCostingDraft[])) => void;
   approvedSellingPrices: Record<string, string>;
@@ -16773,6 +16792,8 @@ function ProductCostingsSectionWithPricing({
   editableInternalMarkups,
   visibleMarkupKeys,
   canEditVat,
+  printingComputations,
+  printingComputationsError,
   sensitiveValuesHidden = false,
   toggleSensitiveValues,
   readOnly = false,
@@ -16790,6 +16811,8 @@ function ProductCostingsSectionWithPricing({
   editableInternalMarkups: boolean;
   visibleMarkupKeys: ReadonlyArray<PricingMarkupKey>;
   canEditVat: boolean;
+  printingComputations: PrintingComputation[];
+  printingComputationsError?: string;
   sensitiveValuesHidden?: boolean;
   toggleSensitiveValues: () => void;
   readOnly?: boolean;
@@ -16798,6 +16821,24 @@ function ProductCostingsSectionWithPricing({
   const defaults = pricingMarkupDefaults(pricingDefaults.pricing_markup_defaults, pricingDefaults);
   const updateCosting = (key: string, update: (costing: ProductCostingDraft) => ProductCostingDraft) =>
     setCostings((current) => current.map((costing) => costing.key === key ? update(costing) : costing));
+  const importPrintingComputation = (costingKey: string, computationId: string) => {
+    const computation = printingComputations.find((item) => item.id === computationId);
+    if (!computation) return;
+    const description = `Printing computation ${computation.order_no} · ${computation.order_description} · Qty ${computation.quantity}`;
+    updateCosting(costingKey, (current) => {
+      if (current.costLines.some((line) => line.description.includes(`Printing computation ${computation.order_no}`))) return current;
+      const importedLine = {
+        key: `cost-line-${crypto.randomUUID()}`,
+        description,
+        calculationType: "fixed_amount" as const,
+        quantity: "1",
+        unitCost: String(n(computation.total_production_cost)),
+        amount: String(n(computation.total_production_cost)),
+      };
+      const hasOnlyBlankLine = current.costLines.length === 1 && !current.costLines[0].description.trim() && n(current.costLines[0].unitCost) === 0 && n(current.costLines[0].amount) === 0;
+      return { ...current, costLines: hasOnlyBlankLine ? [importedLine] : [...current.costLines, importedLine] };
+    });
+  };
   const [targetBudgetValues, setTargetBudgetValues] = useState<Record<string, string>>({});
   const [targetBudgetErrors, setTargetBudgetErrors] = useState<Record<string, string>>({});
   const effectiveVatRate = vatInclusive ? n(vatValue) : 0;
@@ -16879,10 +16920,28 @@ function ProductCostingsSectionWithPricing({
 
                 <fieldset disabled={readOnly} className="min-w-0 border-0 p-0">
                 <div className="mt-3">
-                  <div className="mb-3 flex items-center justify-between gap-3">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
                     <h4 className="text-[12px] font-semibold text-[#344054]">Internal costs</h4>
-                    <span className="text-[11px] text-[#687386]">Product {costingIndex + 1}</span>
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      <span className="text-[11px] text-[#687386]">Product {costingIndex + 1}</span>
+                      {!readOnly && printingComputations.length > 0 && <label className="text-[11px] font-medium text-[#344054]">
+                        Add saved print computation
+                        <select
+                          aria-label={`Add saved print computation to product ${costingIndex + 1}`}
+                          defaultValue=""
+                          className="input mt-1 min-w-56 px-2 py-1.5"
+                          onChange={(event) => {
+                            importPrintingComputation(costing.key, event.target.value);
+                            event.currentTarget.value = "";
+                          }}
+                        >
+                          <option value="">Choose a direct-cost computation</option>
+                          {printingComputations.map((computation) => <option key={computation.id} value={computation.id}>{computation.order_no} · {computation.order_description} · {peso.format(n(computation.total_production_cost))}</option>)}
+                        </select>
+                      </label>}
+                    </div>
                   </div>
+                  {printingComputationsError && !readOnly && <p className="mb-3 rounded-md border border-[#f0c7c7] bg-[#fff7f7] px-3 py-2 text-[11px] text-[#8f1d1d]">Saved print computations are unavailable: {printingComputationsError}</p>}
                   <Table labels={["Mode", "Description", "Quantity", "Unit Cost", "Amount", ""]} minWidth={940} className="table-fixed" compact columnWidths={["10%", "48%", "12%", "12%", "12%", "6%"]} alignRightLabels={["Quantity", "Unit Cost", "Amount"]}>
                     {costing.costLines.map((line, lineIndex) => {
                       const isFixedAmount = line.calculationType === "fixed_amount";
@@ -17045,7 +17104,7 @@ function QuotationVatControl({
 }
 
 function PriceQuotationReviewContent({
-  lines, projectName, projectType, illustrations, productCostings, pricingDefaults, setProductCostings, approvedSellingPrices, setApprovedSellingPrices, prices, setPrices, subtotal, vatRate, setVatRate, vatInclusive, setVatInclusive, tax,
+  lines, projectName, projectType, illustrations, productCostings, printingComputations, printingComputationsError, pricingDefaults, setProductCostings, approvedSellingPrices, setApprovedSellingPrices, prices, setPrices, subtotal, vatRate, setVatRate, vatInclusive, setVatInclusive, tax,
   total, terms, setTerms, paymentTermsOption, pdcTermDays, onPaymentTermsOptionChange, onPdcTermDaysChange, bankDetails, setBankDetails,
   revisionNote, setRevisionNote, submissionNote, setSubmissionNote, close, saving, working, costingsLoading, review, finalApproval, showInternalMarkups, sensitiveValuesHidden, toggleSensitiveValues, visibleMarkupKeys, bankVisibility, pricingRevision, readOnly = false,
   documentLabel = "Price Quotation", sourceQuotationNo, commissionAssignmentVisible, commissionOriginUserId, commissionOriginName, commissionOriginOptions, commissionHandlingMode, commissionCoWorkerUserId, commissionSplitOption, commissionOfficerOptions, commissionOriginEditable, commissionHandlingEditable, commissionSplitEditable, editableApprovedSellingPrices, onCommissionOriginChange, onCommissionHandlingModeChange, onCommissionCoWorkerChange, onCommissionSplitOptionChange,
@@ -17204,7 +17263,7 @@ function PriceQuotationReviewContent({
         <p className="mt-2 whitespace-pre-wrap text-[13px] leading-5 text-[#4b5565]">{submissionNote}</p>
       </section>}
       <QuotationReviewSummary lines={lines} prices={prices} subtotal={subtotal} vatRate={vatInclusive ? vatRate : "0"} tax={tax} total={total} productCostings={productCostings} showPrices={showInternalMarkups} />
-      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} vatInclusive={vatInclusive} costings={productCostings} setCostings={setProductCostings} approvedSellingPrices={approvedSellingPrices} pricingDefaults={pricingDefaults} editableMarkups={showInternalMarkups} editableInternalMarkups={finalApproval} visibleMarkupKeys={visibleMarkupKeys ?? (showInternalMarkups ? internalPricingMarkupKeys : ["discounts"])} canEditVat={finalApproval} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} readOnly={readOnly} />
+      <ProductCostingsSectionWithPricing projectName={projectName} lines={lines} vatValue={vatRate} setVatValue={setVatRate} vatInclusive={vatInclusive} costings={productCostings} setCostings={setProductCostings} approvedSellingPrices={approvedSellingPrices} pricingDefaults={pricingDefaults} editableMarkups={showInternalMarkups} editableInternalMarkups={finalApproval} visibleMarkupKeys={visibleMarkupKeys ?? (showInternalMarkups ? internalPricingMarkupKeys : ["discounts"])} canEditVat={finalApproval} sensitiveValuesHidden={sensitiveValuesHidden} toggleSensitiveValues={toggleSensitiveValues} printingComputations={printingComputations} printingComputationsError={printingComputationsError} readOnly={readOnly} />
       <QuotationPaymentTermsEditor
         option={paymentTermsOption}
         termDays={pdcTermDays}
@@ -17258,6 +17317,7 @@ function PriceQuotationReview({
   reload,
   finalApproval = false,
   showInternalMarkups = finalApproval,
+  allowPrintingComputations = false,
   readOnly = false,
 }: {
   quotation: Row;
@@ -17268,10 +17328,11 @@ function PriceQuotationReview({
   reload: () => Promise<void>;
   finalApproval?: boolean;
   showInternalMarkups?: boolean;
+  allowPrintingComputations?: boolean;
   readOnly?: boolean;
 }) {
   const pricingRevision = !finalApproval && isPricingOfficerRevision(quotation);
-  const documentLabel = "Price Quotation";
+  const documentLabel = text(quotation.quotation_source, "") === "lead_costing_printing" ? "Printing Quotation" : "Price Quotation";
   const commissionAssignmentVisible = Boolean(text(quotation.commission_handling_mode, ""));
   const quotationLead = store.leads.find((lead) => text(lead.id, "") === text(quotation.lead_id, ""));
   const transferCommissionOriginId = text(quotationLead?.transfer_se_origin_user_id, "");
@@ -17478,6 +17539,33 @@ function PriceQuotationReview({
   const [productCostingsLoading, setProductCostingsLoading] = useState(true);
   const [productCostingsError, setProductCostingsError] = useState("");
   const [productCostingsLoadAttempt, setProductCostingsLoadAttempt] = useState(0);
+  const [printingComputations, setPrintingComputations] = useState<PrintingComputation[]>([]);
+  const [printingComputationsError, setPrintingComputationsError] = useState("");
+  useEffect(() => {
+    if (!allowPrintingComputations || finalApproval || readOnly || text(quotation.quotation_source, "") === "lead_costing_printing") {
+      setPrintingComputations([]);
+      setPrintingComputationsError("");
+      return;
+    }
+    let active = true;
+    setPrintingComputationsError("");
+    void createClient()
+      .rpc("list_lead_costing_print_computations", {
+        p_organization_id: text(quotation.organization_id, ""),
+      })
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          setPrintingComputations([]);
+          setPrintingComputationsError(error.message);
+          return;
+        }
+        setPrintingComputations((data ?? []) as PrintingComputation[]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [allowPrintingComputations, finalApproval, quotation.organization_id, quotation.quotation_source, readOnly]);
   const useCurrentGmMarkups = finalApproval && text(quotation.status, "") === "pending_gm_approval";
   const [productCostings, setProductCostings] = useState<ProductCostingDraft[]>(() => {
     const savedCostings = productCostingDrafts(
@@ -17855,6 +17943,8 @@ function PriceQuotationReview({
           documentLabel={documentLabel}
           illustrations={illustrations}
           productCostings={productCostings}
+          printingComputations={printingComputations}
+          printingComputationsError={printingComputationsError}
           pricingDefaults={activePricingDefaultSettings ?? {}}
           setProductCostings={setProductCostings}
           approvedSellingPrices={approvedSellingPrices}

@@ -16,6 +16,14 @@ const indexMigration = readFileSync(
   join(repoRoot, "supabase", "migrations", "20261104115933_lead_costing_index_reference_data.sql"),
   "utf8",
 );
+const latestIndexMigration = readFileSync(
+  join(repoRoot, "supabase", "migrations", "20261105125811_lead_costing_latest_index_updates.sql"),
+  "utf8",
+);
+const directWorkflowMigration = readFileSync(
+  join(repoRoot, "supabase", "migrations", "20261105135427_lead_costing_direct_cost_pricing_workflow.sql"),
+  "utf8",
+);
 const printingQuotation = readFileSync(
   join(repoRoot, "components", "lead-costing-printing-quotation.tsx"),
   "utf8",
@@ -53,22 +61,19 @@ test("Lead costing persistence is organization-scoped and server-authorized", ()
   assert.match(indexMigration, /Only a Lead & Costing Coordinator can create costing orders/);
 });
 
-test("calculator preserves the target costing areas and print workflows", () => {
-  assert.match(costingWorkspace, /laminationPerItem/);
-  assert.match(calculator, /costAllowancePercent/);
-  assert.match(costingWorkspace, /calculateLeadCosting/);
-  assert.match(costingWorkspace, /create_lead_costing_order_from_index/);
-  assert.match(costingWorkspace, /Export sales CSV/);
-  assert.match(costingWorkspace, /Export customers CSV/);
-  assert.match(costingWorkspace, /Search media, code, supplier/);
-  assert.match(costingWorkspace, /Search material, code, supplier/);
-  assert.match(costingWorkspace, /Search customer, order, service/);
-  assert.match(costingWorkspace, /Search customer, contact, inquiry/);
-  assert.match(costingWorkspace, /Copy quotation summary/);
-  assert.match(costingWorkspace, /Print Customer \+ Admin Copies/);
-  assert.match(costingWorkspace, /printOrder\(order, "customer"\)/);
-  assert.match(costingWorkspace, /printOrder\(order, "admin"\)/);
-  assert.match(costingWorkspace, /lead-costing-data:/);
+test("calculator is direct-cost only and quotation pricing stays in the GM workflow", () => {
+  assert.match(costingWorkspace, /Direct Cost Calculator/);
+  assert.match(costingWorkspace, /Saved Costings/);
+  assert.match(costingWorkspace, /Save direct costing/);
+  assert.match(costingWorkspace, /create_lead_costing_order_from_index_direct/);
+  assert.match(costingWorkspace, /This page calculates direct production cost only/);
+  assert.doesNotMatch(costingWorkspace, /Sales Dashboard/);
+  assert.doesNotMatch(costingWorkspace, /Target gross profit margin/);
+  assert.doesNotMatch(costingWorkspace, /Print Customer Copy/);
+  assert.match(calculator, /totalOrderCost/);
+  assert.doesNotMatch(calculator, /sellingPricePerItem/);
+  assert.doesNotMatch(calculator, /estimatedProfit/);
+  assert.match(costingWorkspace, /lead-costing-data-/);
   assert.match(indexMigration, /"materials":\[/);
   assert.match(indexMigration, /"services":\[/);
   assert.match(indexMigration, /"printerCosts":\[/);
@@ -76,8 +81,23 @@ test("calculator preserves the target costing areas and print workflows", () => 
   assert.match(indexMigration, /Brand Maximizers Inc\. \(BMI\)/);
   assert.match(printingQuotation, /Printing Quotations/);
   assert.match(printingQuotation, /Collateral type/);
+  assert.match(printingQuotation, /production_cost: productionCost/);
   assert.match(printingQuotation, /submit_lead_costing_printing_quotation/);
+  assert.match(costingWorkspace, /createPrintingQuotationFromCalculator/);
+  assert.match(printingQuotation, /LeadCostingPrintingQuotationPrefill/);
   assert.match(printingQuotationMigration, /quotation_source/);
   assert.match(printingQuotationMigration, /pending_gm_approval/);
   assert.match(printingQuotationMigration, /costing_metadata/);
+  assert.match(costingWorkspace, /__custom__/);
+  assert.match(costingWorkspace, /Pixels \(px\)/);
+  assert.match(calculator, /0\.0254 \/ Math\.max\(1, numberValue\(input\.dpi\)/);
+  assert.match(latestIndexMigration, /resolution_dpi/);
+  assert.match(latestIndexMigration, /create_lead_costing_order_from_index_direct/);
+  assert.match(latestIndexMigration, /measurement_unit in \('ft', 'in', 'm', 'px'\)/);
+  assert.match(directWorkflowMigration, /seed_lead_costing_printing_product_costings/);
+  assert.match(directWorkflowMigration, /Direct printing production cost/);
+  assert.match(directWorkflowMigration, /create or replace function public\.submit_lead_costing_printing_quotation/);
+  assert.match(directWorkflowMigration, /create or replace function public\.list_lead_costing_print_computations/);
+  assert.match(workspace, /Add saved print computation/);
+  assert.match(workspace, /list_lead_costing_print_computations/);
 });

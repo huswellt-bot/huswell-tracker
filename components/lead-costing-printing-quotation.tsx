@@ -32,25 +32,31 @@ type PrinterCost = { item: string; cost_per_unit: number | null };
 type Lead = { id: string; lead_no?: string | null; project_name?: string | null; client_name?: string | null; contact_name?: string | null; phone?: string | null; email?: string | null; address?: string | null };
 type Quote = { id: string; quotation_no: string; status: string; lead_id: string | null; project_name: string | null; issue_date: string; total_cost: number; subtotal: number; total_amount: number; revision_note: string | null; terms_conditions: string | null; created_by: string | null };
 type QuoteItem = { id: string; quotation_id: string; description: string; quantity: number; unit_cost: number; costing_metadata: unknown };
-type Item = { id: string; collateralType: string; materialId: string; materialName: string; printType: string; width: string; height: string; unit: LeadCostingUnit; location: string; quantity: string; mediaRate: string; inkRate: string; wasteRate: string; lamination: LeadCostingLamination };
+type Item = { id: string; collateralType: string; materialId: string; materialName: string; printType: string; width: string; height: string; unit: LeadCostingUnit; dpi: string; location: string; quantity: string; mediaRate: string; inkRate: string; wasteRate: string; lamination: LeadCostingLamination };
+
+export type LeadCostingPrintingQuotationPrefill = Omit<Item, "id"> & {
+  projectName?: string;
+};
 
 const defaultTerms = "• Quotation is subject to confirmation of final artwork, dimensions, material availability, and production requirements.\n• Production starts after artwork approval and confirmation of payment terms.\n• Changes after approval may affect the price and delivery schedule.\n• Delivery, installation, rush fees, and taxes are included only if stated in the quotation.\n• Final price and completion date are subject to Huswell Trading's written confirmation.";
 const emptyItem = (materials: LeadCostingQuotationMaterial[], printerCosts: PrinterCost[]): Item => ({
-  id: crypto.randomUUID(), collateralType: "", materialId: materials[0]?.id ?? "", materialName: materials[0]?.name ?? "", printType: "1 Side Print", width: "", height: "", unit: "m", location: "", quantity: "1", mediaRate: materials[0]?.cost_per_m2 == null ? "0" : String(numberValue(materials[0].cost_per_m2)), inkRate: String(printerRate(printerCosts, "m")), wasteRate: "0", lamination: "none",
+  id: crypto.randomUUID(), collateralType: "", materialId: materials[0]?.id ?? "", materialName: materials[0]?.name ?? "", printType: "1 Side Print", width: "", height: "", unit: "m", dpi: "300", location: "", quantity: "1", mediaRate: materials[0]?.cost_per_m2 == null ? "0" : String(numberValue(materials[0].cost_per_m2)), inkRate: String(printerRate(printerCosts, "m")), wasteRate: "0", lamination: "none",
 });
 const printerRate = (rows: PrinterCost[], unit: LeadCostingUnit) => {
   const m2 = rows.find((row) => row.item === "Average total print cost / m²")?.cost_per_unit;
   const base = m2 == null ? 0 : numberValue(m2);
-  return unit === "m" ? base : unit === "ft" ? base * 10.7639104167 : unit === "in" ? base / 1550.0031 : "";
+  return unit === "m" || unit === "px" ? base : unit === "ft" ? base * 10.7639104167 : base / 1550.0031;
 };
 const materialRate = (material: LeadCostingQuotationMaterial | undefined, unit: LeadCostingUnit) => {
-  if (!material?.cost_per_m2 || unit === "px") return "";
-  return String(numberValue(material.cost_per_m2) * (unit === "m" ? 1 : unit === "ft" ? 0.09290304 : 0.00064516));
+  if (!material?.cost_per_m2) return "";
+  return String(numberValue(material.cost_per_m2) * (unit === "m" || unit === "px" ? 1 : unit === "ft" ? 0.09290304 : 0.00064516));
 };
-const formatSize = (item: Item) => item.width && item.height ? `${item.width} × ${item.height} ${item.unit}` : "Size not entered";
+const formatSize = (item: Item) => item.width && item.height
+  ? `${item.width} × ${item.height} ${item.unit}${item.unit === "px" && item.dpi ? ` @ ${item.dpi} DPI` : ""}`
+  : "Size not entered";
 const asMetadata = (value: unknown): Partial<Item> => value && typeof value === "object" ? value as Partial<Item> : {};
 
-export function LeadCostingPrintingQuotation({ organizationId, materials, printerCosts }: { organizationId: string; materials: LeadCostingQuotationMaterial[]; printerCosts: PrinterCost[] }) {
+export function LeadCostingPrintingQuotation({ organizationId, materials, printerCosts, prefill, onPrefillConsumed }: { organizationId: string; materials: LeadCostingQuotationMaterial[]; printerCosts: PrinterCost[]; prefill?: LeadCostingPrintingQuotationPrefill | null; onPrefillConsumed?: () => void }) {
   const client = useMemo(() => createClient(), []);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -90,6 +96,18 @@ export function LeadCostingPrintingQuotation({ organizationId, materials, printe
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
+    if (!prefill) return;
+    setEditing(null);
+    setLeadId("");
+    setProjectName(prefill.projectName ?? prefill.collateralType ?? "");
+    setQuoteDate(today());
+    setTerms(defaultTerms);
+    setDraftItems([{ ...prefill, id: crypto.randomUUID() }]);
+    setMessage("Calculator values copied into a new Printing Quotation. Select the Lead before saving.");
+    setError(null);
+    onPrefillConsumed?.();
+  }, [onPrefillConsumed, prefill]);
+  useEffect(() => {
     const channel = client.channel(`lead-costing-printing-quotations:${organizationId}`);
     ["quotations", "quotation_items"].forEach((table) => channel.on("postgres_changes", { event: "*", schema: "public", table, ...(table === "quotations" ? { filter: `organization_id=eq.${organizationId}` } : {}) }, () => void load()));
     channel.subscribe();
@@ -99,8 +117,7 @@ export function LeadCostingPrintingQuotation({ organizationId, materials, printe
   const selectedLead = leads.find((lead) => lead.id === leadId);
   const calculations = useMemo(() => draftItems.map((item) => {
     const material = materials.find((row) => row.id === item.materialId);
-    if (item.unit === "px") return { item, material, calculation: null };
-    return { item, material, calculation: calculateLeadCosting({ width: item.width, height: item.height, quantity: item.quantity, unit: item.unit, mediaRate: item.mediaRate, inkRate: item.inkRate, wasteRate: item.wasteRate, lamination: item.lamination, amountPaid: 0 }, material) };
+    return { item, material, calculation: calculateLeadCosting({ width: item.width, height: item.height, quantity: item.quantity, unit: item.unit, dpi: item.dpi, mediaRate: item.mediaRate, inkRate: item.inkRate, wasteRate: item.wasteRate, lamination: item.lamination }, material) };
   }), [draftItems, materials]);
   const totalCost = calculations.reduce((sum, row) => sum + (row.calculation?.totalOrderCost ?? 0), 0);
   const allRowsReady = calculations.length > 0 && calculations.every((row) => row.calculation?.valid);
@@ -119,16 +136,17 @@ export function LeadCostingPrintingQuotation({ organizationId, materials, printe
     const material = materials.find((row) => row.id === id);
     updateItem(item.id, { materialId: id, materialName: material?.name ?? "", mediaRate: materialRate(material, item.unit) });
   };
-  const changeUnit = (item: Item, unit: LeadCostingUnit) => updateItem(item.id, { unit, mediaRate: materialRate(materials.find((row) => row.id === item.materialId), unit), inkRate: printerRate(printerCosts, unit) === "" ? "0" : String(printerRate(printerCosts, unit)) });
+  const changeUnit = (item: Item, unit: LeadCostingUnit) => updateItem(item.id, { unit, mediaRate: materialRate(materials.find((row) => row.id === item.materialId), unit), inkRate: String(printerRate(printerCosts, unit)) });
   const save = async (submit: boolean) => {
     setSaving(true); setMessage(null); setError(null);
     try {
       if (!leadId || !selectedLead) throw new Error("Select the client Lead before saving the quotation.");
       if (!draftItems.length || draftItems.some((item) => !item.collateralType.trim() || !item.width || !item.height)) throw new Error("Each printing line needs a collateral type and size.");
-      if (submit && !allRowsReady) throw new Error("Every submitted line needs a physical size, an active material, and valid costing inputs. Pixel-only sizes need the physical size or a separate approved manual costing first.");
+      if (submit && !allRowsReady) throw new Error("Every submitted line needs a physical size, an active material, a valid DPI for pixel dimensions, and valid direct-cost inputs.");
       const payload = draftItems.map((item, index) => {
         const result = calculations[index];
-        return { description: [item.collateralType.trim(), item.materialName.trim(), item.printType.trim(), formatSize(item), item.location.trim() ? `Location: ${item.location.trim()}` : ""].filter(Boolean).join(" · "), quantity: Math.max(1, Math.floor(numberValue(item.quantity) || 1)), production_cost: result.calculation?.totalCostPerItem ?? 0, costing_metadata: item };
+        const productionCost = result.calculation?.totalCostPerItem ?? 0;
+        return { description: [item.collateralType.trim(), item.materialName.trim(), item.printType.trim(), formatSize(item), item.location.trim() ? `Location: ${item.location.trim()}` : ""].filter(Boolean).join(" · "), quantity: Math.max(1, Math.floor(numberValue(item.quantity) || 1)), production_cost: productionCost, costing_metadata: { ...item, production_cost: productionCost } };
       });
       const { data, error: saveError } = await client.rpc("save_lead_costing_printing_quotation", { p_quotation_id: editing?.id ?? null, p_lead_id: leadId, p_project_name: projectName.trim() || selectedLead.project_name || "Printing collateral quotation", p_issue_date: quoteDate || today(), p_items: payload, p_terms_conditions: terms });
       if (saveError) throw saveError;
