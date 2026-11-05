@@ -12,6 +12,7 @@ import {
   isPrintableLeadCostingMaterial,
   numberValue,
   printCostRateForUnit,
+  type LeadCostingInventory,
   type LeadCostingLamination,
   type LeadCostingUnit,
 } from "@/lib/lead-costing-calculator";
@@ -39,6 +40,7 @@ type PrinterCost = { item: string; cost_per_unit: number | null };
 type Lead = { id: string; lead_no?: string | null; project_name?: string | null; client_name?: string | null; contact_name?: string | null; phone?: string | null; email?: string | null; address?: string | null };
 type Quote = { id: string; quotation_no: string; status: string; lead_id: string | null; project_name: string | null; issue_date: string; total_cost: number; subtotal: number; total_amount: number; revision_note: string | null; terms_conditions: string | null; created_by: string | null };
 type QuoteItem = { id: string; quotation_id: string; description: string; quantity: number; unit_cost: number; costing_metadata: unknown };
+type Inventory = LeadCostingInventory & { material_id: string };
 type Item = { id: string; collateralType: string; materialId: string; materialName: string; printType: string; width: string; height: string; unit: LeadCostingUnit; dpi: string; location: string; quantity: string; mediaRate: string; inkRate: string; wasteRate: string; lamination: LeadCostingLamination; manualStockConfirmed?: boolean };
 
 export type LeadCostingPrintingQuotationPrefill = Omit<Item, "id"> & {
@@ -58,7 +60,7 @@ const formatSize = (item: Item) => item.width && item.height
   : "Size not entered";
 const asMetadata = (value: unknown): Partial<Item> => value && typeof value === "object" ? value as Partial<Item> : {};
 
-export function LeadCostingPrintingQuotation({ organizationId, materials, printerCosts, prefill, onPrefillConsumed }: { organizationId: string; materials: LeadCostingQuotationMaterial[]; printerCosts: PrinterCost[]; prefill?: LeadCostingPrintingQuotationPrefill | null; onPrefillConsumed?: () => void }) {
+export function LeadCostingPrintingQuotation({ organizationId, materials, inventory, printerCosts, prefill, onPrefillConsumed }: { organizationId: string; materials: LeadCostingQuotationMaterial[]; inventory: Inventory[]; printerCosts: PrinterCost[]; prefill?: LeadCostingPrintingQuotationPrefill | null; onPrefillConsumed?: () => void }) {
   const client = useMemo(() => createClient(), []);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -117,12 +119,13 @@ export function LeadCostingPrintingQuotation({ organizationId, materials, printe
   }, [client, load, organizationId]);
 
   const printableMaterialRows = useMemo(() => materials.filter((material) => isPrintableLeadCostingMaterial(material)), [materials]);
+  const inventoryByMaterial = useMemo(() => new Map(inventory.map((row) => [row.material_id, row])), [inventory]);
   const selectedLead = leads.find((lead) => lead.id === leadId);
   const calculations = useMemo(() => draftItems.map((item) => {
     const material = materials.find((row) => row.id === item.materialId);
     const input = { width: item.width, height: item.height, quantity: item.quantity, unit: item.unit, dpi: item.dpi, mediaRate: item.mediaRate, inkRate: item.inkRate, wasteRate: item.wasteRate, lamination: item.lamination };
-    return { item, material, calculation: calculateLeadCosting(input, material), readiness: calculateProductionReadiness(input, material) };
-  }), [draftItems, materials]);
+    return { item, material, calculation: calculateLeadCosting(input, material), readiness: calculateProductionReadiness(input, material, inventoryByMaterial.get(item.materialId)) };
+  }), [draftItems, inventoryByMaterial, materials]);
   const totalCost = calculations.reduce((sum, row) => sum + (row.calculation?.totalOrderCost ?? 0), 0);
   const allRowsReady = calculations.length > 0 && calculations.every((row) => row.calculation?.valid && (row.readiness.ready || (row.readiness.manualConfirmationAllowed && row.item.manualStockConfirmed === true)));
   const currentItems = (quoteId: string) => items.filter((item) => item.quotation_id === quoteId);
@@ -146,7 +149,7 @@ export function LeadCostingPrintingQuotation({ organizationId, materials, printe
     try {
       if (!leadId || !selectedLead) throw new Error("Select the client Lead before saving the quotation.");
       if (!draftItems.length || draftItems.some((item) => !item.collateralType.trim() || !item.width || !item.height)) throw new Error("Each printing line needs a collateral type and size.");
-      if (submit && !allRowsReady) throw new Error("Every submitted line needs a physical size, an active printable material, a valid DPI, valid direct-cost inputs, and either a valid stock layout or manual sheet-stock confirmation.");
+      if (submit && !allRowsReady) throw new Error("Every submitted line needs a physical size, an active printable material, valid direct-cost inputs, and enough recorded inventory for the selected material.");
       const payload = draftItems.map((item, index) => {
         const result = calculations[index];
         const productionCost = result.calculation?.totalCostPerItem ?? 0;

@@ -14,6 +14,12 @@ export type LeadCostingPrinterRateRow = {
   cost_per_unit: number | null | undefined;
 };
 
+export type LeadCostingInventory = {
+  full_rolls_on_hand?: number | null;
+  remaining_meters?: number | null;
+  available_sheets?: number | null;
+};
+
 export type LeadCostingProductionReadiness = {
   ready: boolean;
   manualConfirmationAllowed: boolean;
@@ -48,6 +54,7 @@ export type LeadCostingLayoutPlan = {
 
 export type LeadCostingCalculation = LeadCostingLayoutPlan & {
   valid: boolean;
+  layoutValid: boolean;
   width: number;
   height: number;
   quantity: number;
@@ -96,26 +103,6 @@ export const printCostRateForUnit = (rows: LeadCostingPrinterRateRow[], unit: Le
 
 export const isPrintableLeadCostingMaterial = (material: LeadCostingMaterial | undefined) =>
   Boolean(material) && material?.is_active !== false && material?.is_finishing !== true;
-
-export const calculateProductionReadiness = (
-  input: Pick<LeadCostingCalculatorInput, "width" | "height" | "quantity" | "unit" | "dpi">,
-  material: LeadCostingMaterial | undefined,
-): LeadCostingProductionReadiness => {
-  if (!isPrintableLeadCostingMaterial(material)) {
-    return { ready: false, manualConfirmationAllowed: false, reason: "Select an active printable material." };
-  }
-  if (input.unit === "px" && numberValue(input.dpi) <= 0) {
-    return { ready: false, manualConfirmationAllowed: false, reason: "Enter a positive DPI for pixel dimensions." };
-  }
-  const plan = calculateLayoutPlan(input, material);
-  if (plan.valid) {
-    return { ready: true, manualConfirmationAllowed: false, reason: "Layout fits the configured stock." };
-  }
-  if (material?.is_sheet && (!numberValue(material.roll_width_m) || !numberValue(material.roll_length_m))) {
-    return { ready: false, manualConfirmationAllowed: true, reason: "Sheet dimensions are not configured; confirm the available sheet stock manually." };
-  }
-  return { ready: false, manualConfirmationAllowed: false, reason: plan.reason };
-};
 
 export const calculateLayoutPlan = (
   input: Pick<LeadCostingCalculatorInput, "width" | "height" | "quantity" | "unit" | "dpi">,
@@ -209,14 +196,20 @@ export const calculateStockFit = ({
   const plan = calculateLayoutPlan(input, material);
   if (material?.is_sheet) {
     const hasSheetInventory = availableSheets != null;
+    const requiredSheets = plan.valid ? Math.ceil(Math.max(1, numberValue(input.quantity)) / Math.max(1, plan.across)) : 0;
     return {
       plan,
       requiredLength: 0,
       requiredRolls: 0,
       availableMeters: null as number | null,
       availableSheets: hasSheetInventory ? numberValue(availableSheets) : null,
+      requiredSheets,
       status: hasSheetInventory
-        ? `${numberValue(availableSheets).toFixed(0)} sheet${numberValue(availableSheets) === 1 ? "" : "s"} recorded; confirm sheet fit manually`
+        ? plan.valid
+          ? numberValue(availableSheets) + 0.0001 >= requiredSheets
+            ? `Enough stock: ${numberValue(availableSheets).toFixed(0)} sheet${numberValue(availableSheets) === 1 ? "" : "s"} available`
+            : `Short by ${(requiredSheets - numberValue(availableSheets)).toFixed(0)} sheet${requiredSheets - numberValue(availableSheets) === 1 ? "" : "s"}`
+          : `${numberValue(availableSheets).toFixed(0)} sheet${numberValue(availableSheets) === 1 ? "" : "s"} recorded; confirm sheet fit manually`
         : "Enter available sheets",
     };
   }
@@ -227,6 +220,7 @@ export const calculateStockFit = ({
       requiredRolls: 0,
       availableMeters: null as number | null,
       availableSheets: null as number | null,
+      requiredSheets: 0,
       status: "Roll dimensions unavailable",
     };
   }
@@ -237,6 +231,7 @@ export const calculateStockFit = ({
       requiredRolls: 0,
       availableMeters: null as number | null,
       availableSheets: null as number | null,
+      requiredSheets: 0,
       status: plan.reason,
     };
   }
@@ -254,6 +249,7 @@ export const calculateStockFit = ({
     requiredRolls,
     availableMeters,
     availableSheets: null as number | null,
+    requiredSheets: 0,
     status:
       availableMeters == null
         ? "Enter roll count or remaining meters"
@@ -261,6 +257,57 @@ export const calculateStockFit = ({
           ? `Enough stock: ${(availableMeters - requiredLength).toFixed(2)} m remaining after estimated job`
           : `Short by ${(requiredLength - availableMeters).toFixed(2)} m`,
   };
+};
+
+export const calculateProductionReadiness = (
+  input: Pick<LeadCostingCalculatorInput, "width" | "height" | "quantity" | "unit" | "dpi">,
+  material: LeadCostingMaterial | undefined,
+  inventory?: LeadCostingInventory,
+): LeadCostingProductionReadiness => {
+  if (!isPrintableLeadCostingMaterial(material)) {
+    return { ready: false, manualConfirmationAllowed: false, reason: "Select an active printable material." };
+  }
+  if (input.unit === "px" && numberValue(input.dpi) <= 0) {
+    return { ready: false, manualConfirmationAllowed: false, reason: "Enter a positive DPI for pixel dimensions." };
+  }
+
+  const stockFit = calculateStockFit({
+    input,
+    material,
+    fullRolls: inventory?.full_rolls_on_hand,
+    remainingMeters: inventory?.remaining_meters,
+    availableSheets: inventory?.available_sheets,
+  });
+
+  if (material?.is_sheet) {
+    if (stockFit.availableSheets == null) {
+      return { ready: false, manualConfirmationAllowed: false, reason: "Enter available sheets in Material Inventory before submitting." };
+    }
+    if (stockFit.availableSheets <= 0) {
+      return { ready: false, manualConfirmationAllowed: false, reason: "No sheet stock is available for this material." };
+    }
+    if (!stockFit.plan.valid) {
+      if (!numberValue(material.roll_width_m) || !numberValue(material.roll_length_m)) {
+        return { ready: false, manualConfirmationAllowed: true, reason: "Sheet dimensions are not configured; confirm the available sheet stock manually." };
+      }
+      return { ready: false, manualConfirmationAllowed: false, reason: stockFit.plan.reason };
+    }
+    if (stockFit.requiredSheets > stockFit.availableSheets) {
+      return { ready: false, manualConfirmationAllowed: false, reason: stockFit.status };
+    }
+    return { ready: true, manualConfirmationAllowed: false, reason: stockFit.status };
+  }
+
+  if (!stockFit.plan.valid) {
+    return { ready: false, manualConfirmationAllowed: false, reason: stockFit.plan.reason };
+  }
+  if (stockFit.availableMeters == null) {
+    return { ready: false, manualConfirmationAllowed: false, reason: "Enter full rolls or remaining meters in Material Inventory before submitting." };
+  }
+  if (stockFit.availableMeters + 0.0001 < stockFit.requiredLength) {
+    return { ready: false, manualConfirmationAllowed: false, reason: stockFit.status };
+  }
+  return { ready: true, manualConfirmationAllowed: false, reason: stockFit.status };
 };
 
 export const calculateLeadCosting = (
@@ -298,6 +345,7 @@ export const calculateLeadCosting = (
   return {
     ...layout,
     valid: width > 0 && height > 0 && quantityIsValid && numericInputsAreValid && isPrintableLeadCostingMaterial(material) && (input.unit !== "px" || numberValue(input.dpi) > 0),
+    layoutValid: layout.valid,
     width,
     height,
     quantity,

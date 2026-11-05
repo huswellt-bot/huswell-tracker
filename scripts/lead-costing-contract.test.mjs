@@ -40,6 +40,10 @@ const sheetInventoryMigration = readFileSync(
   join(repoRoot, "supabase", "migrations", "20261105152102_lead_costing_sheet_inventory_fields.sql"),
   "utf8",
 );
+const inventoryAndRevisionGuardsMigration = readFileSync(
+  join(repoRoot, "supabase", "migrations", "20261105162713_lead_costing_inventory_and_revision_guards.sql"),
+  "utf8",
+);
 
 test("Lead & Costing is exposed only in the Lead Coordinator workspace", () => {
   assert.match(workspace, /lead_coordinator: \["Leads", "Lead Costing", "Announcements", "Policy"\]/);
@@ -124,7 +128,17 @@ test("calculator is direct-cost only and quotation pricing stays in the GM workf
   assert.match(printingSecurityValidationMigration, /revoke all on function public\.create_lead_costing_order_from_index\(/);
   assert.match(costingWorkspace, /available_sheets/);
   assert.match(costingWorkspace, /Available sheets/);
+  assert.match(costingWorkspace, /name="materialType"/);
+  assert.match(costingWorkspace, /is_sheet: String\(data\.get\("materialType"\)/);
   assert.match(costingWorkspace, /upsert/);
   assert.match(calculator, /availableSheets/);
+  assert.match(calculator, /layoutValid/);
+  assert.match(calculator, /requiredSheets/);
   assert.match(sheetInventoryMigration, /add column if not exists available_sheets/);
+  assert.match(printingQuotation, /inventoryByMaterial/);
+  assert.match(printingQuotation, /calculateProductionReadiness\(input, material, inventoryByMaterial/);
+  assert.match(inventoryAndRevisionGuardsMigration, /lead_coordinator/);
+  assert.match(inventoryAndRevisionGuardsMigration, /validate_lead_costing_printing_inventory/);
+  assert.match(inventoryAndRevisionGuardsMigration, /validate_lead_costing_direct_layout/);
+  assert.match(inventoryAndRevisionGuardsMigration, /lead_costing_printing_inventory_guard/);
 });
