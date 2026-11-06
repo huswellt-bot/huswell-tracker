@@ -44,6 +44,18 @@ const inventoryAndRevisionGuardsMigration = readFileSync(
   join(repoRoot, "supabase", "migrations", "20261105162713_lead_costing_inventory_and_revision_guards.sql"),
   "utf8",
 );
+const printingQuotationGuardMigration = readFileSync(
+  join(repoRoot, "supabase", "migrations", "20261106011653_allow_lead_costing_printing_quotation_guards.sql"),
+  "utf8",
+);
+const printingCostingItemGuardMigration = readFileSync(
+  join(repoRoot, "supabase", "migrations", "20261106012313_allow_lead_costing_printing_costing_item_guard.sql"),
+  "utf8",
+);
+const printingCommissionGuardMigration = readFileSync(
+  join(repoRoot, "supabase", "migrations", "20261106013353_skip_printing_quotation_commission_summary.sql"),
+  "utf8",
+);
 
 test("Lead & Costing is exposed only in the Lead Coordinator workspace", () => {
   assert.match(workspace, /lead_coordinator: \["Leads", "Lead Costing", "Announcements", "Policy"\]/);
@@ -141,4 +153,26 @@ test("calculator is direct-cost only and quotation pricing stays in the GM workf
   assert.match(inventoryAndRevisionGuardsMigration, /validate_lead_costing_printing_inventory/);
   assert.match(inventoryAndRevisionGuardsMigration, /validate_lead_costing_direct_layout/);
   assert.match(inventoryAndRevisionGuardsMigration, /lead_costing_printing_inventory_guard/);
+});
+
+test("printing quotations bypass only the legacy project-officer quotation guards", () => {
+  assert.match(printingQuotationGuardMigration, /enforce_project_officer_price_quotation_content/);
+  assert.match(printingQuotationGuardMigration, /enforce_project_officer_price_quotation_items/);
+  assert.match(printingQuotationGuardMigration, /enforce_price_quotation_preparation/);
+  assert.match(printingQuotationGuardMigration, /coalesce\(new\.quotation_source, 'standard'\) <> 'lead_costing_printing'/);
+  assert.match(printingQuotationGuardMigration, /coalesce\(v_quotation\.quotation_source, 'standard'\) <> 'lead_costing_printing'/);
+  assert.match(printingQuotationGuardMigration, /Only a Sales Project Officer can change Price Quotation items/);
+  assert.match(printingQuotationGuardMigration, /Only the General Manager can set quotation prices or totals/);
+});
+
+test("printing submission can seed its direct-cost quotation item snapshot", () => {
+  assert.match(printingCostingItemGuardMigration, /enforce_price_quotation_item_preparation/);
+  assert.match(printingCostingItemGuardMigration, /coalesce\(v_quote\.quotation_source, 'standard'\) <> 'lead_costing_printing'/);
+  assert.match(printingCostingItemGuardMigration, /Only the assigned Sales & Pricing Officer can set Selling Price \/ Unit/);
+});
+
+test("approved printing quotations do not enter the standard commission summary workflow", () => {
+  assert.match(printingCommissionGuardMigration, /create_commission_summary_on_quotation_approval/);
+  assert.match(printingCommissionGuardMigration, /coalesce\(new\.quotation_source, 'standard'\) <> 'lead_costing_printing'/);
+  assert.match(printingCommissionGuardMigration, /ensure_commission_summary_from_approved_quotation/);
 });
