@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test.use({ baseURL: "http://localhost:3000" });
+test.use({ baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3000" });
 
 test("the application shell loads without a browser error", async ({ page }) => {
   const pageErrors: string[] = [];

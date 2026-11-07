@@ -49,6 +49,7 @@ import {
   Goal,
   ImageIcon,
   LayoutDashboard,
+  Landmark,
   Lock,
   LoaderCircle,
   LogOut,
@@ -125,6 +126,10 @@ const DynamicFinanceWorkspace = dynamic(
   () => import("@/components/finance-workspace").then((module) => module.FinanceWorkspace),
   { loading: () => <LoadingState variant="section" label="Loading Finance..." /> },
 );
+const DynamicFinanceFoundationWorkspace = dynamic(
+  () => import("@/components/finance-foundation-workspace").then((module) => module.FinanceFoundationWorkspace),
+  { loading: () => <LoadingState variant="section" label="Loading Financial Foundation..." /> },
+);
 
 PdfFont.register({
   family: "SF Pro Display",
@@ -154,6 +159,7 @@ type View =
   | "Sales"
   | "Expenses"
   | "Finance Overview"
+  | "Finance Foundation"
   | "Finance Reports"
   | "Finance"
   | "Finance Approvals"
@@ -184,6 +190,7 @@ type SidebarWorkspace = "sales_pricing" | "finance";
 
 const financeSidebarViews: View[] = [
   "Finance Overview",
+  "Finance Foundation",
   "Finance Reports",
   "Finance",
   "Finance Approvals",
@@ -21751,7 +21758,7 @@ function Dashboard({
   const monthlyActivity = useSharedMonthlyKpiActivity(
     orgId,
     selectedMonth,
-    !isProjectOfficer && role !== "admin",
+    memberRole(role) && role !== "admin",
   );
   useEffect(() => {
     if (isProjectOfficer || role === "admin") return;
@@ -23710,6 +23717,7 @@ export function HuswellWorkspace({
       "Projects",
       "Price Quotations",
       "Approvals",
+      "Finance Foundation",
       "Finance Budget",
       "Finance Activity History",
       "Commissions",
@@ -23723,6 +23731,7 @@ export function HuswellWorkspace({
       "Price Quotations",
       "Quotation Costing Overview",
       "Approvals",
+      "Finance Foundation",
       "Finance Budget",
       "Finance Activity History",
       "Commissions",
@@ -23739,6 +23748,7 @@ export function HuswellWorkspace({
       "Price Quotations",
       "Quotation Costing Overview",
       "Approvals",
+      "Finance Foundation",
       "Finance Budget",
       "Finance Activity History",
       "Commissions",
@@ -23752,6 +23762,7 @@ export function HuswellWorkspace({
       "Leads",
       "Projects",
       "Price Quotations",
+      "Finance Foundation",
       "Announcements",
       "Policy",
     ],
@@ -23771,11 +23782,11 @@ export function HuswellWorkspace({
     sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Announcements", "Policy"],
     warehouse: ["Dashboard", "Catalog", "Inventory", "Production", "Announcements", "Policy"],
     accountant: ["Announcements", "Policy"],
-    internal_finance: ["Finance Overview", "Finance Reports", "Finance", "Finance Approvals", "Finance Transactions", "Finance Accounts", "Finance Budget", "Finance Supplier Costing", "Finance Payables", "Paid commissions", "Finance Activity History", "Payment Monitoring", "Announcements", "Policy"],
-    external_finance: ["Finance Overview", "Finance Reports", "Finance", "Finance Transactions", "Finance Budget", "Finance Supplier Costing", "Payment Monitoring", "Announcements", "Policy"],
+    internal_finance: ["Finance Overview", "Finance Foundation", "Finance Reports", "Finance", "Finance Approvals", "Finance Transactions", "Finance Accounts", "Finance Budget", "Finance Supplier Costing", "Finance Payables", "Paid commissions", "Finance Activity History", "Payment Monitoring", "Announcements", "Policy"],
+    external_finance: ["Finance Overview", "Finance Foundation", "Finance Reports", "Finance", "Finance Transactions", "Finance Budget", "Finance Supplier Costing", "Payment Monitoring", "Announcements", "Policy"],
     lead_coordinator: ["Leads", "Lead Costing", "Announcements", "Policy"],
     payroll: ["Dashboard", "Payroll & Leave", "Letter Request", "Directory", "Announcements", "Policy"],
-    production: ["Dashboard", "Production", "Inventory", "Announcements", "Policy"],
+    production: ["Dashboard", "Production", "Inventory", "Finance Foundation", "Announcements", "Policy"],
     viewer: [
       "Dashboard",
       "Quotations",
@@ -23801,6 +23812,7 @@ export function HuswellWorkspace({
   ) {
     allowedRoleViews.push(
       "Finance Overview",
+      "Finance Foundation",
       "Finance Reports",
       "Finance Approvals",
       "Finance Transactions",
@@ -23846,6 +23858,7 @@ export function HuswellWorkspace({
           label: "Finance",
           items: [
             { view: "Finance Overview", icon: Wallet },
+            { view: "Finance Foundation", icon: Landmark },
             { view: "Finance Reports", icon: CalendarDays },
             { view: "Finance Approvals", icon: ClipboardCheck, badge: sidebarBadge("finance") },
             { view: "Finance Transactions", icon: ReceiptText },
@@ -23899,6 +23912,7 @@ export function HuswellWorkspace({
     badge?: number;
   }[] = hasInternalFinanceAccess
     ? [
+        { view: "Finance Foundation", icon: Landmark },
         { view: "Finance Approvals", icon: ClipboardCheck, badge: sidebarBadge("finance") },
         { view: "Finance Transactions", icon: ReceiptText },
         { view: "Finance Accounts", icon: Wallet },
@@ -23909,7 +23923,7 @@ export function HuswellWorkspace({
         { view: "Payment Monitoring", icon: ReceiptText },
         { view: "Finance Activity History", icon: ClipboardList },
       ]
-    : [{ view: "Finance Budget", icon: FileText }, { view: "Finance Activity History", icon: ClipboardList }];
+    : [{ view: "Finance Foundation", icon: Landmark }, { view: "Finance Budget", icon: FileText }, { view: "Finance Activity History", icon: ClipboardList }];
   const navBase: {
     label: string;
     items: { view: View; icon: typeof LayoutDashboard; badge?: number }[];
@@ -23950,6 +23964,7 @@ export function HuswellWorkspace({
       label: "Finance",
       items: [
         { view: "Finance Overview", icon: Wallet },
+        { view: "Finance Foundation", icon: Landmark },
         { view: "Finance Reports", icon: CalendarDays },
         { view: "Finance Approvals", icon: ClipboardCheck, badge: sidebarBadge("finance") },
         { view: "Finance Transactions", icon: ReceiptText },
@@ -23969,6 +23984,7 @@ export function HuswellWorkspace({
       label: "Finance",
       items: [
         { view: "Finance Overview", icon: Wallet },
+        { view: "Finance Foundation", icon: Landmark },
         { view: "Finance Reports", icon: CalendarDays },
         { view: "Finance Transactions", icon: ReceiptText, badge: sidebarBadge("finance") },
         { view: "Finance Budget", icon: FileText },
@@ -24042,6 +24058,7 @@ export function HuswellWorkspace({
       label: "Finance",
       items: [
         { view: "Finance Overview", icon: Wallet },
+        { view: "Finance Foundation", icon: Landmark },
         { view: "Finance", icon: Wallet, badge: sidebarBadge("finance") },
         { view: "Payment Monitoring", icon: ReceiptText, badge: hasInternalFinanceAccess ? undefined : sidebarBadge("quotation_payments") },
         ...(!["external_finance", "internal_finance"].includes(role) ? [{ view: "Commissions" as View, icon: PhilippinePeso }] : []),
@@ -24173,6 +24190,10 @@ export function HuswellWorkspace({
       detail: role === "external_finance"
         ? "Track submitted money movements, budget requests, and supplier obligations."
         : "Monitor cash, approvals, receivables, and payables.",
+    },
+    "Finance Foundation": {
+      title: "Financial Foundation",
+      detail: "Keep Company Working Funds, Project Funds, labor payments, operating costs, and break-even targets separate and traceable.",
     },
     "Finance Reports": {
       title: "Monthly Finance Report",
@@ -24451,6 +24472,8 @@ export function HuswellWorkspace({
       />
     ) : active === "Finance Overview" ? (
       <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} overviewOnly />
+    ) : active === "Finance Foundation" ? (
+      <DynamicFinanceFoundationWorkspace key={active} organizationId={organizationId} role={financeRole} />
     ) : active === "Finance Reports" && isManagementRole ? (
       <GeneralManagerMonthlyFinanceReport orgId={organizationId} />
     ) : active === "Finance Reports" ? (
@@ -24593,6 +24616,8 @@ export function HuswellWorkspace({
               ? "Production"
               : view === "Finance Overview" && (hasInternalFinanceAccess || role === "external_finance")
                 ? "Overview"
+              : view === "Finance Foundation"
+                ? "Financial Foundation"
               : view === "Finance Reports"
                 ? "Monthly report"
               : view === "Finance Approvals"
