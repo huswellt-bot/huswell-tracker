@@ -23457,6 +23457,10 @@ export function HuswellWorkspace({
       refreshActivityCount.current += 1;
       setRefreshing(true);
     }
+    type TableRequestResult = Awaited<ReturnType<typeof fetchTable>> | {
+      data: null;
+      error: { message: string };
+    };
     const requests = tablesToRefresh.map((table) => ({
       table,
       requestId: requestIds.get(table) ?? 0,
@@ -23467,13 +23471,27 @@ export function HuswellWorkspace({
         },
       })),
     }));
-    const resolveRequests = (batch: typeof requests) => Promise.all(
-      batch.map(async ({ table, requestId, load }) => ({
-        table,
-        requestId,
-        result: await load(),
-      })),
-    );
+    const resolveRequests = async (batch: typeof requests) => {
+      const results: Array<{
+        table: TableName;
+        requestId: number;
+        result: TableRequestResult;
+      }> = [];
+      const batchSize = 1;
+      for (let index = 0; index < batch.length; index += batchSize) {
+        const slice = batch.slice(index, index + batchSize);
+        results.push(
+          ...(await Promise.all(
+            slice.map(async ({ table, requestId, load }) => ({
+              table,
+              requestId,
+              result: await load(),
+            })),
+          )),
+        );
+      }
+      return results;
+    };
     const applyResults = (
       results: Awaited<ReturnType<typeof resolveRequests>>,
       hideLoading = false,
