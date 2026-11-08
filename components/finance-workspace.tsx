@@ -43,7 +43,7 @@ type Row = { id?: string; [key: string]: unknown };
 type FinanceRemoveTarget = { kind: "category" | "account_type"; id: string; label: string };
 type Direction = "income" | "expense";
 type CashInSource = "other_income" | "quotation_payment";
-type ExpenseMode = "regular" | "project" | "supplier";
+type ExpenseMode = "regular" | "project" | "supplier" | "operating";
 type Tab = "overview" | "reports" | "approvals" | "transactions" | "accounts" | "budget" | "supplier_costing" | "payables" | "commission_history" | "activity_history";
 type PayablesSection = "commission" | "supplier";
 type CommissionPayablesView = "awaiting_payment" | "ready_to_pay";
@@ -242,6 +242,7 @@ const defaultTransaction = (direction: Direction, categoryId = "") => ({
   payment_kind: "downpayment",
   supplier_payable_id: "",
   commission_allocation_id: "",
+  operating_cost_entry_id: "",
 });
 
 const quotationPaymentKindOptions = [
@@ -566,7 +567,7 @@ function LegacyTransactionTableV2({
                 {canRequestIncomeRevision && <button type="button" disabled={saving} onClick={() => requestIncomeRevision(String(transaction.id))} className="button-secondary text-[#6941c6]">Return for correction</button>}
                 {canEditIncomeRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[#6941c6]">Edit &amp; resubmit</button>}
                 {canVoidIncome && <button type="button" disabled={saving} onClick={() => voidIncome(String(transaction.id))} className="button-danger">Reverse Cash In</button>}
-                {canApproveAndPay && <button type="button" disabled={saving || !accountId} onClick={() => approveAndPay(String(transaction.id))} className="button-secondary text-[#218b55]">{approval === "pending" ? "Approve and pay" : "Pay now"}</button>}
+                {canApproveAndPay && <button type="button" disabled={saving} onClick={() => approveAndPay(String(transaction.id))} className="button-secondary text-[#218b55]">Verify Cash Out</button>}
                 {canRequestRevision && <button type="button" disabled={saving} onClick={() => requestRevision(String(transaction.id))} className="button-secondary text-[#6941c6]">Return for revision</button>}
                 {canEditRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[#6941c6]">Edit &amp; resubmit</button>}
                 {canMarkPaid && <button type="button" disabled={saving} onClick={() => markPaid(String(transaction.id), "Cash Out")} className="button-secondary">Mark paid</button>}
@@ -602,7 +603,7 @@ function LegacyTransactionTableV2({
               const reviewDisplay = manualIncome ? incomeReviewStatus === "pending" ? "pending_confirmation" : incomeReviewStatus : approval;
               const receiptBucket = stringValue(transaction, "receipt_bucket", "finance-receipts");
               const note = isVoided ? `Voided: ${stringValue(transaction, "void_reason", "Reversed source payment")}` : reviewDisplay === "revision_requested" ? `Correction requested: ${stringValue(transaction, "decision_note", "See reviewer note")}` : stringValue(transaction, "note", "-");
-              return <tr key={String(transaction.id)} className={isVoided ? "opacity-60" : undefined}><td>{displayDate(transaction.transaction_date)}<small>{stringValue(transaction, "transaction_time")}</small></td><td>{manualIncome ? "Manual Cash In" : leadName(transaction.lead_id)}{manualIncome && <small>Standalone income{stringValue(transaction, "reference_number") ? ` · Ref: ${stringValue(transaction, "reference_number")}` : ""}</small>}{Boolean(transaction.source_payment_id) && <small>Automatic project payment</small>}</td><td>{categoryName(transaction.category_id)}<small>{note}</small></td><td>{canChangeAccount ? <select aria-label={type === "income" ? "Receiving account" : "Payment account"} defaultValue={accountId} onChange={(event) => void assignAccount(String(transaction.id), event.target.value)} disabled={saving} className="input min-w-[150px] text-[10px]"><option value="">Choose account</option>{accounts.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")}</option>)}</select> : accountName(transaction.account_id)}</td><td className="font-semibold text-[#218b55]">{type === "income" ? peso.format(numericValue(transaction, "amount")) : "-"}</td><td className="font-semibold text-[#b42318]">{type === "expense" ? peso.format(numericValue(transaction, "amount")) : "-"}</td><td><StatusPill value={paymentDisplay} /></td><td><StatusPill value={reviewDisplay} /></td><td>{stringValue(transaction, "receipt_storage_path") ? <button type="button" onClick={() => void openReceipt(stringValue(transaction, "receipt_storage_path"), receiptBucket)} className="text-[#c43b43]" title="View receipt"><ReceiptText size={15} /></button> : "-"}</td><td><span className="flex flex-wrap gap-1">{canVerifyIncome && <button type="button" disabled={saving} onClick={() => verifyIncome(String(transaction.id))} className="button-secondary text-[10px] text-[#218b55]">Verify</button>}{canRequestIncomeRevision && <button type="button" disabled={saving} onClick={() => requestIncomeRevision(String(transaction.id))} className="button-secondary text-[10px] text-[#6941c6]">Return</button>}{canEditIncomeRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[10px] text-[#6941c6]">Edit &amp; resubmit</button>}{canVoidIncome && <button type="button" disabled={saving} onClick={() => voidIncome(String(transaction.id))} className="button-danger text-[10px]">Reverse</button>}{canApproveAndPay && <button type="button" disabled={saving || !accountId} onClick={() => approveAndPay(String(transaction.id))} className="button-secondary text-[10px]" title={approval === "pending" ? "Approve and pay Cash Out" : "Pay approved Cash Out"}>{approval === "pending" ? "Approve and pay" : "Pay now"}</button>}{canRequestRevision && <button type="button" disabled={saving} onClick={() => requestRevision(String(transaction.id))} className="button-secondary text-[10px]" title="Return Cash Out for revision">Return</button>}{canEditRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[10px] text-[#6941c6]">Edit &amp; resubmit</button>}{canMarkPaid && <button type="button" disabled={saving} onClick={() => markPaid(String(transaction.id), "Cash Out")} className="button-secondary text-[10px]">Mark paid</button>}{!canVerifyIncome && !canRequestIncomeRevision && !canEditIncomeRevision && !canVoidIncome && !canApproveAndPay && !canRequestRevision && !canEditRevision && !canMarkPaid && "-"}</span></td></tr>;
+              return <tr key={String(transaction.id)} className={isVoided ? "opacity-60" : undefined}><td>{displayDate(transaction.transaction_date)}<small>{stringValue(transaction, "transaction_time")}</small></td><td>{manualIncome ? "Manual Cash In" : leadName(transaction.lead_id)}{manualIncome && <small>Standalone income{stringValue(transaction, "reference_number") ? ` · Ref: ${stringValue(transaction, "reference_number")}` : ""}</small>}{Boolean(transaction.source_payment_id) && <small>Automatic project payment</small>}</td><td>{categoryName(transaction.category_id)}<small>{note}</small></td><td>{canChangeAccount ? <select aria-label={type === "income" ? "Receiving account" : "Payment account"} defaultValue={accountId} onChange={(event) => void assignAccount(String(transaction.id), event.target.value)} disabled={saving} className="input min-w-[150px] text-[10px]"><option value="">Choose account</option>{accounts.map((account) => <option key={String(account.id)} value={String(account.id)}>{stringValue(account, "account_name")}</option>)}</select> : accountName(transaction.account_id)}</td><td className="font-semibold text-[#218b55]">{type === "income" ? peso.format(numericValue(transaction, "amount")) : "-"}</td><td className="font-semibold text-[#b42318]">{type === "expense" ? peso.format(numericValue(transaction, "amount")) : "-"}</td><td><StatusPill value={paymentDisplay} /></td><td><StatusPill value={reviewDisplay} /></td><td>{stringValue(transaction, "receipt_storage_path") ? <button type="button" onClick={() => void openReceipt(stringValue(transaction, "receipt_storage_path"), receiptBucket)} className="text-[#c43b43]" title="View receipt"><ReceiptText size={15} /></button> : "-"}</td><td><span className="flex flex-wrap gap-1">{canVerifyIncome && <button type="button" disabled={saving} onClick={() => verifyIncome(String(transaction.id))} className="button-secondary text-[10px] text-[#218b55]">Verify</button>}{canRequestIncomeRevision && <button type="button" disabled={saving} onClick={() => requestIncomeRevision(String(transaction.id))} className="button-secondary text-[10px] text-[#6941c6]">Return</button>}{canEditIncomeRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[10px] text-[#6941c6]">Edit &amp; resubmit</button>}{canVoidIncome && <button type="button" disabled={saving} onClick={() => voidIncome(String(transaction.id))} className="button-danger text-[10px]">Reverse</button>}{canApproveAndPay && <button type="button" disabled={saving} onClick={() => approveAndPay(String(transaction.id))} className="button-secondary text-[10px]" title="Verify Cash Out">Verify Cash Out</button>}{canRequestRevision && <button type="button" disabled={saving} onClick={() => requestRevision(String(transaction.id))} className="button-secondary text-[10px]" title="Return Cash Out for revision">Return</button>}{canEditRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[10px] text-[#6941c6]">Edit &amp; resubmit</button>}{canMarkPaid && <button type="button" disabled={saving} onClick={() => markPaid(String(transaction.id), "Cash Out")} className="button-secondary text-[10px]">Mark paid</button>}{!canVerifyIncome && !canRequestIncomeRevision && !canEditIncomeRevision && !canVoidIncome && !canApproveAndPay && !canRequestRevision && !canEditRevision && !canMarkPaid && "-"}</span></td></tr>;
             })}
             {!rows.length && <tr><td colSpan={10} className="text-center text-[#7d8797]">No transactions match the current filter.</td></tr>}
           </tbody>
@@ -665,7 +666,7 @@ function TransactionTable({
           const isVoided = Boolean(transaction.is_voided);
           const isRegularExpense = type === "expense" && !transaction.source_payment_id && !transaction.supplier_payable_id && !transaction.commission_summary_id && !transaction.commission_allocation_id;
           const canApproveAndPay = allowActions && internal && !isVoided && isRegularExpense && paid === "unpaid" && ["pending", "approved"].includes(approval);
-          const canMarkPaid = allowActions && internal && !isVoided && type === "expense" && !isRegularExpense && paid === "unpaid" && approval === "approved";
+          const canMarkPaid = allowActions && internal && !isVoided && type === "expense" && !isRegularExpense && paid === "unpaid" && approval === "approved" && Boolean(transaction.supplier_payable_id || transaction.commission_summary_id || transaction.commission_allocation_id);
           const canRequestRevision = allowActions && internal && !isVoided && type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval) && !transaction.source_payment_id && !transaction.commission_summary_id && !transaction.commission_allocation_id;
           const canEditRevision = allowActions && !internal && !isVoided && type === "expense" && paid === "unpaid" && approval === "revision_requested";
           const canVerifyIncome = allowActions && internal && manualIncome && !isVoided && paid === "unpaid" && incomeReviewStatus === "pending" && Boolean(transaction.account_id);
@@ -673,6 +674,7 @@ function TransactionTable({
           const canEditIncomeRevision = allowActions && !internal && manualIncome && !isVoided && paid === "unpaid" && incomeReviewStatus === "revision_requested";
           const canVoidIncome = allowActions && internal && manualIncome && !isVoided && paid === "paid" && incomeReviewStatus === "verified";
           const accountId = stringValue(transaction, "account_id");
+          const canReleasePayment = allowActions && !internal && !isVoided && type === "expense" && paid === "unpaid" && approval === "approved" && Boolean(accountId);
           const canChangeAccount = allowActions && internal && !isVoided && (
             (type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval))
             || (!accountId && Boolean(transaction.source_payment_id))
@@ -709,10 +711,11 @@ function TransactionTable({
                 {canRequestIncomeRevision && <button type="button" disabled={saving} onClick={() => requestIncomeRevision(String(transaction.id))} className="button-secondary text-[10px]">Return for correction</button>}
                 {canEditIncomeRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[10px]">Edit &amp; resubmit</button>}
                  {canVoidIncome && <button type="button" disabled={saving} onClick={() => voidIncome(String(transaction.id))} className="button-danger text-[10px]">Reverse Cash In</button>}
-                {canApproveAndPay && <button type="button" disabled={saving || !accountId} onClick={() => approveAndPay(String(transaction.id))} className="button-secondary text-[10px] text-[#218b55]">{approval === "pending" ? "Approve and pay" : "Pay now"}</button>}
+                {canApproveAndPay && <button type="button" disabled={saving} onClick={() => approveAndPay(String(transaction.id))} className="button-secondary text-[10px] text-[#218b55]">Verify Cash Out</button>}
                 {canRequestRevision && <button type="button" disabled={saving} onClick={() => requestRevision(String(transaction.id))} className="button-secondary text-[10px]">Return for revision</button>}
                 {canEditRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[10px]">Edit &amp; resubmit</button>}
                  {canMarkPaid && <button type="button" disabled={saving} onClick={() => markPaid(String(transaction.id), "Cash Out")} className="button-secondary text-[10px]">Mark paid</button>}
+                {canReleasePayment && <button type="button" disabled={saving} onClick={() => markPaid(String(transaction.id), "Cash Out")} className="button-primary text-[10px]">Release payment</button>}
               </div>}
             </article>
           );
@@ -732,7 +735,7 @@ function TransactionTable({
               const isVoided = Boolean(transaction.is_voided);
               const isRegularExpense = type === "expense" && !transaction.source_payment_id && !transaction.supplier_payable_id && !transaction.commission_summary_id && !transaction.commission_allocation_id;
               const canApproveAndPay = allowActions && internal && !isVoided && isRegularExpense && paid === "unpaid" && ["pending", "approved"].includes(approval);
-              const canMarkPaid = allowActions && internal && !isVoided && type === "expense" && !isRegularExpense && paid === "unpaid" && approval === "approved";
+              const canMarkPaid = allowActions && internal && !isVoided && type === "expense" && !isRegularExpense && paid === "unpaid" && approval === "approved" && Boolean(transaction.supplier_payable_id || transaction.commission_summary_id || transaction.commission_allocation_id);
               const canRequestRevision = allowActions && internal && !isVoided && type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval) && !transaction.source_payment_id && !transaction.commission_summary_id && !transaction.commission_allocation_id;
               const canEditRevision = allowActions && !internal && !isVoided && type === "expense" && paid === "unpaid" && approval === "revision_requested";
               const canVerifyIncome = allowActions && internal && manualIncome && !isVoided && paid === "unpaid" && incomeReviewStatus === "pending" && Boolean(transaction.account_id);
@@ -740,6 +743,7 @@ function TransactionTable({
               const canEditIncomeRevision = allowActions && !internal && manualIncome && !isVoided && paid === "unpaid" && incomeReviewStatus === "revision_requested";
               const canVoidIncome = allowActions && internal && manualIncome && !isVoided && paid === "paid" && incomeReviewStatus === "verified";
               const accountId = stringValue(transaction, "account_id");
+              const canReleasePayment = allowActions && !internal && !isVoided && type === "expense" && paid === "unpaid" && approval === "approved" && Boolean(accountId);
               const canChangeAccount = allowActions && internal && !isVoided && ((type === "expense" && paid === "unpaid" && ["pending", "approved"].includes(approval)) || (!accountId && Boolean(transaction.source_payment_id)) || (manualIncome && paid === "unpaid" && ["pending", "revision_requested"].includes(incomeReviewStatus)));
               const receiptBucket = stringValue(transaction, "receipt_bucket", "finance-receipts");
               const description = manualIncome ? "Manual Cash In" : leadName(transaction.lead_id) !== "—" ? leadName(transaction.lead_id) : type === "income" ? "Project payment" : "Cash Out";
@@ -754,7 +758,7 @@ function TransactionTable({
                 <td aria-label={`${type === "income" ? "Cash In" : "Cash Out"} amount ${peso.format(amount)}`} title={type === "income" ? "Cash In" : "Cash Out"} className={`whitespace-nowrap font-semibold ${type === "income" ? "finance-cash-in-amount text-[#218b55]" : "finance-cash-out-amount text-[#b42318]"}`}>{peso.format(amount)}</td>
                 {internal && <td>{transactionNote(transaction)}</td>}
                 <td><StatusPill value={transactionStatusLabel(transaction)} /></td>
-                 {allowActions && <><td>{stringValue(transaction, "receipt_storage_path") ? <button type="button" onClick={() => void openReceipt(stringValue(transaction, "receipt_storage_path"), receiptBucket)} className="text-[#c43b43]" title="View receipt"><ReceiptText size={15} /></button> : "-"}</td><td className="finance-action-cell"><span className="finance-action-group"><button type="button" onClick={() => onSelectTransaction(transaction)} className="button-secondary text-[10px]">Details</button>{canVerifyIncome && <button type="button" disabled={saving} onClick={() => verifyIncome(String(transaction.id))} className="button-secondary text-[10px] text-[#218b55]">Verify</button>}{canRequestIncomeRevision && <button type="button" disabled={saving} onClick={() => requestIncomeRevision(String(transaction.id))} className="button-secondary text-[10px]">Return</button>}{canEditIncomeRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[10px]">Edit</button>}{canVoidIncome && <button type="button" disabled={saving} onClick={() => voidIncome(String(transaction.id))} className="button-danger text-[10px]">Reverse</button>}{canApproveAndPay && <button type="button" disabled={saving || !accountId} onClick={() => approveAndPay(String(transaction.id))} className="button-secondary text-[10px]">{approval === "pending" ? "Approve and pay" : "Pay now"}</button>}{canRequestRevision && <button type="button" disabled={saving} onClick={() => requestRevision(String(transaction.id))} className="button-secondary text-[10px]">Return</button>}{canEditRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[10px]">Edit</button>}{canMarkPaid && <button type="button" disabled={saving} onClick={() => markPaid(String(transaction.id), "Cash Out")} className="button-secondary text-[10px]">Mark paid</button>}</span></td></>}
+                 {allowActions && <><td>{stringValue(transaction, "receipt_storage_path") ? <button type="button" onClick={() => void openReceipt(stringValue(transaction, "receipt_storage_path"), receiptBucket)} className="text-[#c43b43]" title="View receipt"><ReceiptText size={15} /></button> : "-"}</td><td className="finance-action-cell"><span className="finance-action-group"><button type="button" onClick={() => onSelectTransaction(transaction)} className="button-secondary text-[10px]">Details</button>{canVerifyIncome && <button type="button" disabled={saving} onClick={() => verifyIncome(String(transaction.id))} className="button-secondary text-[10px] text-[#218b55]">Verify</button>}{canRequestIncomeRevision && <button type="button" disabled={saving} onClick={() => requestIncomeRevision(String(transaction.id))} className="button-secondary text-[10px]">Return</button>}{canEditIncomeRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[10px]">Edit</button>}{canVoidIncome && <button type="button" disabled={saving} onClick={() => voidIncome(String(transaction.id))} className="button-danger text-[10px]">Reverse</button>}{canApproveAndPay && <button type="button" disabled={saving} onClick={() => approveAndPay(String(transaction.id))} className="button-secondary text-[10px]">Verify Cash Out</button>}{canRequestRevision && <button type="button" disabled={saving} onClick={() => requestRevision(String(transaction.id))} className="button-secondary text-[10px]">Return</button>}{canEditRevision && <button type="button" disabled={saving} onClick={() => editRevision(transaction)} className="button-secondary text-[10px]">Edit</button>}{canMarkPaid && <button type="button" disabled={saving} onClick={() => markPaid(String(transaction.id), "Cash Out")} className="button-secondary text-[10px]">Mark paid</button>}{canReleasePayment && <button type="button" disabled={saving} onClick={() => markPaid(String(transaction.id), "Cash Out")} className="button-primary text-[10px]">Release payment</button>}</span></td></>}
               </tr>;
             })}
              {!rows.length && <tr><td colSpan={7 + (internal ? 2 : 0) + (allowActions ? 2 : 0)} className="text-center text-[#7d8797]">No transactions match the current filters.</td></tr>}
@@ -1316,7 +1320,7 @@ function FinanceApprovalReviewDialog({
           <button type="button" onClick={close} className="button-secondary">Close</button>
           {showIncomeRevision && <button type="button" disabled={saving} onClick={() => { close(); if (row.kind === "quotation_payment") requestQuotationPaymentReview(row.id, "revision_requested"); else requestIncomeRevision(row.id); }} className="button-secondary"><Undo2 size={14} aria-hidden="true" /> Return for correction</button>}
           {showCashOutRevision && <button type="button" disabled={saving} onClick={() => { close(); requestRevision(row.id); }} className="button-secondary"><Undo2 size={14} aria-hidden="true" /> Return for revision</button>}
-          {showCashOutApproval && <button type="button" disabled={saving || !row.accountId} onClick={() => { close(); requestApproveAndPay(row.id); }} className="button-success"><Check size={14} aria-hidden="true" /> Approve and pay</button>}
+          {showCashOutApproval && <button type="button" disabled={saving} onClick={() => { close(); requestApproveAndPay(row.id); }} className="button-success"><Check size={14} aria-hidden="true" /> Verify Cash Out</button>}
           {showVerify && <button type="button" disabled={saving || verifyNeedsAccount} onClick={() => { close(); if (row.kind === "quotation_payment") requestQuotationPaymentReview(row.id, "verified"); else requestVerifyIncome(row.id); }} className="button-success"><Check size={14} aria-hidden="true" /> Verify</button>}
         </div>
       </div>
@@ -1947,7 +1951,7 @@ function FinanceConfirmDialog({
     : action.kind === "account"
         ? action.active ? "Reactivate" : "Deactivate"
       : action.kind === "approve_and_pay"
-        ? "Approve and pay"
+        ? "Verify Cash Out"
       : action.kind === "quotation_payment"
         ? action.decision === "verified" ? "Verify receipt" : action.decision === "revision_requested" ? "Return for correction" : "Reject receipt"
       : action.kind === "verify_income"
@@ -1963,7 +1967,7 @@ function FinanceConfirmDialog({
   return (
     <FinanceDialog
       title={`${actionLabel} ${action.label}`}
-      detail={action.kind === "account_delete" ? "This permanently removes the account. It can only succeed when the account has no opening balance, transactions, payments, allocations, or funding history." : action.kind === "account" ? "Deactivation hides the account from new payment selections but preserves its balances, payments, and receipts." : action.kind === "approve_and_pay" ? "This approves the regular Cash Out, records it as paid, and deducts the selected payment account." : action.kind === "quotation_payment" ? action.decision === "verified" ? "This confirms the client receipt and posts it as Cash In." : action.decision === "revision_requested" ? "This returns the receipt to External Finance for correction. It stays out of Cash In until resubmitted and verified." : "This rejects the receipt and keeps it out of Cash In." : action.kind === "verify_income" ? "This confirms the receipt, updates the selected receiving account balance, and includes the amount in Cash In totals." : action.kind === "income_void" ? "This reverses the verified Cash In and removes it from the account balance while preserving the audit record." : action.kind === "funding_request" ? action.decision === "revision_requested" ? "This returns the account funding request to External Finance for correction." : "This rejects the account funding request." : isRevision ? action.kind === "income_revision" ? "This sends the standalone Cash In back to External Finance for correction and resubmission." : "This sends the unpaid Cash Out back to External Finance for correction and resubmission." : "This changes the settlement status in the finance ledger."}
+      detail={action.kind === "account_delete" ? "This permanently removes the account. It can only succeed when the account has no opening balance, transactions, payments, allocations, or funding history." : action.kind === "account" ? "Deactivation hides the account from new payment selections but preserves its balances, payments, and receipts." : action.kind === "approve_and_pay" ? "This verifies the regular Cash Out. External Finance will release it later from the selected payment account." : action.kind === "quotation_payment" ? action.decision === "verified" ? "This confirms the client receipt and posts it as Cash In." : action.decision === "revision_requested" ? "This returns the receipt to External Finance for correction. It stays out of Cash In until resubmitted and verified." : "This rejects the receipt and keeps it out of Cash In." : action.kind === "verify_income" ? "This confirms the receipt, updates the selected receiving account balance, and includes the amount in Cash In totals." : action.kind === "income_void" ? "This reverses the verified Cash In and removes it from the account balance while preserving the audit record." : action.kind === "funding_request" ? action.decision === "revision_requested" ? "This returns the account funding request to External Finance for correction." : "This rejects the account funding request." : isRevision ? action.kind === "income_revision" ? "This sends the standalone Cash In back to External Finance for correction and resubmission." : "This sends the unpaid Cash Out back to External Finance for correction and resubmission." : "This changes the settlement status in the finance ledger."}
       close={close}
     >
       {requiresNote && (
@@ -2089,6 +2093,7 @@ export function FinanceWorkspace({
   const [quotations, setQuotations] = useState<Row[]>([]);
   const [quotationDirectCosts, setQuotationDirectCosts] = useState<Row[]>([]);
   const [projectExpenseRows, setProjectExpenseRows] = useState<Row[]>([]);
+  const [operatingCostEntries, setOperatingCostEntries] = useState<Row[]>([]);
   const [payables, setPayables] = useState<Row[]>([]);
   const [suppliers, setSuppliers] = useState<Row[]>([]);
   const [commissionAllocations, setCommissionAllocations] = useState<Row[]>([]);
@@ -2218,6 +2223,15 @@ export function FinanceWorkspace({
         : client.rpc("finance_project_expense_rows", {
             p_organization_id: organizationId,
           });
+      const operatingCostEntriesRequest = budgetOnly
+        ? emptyFinanceRequest()
+        : client
+            .from("operating_cost_entries")
+            .select("*")
+            .eq("organization_id", organizationId)
+            .eq("status", "planned")
+            .is("finance_transaction_id", null)
+            .order("cost_date", { ascending: false });
       const pendingQuotationPaymentsRequest = internal
         ? client
             .from("quotation_payment_records")
@@ -2290,6 +2304,7 @@ export function FinanceWorkspace({
         commissionSummariesRequest,
         productionConfirmedQuotationIdsRequest,
         financeActivityRequest,
+        operatingCostEntriesRequest,
       ]);
       const failed = requests.find((request) => request.error);
       if (failed?.error) {
@@ -2304,6 +2319,7 @@ export function FinanceWorkspace({
       setQuotations((requests[6].data ?? []) as Row[]);
       setQuotationDirectCosts((requests[14].data ?? []) as Row[]);
       setProjectExpenseRows((requests[15].data ?? []) as Row[]);
+      setOperatingCostEntries((requests[27].data ?? []) as Row[]);
       setPayables((requests[7].data ?? []) as Row[]);
       setSuppliers((requests[8].data ?? []) as Row[]);
       const loadedAllocations = (requests[9].data ?? []) as Row[];
@@ -2590,6 +2606,15 @@ export function FinanceWorkspace({
       };
     }),
     [projectExpenseRows],
+  );
+
+  const operatingCostOptions = useMemo<SearchableOption[]>(
+    () => operatingCostEntries.map((entry) => ({
+      value: String(entry.id),
+      label: `${stringValue(entry, "name")} · ${peso.format(numericValue(entry, "amount"))}`,
+      searchText: [stringValue(entry, "name"), stringValue(entry, "category"), stringValue(entry, "cost_class"), stringValue(entry, "cost_date")].join(" "),
+    })),
+    [operatingCostEntries],
   );
 
   const quotationPaymentOptions = useMemo<SearchableOption[]>(
@@ -3279,6 +3304,7 @@ export function FinanceWorkspace({
   );
   const projectExpenseMode = !internal && transactionDirection === "expense" && expenseMode === "project";
   const supplierPaymentMode = !internal && transactionDirection === "expense" && expenseMode === "supplier";
+  const operatingCostMode = !internal && transactionDirection === "expense" && expenseMode === "operating";
   const quotationPaymentMode = !internal && transactionDirection === "income" && !revisionTransaction && cashInSource === "quotation_payment";
   const manualIncomeMode = !internal && transactionDirection === "income" && !revisionTransaction && cashInSource === "other_income";
   const manualIncomeRevisionMode = Boolean(revisionTransaction && transactionDirection === "income" && isManualIncomeTransaction(revisionTransaction));
@@ -3318,6 +3344,10 @@ export function FinanceWorkspace({
       ),
     };
   }, [revisionTransaction, selectedProjectExpense]);
+  const selectedOperatingCostEntry = useMemo(
+    () => operatingCostEntries.find((entry) => String(entry.id) === String(transactionValues.operating_cost_entry_id)) ?? null,
+    [operatingCostEntries, transactionValues.operating_cost_entry_id],
+  );
   const projectExpenseAmount = Number(transactionValues.amount);
   const projectExpenseAmountError = projectExpenseMode
     && selectedProjectExpenseCapacity
@@ -3369,6 +3399,8 @@ export function FinanceWorkspace({
             ? "Pay commission"
               : projectExpenseMode
                 ? "Submit project expense"
+                : operatingCostMode
+                  ? "Submit operating cost"
             : "Submit Cash Out";
   const transactionDialogDetail = quotationPaymentMode
     ? "Submit a client receipt for an approved project. Internal Finance verifies it before it becomes Cash In."
@@ -3384,6 +3416,8 @@ export function FinanceWorkspace({
             ? "Create a controlled commission payout after full project payment and verified receipt."
             : projectExpenseMode
               ? "Link this Cash Out to an approved project; the remaining direct-cost capacity limits the amount you can submit."
+              : operatingCostMode
+                ? "Link this planned operating cost to Cash Out. Internal Finance verifies it, then External Finance releases it."
             : supplierPaymentMode
               ? "Submit a supplier payment for Internal Finance approval."
               : "Submit a regular expense for Internal Finance approval.";
@@ -3395,6 +3429,17 @@ export function FinanceWorkspace({
       supplier_payable_id: "",
       quotation_id: "",
       lead_id: "",
+      operating_cost_entry_id: "",
+    }));
+  };
+
+  const chooseOperatingCost = (entryId: string) => {
+    const entry = operatingCostEntries.find((item) => String(item.id) === entryId);
+    setTransactionValues((current) => ({
+      ...current,
+      operating_cost_entry_id: entryId,
+      amount: entry ? numericValue(entry, "amount").toFixed(2) : "",
+      note: entry ? `${stringValue(entry, "name")} · ${stringValue(entry, "category")}` : current.note,
     }));
   };
 
@@ -3510,9 +3555,10 @@ export function FinanceWorkspace({
     if (internal || (!manualIncomeRevision && stringValue(transaction, "approval_status") !== "revision_requested")) return;
     const supplierPayableId = stringValue(transaction, "supplier_payable_id");
     const quotationId = stringValue(transaction, "quotation_id");
+    const operatingCostEntryId = stringValue(transaction, "operating_cost_entry_id");
     setRevisionTransaction(transaction);
     setTransactionDirection(manualIncomeRevision ? "income" : "expense");
-    setExpenseMode(manualIncomeRevision ? "regular" : supplierPayableId ? "supplier" : quotationId ? "project" : "regular");
+    setExpenseMode(manualIncomeRevision ? "regular" : supplierPayableId ? "supplier" : operatingCostEntryId ? "operating" : quotationId ? "project" : "regular");
     setTransactionValues({
       ...defaultTransaction(manualIncomeRevision ? "income" : "expense"),
       amount: numericValue(transaction, "amount").toFixed(2),
@@ -3525,6 +3571,7 @@ export function FinanceWorkspace({
       lead_id: manualIncomeRevision ? "" : stringValue(transaction, "lead_id"),
       quotation_id: manualIncomeRevision ? "" : stringValue(transaction, "quotation_id"),
       supplier_payable_id: manualIncomeRevision ? "" : supplierPayableId,
+      operating_cost_entry_id: manualIncomeRevision ? "" : operatingCostEntryId,
       payment_status: "unpaid",
     });
     setTransactionFile(null);
@@ -3617,9 +3664,11 @@ export function FinanceWorkspace({
     if (!internal && !manualIncomeMode && !manualIncomeRevisionMode && (transactionDirection !== "expense" || !canSubmitExpense)) return setErrorMessage("External Finance can submit Cash Out or standalone Cash In.");
     if (!internal && transactionValues.payment_status !== "unpaid") return setErrorMessage("External Finance submissions must remain unpaid until Internal Finance confirms the payment.");
     if (supplierPaymentMode && !transactionValues.supplier_payable_id) return setErrorMessage("Choose an open supplier payable.");
+    if (operatingCostMode && !selectedOperatingCostEntry) return setErrorMessage("Choose a planned operating cost to submit.");
     if (projectExpenseMode && (!transactionValues.quotation_id || !selectedProjectExpense || !selectedProjectExpenseCapacity)) return setErrorMessage("Choose an approved project with direct-cost capacity for this project expense.");
     const enteredAmount = Number(transactionValues.amount);
     if (!transactionValues.amount || !Number.isFinite(enteredAmount) || enteredAmount <= 0) return setErrorMessage("Enter an amount greater than zero.");
+    if (operatingCostMode && selectedOperatingCostEntry && Math.abs(enteredAmount - numericValue(selectedOperatingCostEntry, "amount")) > 0.001) return setErrorMessage("Cash Out amount must match the planned operating cost amount.");
     if (projectExpenseMode && selectedProjectExpenseCapacity && exceedsProjectExpenseLimit(enteredAmount, selectedProjectExpenseCapacity.availableToExpense)) {
       return setErrorMessage(`This project expense exceeds the available direct-cost capacity of ${peso.format(selectedProjectExpenseCapacity.availableToExpense)}.`);
     }
@@ -3726,6 +3775,13 @@ export function FinanceWorkspace({
           })
         : await client.rpc("create_finance_transaction", transactionPayload);
       if (result.error) throw result.error;
+      if (operatingCostMode && !revisionTransaction) {
+        const linkResult = await client.rpc("link_operating_cost_finance_transaction", {
+          p_transaction_id: transactionId,
+          p_operating_cost_entry_id: transactionValues.operating_cost_entry_id,
+        });
+        if (linkResult.error) throw linkResult.error;
+      }
       setMessage(manualIncomeMode ? "Cash In submitted for Internal Finance verification." : transactionDirection === "expense" && !internal ? "Cash Out submitted for Internal Finance approval." : "Finance transaction saved.");
       closeTransactionForm();
       await load();
@@ -4072,7 +4128,7 @@ export function FinanceWorkspace({
       setErrorMessage(error.message);
       return false;
     }
-    setMessage("Cash Out approved and paid. The selected account was deducted.");
+    setMessage("Cash Out verified. External Finance can now release it from the selected account.");
     await load();
     return true;
   };
@@ -4170,7 +4226,7 @@ export function FinanceWorkspace({
       setErrorMessage(error.message);
       return false;
     }
-    setMessage("Transaction marked paid.");
+    setMessage(internal ? "Legacy Finance transaction marked paid." : "Cash Out released and the selected account was deducted.");
     await load();
     return true;
   };
@@ -5089,9 +5145,27 @@ export function FinanceWorkspace({
                   <button type="button" aria-pressed={expenseMode === "regular"} onClick={() => chooseExpenseMode("regular")} className={expenseMode === "regular" ? "flex-1 rounded-md bg-[#c43b43] px-3 py-2 text-[11px] font-semibold text-white shadow-sm hover:bg-[#a92f37]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797] hover:bg-white"}>Non-Project Expense</button>
                   <button type="button" aria-pressed={expenseMode === "project"} onClick={() => chooseExpenseMode("project")} className={expenseMode === "project" ? "flex-1 rounded-md bg-[#c43b43] px-3 py-2 text-[11px] font-semibold text-white shadow-sm hover:bg-[#a92f37]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797] hover:bg-white"}>Project expense</button>
                   <button type="button" aria-pressed={expenseMode === "supplier"} onClick={() => chooseExpenseMode("supplier")} className={expenseMode === "supplier" ? "flex-1 rounded-md bg-[#c43b43] px-3 py-2 text-[11px] font-semibold text-white shadow-sm hover:bg-[#a92f37]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797] hover:bg-white"}>Supplier payment</button>
+                  <button type="button" aria-pressed={expenseMode === "operating"} onClick={() => chooseExpenseMode("operating")} className={expenseMode === "operating" ? "flex-1 rounded-md bg-[#c43b43] px-3 py-2 text-[11px] font-semibold text-white shadow-sm hover:bg-[#a92f37]" : "flex-1 rounded-md px-3 py-2 text-[11px] font-semibold text-[#7d8797] hover:bg-white"}>Operating cost</button>
                 </div>
               </fieldset>
             )}
+            {operatingCostMode && <div className="field-label sm:col-span-2">
+              <span>Planned operating cost</span>
+              <SearchableSelect
+                options={operatingCostOptions}
+                value={transactionValues.operating_cost_entry_id}
+                onChange={chooseOperatingCost}
+                placeholder={operatingCostOptions.length ? "Choose a planned operating cost" : "No planned operating costs available"}
+                searchPlaceholder="Search cost name or category"
+                noResultsLabel="No unlinked planned operating cost found."
+                ariaLabel="Planned operating cost"
+                required
+                clearable={false}
+                disabled={!operatingCostOptions.length}
+                className="mt-1"
+              />
+              {selectedOperatingCostEntry && <small className="mt-1 block text-[#7d8797]">Amount locked to {peso.format(numericValue(selectedOperatingCostEntry, "amount"))}. The planned entry becomes Paid only after release.</small>}
+            </div>}
             {projectExpenseMode && <div className="field-label sm:col-span-2">
               <span>Project</span>
               <SearchableSelect
@@ -5185,7 +5259,7 @@ export function FinanceWorkspace({
             </>
             )}
           </div>
-            <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={closeTransactionForm} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveTransaction()} disabled={saving || (quotationPaymentMode && (!transactionValues.quotation_id || !transactionValues.account_id || !transactionFile || !quotationPaymentAccountOptions.length)) || (!revisionTransaction && !internal && !manualIncomeMode && !commissionPayoutMode && transactionDirection === "expense" && !availableExpenseAccounts.length) || ((transactionDirection === "expense" || manualIncomeMode || manualIncomeRevisionMode) && (!accountOptions.length || !transactionValues.account_id)) || (supplierPaymentMode && !transactionValues.supplier_payable_id) || (projectExpenseMode && (!transactionValues.quotation_id || !selectedProjectExpense || !((selectedProjectExpenseCapacity?.availableToExpense ?? 0) > 0))) || (internal && !transactionValues.commission_allocation_id)} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} {saving ? "Saving..." : quotationPaymentMode ? selectedQuotationPaymentRevision ? "Resubmit receipt" : "Submit receipt" : manualIncomeMode ? "Submit Cash In" : manualIncomeRevisionMode ? "Resubmit Cash In" : revisionTransaction ? "Resubmit Cash Out" : commissionPayoutMode ? "Create commission payout" : projectExpenseMode ? "Submit project expense" : supplierPaymentMode ? "Submit supplier payment" : "Submit regular expense"}</button></div>
+            <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={closeTransactionForm} className="button-secondary">Cancel</button><button type="button" onClick={() => void saveTransaction()} disabled={saving || (quotationPaymentMode && (!transactionValues.quotation_id || !transactionValues.account_id || !transactionFile || !quotationPaymentAccountOptions.length)) || (!revisionTransaction && !internal && !manualIncomeMode && !commissionPayoutMode && transactionDirection === "expense" && !availableExpenseAccounts.length) || ((transactionDirection === "expense" || manualIncomeMode || manualIncomeRevisionMode) && (!accountOptions.length || !transactionValues.account_id)) || (supplierPaymentMode && !transactionValues.supplier_payable_id) || (operatingCostMode && (!transactionValues.operating_cost_entry_id || !selectedOperatingCostEntry)) || (projectExpenseMode && (!transactionValues.quotation_id || !selectedProjectExpense || !((selectedProjectExpenseCapacity?.availableToExpense ?? 0) > 0))) || (internal && !transactionValues.commission_allocation_id)} className="button-primary">{saving && <LoaderCircle size={14} className="animate-spin" />} {saving ? "Saving..." : quotationPaymentMode ? selectedQuotationPaymentRevision ? "Resubmit receipt" : "Submit receipt" : manualIncomeMode ? "Submit Cash In" : manualIncomeRevisionMode ? "Resubmit Cash In" : revisionTransaction ? "Resubmit Cash Out" : commissionPayoutMode ? "Create commission payout" : projectExpenseMode ? "Submit project expense" : operatingCostMode ? "Submit operating cost" : supplierPaymentMode ? "Submit supplier payment" : "Submit regular expense"}</button></div>
         </FinanceDialog>
       )}
 

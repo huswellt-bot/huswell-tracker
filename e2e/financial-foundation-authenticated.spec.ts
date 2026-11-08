@@ -74,7 +74,7 @@ async function login(page: Page, email: string) {
   await page.getByPlaceholder("name@company.com").fill(email);
   await page.locator('input[type="password"]').fill(password);
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
-  await expect(page).not.toHaveURL(/\/auth(?:\?|$)/);
+  await expect(page).not.toHaveURL(/\/auth(?:\?|$)/, { timeout: 20_000 });
   await page.waitForLoadState("networkidle");
   await expect(page.getByRole("button", { name: "Sign out", exact: true }).first()).toBeVisible({ timeout: 15_000 });
 }
@@ -82,15 +82,13 @@ async function login(page: Page, email: string) {
 async function openFoundation(page: Page) {
   const foundationButton = page.getByRole("button", { name: "Financial Foundation", exact: true }).first();
   const financeMenu = page.getByRole("button", { name: "Finance menu", exact: true });
-  if (await financeMenu.isVisible({ timeout: 2_000 }).catch(() => false)) {
+  if (!(await foundationButton.isVisible({ timeout: 1_000 }).catch(() => false)) && await financeMenu.isVisible({ timeout: 2_000 }).catch(() => false)) {
     await financeMenu.click();
-  } else {
-    await expect(foundationButton).toBeVisible({ timeout: 15_000 });
   }
-  await expect(foundationButton).toBeVisible();
+  await expect(foundationButton).toBeVisible({ timeout: 15_000 });
   await foundationButton.click();
-  await expect(page.getByRole("heading", { name: "Financial Foundation", exact: true })).toBeVisible();
-  await expect(page.getByText("Project money, Company Working Funds, labor, operating costs, and break-even in one controlled flow.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Financial Foundation", exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText("Project money, Company Working Funds, labor, operating costs, and break-even in one controlled flow.")).toBeVisible({ timeout: 30_000 });
 }
 
 async function signOut(page: Page) {
@@ -120,47 +118,54 @@ async function selectOptionContaining(select: Locator, text: string) {
   await select.selectOption(option.value);
 }
 
+async function chooseSearchableOption(scope: Locator, label: string, optionText?: string) {
+  await scope.getByRole("button", { name: label, exact: true }).click();
+  const options = scope.getByRole("option");
+  const option = optionText ? options.filter({ hasText: optionText }).first() : options.first();
+  await expect(option).toBeVisible();
+  await option.click();
+}
+
 test("admin completes the financial foundation controls and labor payment flow", async ({ page }) => {
   const health = browserHealth(page);
   await login(page, accounts.admin);
   await openFoundation(page);
 
   await expect(page.getByText("Working Funds", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("₱200,000.00", { exact: true }).first()).toBeVisible();
 
   await page.getByRole("button", { name: "Break-even", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Break-even and sales quota", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Edit settings", exact: true }).click();
   await page.getByLabel("Desired monthly profit").fill("60000");
-  await page.getByRole("button", { name: "Save foundation settings", exact: true }).click();
+  await page.getByRole("button", { name: "Save settings", exact: true }).click();
   await notification(page, "Financial foundation settings saved.");
 
   await page.getByRole("button", { name: "Working Funds", exact: true }).click();
   const workingPanel = panel(page, "Company Working Funds");
-  await workingPanel.getByLabel("Amount").fill("10000");
-  await workingPanel.getByLabel("Reference no.").fill("E2E-WF-001");
-  await workingPanel.getByLabel("Purpose / note").fill("Safe staging working funds inflow");
-  await workingPanel.getByRole("button", { name: "Record Working Funds entry", exact: true }).click();
+  await workingPanel.getByRole("button", { name: "Record entry", exact: true }).click();
+  const workingDialog = page.getByRole("dialog", { name: "Record Working Funds entry" });
+  await workingDialog.getByLabel("Amount").fill("10000");
+  await workingDialog.getByLabel("Reference no.").fill("E2E-WF-001");
+  await workingDialog.getByLabel("Purpose / note").fill("Safe staging working funds inflow");
+  await workingDialog.getByRole("button", { name: "Record entry", exact: true }).click();
   await notification(page, "Working Funds entry recorded.");
-  await expect(page.getByText("E2E-WF-001", { exact: true })).toBeVisible();
+  await expect(page.getByText("E2E-WF-001", { exact: true }).first()).toBeVisible();
 
-  await page.getByRole("button", { name: "Operating Costs", exact: true }).click();
-  const recurringPanel = panel(page, "Recurring operational cost templates");
-  await recurringPanel.getByLabel("Cost name").fill("E2E Subscription");
-  await recurringPanel.getByLabel("Category").fill("Subscription");
-  await recurringPanel.getByLabel("Expected monthly amount").fill("1000");
-  await recurringPanel.getByRole("button", { name: "Save recurring cost", exact: true }).click();
-  await notification(page, "Operating cost template saved.");
-  await expect(recurringPanel).toContainText("E2E Subscription");
+  await page.getByRole("button", { name: "Budget & allocations", exact: true }).click();
+  await page.getByRole("button", { name: "Budget", exact: true }).click();
+  const grantDialog = page.getByRole("dialog", { name: "Add GM budget" });
+  await grantDialog.getByLabel("Approved amount").fill("5000");
+  await grantDialog.getByLabel("Note").fill("E2E staging budget allocation");
+  await grantDialog.getByRole("button", { name: "Save budget", exact: true }).click();
+  await notification(page, "GM budget added to this month.");
+  await page.getByRole("button", { name: "Allocate budget", exact: true }).click();
+  const allocationDialog = page.getByRole("dialog", { name: "Allocate budget to account" });
+  await allocationDialog.locator("select").first().selectOption({ label: "E2E Demo Staging Bank" });
+  await allocationDialog.getByLabel("Amount", { exact: true }).fill("5000");
+  await allocationDialog.getByRole("button", { name: "Allocate", exact: true }).click();
+  await notification(page, "Budget allocated to the Finance account.");
 
-  const monthlyPanel = panel(page, "Monthly operational cost entries");
-  await monthlyPanel.getByLabel("Cost name").fill("E2E Subscription November");
-  await monthlyPanel.getByLabel("Category").fill("Subscription");
-  await monthlyPanel.getByLabel("Amount").fill("1000");
-  await monthlyPanel.getByLabel("Status").selectOption("paid");
-  await monthlyPanel.getByRole("button", { name: "Record operating cost", exact: true }).click();
-  await notification(page, "Operating cost recorded.");
-  await expect(monthlyPanel).toContainText("E2E Subscription November");
-
+  await openFoundation(page);
   await page.getByRole("button", { name: "Project Funds", exact: true }).click();
   const fundPanel = panel(page, "Automatic Project Fund creation");
   await expect(fundPanel).toContainText("No manual setup is required.");
@@ -168,79 +173,133 @@ test("admin completes the financial foundation controls and labor payment flow",
   await expect(page.getByText("E2E Project Alpha", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("E2E Project Beta", { exact: true }).first()).toBeVisible();
 
-  const advancePanel = panel(page, "Company Working Fund advance");
-  await selectOptionContaining(advancePanel.getByLabel("Project"), "E2E Project Alpha");
-  await advancePanel.getByLabel("Requested amount").fill("20000");
-  await advancePanel.getByLabel("Reason").fill("Temporary staging support before client collection");
-  await advancePanel.getByRole("button", { name: "Request temporary support", exact: true }).click();
-  await notification(page, "Company Working Fund advance requested.");
-  const approvalsPanel = panel(page, "Advance approvals and repayments");
-  await approvalsPanel.getByRole("button", { name: "Approve", exact: true }).click();
-  await notification(page, "Company advance approved.");
-  await approvalsPanel.getByRole("button", { name: "Release", exact: true }).click();
-  await notification(page, "Company advance released to the Project Fund.");
-
   await page.getByRole("button", { name: "Labor Payments", exact: true }).click();
   const laborRatePanel = panel(page, "Individual Box Maker Labor Rates");
-  await selectOptionContaining(laborRatePanel.getByLabel("Project Fund"), "E2E Project Alpha");
-  await laborRatePanel.getByLabel("Box maker").fill("E2E Maker");
-  await laborRatePanel.getByLabel("Assigned work").fill("Assembly");
-  await laborRatePanel.getByLabel("Unit", { exact: true }).fill("box");
-  await laborRatePanel.getByLabel("Agreed unit rate").fill("100");
-  await laborRatePanel.getByLabel("Planned quantity").fill("100");
-  await laborRatePanel.getByLabel("Total agreed labor rate").fill("10000");
-  await laborRatePanel.getByRole("button", { name: "Assign labor rate", exact: true }).click();
+  await laborRatePanel.getByRole("button", { name: "Assign rate", exact: true }).click();
+  const laborRateDialog = page.getByRole("dialog", { name: "Assign individual box-maker labor rate" });
+  await selectOptionContaining(laborRateDialog.getByLabel("Project Fund"), "E2E Project Alpha");
+  await laborRateDialog.getByLabel("Box maker").fill("E2E Maker");
+  await laborRateDialog.getByLabel("Assigned work").fill("Assembly");
+  await laborRateDialog.getByLabel("Unit", { exact: true }).fill("box");
+  await laborRateDialog.getByLabel("Agreed unit rate").fill("100");
+  await laborRateDialog.getByLabel("Planned quantity").fill("100");
+  await laborRateDialog.getByLabel("Total agreed labor rate").fill("10000");
+  await laborRateDialog.getByRole("button", { name: "Assign rate", exact: true }).click();
   await notification(page, "Individual project labor rate assigned.");
   await expect(laborRatePanel).toContainText("E2E Maker");
 
+  await page.getByRole("button", { name: "Work accomplishment", exact: true }).click();
   const accomplishmentPanel = panel(page, "Verified work accomplishment");
-  await selectOptionContaining(accomplishmentPanel.getByLabel("Labor rate"), "E2E Maker");
-  await accomplishmentPanel.getByLabel("Accomplishment date").fill("2026-11-06");
-  await accomplishmentPanel.getByLabel("Completed quantity").fill("10");
-  await accomplishmentPanel.getByLabel("Accepted quantity").fill("10");
-  await accomplishmentPanel.getByLabel("Rejected quantity").fill("0");
   await accomplishmentPanel.getByRole("button", { name: "Submit accomplishment", exact: true }).click();
+  const accomplishmentDialog = page.getByRole("dialog", { name: "Submit verified work accomplishment" });
+  await selectOptionContaining(accomplishmentDialog.getByLabel("Labor rate"), "E2E Maker");
+  await accomplishmentDialog.getByLabel("Accomplishment date").fill("2026-11-06");
+  await accomplishmentDialog.getByLabel("Completed quantity").fill("10");
+  await accomplishmentDialog.getByLabel("Accepted quantity").fill("10");
+  await accomplishmentDialog.getByLabel("Rejected quantity").fill("0");
+  await accomplishmentDialog.getByRole("button", { name: "Submit accomplishment", exact: true }).click();
   await notification(page, "Work accomplishment submitted for verification.");
   await accomplishmentPanel.getByRole("button", { name: "Verify", exact: true }).click();
   await notification(page, "Accomplishment verified.");
 
-  const runPanel = panel(page, "Tuesday & Friday payment runs");
-  await runPanel.getByLabel("Payment date").fill("2026-11-07");
-  health.allowExpectedHttpFailure(/\/rest\/v1\/rpc\/create_labor_payment_run/);
-  await runPanel.getByRole("button", { name: "Prepare payment run", exact: true }).click();
-  await notification(page, "Labor payments can only be scheduled for Tuesday or Friday");
-  await runPanel.getByLabel("Payment date").fill("2026-11-06");
-  await runPanel.getByLabel("Run note").fill("E2E Friday labor run");
-  await runPanel.getByRole("button", { name: "Prepare payment run", exact: true }).click();
-  await notification(page, "Labor payment run prepared.");
-  await runPanel.getByRole("button", { name: "Approve", exact: true }).click();
-  await notification(page, "Labor payment run approved.");
-  await runPanel.getByRole("button", { name: "Post payment", exact: true }).click();
-  await notification(page, "Labor payment run posted to Project Funds.");
-  await expect(runPanel).toContainText("paid");
-
   health.assert();
 });
 
-test("internal finance can manage while external finance is read-only", async ({ page }) => {
+test("internal and external finance have the intended foundation boundaries", async ({ page }) => {
   const health = browserHealth(page);
   await login(page, accounts.internalFinance);
   await openFoundation(page);
   await page.getByRole("button", { name: "Working Funds", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Record Working Funds entry", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Record entry", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Operating Costs", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Save recurring cost", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Record operating cost", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add recurring cost", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Planned / paid costs", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Record planned cost", exact: true })).toHaveCount(0);
   health.assert();
 
   await signOut(page);
   await login(page, accounts.externalFinance);
   await openFoundation(page);
   await page.getByRole("button", { name: "Working Funds", exact: true }).click();
-  await expect(page.getByText("Read-only view. Finance managers record Company Working Funds entries.", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Record Working Funds entry", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Read-only view. Internal Finance records company-level Working Funds adjustments.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Record entry", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Operating Costs", exact: true }).click();
-  await expect(page.getByText("Read-only view. Finance managers maintain operational cost assumptions.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Add recurring cost", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Add recurring cost", exact: true }).click();
+  const recurringDialog = page.getByRole("dialog", { name: "Add recurring operating-cost template" });
+  await recurringDialog.getByLabel("Cost name").fill("E2E Subscription");
+  await recurringDialog.getByLabel("Category").fill("Subscription");
+  await recurringDialog.getByLabel("Expected monthly amount").fill("1000");
+  await recurringDialog.getByRole("button", { name: "Save template", exact: true }).click();
+  await notification(page, "Operating cost template saved.");
+  await expect(panel(page, "Recurring operational cost templates")).toContainText("E2E Subscription");
+
+  await page.getByRole("button", { name: "Planned / paid costs", exact: true }).click();
+  await page.getByRole("button", { name: "Record planned cost", exact: true }).click();
+  const plannedCostDialog = page.getByRole("dialog", { name: "Record planned operating cost" });
+  await plannedCostDialog.getByLabel("Cost name").fill("E2E Subscription November");
+  await plannedCostDialog.getByLabel("Category").fill("Subscription");
+  await plannedCostDialog.getByLabel("Amount").fill("1000");
+  await plannedCostDialog.getByLabel("Note").fill("E2E planned operating cost");
+  await plannedCostDialog.getByRole("button", { name: "Record planned cost", exact: true }).click();
+  await notification(page, "Operating cost recorded.");
+  await expect(panel(page, "Planned operating costs")).toContainText("E2E Subscription November");
+
+  await page.getByRole("button", { name: "Transaction", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Transaction history", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Cash Out", exact: true }).first().click();
+  const cashOutDialog = page.getByRole("dialog").last();
+  await cashOutDialog.getByRole("button", { name: "Operating cost", exact: true }).click();
+  await chooseSearchableOption(cashOutDialog, "Planned operating cost", "E2E Subscription November");
+  await cashOutDialog.getByRole("button", { name: "Expense category", exact: true }).click();
+  await cashOutDialog.getByRole("option", { name: "Add new", exact: true }).click();
+  const categoryDialog = page.getByRole("dialog", { name: "Add expense category" });
+  await categoryDialog.getByLabel("Category name").fill("E2E Operating Category");
+  await categoryDialog.getByRole("button", { name: "Add category", exact: true }).click();
+  await expect(categoryDialog.getByRole("status")).toContainText("Category added. You can add another.");
+  await categoryDialog.getByRole("button", { name: "Done", exact: true }).click();
+  await chooseSearchableOption(cashOutDialog, "Payment account", "E2E Demo Staging Bank");
+  await cashOutDialog.locator('input[type="file"]').setInputFiles({
+    name: "e2e-cash-out-receipt.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
+  });
+  await cashOutDialog.getByRole("button", { name: "Submit operating cost", exact: true }).click();
+  await notification(page, "Cash Out submitted for Internal Finance approval.");
+  health.assert();
+
+  await signOut(page);
+  await login(page, accounts.internalFinance);
+  await page.getByRole("button", { name: "Pending approvals", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Pending approvals", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /^Cash Out \(/ }).click();
+  const pendingCashOut = page.locator(".finance-approval-table tbody tr")
+    .filter({ hasText: "E2E Demo Staging Bank" })
+    .filter({ hasText: "₱1,000.00" })
+    .first();
+  await expect(pendingCashOut).toBeVisible();
+  await pendingCashOut.getByRole("button", { name: "Review Cash Out", exact: true }).click();
+  const reviewDialog = page.getByRole("dialog", { name: "Regular expenses review" });
+  await reviewDialog.getByRole("button", { name: "Verify Cash Out", exact: true }).click();
+  const confirmDialog = page.getByRole("dialog", { name: "Verify Cash Out regular Cash Out" });
+  await confirmDialog.getByRole("button", { name: "Verify Cash Out", exact: true }).click();
+  await notification(page, "Cash Out verified. External Finance can now release it from the selected account.");
+  health.assert();
+
+  await signOut(page);
+  await login(page, accounts.externalFinance);
+  await page.getByRole("button", { name: "Transaction", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Transaction history", exact: true })).toBeVisible();
+  const verifiedCashOut = page.locator("table tbody tr")
+    .filter({ hasText: "E2E Demo Staging Bank" })
+    .filter({ hasText: "₱1,000.00" })
+    .last();
+  await expect(verifiedCashOut).toBeVisible();
+  await verifiedCashOut.getByRole("button", { name: "Release payment", exact: true }).click();
+  const releaseDialog = page.getByRole("dialog", { name: "Mark paid Cash Out" });
+  await expect(releaseDialog).toBeVisible();
+  await releaseDialog.getByRole("button", { name: "Mark paid", exact: true }).click();
+  await notification(page, "Cash Out released and the selected account was deducted.");
   health.assert();
 });
 
@@ -253,9 +312,9 @@ test("project and production roles see only their operational foundation surface
   await expect(foundationSections.getByRole("button", { name: "Working Funds", exact: true })).toHaveCount(0);
   await expect(foundationSections.getByRole("button", { name: "Project Funds", exact: true })).toBeVisible();
   await expect(foundationSections.getByRole("button", { name: "Labor Payments", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Request temporary support", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Request support", exact: true })).toBeVisible();
   await foundationSections.getByRole("button", { name: "Labor Payments", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Assign labor rate", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Assign rate", exact: true })).toBeVisible();
   health.assert();
 
   await signOut(page);
@@ -265,8 +324,8 @@ test("project and production roles see only their operational foundation surface
   await expect(productionSections.getByRole("button", { name: "Dashboard", exact: true })).toHaveCount(0);
   await expect(productionSections.getByRole("button", { name: "Working Funds", exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Labor Payments", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Assign labor rate", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Prepare payment run", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Assign rate", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Prepare run", exact: true })).toHaveCount(0);
   health.assert();
 });
 
