@@ -162,11 +162,9 @@ test("admin completes the financial foundation controls and labor payment flow",
   await expect(monthlyPanel).toContainText("E2E Subscription November");
 
   await page.getByRole("button", { name: "Project Funds", exact: true }).click();
-  const fundPanel = panel(page, "Create a dedicated Project Fund");
-  await selectOptionContaining(fundPanel.getByLabel("Approved Price Quotation"), "E2E Project Alpha");
-  await fundPanel.getByLabel("Note").fill("Dedicated staging fund");
-  await fundPanel.getByRole("button", { name: "Create Project Fund", exact: true }).click();
-  await notification(page, "Project Fund created or linked.");
+  const fundPanel = panel(page, "Automatic Project Fund creation");
+  await expect(fundPanel).toContainText("No manual setup is required.");
+  await expect(fundPanel.getByRole("button", { name: "Create Project Fund", exact: true })).toHaveCount(0);
   await expect(page.getByText("E2E Project Alpha", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("E2E Project Beta", { exact: true }).first()).toBeVisible();
 

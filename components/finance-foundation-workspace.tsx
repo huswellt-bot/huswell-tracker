@@ -141,7 +141,6 @@ export function FinanceFoundationWorkspace({ organizationId, role }: { organizat
   const canManage = roleCanManage(role);
   const canRequest = roleCanRequest(role);
   const canViewFinancialSnapshot = canManage || role === "external_finance";
-  const canCreateProjectFund = canManage || role === "project_manager";
   const canRecordLabor = canManage || ["project_manager", "production"].includes(role);
   const canVerifyLabor = canManage || role === "project_manager";
   const [tab, setTab] = useState<FoundationTab>(canViewFinancialSnapshot ? "dashboard" : role === "production" ? "labor" : "project_funds");
@@ -156,7 +155,6 @@ export function FinanceFoundationWorkspace({ organizationId, role }: { organizat
   const [operatingTemplates, setOperatingTemplates] = useState<Row[]>([]);
   const [operatingEntries, setOperatingEntries] = useState<Row[]>([]);
   const [workingEntries, setWorkingEntries] = useState<Row[]>([]);
-  const [quotations, setQuotations] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -166,7 +164,6 @@ export function FinanceFoundationWorkspace({ organizationId, role }: { organizat
 
   const [settingsForm, setSettingsForm] = useState({ openingCapital: "", openingWorking: "", minimumWorking: "", desiredProfit: "", vatRate: "12", revenueBasis: "net_sales" });
   const [workingForm, setWorkingForm] = useState({ entryType: "other_in", direction: "credit", amount: "", date: localDate(), reference: "", note: "" });
-  const [fundForm, setFundForm] = useState({ quotationId: "", note: "" });
   const [advanceForm, setAdvanceForm] = useState({ amount: "", note: "" });
   const [laborRateForm, setLaborRateForm] = useState({ fundId: "", boxMaker: "", task: "", unit: "box", unitRate: "", plannedQuantity: "", totalRate: "", note: "" });
   const [accomplishmentForm, setAccomplishmentForm] = useState({ rateId: "", date: localDate(), completed: "", accepted: "", rejected: "0", note: "" });
@@ -183,7 +180,7 @@ export function FinanceFoundationWorkspace({ organizationId, role }: { organizat
     const settingsRequest = canManage
       ? client.from("finance_foundation_settings").select("*").eq("organization_id", organizationId).maybeSingle()
       : Promise.resolve({ data: null, error: null });
-    const [snapshotResult, settingsResult, fundsResult, advancesResult, ratesResult, accomplishmentsResult, runsResult, templatesResult, entriesResult, workingResult, quotationsResult] = await Promise.all([
+    const [snapshotResult, settingsResult, fundsResult, advancesResult, ratesResult, accomplishmentsResult, runsResult, templatesResult, entriesResult, workingResult] = await Promise.all([
       snapshotRequest,
       settingsRequest,
       client.from("finance_project_fund_summary").select("*").eq("organization_id", organizationId).order("status").order("project_name"),
@@ -194,9 +191,8 @@ export function FinanceFoundationWorkspace({ organizationId, role }: { organizat
       client.from("operating_cost_templates").select("*").eq("organization_id", organizationId).order("category").order("name"),
       client.from("operating_cost_entries").select("*").eq("organization_id", organizationId).order("cost_date", { ascending: false }),
       client.from("company_working_fund_entries").select("*").eq("organization_id", organizationId).order("entry_date", { ascending: false }).limit(100),
-      client.from("quotations").select("id,quotation_no,project_name,client_name,total_amount,subtotal,status,document_type").eq("organization_id", organizationId).eq("status", "approved").eq("document_type", "price_quotation").order("created_at", { ascending: false }),
     ]);
-    const failed = [snapshotResult, settingsResult, fundsResult, advancesResult, ratesResult, accomplishmentsResult, runsResult, templatesResult, entriesResult, workingResult, quotationsResult].find((result) => result.error);
+    const failed = [snapshotResult, settingsResult, fundsResult, advancesResult, ratesResult, accomplishmentsResult, runsResult, templatesResult, entriesResult, workingResult].find((result) => result.error);
     if (failed?.error) setError(failed.error.message);
     if (!snapshotResult.error) setSnapshot((snapshotResult.data ?? null) as Snapshot | null);
     if (!settingsResult.error) {
@@ -219,7 +215,6 @@ export function FinanceFoundationWorkspace({ organizationId, role }: { organizat
     if (!templatesResult.error) setOperatingTemplates((templatesResult.data ?? []) as Row[]);
     if (!entriesResult.error) setOperatingEntries((entriesResult.data ?? []) as Row[]);
     if (!workingResult.error) setWorkingEntries((workingResult.data ?? []) as Row[]);
-    if (!quotationsResult.error) setQuotations((quotationsResult.data ?? []) as Row[]);
     setLoading(false);
   }, [canManage, canViewFinancialSnapshot, client, month, organizationId]);
 
@@ -266,15 +261,6 @@ export function FinanceFoundationWorkspace({ organizationId, role }: { organizat
       p_note: workingForm.note || null,
     }), "Working Funds entry recorded.");
     if (saved) setWorkingForm({ entryType: "other_in", direction: "credit", amount: "", date: localDate(), reference: "", note: "" });
-  };
-
-  const saveProjectFund = async (event: FormEvent) => {
-    event.preventDefault();
-    if (!fundForm.quotationId) return setError("Choose an approved Price Quotation.");
-    const saved = await runAction(() => client.rpc("create_project_fund", {
-      p_organization_id: organizationId, p_quotation_id: fundForm.quotationId, p_note: fundForm.note || null,
-    }), "Project Fund created or linked.");
-    if (saved) setFundForm({ quotationId: "", note: "" });
   };
 
   const saveAdvance = async (event: FormEvent) => {
@@ -387,7 +373,7 @@ export function FinanceFoundationWorkspace({ organizationId, role }: { organizat
     <nav className="app-tabs overflow-x-auto" aria-label="Financial Foundation sections">{foundationTabs.map(([key, label]) => <button type="button" className="app-tab whitespace-nowrap" key={key} aria-current={tab === key ? "page" : undefined} onClick={() => setTab(key)}>{label}</button>)}</nav>
     {tab === "dashboard" && <FoundationDashboard snapshot={current} funds={funds} onProjectFunds={() => setTab("project_funds")} />}
     {tab === "working_funds" && <WorkingFundsPanel canManage={canManage} snapshot={current} entries={workingEntries} form={workingForm} setForm={setWorkingForm} onSubmit={saveWorkingEntry} />}
-    {tab === "project_funds" && <ProjectFundsPanel canManage={canManage} canCreateFund={canCreateProjectFund} canRequest={canRequest} funds={funds} quotations={quotations} advances={advances} fundForm={fundForm} setFundForm={setFundForm} advanceForm={advanceForm} setAdvanceForm={setAdvanceForm} selectedFundId={selectedFundId} setSelectedFundId={setSelectedFundId} selectedAdvanceId={selectedAdvanceId} onCreateFund={saveProjectFund} onRequestAdvance={saveAdvance} onRepayAdvance={submitRepayment} onReviewAdvance={reviewAdvance} onReleaseAdvance={releaseAdvance} onRepayClick={repayAdvance} />}
+    {tab === "project_funds" && <ProjectFundsPanel canManage={canManage} canRequest={canRequest} funds={funds} advances={advances} advanceForm={advanceForm} setAdvanceForm={setAdvanceForm} selectedFundId={selectedFundId} setSelectedFundId={setSelectedFundId} selectedAdvanceId={selectedAdvanceId} onRequestAdvance={saveAdvance} onRepayAdvance={submitRepayment} onReviewAdvance={reviewAdvance} onReleaseAdvance={releaseAdvance} onRepayClick={repayAdvance} />}
     {tab === "labor" && <LaborPanel canManage={canManage} canRecord={canRecordLabor} canVerify={canVerifyLabor} funds={funds} rates={laborRates} accomplishments={accomplishments} runs={paymentRuns} rateForm={laborRateForm} setRateForm={setLaborRateForm} accomplishmentForm={accomplishmentForm} setAccomplishmentForm={setAccomplishmentForm} runForm={runForm} setRunForm={setRunForm} onCreateRate={saveLaborRate} onCreateAccomplishment={saveAccomplishment} onCreateRun={savePaymentRun} onVerify={verifyAccomplishment} onApproveRun={approveRun} onPayRun={payRun} activeRates={activeRates} pendingAccomplishments={pendingAccomplishments} />}
     {tab === "operating_costs" && <OperatingCostsPanel canManage={canManage} templates={operatingTemplates} entries={operatingEntries} templateForm={templateForm} setTemplateForm={setTemplateForm} entryForm={entryForm} setEntryForm={setEntryForm} onCreateTemplate={saveTemplate} onCreateEntry={saveOperatingEntry} />}
     {tab === "break_even" && <BreakEvenPanel canManage={canManage} snapshot={current} settings={settings} form={settingsForm} setForm={setSettingsForm} onSubmit={saveSettings} />}
@@ -396,7 +382,6 @@ export function FinanceFoundationWorkspace({ organizationId, role }: { organizat
 
 type FormSetter<T> = (value: T) => void;
 type WorkingForm = { entryType: string; direction: string; amount: string; date: string; reference: string; note: string };
-type FundForm = { quotationId: string; note: string };
 type AdvanceForm = { amount: string; note: string };
 type LaborRateForm = { fundId: string; boxMaker: string; task: string; unit: string; unitRate: string; plannedQuantity: string; totalRate: string; note: string };
 type AccomplishmentForm = { rateId: string; date: string; completed: string; accepted: string; rejected: string; note: string };
@@ -425,7 +410,7 @@ function FoundationDashboard({ snapshot, funds, onProjectFunds }: { snapshot: Sn
       <button type="button" className="button-secondary inline-flex items-center gap-1.5" onClick={onProjectFunds}>Open Project Funds <span aria-hidden="true">→</span></button>
     </div>
     <FoundationPanel title="Project fund health" detail="Each project is monitored independently. A positive balance is not available to another project; it remains assigned to its own project fund.">
-      <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[780px]"><thead><tr><th>Project</th><th>Status</th><th>Client collections</th><th>Project expenses</th><th>Labor paid</th><th>Available</th></tr></thead><tbody>{funds.slice(0, 8).map((fund) => <tr key={String(fund.id)}><td><p className="font-semibold">{value(fund, "project_name", "Unnamed project")}</p><p className="text-[10px] text-[var(--color-text-secondary)]">{value(fund, "client_name", "No client")}</p></td><td><FoundationStatus status={value(fund, "status", "open")} /></td><td>{peso.format(numberValue(fund, "client_payments"))}</td><td>{peso.format(numberValue(fund, "project_expenses"))}</td><td>{peso.format(numberValue(fund, "labor_payments"))}</td><td className={numberValue(fund, "available_balance") < 0 ? "font-semibold text-[var(--color-danger-text)]" : "font-semibold text-[var(--color-success-text)]"}>{peso.format(numberValue(fund, "available_balance"))}</td></tr>)}{!funds.length && <tr><td colSpan={6} className="text-center text-[var(--color-text-secondary)]">No Project Funds yet. Create one from an approved Price Quotation.</td></tr>}</tbody></table></div>
+      <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[780px]"><thead><tr><th>Project</th><th>Status</th><th>Client collections</th><th>Project expenses</th><th>Labor paid</th><th>Available</th></tr></thead><tbody>{funds.slice(0, 8).map((fund) => <tr key={String(fund.id)}><td><p className="font-semibold">{value(fund, "project_name", "Unnamed project")}</p><p className="text-[10px] text-[var(--color-text-secondary)]">{value(fund, "client_name", "No client")}</p></td><td><FoundationStatus status={value(fund, "status", "open")} /></td><td>{peso.format(numberValue(fund, "client_payments"))}</td><td>{peso.format(numberValue(fund, "project_expenses"))}</td><td>{peso.format(numberValue(fund, "labor_payments"))}</td><td className={numberValue(fund, "available_balance") < 0 ? "font-semibold text-[var(--color-danger-text)]" : "font-semibold text-[var(--color-success-text)]"}>{peso.format(numberValue(fund, "available_balance"))}</td></tr>)}{!funds.length && <tr><td colSpan={6} className="text-center text-[var(--color-text-secondary)]">No approved Price Quotations have created a Project Fund yet.</td></tr>}</tbody></table></div>
     </FoundationPanel>
   </div>;
 }
@@ -450,10 +435,13 @@ function WorkingFundsPanel({ canManage, snapshot, entries, form, setForm, onSubm
   </div>;
 }
 
-function ProjectFundsPanel({ canManage, canCreateFund, canRequest, funds, quotations, advances, fundForm, setFundForm, advanceForm, setAdvanceForm, selectedFundId, setSelectedFundId, selectedAdvanceId, onCreateFund, onRequestAdvance, onRepayAdvance, onReviewAdvance, onReleaseAdvance, onRepayClick }: { canManage: boolean; canCreateFund: boolean; canRequest: boolean; funds: Row[]; quotations: Row[]; advances: Row[]; fundForm: FundForm; setFundForm: FormSetter<FundForm>; advanceForm: AdvanceForm; setAdvanceForm: FormSetter<AdvanceForm>; selectedFundId: string; setSelectedFundId: (value: string) => void; selectedAdvanceId: string; onCreateFund: (event: FormEvent) => void; onRequestAdvance: (event: FormEvent) => void; onRepayAdvance: (event: FormEvent) => void; onReviewAdvance: (row: Row, decision: "approved" | "rejected") => void; onReleaseAdvance: (row: Row) => void; onRepayClick: (row: Row) => void }) {
+function ProjectFundsPanel({ canManage, canRequest, funds, advances, advanceForm, setAdvanceForm, selectedFundId, setSelectedFundId, selectedAdvanceId, onRequestAdvance, onRepayAdvance, onReviewAdvance, onReleaseAdvance, onRepayClick }: { canManage: boolean; canRequest: boolean; funds: Row[]; advances: Row[]; advanceForm: AdvanceForm; setAdvanceForm: FormSetter<AdvanceForm>; selectedFundId: string; setSelectedFundId: (value: string) => void; selectedAdvanceId: string; onRequestAdvance: (event: FormEvent) => void; onRepayAdvance: (event: FormEvent) => void; onReviewAdvance: (row: Row, decision: "approved" | "rejected") => void; onReleaseAdvance: (row: Row) => void; onRepayClick: (row: Row) => void }) {
   return <div className="space-y-4">
-    <FoundationPanel title="Create a dedicated Project Fund" detail="Link an approved Price Quotation to its own fund. Client downpayments and project expenses stay inside that fund.">
-      {canCreateFund ? <form className="grid gap-3 p-4 sm:grid-cols-2" onSubmit={onCreateFund}><FoundationSelect label="Approved Price Quotation" value={fundForm.quotationId} onChange={(quotationId) => setFundForm({ ...fundForm, quotationId })} required><option value="">Choose a quotation</option>{quotations.map((quotation) => <option key={String(quotation.id)} value={String(quotation.id)}>{value(quotation, "quotation_no", "Quotation")} · {value(quotation, "project_name", "Unnamed project")} · {value(quotation, "client_name", "No client")}</option>)}</FoundationSelect><FoundationInput label="Note" value={fundForm.note} onChange={(note) => setFundForm({ ...fundForm, note })} placeholder="Optional project fund note" /><div className="sm:col-span-2"><button className="button-primary inline-flex items-center gap-1.5" type="submit"><Plus size={14} aria-hidden="true" />Create Project Fund</button></div></form> : <p className="p-4 text-[11px] text-[var(--color-text-secondary)]">Project Funds are created and controlled by Finance and authorized project managers.</p>}
+    <FoundationPanel title="Automatic Project Fund creation" detail="A dedicated Project Fund is created automatically when a Price Quotation is approved.">
+      <div className="space-y-2 p-4 text-[11px] leading-4 text-[var(--color-text-secondary)]">
+        <p>No manual setup is required. Approved Price Quotations appear in the Project Fund balances below after the page is refreshed.</p>
+        <p>Client payments, project expenses, labor payments, company advances, and repayments remain linked to the automatically created fund.</p>
+      </div>
     </FoundationPanel>
     <FoundationPanel title="Company Working Fund advance" detail="Use this only when a Project Fund is insufficient. The release creates a repayable company advance; it is not project income.">
       {canRequest ? <form className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3" onSubmit={onRequestAdvance}><FoundationSelect label="Project" value={selectedFundId} onChange={setSelectedFundId} required><option value="">Choose a project fund</option>{funds.filter((fund) => value(fund, "status") === "open").map((fund) => <option key={String(fund.id)} value={String(fund.id)}>{value(fund, "project_name", "Unnamed project")} · available {peso.format(numberValue(fund, "available_balance"))}</option>)}</FoundationSelect><FoundationInput label="Requested amount" value={advanceForm.amount} onChange={(amount) => setAdvanceForm({ ...advanceForm, amount })} type="number" min="0.01" step="0.01" required /><FoundationInput label="Reason" value={advanceForm.note} onChange={(note) => setAdvanceForm({ ...advanceForm, note })} placeholder="Why is temporary support needed?" /><div className="lg:col-span-3"><button className="button-secondary" type="submit">Request temporary support</button></div></form> : <p className="p-4 text-[11px] text-[var(--color-text-secondary)]">Read-only view. Authorized project users may request temporary support.</p>}
