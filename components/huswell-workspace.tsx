@@ -17600,7 +17600,8 @@ function PriceQuotationReview({
       const { data: costingData, error: costingError } = await client
         .from("price_quotation_product_costings")
         .select("*")
-        .eq("quotation_id", quotation.id);
+        .eq("quotation_id", quotation.id)
+        .eq("organization_id", text(quotation.organization_id, ""));
       if (!active) return;
       if (costingError) {
         setProductCostingsLoading(false);
@@ -17619,11 +17620,13 @@ function PriceQuotationReview({
         client
           .from("price_quotation_costing_lines")
           .select("*")
-          .in("product_costing_id", costingIds),
+          .in("product_costing_id", costingIds)
+          .eq("organization_id", text(quotation.organization_id, "")),
         client
           .from("price_quotation_costing_markups")
           .select("*")
-          .in("product_costing_id", costingIds),
+          .in("product_costing_id", costingIds)
+          .eq("organization_id", text(quotation.organization_id, "")),
       ]);
       if (!active) return;
       if (costLineResult.error || markupResult.error) {
@@ -17646,7 +17649,7 @@ function PriceQuotationReview({
     return () => {
       active = false;
     };
-  }, [defaultPricingDefaults, lines, productCostingsLoadAttempt, quotation.id, useCurrentGmMarkups]);
+  }, [defaultPricingDefaults, lines, productCostingsLoadAttempt, quotation.id, quotation.organization_id, useCurrentGmMarkups]);
   const [galleryIllustrations, setGalleryIllustrations] = useState<Row[]>(() =>
     store.price_quotation_illustrations.filter(
       (illustration) => illustration.quotation_id === illustrationQuotationId,
