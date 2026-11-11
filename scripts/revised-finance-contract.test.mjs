@@ -9,11 +9,12 @@ const migration = [
   readFileSync(join(root, "supabase", "migrations", "20261111054845_revised_finance_ledger.sql"), "utf8"),
   readFileSync(join(root, "supabase", "migrations", "20261111054855_revised_finance_categories.sql"), "utf8"),
   readFileSync(join(root, "supabase", "migrations", "20261111054858_revised_finance_daily_fund.sql"), "utf8"),
-  readFileSync(join(root, "supabase", "migrations", "20261111070000_revised_finance_costing_monitoring.sql"), "utf8"),
+  readFileSync(join(root, "supabase", "migrations", "20261111083118_revised_finance_costing_monitoring.sql"), "utf8"),
 ].join("\n");
-const integrityMigration = readFileSync(join(root, "supabase", "migrations", "20261111064207_revised_finance_integrity_fixes.sql"), "utf8");
-const fundModalMigration = readFileSync(join(root, "supabase", "migrations", "20261111085800_revised_finance_gm_fund_modal_simplification.sql"), "utf8");
-const actorVisibilityMigration = readFileSync(join(root, "supabase", "migrations", "20261111121304_revised_finance_actor_visibility.sql"), "utf8");
+const integrityMigration = readFileSync(join(root, "supabase", "migrations", "20261111083110_revised_finance_integrity_fixes.sql"), "utf8");
+const fundModalMigration = readFileSync(join(root, "supabase", "migrations", "20261111091638_revised_finance_gm_fund_modal_simplification.sql"), "utf8");
+const actorVisibilityMigration = readFileSync(join(root, "supabase", "migrations", "20261111122521_revised_finance_actor_visibility.sql"), "utf8");
+const revisionMigration = readFileSync(join(root, "supabase", "migrations", "20261111204731_revised_finance_revision_flow.sql"), "utf8");
 const roleMigration = readFileSync(join(root, "supabase", "migrations", "20261111054901_unify_accounting_finance_role.sql"), "utf8");
 const workspace = readFileSync(join(root, "components", "finance-revised-workspace.tsx"), "utf8");
 const host = readFileSync(join(root, "components", "huswell-workspace.tsx"), "utf8");
@@ -224,8 +225,42 @@ test("GM approvals are organized into counted request tabs", () => {
   assert.match(workspace, /label: "Working Funds"/);
   assert.match(workspace, /label: "Daily Fund"/);
   assert.match(workspace, /approvalCounts/);
-  assert.match(workspace, /Pending Working Fund requests/);
-  assert.match(workspace, /Pending Daily Fund requests/);
+  assert.match(workspace, /function ApprovalTable/);
+  assert.match(workspace, /items=\{visibleItems\}/);
+  assert.match(workspace, /All approval types use one queue/);
+});
+
+test("Cash In and Cash Out use approve or request-revision decisions", () => {
+  assert.match(revisionMigration, /status in \('pending', 'approved', 'rejected', 'revision_requested', 'voided'\)/);
+  assert.match(revisionMigration, /v_decision not in \('approved', 'revision_requested'\)/);
+  assert.match(revisionMigration, /'project_cash_in', 'project_cash_out', 'operating_cash_out', 'commission_payout'/);
+  assert.match(revisionMigration, /A revision note is required/);
+  assert.match(revisionMigration, /reviewed_by = v_actor/);
+  assert.match(revisionMigration, /create or replace function public\.resubmit_finance_revised_transaction/);
+  assert.match(revisionMigration, /revision_of_transaction_id/);
+  assert.match(revisionMigration, /finance_revised_transactions_one_active_revision_child_idx/);
+  assert.match(revisionMigration, /replacement\.status not in \('rejected', 'voided'\)/);
+  assert.match(revisionMigration, /commission_allocation_id/);
+  assert.match(workspace, /Request revision/);
+  assert.match(workspace, /Correct &amp; resubmit/);
+  assert.match(workspace, /Correct and resubmit commission payout/);
+  assert.match(workspace, /GM revision note/);
+  assert.doesNotMatch(workspace, /reviewTransactionDecision\("rejected"\)/);
+});
+
+test("revised approval counts and realtime refresh include fund requests", () => {
+  assert.match(revisionMigration, /finance_revised_transactions transaction[\s\S]*status = 'pending'/);
+  assert.match(revisionMigration, /finance_working_fund_requests request[\s\S]*status = 'pending'/);
+  assert.match(revisionMigration, /finance_daily_fund_requests request[\s\S]*status = 'pending'/);
+  assert.match(revisionMigration, /finance_revised_transactions',\s*'finance_working_fund_requests',\s*'finance_daily_fund_requests'/);
+  assert.match(host, /finance_revised_transactions/);
+  assert.match(host, /finance_working_fund_requests/);
+  assert.match(host, /finance_daily_fund_requests/);
+});
+
+test("repayment UI uses collected project balance instead of support-inclusive balance", () => {
+  assert.match(workspace, /client_cash_in.*cash_out.*working_fund_repaid/);
+  assert.doesNotMatch(workspace, /numberValue\(project, "available_balance"\),\s*\n\s*\)\);/);
 });
 
 test("Finance audit actors are visible for transactions and fund requests", () => {

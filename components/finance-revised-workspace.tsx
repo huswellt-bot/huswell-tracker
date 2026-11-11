@@ -26,6 +26,7 @@ type RevisedTab = "dashboard" | "funds" | "daily_fund" | "cash_on_hand" | "trans
 type DialogKind = "capital" | "transfer" | "daily_request" | "daily_return" | "cash_in" | "cash_out" | null;
 type CategoryDirection = "income" | "expense";
 type ApprovalTab = "all" | "cash_in" | "cash_out" | "working_funds" | "daily_fund";
+type ApprovalItemKind = "transaction" | "working_request" | "daily_request";
 
 const addCategoryOptionValue = "__add_revised_finance_category__";
 
@@ -86,6 +87,94 @@ const transactionLabel = (row: Row) => {
   if (kind === "adjustment") return "Reversal adjustment";
   return titleCase(kind);
 };
+
+const canRequestTransactionRevision = (row: Row) =>
+  row.has_active_revision_child !== true
+  && ["project_cash_in", "project_cash_out", "operating_cash_out", "commission_payout"].includes(textValue(row, "transaction_kind"));
+
+const transactionSourceLabel = (row: Row) => {
+  const projectName = textValue(row, "project_name").trim();
+  if (projectName) return projectName;
+  const kind = textValue(row, "transaction_kind");
+  if (["operating_cash_out", "daily_fund_allocation", "daily_fund_return"].includes(kind)) return "Daily Fund";
+  if (["working_fund_support", "working_fund_repayment", "capital_to_working"].includes(kind)) return "Working Funds";
+  if (kind === "capital_contribution") return "Capital Funds";
+  return "Unassigned";
+};
+
+const approvalBucket = (transaction: Row): Exclude<ApprovalTab, "all"> => {
+  const kind = textValue(transaction, "transaction_kind");
+  if (kind === "project_cash_in") return "cash_in";
+  if (["working_fund_support", "working_fund_repayment"].includes(kind)) return "working_funds";
+  if (["daily_fund_allocation", "daily_fund_return"].includes(kind)) return "daily_fund";
+  return "cash_out";
+};
+
+type FinanceApprovalItem = {
+  id: string;
+  kind: ApprovalItemKind;
+  bucket: Exclude<ApprovalTab, "all">;
+  date: unknown;
+  project: string;
+  activity: string;
+  category: string;
+  amount: number;
+  requestedBy: string;
+  status: string;
+  transaction?: Row;
+  request?: Row;
+  dailyRequest?: Row;
+};
+
+const buildApprovalItems = (
+  transactions: Row[],
+  requests: Row[],
+  dailyFundRequests: Row[],
+): FinanceApprovalItem[] => [
+  ...transactions.map((transaction) => ({
+    id: textValue(transaction, "id"),
+    kind: "transaction" as const,
+    bucket: approvalBucket(transaction),
+    date: transaction.transaction_date,
+    project: transactionSourceLabel(transaction),
+    activity: transactionLabel(transaction),
+    category: textValue(transaction, "category", "—"),
+    amount: numberValue(transaction, "amount"),
+    requestedBy: textValue(transaction, "submitted_by_name", textValue(transaction, "submitted_by", "Unknown")),
+    status: textValue(transaction, "status"),
+    transaction,
+  })),
+  ...requests.map((request) => ({
+    id: textValue(request, "id"),
+    kind: "working_request" as const,
+    bucket: "working_funds" as const,
+    date: request.requested_at,
+    project: textValue(request, "project_name", "Project"),
+    activity: textValue(request, "purpose", "Working Fund request"),
+    category: `${textValue(request, "breakdown_line_count", "0")} lines`,
+    amount: numberValue(request, "requested_amount"),
+    requestedBy: textValue(request, "requested_by_name", textValue(request, "requested_by", "Unknown")),
+    status: textValue(request, "status"),
+    request,
+  })),
+  ...dailyFundRequests.map((request) => ({
+    id: textValue(request, "id"),
+    kind: "daily_request" as const,
+    bucket: "daily_fund" as const,
+    date: request.requested_at ?? request.fund_date,
+    project: "Daily Fund",
+    activity: textValue(request, "purpose", "Daily Fund request"),
+    category: "Non-project expenses",
+    amount: numberValue(request, "requested_amount"),
+    requestedBy: textValue(request, "requested_by_name", textValue(request, "requested_by", "Unknown")),
+    status: textValue(request, "status"),
+    dailyRequest: request,
+  })),
+].sort((left, right) => {
+  const leftTime = new Date(String(left.date ?? "")).getTime();
+  const rightTime = new Date(String(right.date ?? "")).getTime();
+  return (Number.isFinite(rightTime) ? rightTime : 0) - (Number.isFinite(leftTime) ? leftTime : 0);
+});
 
 type CostingGroup = {
   key: string;
@@ -353,6 +442,7 @@ export function FinanceRevisedWorkspace({
   const [reviewRequest, setReviewRequest] = useState<Row | null>(null);
   const [reviewDailyFundRequest, setReviewDailyFundRequest] = useState<Row | null>(null);
   const [reviewTransaction, setReviewTransaction] = useState<Row | null>(null);
+  const [revisionSource, setRevisionSource] = useState<Row | null>(null);
   const [voidTransaction, setVoidTransaction] = useState<Row | null>(null);
   const [voidReason, setVoidReason] = useState("");
   const [repaymentRequest, setRepaymentRequest] = useState<Row | null>(null);
@@ -415,6 +505,13 @@ export function FinanceRevisedWorkspace({
 
   const cashInProjects = projects.filter((project) => ["open", "on_hold", "closed"].includes(textValue(project, "project_status")));
   const openProjects = projects.filter((project) => ["open", "on_hold"].includes(textValue(project, "project_status")));
+  const hasActiveRevisionChild = (transaction: Row) => {
+    const transactionId = textValue(transaction, "id");
+    return Boolean(transactionId) && transactions.some((candidate) =>
+      textValue(candidate, "revision_of_transaction_id") === transactionId
+      && !["rejected", "voided"].includes(textValue(candidate, "status"))
+    );
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -492,7 +589,17 @@ export function FinanceRevisedWorkspace({
     setSnapshot((snapshotResult.data as Row | null) ?? null);
     setDailySnapshot((dailySnapshotResult.data as Row | null) ?? null);
     setProjects((projectResult.data as Row[] | null) ?? []);
-    setTransactions((transactionResult.data as Row[] | null) ?? []);
+    const loadedTransactions = (transactionResult.data as Row[] | null) ?? [];
+    const activeRevisionParents = new Set(
+      loadedTransactions
+        .filter((transaction) => textValue(transaction, "revision_of_transaction_id") && !["rejected", "voided"].includes(textValue(transaction, "status")))
+        .map((transaction) => textValue(transaction, "revision_of_transaction_id")),
+    );
+    setTransactions(loadedTransactions.map((transaction) => ({
+      ...transaction,
+      project_name: transactionSourceLabel(transaction),
+      has_active_revision_child: activeRevisionParents.has(textValue(transaction, "id")),
+    })));
     setRequests((requestResult.data as Row[] | null) ?? []);
     setDailyFundRequests((dailyRequestResult.data as Row[] | null) ?? []);
     setCommissionPayables((commissionResult.data as Row[] | null) ?? []);
@@ -528,24 +635,69 @@ export function FinanceRevisedWorkspace({
     setNotice(null);
   };
 
+  const closeTransactionDialog = () => {
+    setDialog(null);
+    setRevisionSource(null);
+  };
+
+  const beginTransactionRevision = (transaction: Row) => {
+    const kind = textValue(transaction, "transaction_kind");
+    if (!canRequestTransactionRevision(transaction) || hasActiveRevisionChild(transaction)) return;
+    setRevisionSource(transaction);
+    setError(null);
+    if (kind === "project_cash_in") {
+      setCashIn({
+        projectId: textValue(transaction, "project_fund_id"),
+        categoryId: textValue(transaction, "category_id"),
+        amount: textValue(transaction, "amount"),
+        date: textValue(transaction, "transaction_date", localDate()),
+        reference: textValue(transaction, "reference_number"),
+        note: textValue(transaction, "note"),
+      });
+      setDialog("cash_in");
+      return;
+    }
+    setCashOut({
+      projectId: ["project_cash_out", "commission_payout"].includes(kind) ? textValue(transaction, "project_fund_id") : "",
+      dailyFundRequestId: kind === "operating_cash_out" ? textValue(transaction, "daily_fund_request_id") : "",
+      categoryId: textValue(transaction, "category_id"),
+      amount: textValue(transaction, "amount"),
+      date: textValue(transaction, "transaction_date", localDate()),
+      reference: textValue(transaction, "reference_number"),
+      note: textValue(transaction, "note"),
+    });
+    setDialog("cash_out");
+  };
+
   const handleCashIn = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!cashIn.projectId || !cashIn.categoryId || Number(cashIn.amount) <= 0) return;
     setSaving(true);
     try {
-      const { error: requestError } = await client.rpc("create_finance_revised_cash_in_with_category", {
-        p_organization_id: organizationId,
-        p_project_fund_id: cashIn.projectId,
-        p_amount: Number(cashIn.amount),
-        p_category_id: cashIn.categoryId,
-        p_transaction_date: cashIn.date,
-        p_reference_number: cashIn.reference || null,
-        p_note: cashIn.note || null,
-      });
+      const { error: requestError } = revisionSource
+        ? await client.rpc("resubmit_finance_revised_transaction", {
+          p_original_transaction_id: textValue(revisionSource, "id"),
+          p_project_fund_id: cashIn.projectId,
+          p_amount: Number(cashIn.amount),
+          p_category_id: cashIn.categoryId,
+          p_transaction_date: cashIn.date,
+          p_reference_number: cashIn.reference || null,
+          p_note: cashIn.note || null,
+          p_daily_fund_request_id: null,
+        })
+        : await client.rpc("create_finance_revised_cash_in_with_category", {
+          p_organization_id: organizationId,
+          p_project_fund_id: cashIn.projectId,
+          p_amount: Number(cashIn.amount),
+          p_category_id: cashIn.categoryId,
+          p_transaction_date: cashIn.date,
+          p_reference_number: cashIn.reference || null,
+          p_note: cashIn.note || null,
+        });
       if (requestError) throw new Error(requestError.message);
-      setDialog(null);
+      closeTransactionDialog();
       setCashIn({ projectId: "", categoryId: "", amount: "", date: localDate(), reference: "", note: "" });
-      finish("Project Cash In was submitted for GM approval.");
+      finish(revisionSource ? "Corrected Project Cash In was resubmitted for GM approval." : "Project Cash In was submitted for GM approval.");
     } catch (caught) {
       showError(caught);
     } finally {
@@ -555,23 +707,35 @@ export function FinanceRevisedWorkspace({
 
   const handleCashOut = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!cashOut.categoryId || Number(cashOut.amount) <= 0 || (!cashOut.projectId && !cashOut.dailyFundRequestId)) return;
+    const commissionRevision = revisionSource && textValue(revisionSource, "transaction_kind") === "commission_payout";
+    if ((!cashOut.categoryId && !commissionRevision) || Number(cashOut.amount) <= 0 || (!cashOut.projectId && !cashOut.dailyFundRequestId)) return;
     setSaving(true);
     try {
-      const { error: requestError } = await client.rpc("create_finance_revised_cash_out_with_category", {
-        p_organization_id: organizationId,
-        p_project_fund_id: cashOut.projectId || null,
-        p_amount: Number(cashOut.amount),
-        p_category_id: cashOut.categoryId,
-        p_transaction_date: cashOut.date,
-        p_reference_number: cashOut.reference || null,
-        p_note: cashOut.note || null,
-        p_daily_fund_request_id: cashOut.projectId ? null : cashOut.dailyFundRequestId,
-      });
+      const { error: requestError } = revisionSource
+        ? await client.rpc("resubmit_finance_revised_transaction", {
+          p_original_transaction_id: textValue(revisionSource, "id"),
+          p_project_fund_id: cashOut.projectId || null,
+          p_amount: Number(cashOut.amount),
+          p_category_id: cashOut.categoryId || null,
+          p_transaction_date: cashOut.date,
+          p_reference_number: cashOut.reference || null,
+          p_note: cashOut.note || null,
+          p_daily_fund_request_id: cashOut.projectId ? null : cashOut.dailyFundRequestId,
+        })
+        : await client.rpc("create_finance_revised_cash_out_with_category", {
+          p_organization_id: organizationId,
+          p_project_fund_id: cashOut.projectId || null,
+          p_amount: Number(cashOut.amount),
+          p_category_id: cashOut.categoryId,
+          p_transaction_date: cashOut.date,
+          p_reference_number: cashOut.reference || null,
+          p_note: cashOut.note || null,
+          p_daily_fund_request_id: cashOut.projectId ? null : cashOut.dailyFundRequestId,
+        });
       if (requestError) throw new Error(requestError.message);
-      setDialog(null);
+      closeTransactionDialog();
       setCashOut({ projectId: "", dailyFundRequestId: "", categoryId: "", amount: "", date: localDate(), reference: "", note: "" });
-      finish("Cash Out was submitted for GM approval.");
+      finish(revisionSource ? "Corrected Cash Out was resubmitted for GM approval." : "Cash Out was submitted for GM approval.");
     } catch (caught) {
       showError(caught);
     } finally {
@@ -893,8 +1057,12 @@ export function FinanceRevisedWorkspace({
     }
   };
 
-  const reviewTransactionDecision = async (decision: "approved" | "rejected") => {
+  const reviewTransactionDecision = async (decision: "approved" | "revision_requested") => {
     if (!reviewTransaction) return;
+    if (decision === "revision_requested" && !decisionNote.trim()) {
+      showError(new Error("A revision note is required so Finance knows what to correct."));
+      return;
+    }
     setSaving(true);
     try {
       const { error: requestError } = await client.rpc("review_finance_revised_transaction", {
@@ -905,7 +1073,7 @@ export function FinanceRevisedWorkspace({
       if (requestError) throw new Error(requestError.message);
       setReviewTransaction(null);
       setDecisionNote("");
-      finish(decision === "approved" ? "Finance transaction was approved and posted." : "Finance transaction decision was recorded.");
+      finish(decision === "approved" ? "Finance transaction was approved and posted." : "Revision requested. The original transaction remains in the audit history.");
     } catch (caught) {
       showError(caught);
     } finally {
@@ -967,9 +1135,13 @@ export function FinanceRevisedWorkspace({
   const startRepayment = (request: Row) => {
     setRepaymentRequest(request);
     const project = projects.find((item) => textValue(item, "project_fund_id") === textValue(request, "project_fund_id"));
+    const clientAvailableBalance = Math.max(
+      numberValue(project, "client_cash_in") - numberValue(project, "cash_out") - numberValue(project, "working_fund_repaid"),
+      0,
+    );
     setRepaymentAmount(String(Math.min(
       numberValue(request, "outstanding_amount") || numberValue(request, "approved_amount") || numberValue(request, "requested_amount"),
-      numberValue(project, "available_balance"),
+      clientAvailableBalance,
     )));
   };
 
@@ -1024,7 +1196,13 @@ export function FinanceRevisedWorkspace({
     }
   };
 
-  const renderDashboard = () => (
+  const renderDashboard = () => {
+    const pendingApprovalItems = buildApprovalItems(
+      transactions.filter((item) => textValue(item, "status") === "pending"),
+      requests.filter((request) => textValue(request, "status") === "pending"),
+      dailyFundRequests.filter((request) => textValue(request, "status") === "pending"),
+    ).slice(0, 6);
+    return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <label className="block text-[11px] font-medium text-[var(--color-text-primary)]">
@@ -1041,7 +1219,7 @@ export function FinanceRevisedWorkspace({
           <Metric label="Capital Funds balance" value={amount(snapshot?.capital_funds)} detail="Owner investment remaining after transfers" />
           <Metric label="Beginning Working Funds" value={amount(snapshot?.beginning_working_funds)} detail={"Balance before " + month} />
           <Metric label="Ending Working Funds" value={amount(snapshot?.ending_working_funds)} detail="Available company operating pool" tone={numberValue(snapshot, "ending_working_funds") < 0 ? "negative" : "positive"} />
-          <Metric label="Pending GM approvals" value={String(numberValue(snapshot, "pending_approvals"))} detail="Cash In, Cash Out, and repayments" tone={numberValue(snapshot, "pending_approvals") ? "warning" : "positive"} />
+          <Metric label="Pending GM approvals" value={String(numberValue(snapshot, "pending_approvals"))} detail="Cash In, Cash Out, Working Funds, and Daily Fund requests" tone={numberValue(snapshot, "pending_approvals") ? "warning" : "positive"} />
           <Metric label="Period Cash In" value={amount(snapshot?.period_cash_in)} detail="Client collections recorded manually" tone="positive" />
           <Metric label="Period Cash Out" value={amount(snapshot?.period_cash_out)} detail="Approved project and operating expenses" />
           <Metric label="Daily Fund balance" value={amount(dailySnapshot?.daily_fund_balance)} detail="Available for non-project Cash Out" tone={numberValue(dailySnapshot, "daily_fund_balance") < 0 ? "negative" : "positive"} />
@@ -1056,20 +1234,19 @@ export function FinanceRevisedWorkspace({
         </div>
       </Panel>
       <Panel title="Approval queue" detail="GM approval is the posting event. Pending rows have not changed a balance yet.">
-        {transactions.filter((item) => textValue(item, "status") === "pending").length ? (
-          <div className="divide-y divide-[var(--color-border)]">
-            {transactions.filter((item) => textValue(item, "status") === "pending").slice(0, 6).map((transaction) => (
-              <div key={textValue(transaction, "id")} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5">
-                <div><p className="text-[12px] font-semibold text-[var(--color-text-primary)]">{transactionLabel(transaction)}</p><p className="mt-1 text-[10px] text-[var(--color-text-secondary)]">{textValue(transaction, "project_name", "Working Funds")} · {dateLabel(transaction.transaction_date)}</p></div>
-                <div className="flex items-center gap-3"><span className="text-[12px] font-semibold text-[var(--color-text-primary)]">{amount(transaction.amount)}</span>{gm ? <button type="button" className="button-secondary text-[11px]" onClick={() => { setReviewTransaction(transaction); setDecisionNote(""); }}>Review</button> : null}</div>
-              </div>
-            ))}
-          </div>
-        ) : <EmptyState>No pending revised Finance approvals.</EmptyState>}
+        <ApprovalTable
+          items={pendingApprovalItems}
+          canReview={gm}
+          onTransactionDetails={(transaction) => setSelectedTransaction(transaction)}
+          onTransactionReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }}
+          onWorkingDetails={(request) => void openRequest(request)}
+          onWorkingReview={(request) => { setReviewRequest(request); setApprovalAmount(textValue(request, "requested_amount")); setDecisionNote(""); }}
+          onDailyReview={(request) => { setReviewDailyFundRequest(request); setApprovalAmount(textValue(request, "requested_amount")); setDecisionNote(""); }}
+        />
       </Panel>
     </div>
   );
-
+  };
   const renderFunds = () => {
     const capitalTransactions = transactions.filter((transaction) =>
       ["capital_contribution", "capital_to_working"].includes(textValue(transaction, "transaction_kind")),
@@ -1108,10 +1285,10 @@ export function FinanceRevisedWorkspace({
 
         <div className="grid gap-5 xl:grid-cols-2">
           <Panel title="Capital Funds activity" detail="Owner contributions increase Capital Funds. Capital → Working transfers reduce the Capital balance by the same amount.">
-            <ActivityTable transactions={capitalTransactions} canApprove={gm} onDetails={(transaction) => setSelectedTransaction(transaction)} onReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }} />
+            <ActivityTable transactions={capitalTransactions} canApprove={gm} onDetails={(transaction) => setSelectedTransaction(transaction)} onReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }} onRevise={canOperate ? beginTransactionRevision : undefined} />
           </Panel>
           <Panel title="Working Funds activity" detail="Shows Capital transfers, project support, Daily Fund allocations, completed-project repayments, and Daily Fund returns.">
-            <ActivityTable transactions={workingTransactions} canApprove={gm} onDetails={(transaction) => setSelectedTransaction(transaction)} onReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }} />
+            <ActivityTable transactions={workingTransactions} canApprove={gm} onDetails={(transaction) => setSelectedTransaction(transaction)} onReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }} onRevise={canOperate ? beginTransactionRevision : undefined} />
           </Panel>
         </div>
       </div>
@@ -1153,7 +1330,7 @@ export function FinanceRevisedWorkspace({
         </Panel>
 
         <Panel title="Daily Fund activity" detail="This activity shows allocations from Working Funds, non-project Cash Out, and returns to Working Funds.">
-          <ActivityTable transactions={dailyTransactions} canApprove={gm} onDetails={(transaction) => setSelectedTransaction(transaction)} onReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }} />
+          <ActivityTable transactions={dailyTransactions} canApprove={gm} onDetails={(transaction) => setSelectedTransaction(transaction)} onReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }} onRevise={canOperate ? beginTransactionRevision : undefined} />
         </Panel>
       </div>
     );
@@ -1205,7 +1382,7 @@ export function FinanceRevisedWorkspace({
         </Panel>
       </div>
       <Panel title="Revised Finance activity" detail="Only approved rows affect the Capital, Working Fund, or project balances.">
-        <ActivityTable transactions={transactions} canApprove={gm} onDetails={(transaction) => setSelectedTransaction(transaction)} onReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }} />
+        <ActivityTable transactions={transactions} canApprove={gm} onDetails={(transaction) => setSelectedTransaction(transaction)} onReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }} onRevise={canOperate ? beginTransactionRevision : undefined} />
       </Panel>
     </div>
   );
@@ -1225,6 +1402,7 @@ export function FinanceRevisedWorkspace({
                 {requests.map((request) => {
                   const project = projects.find((item) => textValue(item, "project_fund_id") === textValue(request, "project_fund_id"));
                   const completed = Boolean(project?.is_completed);
+                  const clientAvailableBalance = Math.max(numberValue(project, "client_cash_in") - numberValue(project, "cash_out") - numberValue(project, "working_fund_repaid"), 0);
                   return <tr key={textValue(request, "id")} className="border-b border-[var(--color-border)] last:border-0">
                     <td className="px-4 py-3 font-semibold text-[var(--color-text-primary)]">{textValue(request, "project_name")}</td>
                     <td className="max-w-[220px] px-4 py-3 text-[var(--color-text-secondary)]">{textValue(request, "purpose")}</td>
@@ -1232,7 +1410,7 @@ export function FinanceRevisedWorkspace({
                     <td className="px-4 py-3 font-semibold text-[var(--color-text-primary)]">{amount(request.approved_amount ?? request.requested_amount)}</td>
                     <td className="px-4 py-3 text-[var(--color-text-secondary)]">{textValue(request, "requested_by_name", textValue(request, "requested_by", "Unknown"))}</td>
                     <td className="px-4 py-3"><StatusBadge status={textValue(request, "status")} /></td>
-                    <td className="px-4 py-3"><div className="flex flex-wrap justify-end gap-2"><button type="button" className="button-secondary text-[10px]" onClick={() => void openRequest(request)}>View breakdown</button>{gm && textValue(request, "status") === "pending" ? <button type="button" className="button-secondary text-[10px]" onClick={() => { setReviewRequest(request); setApprovalAmount(textValue(request, "requested_amount")); setDecisionNote(""); }}>Review</button> : null}{canOperate && completed && ["approved", "partially_repaid"].includes(textValue(request, "status")) && numberValue(request, "outstanding_amount") > 0 && numberValue(project, "available_balance") > 0 ? <button type="button" className="button-secondary text-[10px]" onClick={() => startRepayment(request)}>Repay</button> : null}</div></td>
+                    <td className="px-4 py-3"><div className="flex flex-wrap justify-end gap-2"><button type="button" className="button-secondary text-[10px]" onClick={() => void openRequest(request)}>View breakdown</button>{gm && textValue(request, "status") === "pending" ? <button type="button" className="button-secondary text-[10px]" onClick={() => { setReviewRequest(request); setApprovalAmount(textValue(request, "requested_amount")); setDecisionNote(""); }}>Review</button> : null}{canOperate && completed && ["approved", "partially_repaid"].includes(textValue(request, "status")) && numberValue(request, "outstanding_amount") > 0 && clientAvailableBalance > 0 ? <button type="button" className="button-secondary text-[10px]" onClick={() => startRepayment(request)}>Repay</button> : null}</div></td>
                   </tr>;
                 })}
               </tbody>
@@ -1326,7 +1504,7 @@ export function FinanceRevisedWorkspace({
 
   const renderHistory = () => (
     <Panel title="Finance activity history" detail="A journal-style view of approved and pending movements across Capital Funds, Working Funds, and project budgets.">
-      <ActivityTable transactions={transactions} canApprove={gm} onDetails={(transaction) => setSelectedTransaction(transaction)} onReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }} />
+      <ActivityTable transactions={transactions} canApprove={gm} onDetails={(transaction) => setSelectedTransaction(transaction)} onReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }} onRevise={canOperate ? beginTransactionRevision : undefined} />
     </Panel>
   );
 
@@ -1334,26 +1512,20 @@ export function FinanceRevisedWorkspace({
     const pendingTransactions = transactions.filter((transaction) => textValue(transaction, "status") === "pending");
     const pendingRequests = requests.filter((request) => textValue(request, "status") === "pending");
     const pendingDailyFundRequests = dailyFundRequests.filter((request) => textValue(request, "status") === "pending");
-    const approvalBucket = (transaction: Row): Exclude<ApprovalTab, "all"> => {
-      const kind = textValue(transaction, "transaction_kind");
-      if (kind === "project_cash_in") return "cash_in";
-      if (["working_fund_support", "working_fund_repayment"].includes(kind)) return "working_funds";
-      if (["daily_fund_allocation", "daily_fund_return"].includes(kind)) return "daily_fund";
-      return "cash_out";
-    };
+    const pendingItems = buildApprovalItems(pendingTransactions, pendingRequests, pendingDailyFundRequests);
     const transactionCounts = {
-      cash_in: pendingTransactions.filter((transaction) => approvalBucket(transaction) === "cash_in").length,
-      cash_out: pendingTransactions.filter((transaction) => approvalBucket(transaction) === "cash_out").length,
-      working_funds: pendingTransactions.filter((transaction) => approvalBucket(transaction) === "working_funds").length + pendingRequests.length,
-      daily_fund: pendingTransactions.filter((transaction) => approvalBucket(transaction) === "daily_fund").length + pendingDailyFundRequests.length,
+      cash_in: pendingItems.filter((item) => item.bucket === "cash_in").length,
+      cash_out: pendingItems.filter((item) => item.bucket === "cash_out").length,
+      working_funds: pendingItems.filter((item) => item.bucket === "working_funds").length,
+      daily_fund: pendingItems.filter((item) => item.bucket === "daily_fund").length,
     };
     const approvalCounts: Record<ApprovalTab, number> = {
-      all: pendingTransactions.length + pendingRequests.length + pendingDailyFundRequests.length,
+      all: pendingItems.length,
       ...transactionCounts,
     };
-    const visiblePendingTransactions = approvalTab === "all"
-      ? pendingTransactions
-      : pendingTransactions.filter((transaction) => approvalBucket(transaction) === approvalTab);
+    const visibleItems = approvalTab === "all"
+      ? pendingItems
+      : pendingItems.filter((item) => item.bucket === approvalTab);
     const approvalTabs: Array<{ key: ApprovalTab; label: string }> = [
       { key: "all", label: "All" },
       { key: "cash_in", label: "Cash In" },
@@ -1361,7 +1533,7 @@ export function FinanceRevisedWorkspace({
       { key: "working_funds", label: "Working Funds" },
       { key: "daily_fund", label: "Daily Fund" },
     ];
-    const transactionTitle = approvalTab === "cash_in"
+    const approvalTitle = approvalTab === "cash_in"
       ? "Pending Cash In"
       : approvalTab === "cash_out"
         ? "Pending Cash Out"
@@ -1369,7 +1541,7 @@ export function FinanceRevisedWorkspace({
           ? "Pending Working Fund activity"
           : approvalTab === "daily_fund"
             ? "Pending Daily Fund activity"
-            : "Pending Finance transactions";
+          : "Pending Finance approvals";
 
     return (
       <div className="space-y-5">
@@ -1382,20 +1554,17 @@ export function FinanceRevisedWorkspace({
             </button>;
           })}
         </div>
-        <Panel title={transactionTitle} detail="Pending rows do not change a balance until the GM approves them.">
-          <ActivityTable
-            transactions={visiblePendingTransactions}
-            canApprove={gm}
-            onDetails={(transaction) => setSelectedTransaction(transaction)}
-            onReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }}
+        <Panel title={approvalTitle} detail="All approval types use one queue. Pending rows do not change a balance until the GM approves them.">
+          <ApprovalTable
+            items={visibleItems}
+            canReview={gm}
+            onTransactionDetails={(transaction) => setSelectedTransaction(transaction)}
+            onTransactionReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }}
+            onWorkingDetails={(request) => void openRequest(request)}
+            onWorkingReview={(request) => { setReviewRequest(request); setApprovalAmount(textValue(request, "requested_amount")); setDecisionNote(""); }}
+            onDailyReview={(request) => { setReviewDailyFundRequest(request); setApprovalAmount(textValue(request, "requested_amount")); setDecisionNote(""); }}
           />
         </Panel>
-        {approvalTab === "all" || approvalTab === "working_funds" ? <Panel title="Pending Working Fund requests" detail="Each request is tied to one project and includes the itemized breakdown submitted by Accounting & Finance.">
-          {pendingRequests.length ? <div className="overflow-x-auto"><table className="w-full min-w-[980px] text-left text-[11px]"><thead><tr className="border-b border-[var(--color-border)] text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]"><th className="px-4 py-3">Project</th><th className="px-4 py-3">Purpose</th><th className="px-4 py-3">Breakdown</th><th className="px-4 py-3">Requested</th><th className="px-4 py-3">Requested by</th><th className="px-4 py-3"></th></tr></thead><tbody>{pendingRequests.map((request) => <tr key={textValue(request, "id")} className="border-b border-[var(--color-border)] last:border-0"><td className="px-4 py-3 font-semibold text-[var(--color-text-primary)]">{textValue(request, "project_name", "Project")}</td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{textValue(request, "purpose")}</td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{textValue(request, "breakdown_line_count", "0")} lines · {amount(request.breakdown_total)}</td><td className="px-4 py-3 font-semibold">{amount(request.requested_amount)}</td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{textValue(request, "requested_by_name", textValue(request, "requested_by", "Unknown"))}</td><td className="px-4 py-3 text-right"><div className="flex justify-end gap-2"><button type="button" className="button-secondary text-[10px]" onClick={() => void openRequest(request)}>View breakdown</button>{gm ? <button type="button" className="button-secondary text-[10px]" onClick={() => { setReviewRequest(request); setApprovalAmount(textValue(request, "requested_amount")); setDecisionNote(""); }}>Review</button> : null}</div></td></tr>)}</tbody></table></div> : <EmptyState>No pending Working Fund requests.</EmptyState>}
-        </Panel> : null}
-        {approvalTab === "all" || approvalTab === "daily_fund" ? <Panel title="Pending Daily Fund requests" detail="Approval transfers the approved amount from Working Funds into the Daily Fund for non-project Cash Out.">
-          {pendingDailyFundRequests.length ? <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-left text-[11px]"><thead><tr className="border-b border-[var(--color-border)] text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]"><th className="px-4 py-3">Fund date</th><th className="px-4 py-3">Purpose</th><th className="px-4 py-3">Requested</th><th className="px-4 py-3">Requested by</th><th className="px-4 py-3"></th></tr></thead><tbody>{pendingDailyFundRequests.map((request) => <tr key={textValue(request, "id")} className="border-b border-[var(--color-border)] last:border-0"><td className="px-4 py-3 text-[var(--color-text-secondary)]">{dateLabel(request.fund_date)}</td><td className="px-4 py-3 font-semibold text-[var(--color-text-primary)]">{textValue(request, "purpose")}</td><td className="px-4 py-3 font-semibold">{amount(request.requested_amount)}</td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{textValue(request, "requested_by_name", textValue(request, "requested_by", "Unknown"))}</td><td className="px-4 py-3 text-right">{gm ? <button type="button" className="button-secondary text-[10px]" onClick={() => { setReviewDailyFundRequest(request); setApprovalAmount(textValue(request, "requested_amount")); setDecisionNote(""); }}>Review</button> : <span className="text-[10px] text-[var(--color-text-secondary)]">GM review required</span>}</td></tr>)}</tbody></table></div> : <EmptyState>No pending Daily Fund requests.</EmptyState>}
-        </Panel> : null}
       </div>
     );
   };
@@ -1404,6 +1573,7 @@ export function FinanceRevisedWorkspace({
   const selectedCostingTotal = costingLines.length
     ? numberValue(costingLines[0], "total_direct_cost")
     : numberValue(selectedProject, "total_direct_cost");
+  const commissionRevisionSource = revisionSource && textValue(revisionSource, "transaction_kind") === "commission_payout";
 
   if (loading && !snapshot && !projects.length && !transactions.length && !requests.length) {
     return <LoadingState variant="section" label="Loading Accounting & Finance..." />;
@@ -1418,7 +1588,7 @@ export function FinanceRevisedWorkspace({
 
       {tab === "dashboard" ? renderDashboard() : tab === "funds" ? renderFunds() : tab === "daily_fund" ? renderDailyFund() : tab === "cash_on_hand" ? renderCashOnHand() : tab === "transactions" ? renderTransactions() : tab === "requests" ? renderRequests() : tab === "approvals" ? renderApprovals() : tab === "projects" ? renderProjects() : tab === "commissions" ? renderCommissions() : renderHistory()}
 
-      {dialog === "cash_in" ? <Modal title="Record project Cash In" detail="Enter any collection amount manually. GM approval is required before the project balance changes." close={() => setDialog(null)}>
+      {dialog === "cash_in" ? <Modal title={revisionSource ? "Correct and resubmit Cash In" : "Record project Cash In"} detail={revisionSource ? "Update the requested correction. The original submission remains in the audit history." : "Enter any collection amount manually. GM approval is required before the project balance changes."} close={closeTransactionDialog}>
         <form className="grid gap-3 sm:grid-cols-2" onSubmit={handleCashIn}>
           <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Project</span><select className="input mt-1 w-full" value={cashIn.projectId} onChange={(event) => setCashIn((current) => ({ ...current, projectId: event.target.value }))} required><option value="">Select project</option>{cashInProjects.map((project) => <option key={textValue(project, "project_fund_id")} value={textValue(project, "project_fund_id")}>{textValue(project, "project_name")} · {textValue(project, "client_name", "No client")}{textValue(project, "project_status") === "closed" ? " · Completed" : ""}</option>)}</select></label>
           <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Cash In category</span><div className="mt-1 flex items-center gap-2"><select className="input w-full" value={cashIn.categoryId} onChange={(event) => handleCategorySelection("income", event.target.value)} required><option value="">Select Cash In category</option>{categories.filter((category) => textValue(category, "direction") === "income").map((category) => <option key={textValue(category, "category_id")} value={textValue(category, "category_id")}>{textValue(category, "name")}</option>)}<option value={addCategoryOptionValue}>＋ Add Cash In category</option></select><button type="button" className="button-secondary inline-flex shrink-0 items-center gap-1 text-[10px]" onClick={() => openCategoryManager("income")}><Tag size={13} /> Manage</button></div></label>
@@ -1426,20 +1596,33 @@ export function FinanceRevisedWorkspace({
           <Field label="Collection date" value={cashIn.date} onChange={(value) => setCashIn((current) => ({ ...current, date: value }))} type="date" required />
           <Field label="Reference" value={cashIn.reference} onChange={(value) => setCashIn((current) => ({ ...current, reference: value }))} placeholder="Receipt or collection reference" />
           <Field label="Note" value={cashIn.note} onChange={(value) => setCashIn((current) => ({ ...current, note: value }))} placeholder="Optional detail" />
-          <div className="flex justify-end gap-2 sm:col-span-2"><button type="button" className="button-secondary" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button-primary inline-flex items-center gap-2" disabled={!canOperate || saving}><ArrowDownToLine size={15} /> Submit Cash In</button></div>
+          {revisionSource && textValue(revisionSource, "decision_note") ? <div className="rounded-lg border border-[var(--color-warning-border)] bg-[var(--color-warning-subtle)] p-3 text-[11px] sm:col-span-2"><p className="font-semibold text-[var(--color-warning-text)]">GM revision note</p><p className="mt-1 whitespace-pre-wrap leading-5 text-[var(--color-text-primary)]">{textValue(revisionSource, "decision_note")}</p></div> : null}
+          <div className="flex justify-end gap-2 sm:col-span-2"><button type="button" className="button-secondary" onClick={closeTransactionDialog}>Cancel</button><button type="submit" className="button-primary inline-flex items-center gap-2" disabled={!canOperate || saving}><ArrowDownToLine size={15} /> {revisionSource ? "Resubmit Cash In" : "Submit Cash In"}</button></div>
         </form>
       </Modal> : null}
 
-      {dialog === "cash_out" ? <Modal title="Record Cash Out" detail="Choose a project for project expenses or leave Project blank for a non-project expense from Daily Fund." close={() => setDialog(null)}>
+      {dialog === "cash_out" && !commissionRevisionSource ? <Modal title={revisionSource ? "Correct and resubmit Cash Out" : "Record Cash Out"} detail={revisionSource ? "Update the requested correction. The original submission remains in the audit history." : "Choose a project for project expenses or leave Project blank for a non-project expense from Daily Fund."} close={closeTransactionDialog}>
         <form className="grid gap-3 sm:grid-cols-2" onSubmit={handleCashOut}>
-          <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Budget source</span><select className="input mt-1 w-full" value={cashOut.projectId} onChange={(event) => setCashOut((current) => ({ ...current, projectId: event.target.value, dailyFundRequestId: "" }))}><option value="">Daily Fund · Non-project expense</option>{openProjects.map((project) => <option key={textValue(project, "project_fund_id")} value={textValue(project, "project_fund_id")}>{textValue(project, "project_name")} · Project budget</option>)}</select></label>
+        <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Budget source</span><select className="input mt-1 w-full" value={cashOut.projectId} onChange={(event) => setCashOut((current) => ({ ...current, projectId: event.target.value, dailyFundRequestId: "" }))} disabled={Boolean(revisionSource)}><option value="">Daily Fund · Non-project expense</option>{openProjects.map((project) => <option key={textValue(project, "project_fund_id")} value={textValue(project, "project_fund_id")}>{textValue(project, "project_name")} · Project budget</option>)}</select></label>
           {!cashOut.projectId ? <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Daily Fund request</span><select className="input mt-1 w-full" value={cashOut.dailyFundRequestId} onChange={(event) => setCashOut((current) => ({ ...current, dailyFundRequestId: event.target.value }))} required><option value="">Select an approved Daily Fund request</option>{dailyFundRequests.filter((request) => ["approved", "partially_returned"].includes(textValue(request, "status")) && numberValue(request, "unused_amount") > 0).map((request) => <option key={textValue(request, "id")} value={textValue(request, "id")}>{dateLabel(request.fund_date)} · {textValue(request, "purpose")} · {amount(request.unused_amount)} remaining</option>)}</select><span className="mt-1 block text-[10px] text-[var(--color-text-secondary)]">Every non-project Cash Out is assigned to an approved Daily Fund request so its remaining budget can be tracked.</span></label> : null}
           <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Cash Out category</span><div className="mt-1 flex items-center gap-2"><select className="input w-full" value={cashOut.categoryId} onChange={(event) => handleCategorySelection("expense", event.target.value)} required><option value="">Select Cash Out category</option>{categories.filter((category) => textValue(category, "direction") === "expense").map((category) => <option key={textValue(category, "category_id")} value={textValue(category, "category_id")}>{textValue(category, "name")}</option>)}<option value={addCategoryOptionValue}>＋ Add Cash Out category</option></select><button type="button" className="button-secondary inline-flex shrink-0 items-center gap-1 text-[10px]" onClick={() => openCategoryManager("expense")}><Tag size={13} /> Manage</button></div></label>
           <Field label="Amount" value={cashOut.amount} onChange={(value) => setCashOut((current) => ({ ...current, amount: value }))} type="number" min="0.01" step="0.01" required />
           <Field label="Cash Out date" value={cashOut.date} onChange={(value) => setCashOut((current) => ({ ...current, date: value }))} type="date" required />
           <Field label="Reference" value={cashOut.reference} onChange={(value) => setCashOut((current) => ({ ...current, reference: value }))} placeholder="Voucher or receipt reference" />
           <div className="sm:col-span-2"><TextArea label="Note" value={cashOut.note} onChange={(value) => setCashOut((current) => ({ ...current, note: value }))} placeholder="What is this Cash Out for?" /></div>
-          <div className="flex justify-end gap-2 sm:col-span-2"><button type="button" className="button-secondary" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button-primary inline-flex items-center gap-2" disabled={!canOperate || saving}><ArrowUpFromLine size={15} /> Submit Cash Out</button></div>
+          {revisionSource && textValue(revisionSource, "decision_note") ? <div className="rounded-lg border border-[var(--color-warning-border)] bg-[var(--color-warning-subtle)] p-3 text-[11px] sm:col-span-2"><p className="font-semibold text-[var(--color-warning-text)]">GM revision note</p><p className="mt-1 whitespace-pre-wrap leading-5 text-[var(--color-text-primary)]">{textValue(revisionSource, "decision_note")}</p></div> : null}
+          <div className="flex justify-end gap-2 sm:col-span-2"><button type="button" className="button-secondary" onClick={closeTransactionDialog}>Cancel</button><button type="submit" className="button-primary inline-flex items-center gap-2" disabled={!canOperate || saving}><ArrowUpFromLine size={15} /> {revisionSource ? "Resubmit Cash Out" : "Submit Cash Out"}</button></div>
+        </form>
+      </Modal> : null}
+
+      {dialog === "cash_out" && commissionRevisionSource ? <Modal title="Correct and resubmit commission payout" detail="Update the payout date, reference, or note. The project and amount remain tied to the approved commission allocation." close={closeTransactionDialog}>
+        <form className="space-y-4" onSubmit={handleCashOut}>
+          <div className="grid gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 sm:grid-cols-3"><Metric label="Project" value={transactionSourceLabel(revisionSource ?? {})} /><Metric label="Expense type" value="Commission payout" /><Metric label="Commission amount" value={amount(cashOut.amount)} /></div>
+          <Field label="Cash Out date" value={cashOut.date} onChange={(value) => setCashOut((current) => ({ ...current, date: value }))} type="date" required />
+          <Field label="Reference" value={cashOut.reference} onChange={(value) => setCashOut((current) => ({ ...current, reference: value }))} placeholder="Voucher or receipt reference" />
+          <TextArea label="Note" value={cashOut.note} onChange={(value) => setCashOut((current) => ({ ...current, note: value }))} placeholder="What should be corrected?" />
+          {revisionSource && textValue(revisionSource, "decision_note") ? <div className="rounded-lg border border-[var(--color-warning-border)] bg-[var(--color-warning-subtle)] p-3 text-[11px]"><p className="font-semibold text-[var(--color-warning-text)]">GM revision note</p><p className="mt-1 whitespace-pre-wrap leading-5 text-[var(--color-text-primary)]">{textValue(revisionSource, "decision_note")}</p></div> : null}
+          <div className="flex justify-end gap-2"><button type="button" className="button-secondary" onClick={closeTransactionDialog}>Cancel</button><button type="submit" className="button-primary inline-flex items-center gap-2" disabled={!canOperate || saving}><ArrowUpFromLine size={15} /> Resubmit commission payout</button></div>
         </form>
       </Modal> : null}
 
@@ -1640,7 +1823,7 @@ export function FinanceRevisedWorkspace({
       ) : null}
 
       {reviewTransaction ? <Modal title="Review Finance transaction" detail={transactionLabel(reviewTransaction) + " · " + textValue(reviewTransaction, "project_name", "Working Funds")} close={() => setReviewTransaction(null)}>
-        <div className="space-y-4"><div className="grid gap-3 sm:grid-cols-3"><Metric label="Amount" value={amount(reviewTransaction.amount)} /><Metric label="Date" value={dateLabel(reviewTransaction.transaction_date)} /><Metric label="Reference" value={textValue(reviewTransaction, "reference_number", "—")} /></div>{textValue(reviewTransaction, "commission_allocation_id") ? <div className="grid gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 sm:grid-cols-3"><Metric label="Commission recipient" value={textValue(reviewTransaction, "commission_recipient_name", "—")} /><Metric label="Commission role" value={titleCase(reviewTransaction.commission_allocation_role)} /><Metric label="Project" value={textValue(reviewTransaction, "project_name", "—")} /></div> : null}<TextArea label="Decision note" value={decisionNote} onChange={setDecisionNote} placeholder="Optional approval note" /><p className="text-[11px] leading-5 text-[var(--color-text-secondary)]">If the details are wrong, reject this transaction and submit a corrected one.</p><div className="flex flex-wrap justify-end gap-2"><button type="button" className="button-secondary" onClick={() => void reviewTransactionDecision("rejected")} disabled={saving}>Reject</button><button type="button" className="button-primary inline-flex items-center gap-1" onClick={() => void reviewTransactionDecision("approved")} disabled={saving}><Check size={14} /> Approve &amp; post</button></div></div>
+        <div className="space-y-4"><div className="grid gap-3 sm:grid-cols-3"><Metric label="Amount" value={amount(reviewTransaction.amount)} /><Metric label="Date" value={dateLabel(reviewTransaction.transaction_date)} /><Metric label="Reference" value={textValue(reviewTransaction, "reference_number", "—")} /></div>{textValue(reviewTransaction, "commission_allocation_id") ? <div className="grid gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 sm:grid-cols-3"><Metric label="Commission recipient" value={textValue(reviewTransaction, "commission_recipient_name", "—")} /><Metric label="Commission role" value={titleCase(reviewTransaction.commission_allocation_role)} /><Metric label="Project" value={textValue(reviewTransaction, "project_name", "—")} /></div> : null}<TextArea label={canRequestTransactionRevision(reviewTransaction) ? "Decision note" : "Approval note"} value={decisionNote} onChange={setDecisionNote} placeholder={canRequestTransactionRevision(reviewTransaction) ? "Required when requesting a revision" : "Optional approval note"} /><p className="text-[11px] leading-5 text-[var(--color-text-secondary)]">{canRequestTransactionRevision(reviewTransaction) ? "Approve to post this Cash In or Cash Out. If the details are wrong, request a revision with a clear correction note; no ledger entry is posted." : "Approve to post this transaction. Corrections for Cash In and Cash Out use the revision workflow."}</p><div className="flex flex-wrap justify-end gap-2">{canRequestTransactionRevision(reviewTransaction) ? <button type="button" className="button-secondary" onClick={() => void reviewTransactionDecision("revision_requested")} disabled={saving || !decisionNote.trim()}>Request revision</button> : null}<button type="button" className="button-primary inline-flex items-center gap-1" onClick={() => void reviewTransactionDecision("approved")} disabled={saving}><Check size={14} /> Approve &amp; post</button></div></div>
       </Modal> : null}
 
       {repaymentRequest ? <Modal title="Return Working Funds" detail="Only completed projects can return approved support. The repayment is an internal project-to-Working-Funds transfer." close={() => setRepaymentRequest(null)}>
@@ -1661,8 +1844,8 @@ export function FinanceRevisedWorkspace({
           </div>
           <div className="grid gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-[11px] sm:grid-cols-2">
             <div><p className="text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]">Submitted by</p><p className="mt-1 break-all text-[var(--color-text-primary)]">{textValue(selectedTransaction, "submitted_by_name", textValue(selectedTransaction, "submitted_by", "—"))}</p></div>
-            <div><p className="text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]">Approved by</p><p className="mt-1 break-all text-[var(--color-text-primary)]">{textValue(selectedTransaction, "approved_by_name", textValue(selectedTransaction, "approved_by", "Pending"))}</p></div>
-            <div><p className="text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]">Approved at</p><p className="mt-1 text-[var(--color-text-primary)]">{dateLabel(selectedTransaction.approved_at)}</p></div>
+            <div><p className="text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]">Reviewed by</p><p className="mt-1 break-all text-[var(--color-text-primary)]">{textValue(selectedTransaction, "reviewed_by_name", textValue(selectedTransaction, "approved_by_name", textValue(selectedTransaction, "reviewed_by", textValue(selectedTransaction, "approved_by", "Pending"))))}</p></div>
+            <div><p className="text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]">Reviewed at</p><p className="mt-1 text-[var(--color-text-primary)]">{dateLabel(selectedTransaction.reviewed_at ?? selectedTransaction.approved_at)}</p></div>
             <div><p className="text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]">Daily Fund request</p><p className="mt-1 break-all text-[var(--color-text-primary)]">{textValue(selectedTransaction, "daily_fund_request_id", "—")}</p></div>
           </div>
           {textValue(selectedTransaction, "note") ? <div><p className="text-[10px] font-semibold uppercase tracking-[.06em] text-[var(--color-text-secondary)]">Note</p><p className="mt-1 whitespace-pre-wrap text-[11px] leading-5 text-[var(--color-text-primary)]">{textValue(selectedTransaction, "note")}</p></div> : null}
@@ -1706,8 +1889,8 @@ export function FinanceRevisedWorkspace({
             </div> : <EmptyState>No submitted direct-cost lines are available for this quotation.</EmptyState>}
           </Panel>
           <div className="grid gap-5 xl:grid-cols-2">
-            <Panel title="Project Cash In breakdown" detail="Approved and pending Cash In records for this project.">{transactions.filter((item) => textValue(item, "project_fund_id") === textValue(selectedProject, "project_fund_id") && textValue(item, "transaction_kind") === "project_cash_in").length ? <ActivityTable transactions={transactions.filter((item) => textValue(item, "project_fund_id") === textValue(selectedProject, "project_fund_id") && textValue(item, "transaction_kind") === "project_cash_in")} canApprove={gm} onDetails={(transaction) => setSelectedTransaction(transaction)} onReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }} /> : <EmptyState>No project Cash In records yet.</EmptyState>}</Panel>
-            <Panel title="Project Cash Out breakdown" detail="Approved and pending project expenses and commission payouts for this project.">{transactions.filter((item) => textValue(item, "project_fund_id") === textValue(selectedProject, "project_fund_id") && ["project_cash_out", "commission_payout"].includes(textValue(item, "transaction_kind"))).length ? <ActivityTable transactions={transactions.filter((item) => textValue(item, "project_fund_id") === textValue(selectedProject, "project_fund_id") && ["project_cash_out", "commission_payout"].includes(textValue(item, "transaction_kind")))} canApprove={gm} onDetails={(transaction) => setSelectedTransaction(transaction)} onReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }} /> : <EmptyState>No project Cash Out records yet.</EmptyState>}</Panel>
+            <Panel title="Project Cash In breakdown" detail="Approved and pending Cash In records for this project.">{transactions.filter((item) => textValue(item, "project_fund_id") === textValue(selectedProject, "project_fund_id") && textValue(item, "transaction_kind") === "project_cash_in").length ? <ActivityTable transactions={transactions.filter((item) => textValue(item, "project_fund_id") === textValue(selectedProject, "project_fund_id") && textValue(item, "transaction_kind") === "project_cash_in")} canApprove={gm} onDetails={(transaction) => setSelectedTransaction(transaction)} onReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }} onRevise={canOperate ? beginTransactionRevision : undefined} /> : <EmptyState>No project Cash In records yet.</EmptyState>}</Panel>
+            <Panel title="Project Cash Out breakdown" detail="Approved and pending project expenses and commission payouts for this project.">{transactions.filter((item) => textValue(item, "project_fund_id") === textValue(selectedProject, "project_fund_id") && ["project_cash_out", "commission_payout"].includes(textValue(item, "transaction_kind"))).length ? <ActivityTable transactions={transactions.filter((item) => textValue(item, "project_fund_id") === textValue(selectedProject, "project_fund_id") && ["project_cash_out", "commission_payout"].includes(textValue(item, "transaction_kind")))} canApprove={gm} onDetails={(transaction) => setSelectedTransaction(transaction)} onReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }} onRevise={canOperate ? beginTransactionRevision : undefined} /> : <EmptyState>No project Cash Out records yet.</EmptyState>}</Panel>
           </div>
         </div>
       </Modal> : null}
@@ -1720,18 +1903,62 @@ function ActivityTable({
   canApprove,
   onDetails,
   onReview,
+  onRevise,
 }: {
   transactions: Row[];
   canApprove: boolean;
   onDetails?: (transaction: Row) => void;
   onReview: (transaction: Row) => void;
+  onRevise?: (transaction: Row) => void;
 }) {
   if (!transactions.length) return <EmptyState>No revised Finance transactions yet.</EmptyState>;
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[980px] text-left text-[11px]">
         <thead><tr className="border-b border-[var(--color-border)] text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]"><th className="px-4 py-3">Date</th><th className="px-4 py-3">Activity</th><th className="px-4 py-3">Project / source</th><th className="px-4 py-3">Category</th><th className="px-4 py-3">Amount</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Actor</th><th className="px-4 py-3"></th></tr></thead>
-        <tbody>{transactions.map((transaction) => <tr key={textValue(transaction, "id")} className="border-b border-[var(--color-border)] last:border-0"><td className="px-4 py-3 text-[var(--color-text-secondary)]">{dateLabel(transaction.transaction_date)}</td><td className="px-4 py-3 font-semibold text-[var(--color-text-primary)]">{transactionLabel(transaction)}</td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{textValue(transaction, "project_name", "Daily Fund")}</td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{textValue(transaction, "category", "—")}</td><td className="px-4 py-3 font-semibold text-[var(--color-text-primary)]">{amount(transaction.amount)}</td><td className="px-4 py-3"><StatusBadge status={textValue(transaction, "status")} /></td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{textValue(transaction, "submitted_by_name", textValue(transaction, "submitted_by", "Unknown"))}</td><td className="px-4 py-3 text-right"><div className="flex justify-end gap-1">{onDetails ? <button type="button" className="button-secondary text-[10px]" onClick={() => onDetails(transaction)}>Details</button> : null}{canApprove && textValue(transaction, "status") === "pending" ? <button type="button" className="button-secondary text-[10px]" onClick={() => onReview(transaction)}>Review</button> : null}</div></td></tr>)}</tbody>
+        <tbody>{transactions.map((transaction) => <tr key={textValue(transaction, "id")} className="border-b border-[var(--color-border)] last:border-0"><td className="px-4 py-3 text-[var(--color-text-secondary)]">{dateLabel(transaction.transaction_date)}</td><td className="px-4 py-3 font-semibold text-[var(--color-text-primary)]">{transactionLabel(transaction)}</td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{textValue(transaction, "project_name", "Daily Fund")}</td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{textValue(transaction, "category", "—")}</td><td className="px-4 py-3 font-semibold text-[var(--color-text-primary)]">{amount(transaction.amount)}</td><td className="px-4 py-3"><StatusBadge status={textValue(transaction, "status")} /></td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{textValue(transaction, "submitted_by_name", textValue(transaction, "submitted_by", "Unknown"))}</td><td className="px-4 py-3 text-right"><div className="flex justify-end gap-1">{onDetails ? <button type="button" className="button-secondary text-[10px]" onClick={() => onDetails(transaction)}>Details</button> : null}{canApprove && textValue(transaction, "status") === "pending" ? <button type="button" className="button-secondary text-[10px]" onClick={() => onReview(transaction)}>Review</button> : null}{onRevise && textValue(transaction, "status") === "revision_requested" && canRequestTransactionRevision(transaction) ? <button type="button" className="button-secondary text-[10px]" onClick={() => onRevise(transaction)}>Correct &amp; resubmit</button> : null}</div></td></tr>)}</tbody>
+      </table>
+    </div>
+  );
+}
+
+function ApprovalTable({
+  items,
+  canReview,
+  onTransactionDetails,
+  onTransactionReview,
+  onWorkingDetails,
+  onWorkingReview,
+  onDailyReview,
+}: {
+  items: FinanceApprovalItem[];
+  canReview: boolean;
+  onTransactionDetails: (transaction: Row) => void;
+  onTransactionReview: (transaction: Row) => void;
+  onWorkingDetails: (request: Row) => void;
+  onWorkingReview: (request: Row) => void;
+  onDailyReview: (request: Row) => void;
+}) {
+  if (!items.length) return <EmptyState>No pending Finance approvals.</EmptyState>;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full min-w-[1080px] text-left text-[11px]">
+        <thead><tr className="border-b border-[var(--color-border)] text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]"><th className="px-4 py-3">Type</th><th className="px-4 py-3">Date</th><th className="px-4 py-3">Project / source</th><th className="px-4 py-3">Activity / purpose</th><th className="px-4 py-3">Category / breakdown</th><th className="px-4 py-3">Amount</th><th className="px-4 py-3">Requested by</th><th className="px-4 py-3">Status</th><th className="px-4 py-3"></th></tr></thead>
+        <tbody>{items.map((item) => <tr key={`${item.kind}-${item.id}`} className="border-b border-[var(--color-border)] last:border-0">
+          <td className="px-4 py-3 font-semibold text-[var(--color-text-primary)]">{item.kind === "transaction" ? "Transaction" : item.kind === "working_request" ? "Working Funds" : "Daily Fund"}</td>
+          <td className="px-4 py-3 text-[var(--color-text-secondary)]">{dateLabel(item.date)}</td>
+          <td className="px-4 py-3 text-[var(--color-text-secondary)]">{item.project}</td>
+          <td className="max-w-[260px] px-4 py-3 font-semibold text-[var(--color-text-primary)]">{item.activity}</td>
+          <td className="px-4 py-3 text-[var(--color-text-secondary)]">{item.category}</td>
+          <td className="px-4 py-3 font-semibold text-[var(--color-text-primary)]">{amount(item.amount)}</td>
+          <td className="px-4 py-3 text-[var(--color-text-secondary)]">{item.requestedBy}</td>
+          <td className="px-4 py-3"><StatusBadge status={item.status} /></td>
+          <td className="px-4 py-3 text-right"><div className="flex justify-end gap-1">
+            {item.kind === "transaction" && item.transaction ? <><button type="button" className="button-secondary text-[10px]" onClick={() => onTransactionDetails(item.transaction as Row)}>Details</button>{canReview ? <button type="button" className="button-secondary text-[10px]" onClick={() => onTransactionReview(item.transaction as Row)}>Review</button> : null}</> : null}
+            {item.kind === "working_request" && item.request ? <><button type="button" className="button-secondary text-[10px]" onClick={() => onWorkingDetails(item.request as Row)}>View breakdown</button>{canReview ? <button type="button" className="button-secondary text-[10px]" onClick={() => onWorkingReview(item.request as Row)}>Review</button> : null}</> : null}
+            {item.kind === "daily_request" && item.dailyRequest ? canReview ? <button type="button" className="button-secondary text-[10px]" onClick={() => onDailyReview(item.dailyRequest!)}>Review</button> : <span className="text-[10px] text-[var(--color-text-secondary)]">GM review required</span> : null}
+          </div></td>
+        </tr>)}</tbody>
       </table>
     </div>
   );
