@@ -33,7 +33,7 @@ const productionConfirmedSummariesMigration = readFileSync(
   "utf8",
 );
 const financeProductionRemovalMigration = readFileSync(
-  join(repoRoot, "supabase", "migrations", "20261109100000_remove_finance_production_requirement.sql"),
+  join(repoRoot, "supabase", "migrations", "20261111054555_remove_finance_production_requirement.sql"),
   "utf8",
 );
 const commissionSummaryAccessMigration = readFileSync(

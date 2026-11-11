@@ -6,11 +6,11 @@ import test from "node:test";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const migration = [
-  readFileSync(join(root, "supabase", "migrations", "20261110110000_revised_finance_ledger.sql"), "utf8"),
-  readFileSync(join(root, "supabase", "migrations", "20261110120000_revised_finance_categories.sql"), "utf8"),
-  readFileSync(join(root, "supabase", "migrations", "20261110130000_revised_finance_daily_fund.sql"), "utf8"),
+  readFileSync(join(root, "supabase", "migrations", "20261111054845_revised_finance_ledger.sql"), "utf8"),
+  readFileSync(join(root, "supabase", "migrations", "20261111054855_revised_finance_categories.sql"), "utf8"),
+  readFileSync(join(root, "supabase", "migrations", "20261111054858_revised_finance_daily_fund.sql"), "utf8"),
 ].join("\n");
-const roleMigration = readFileSync(join(root, "supabase", "migrations", "20261110140000_unify_accounting_finance_role.sql"), "utf8");
+const roleMigration = readFileSync(join(root, "supabase", "migrations", "20261111054901_unify_accounting_finance_role.sql"), "utf8");
 const workspace = readFileSync(join(root, "components", "finance-revised-workspace.tsx"), "utf8");
 const host = readFileSync(join(root, "components", "huswell-workspace.tsx"), "utf8");
 const userAdmin = readFileSync(join(root, "components", "super-admin-console.tsx"), "utf8");
