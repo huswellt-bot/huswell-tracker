@@ -7,6 +7,7 @@ import test from "node:test";
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const workspace = readFileSync(join(repoRoot, "components", "finance-workspace.tsx"), "utf8");
 const mainWorkspace = readFileSync(join(repoRoot, "components", "huswell-workspace.tsx"), "utf8");
+const revisedWorkspace = readFileSync(join(repoRoot, "components", "finance-revised-workspace.tsx"), "utf8");
 const migration = readFileSync(
   join(repoRoot, "supabase", "migrations", "20261028125014_finance_activity_history_and_returns.sql"),
   "utf8",
@@ -16,25 +17,42 @@ const cutoffMigration = readFileSync(
   "utf8",
 ).toLowerCase();
 
-test("Finance activity history is a separate final Finance navigation item for GM and Internal Finance", () => {
-  assert.match(mainWorkspace, /\| "Finance Activity History"/);
-  assert.match(mainWorkspace, /\{ view: "Finance Activity History", icon: ClipboardList \}/);
-  assert.match(mainWorkspace, /active === "Finance Activity History"/);
+test("Transactions History is a separate final Finance navigation item for GM and Accounting & Finance", () => {
+  assert.match(mainWorkspace, /\| "Finance Transactions History"/);
+  assert.match(mainWorkspace, /\{ view: "Finance Transactions History", icon: ClipboardList \}/);
+  assert.match(mainWorkspace, /active === "Finance Transactions History"/);
   const accountingStart = mainWorkspace.indexOf('const accountingFinanceItems');
   const navStart = mainWorkspace.indexOf('const navBase', accountingStart);
   assert.ok(accountingStart >= 0 && navStart > accountingStart);
-  assert.match(mainWorkspace.slice(accountingStart, navStart), /Finance Activity History/);
+  assert.match(mainWorkspace.slice(accountingStart, navStart), /Finance Transactions History/);
 });
 
-test("activity history uses one consistent table schema and server-side role authorization", () => {
+test("Transactions History uses one unified revised Finance table", () => {
+  assert.match(revisedWorkspace, /const historyRows = useMemo<FinanceHistoryRow\[\]>/);
+  assert.match(revisedWorkspace, /finance_revised_transaction_feed/);
+  assert.match(revisedWorkspace, /finance_revised_working_fund_request_feed/);
+  assert.match(revisedWorkspace, /finance_revised_daily_fund_request_feed/);
+  assert.match(revisedWorkspace, /function TransactionsHistoryTable/);
+  assert.match(revisedWorkspace, /Date &amp; time.*Activity.*From.*To.*Project \/ Client \/ Company.*Amount.*Status.*Actors/);
+  assert.match(revisedWorkspace, /historyTransactionMovement/);
+});
+
+test("Capital Funds activity opens a dedicated movement details modal", () => {
+  assert.match(revisedWorkspace, /function CapitalFundDetailsModal/);
+  assert.match(revisedWorkspace, /Current fund balances/);
+  assert.match(revisedWorkspace, /Date added/);
+  assert.match(revisedWorkspace, /CapitalFundDetailsModal transaction=\{selectedTransaction\}/);
+  assert.match(revisedWorkspace, /Capital Funds added/);
+  assert.match(revisedWorkspace, /Capital to Working Funds transfer/);
+});
+
+test("legacy activity history migration keeps server-side role authorization", () => {
   assert.match(migration, /create or replace function public\.get_finance_activity_history/);
   assert.match(migration, /activity_at timestamptz/);
   assert.match(migration, /source_account text/);
   assert.match(migration, /destination_account text/);
   assert.match(migration, /not private\.finance_is_budget_viewer\(p_organization_id\)/);
   assert.match(migration, /grant execute on function public\.get_finance_activity_history\(uuid\) to authenticated/);
-  assert.match(workspace, /get_finance_activity_history/);
-  assert.match(workspace, /Date &amp; time.*Activity.*Status.*Amount.*Source account.*Destination account.*Performed by/);
   assert.match(cutoffMigration, /finance_activity_history_started_at/);
   assert.match(cutoffMigration, /grant_row\.granted_at >= v_started_at/);
   assert.match(cutoffMigration, /event\.created_at >= v_started_at/);

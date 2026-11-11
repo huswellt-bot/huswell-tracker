@@ -31,8 +31,13 @@ const isMissingProductionApprovalTable = (
 const isMissingMemberCapabilityTable = (
   error: { code?: string } | null | undefined,
 ) => Boolean(error && ["42P01", "PGRST205"].includes(error.code ?? ""));
-const canReceiveInternalFinanceCapability = (role: string | null) =>
-  role === "sales_pricing_officer";
+// Revised Finance is assigned through the Accountant membership role. Keep
+// the legacy request fields temporarily readable so older clients do not
+// break, but never create or retain capability-based Finance access.
+const canReceiveInternalFinanceCapability = (role: string | null) => {
+  void role;
+  return false;
+};
 
 async function getSuperAdminOrganization() {
   const supabase = await createClient();
@@ -140,7 +145,6 @@ export async function GET() {
     { data: profiles, error: profileError },
     { data: projectTypeAssignments, error: assignmentError },
     { data: productionApprovals, error: productionApprovalError },
-    { data: memberCapabilities, error: memberCapabilityError },
   ] = await Promise.all([
     userIds.length
       ? admin.from("profiles").select("id, signature_url").in("id", userIds)
@@ -159,22 +163,12 @@ export async function GET() {
           .eq("is_active", true)
           .in("user_id", userIds)
       : Promise.resolve({ data: [], error: null }),
-    userIds.length
-      ? admin
-          .from("organization_member_capabilities")
-          .select("user_id, capability")
-          .eq("organization_id", organizationId)
-          .eq("capability", "internal_finance")
-          .in("user_id", userIds)
-      : Promise.resolve({ data: [], error: null }),
   ]);
   if (
     profileError ||
     assignmentError ||
     (productionApprovalError &&
-      !isMissingProductionApprovalTable(productionApprovalError)) ||
-    (memberCapabilityError &&
-      !isMissingMemberCapabilityTable(memberCapabilityError))
+      !isMissingProductionApprovalTable(productionApprovalError))
   )
     return json({ error: profileError?.message ?? assignmentError?.message ?? productionApprovalError?.message ?? "Unable to load user details." }, 500);
 
@@ -195,11 +189,6 @@ export async function GET() {
       .filter((permission) => permission.is_active)
       .map((permission) => permission.user_id),
   );
-  const internalFinanceUserIds = new Set(
-    (memberCapabilities ?? [])
-      .filter((capability) => capability.capability === "internal_finance")
-      .map((capability) => capability.user_id),
-  );
   return Response.json({
     users: (memberships ?? [])
       .filter((member) => member.role !== "super_admin")
@@ -213,10 +202,7 @@ export async function GET() {
               : (user?.email ?? "Unnamed user"),
           email: user?.email ?? "—",
           role: member.role,
-          internal_finance_enabled:
-            member.role === "admin" ||
-            member.role === "internal_finance" ||
-            internalFinanceUserIds.has(member.user_id),
+          internal_finance_enabled: member.role === "accountant",
           project_types: projectTypesByUserId.get(member.user_id) ?? [],
           production_approval_enabled: productionApprovalUserIds.has(member.user_id),
           signature_url: profileByUserId.get(member.user_id)?.signature_url ?? null,

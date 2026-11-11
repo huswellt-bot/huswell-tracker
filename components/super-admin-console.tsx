@@ -55,8 +55,13 @@ const displayRole = (role: string, internalFinanceEnabled = false) =>
   workspaceRoleLabel(role, internalFinanceEnabled);
 const isPricingRole = (role: string) =>
   role === "sales_pricing_officer";
-const canReceiveInternalFinanceCapability = (role: string) =>
-  role === "sales_pricing_officer";
+// Finance access is assigned by the Accounting & Finance membership role.
+// The legacy capability control remains type-compatible for old saved form
+// state, but it is no longer offered to any role.
+const canReceiveInternalFinanceCapability = (role: string) => {
+  void role;
+  return false;
+};
 const titleCase = (value: string) =>
   value.replace(
     /(^|[^A-Za-z])([a-z])/g,

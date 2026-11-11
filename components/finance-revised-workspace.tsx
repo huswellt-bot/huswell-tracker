@@ -18,6 +18,7 @@ import {
 import { pdf } from "@react-pdf/renderer";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { FinanceProjectPdf } from "@/components/finance-project-pdf";
+import { ClientCompanyNames } from "@/components/ui/client-company-names";
 import { LoadingState } from "@/components/ui/loading-state";
 import { NotificationDialog } from "@/components/ui/notification-dialog";
 import { createClient } from "@/lib/supabase/client";
@@ -29,6 +30,40 @@ type CategoryDirection = "income" | "expense";
 type CashOutSource = "project" | "non_project";
 type ApprovalTab = "all" | "cash_in" | "cash_out" | "working_funds" | "daily_fund";
 type ApprovalItemKind = "transaction" | "working_request" | "daily_request";
+type HistoryItemKind = "transaction" | "working_request" | "daily_request";
+
+type FinanceHistoryRow = {
+  key: string;
+  kind: HistoryItemKind;
+  type: string;
+  sourceRow: Row;
+  activityAt: unknown;
+  activityDate: unknown;
+  activityTime: unknown;
+  activity: string;
+  category: string;
+  amount: number;
+  status: string;
+  sourceAccount: string;
+  destinationAccount: string;
+  projectFundId: string;
+  projectName: string;
+  clientName: string;
+  companyName: string;
+  submittedBy: string;
+  approvedBy: string;
+  searchText: string;
+  sortAt: number;
+};
+
+type HistoryFilters = {
+  search: string;
+  period: "all" | "today" | "month";
+  type: string;
+  status: string;
+  project: string;
+  actor: string;
+};
 
 const addCategoryOptionValue = "__add_revised_finance_category__";
 
@@ -69,6 +104,15 @@ const dateLabel = (value: unknown) => {
     : new Intl.DateTimeFormat("en-PH", { dateStyle: "medium" }).format(parsed);
 };
 
+const timeLabel = (value: unknown) => {
+  const raw = String(value ?? "").trim();
+  if (!raw || /^\d{4}-\d{2}-\d{2}$/.test(raw)) return "";
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime())
+    ? ""
+    : new Intl.DateTimeFormat("en-PH", { timeStyle: "short" }).format(parsed);
+};
+
 const titleCase = (value: unknown) =>
   String(value ?? "")
     .replaceAll("_", " ")
@@ -103,6 +147,36 @@ const transactionSourceLabel = (row: Row) => {
   if (kind === "capital_contribution") return "Capital Funds";
   return "Unassigned";
 };
+
+const historyTransactionMovement = (row: Row, projectName: string) => {
+  const kind = textValue(row, "transaction_kind");
+  const project = projectName || "Project";
+  const expense = textValue(row, "category") || "Expense";
+  if (kind === "capital_contribution") return { sourceAccount: "Owner investment", destinationAccount: "Capital Funds" };
+  if (kind === "capital_to_working") return { sourceAccount: "Capital Funds", destinationAccount: "Working Funds" };
+  if (kind === "project_cash_in") return { sourceAccount: "Client collection", destinationAccount: project };
+  if (kind === "project_cash_out") return { sourceAccount: project, destinationAccount: expense };
+  if (kind === "commission_payout") return { sourceAccount: project, destinationAccount: "Commission payout" };
+  if (kind === "operating_cash_out") return { sourceAccount: "Daily Fund", destinationAccount: expense };
+  if (kind === "daily_fund_allocation") return { sourceAccount: "Working Funds", destinationAccount: "Daily Fund" };
+  if (kind === "daily_fund_return") return { sourceAccount: "Daily Fund", destinationAccount: "Working Funds" };
+  if (kind === "working_fund_support") return { sourceAccount: "Working Funds", destinationAccount: project };
+  if (kind === "working_fund_repayment") return { sourceAccount: project, destinationAccount: "Working Funds" };
+  if (kind === "adjustment") return { sourceAccount: "Original transaction", destinationAccount: "Reversal adjustment" };
+  return { sourceAccount: "Finance ledger", destinationAccount: "Finance ledger" };
+};
+
+const historyTimestamp = (row: Row, kind: HistoryItemKind) => {
+  if (kind === "transaction") {
+    return textValue(row, "approved_at") || textValue(row, "submitted_at") || textValue(row, "created_at") || textValue(row, "transaction_date");
+  }
+  return textValue(row, "requested_at") || textValue(row, "created_at") || textValue(row, "fund_date");
+};
+
+const historyDateValue = (row: Row, kind: HistoryItemKind) =>
+  kind === "transaction"
+    ? textValue(row, "transaction_date") || textValue(row, "created_at")
+    : textValue(row, "fund_date") || textValue(row, "requested_at") || textValue(row, "created_at");
 
 const approvalBucket = (transaction: Row): Exclude<ApprovalTab, "all"> => {
   const kind = textValue(transaction, "transaction_kind");
@@ -369,6 +443,56 @@ function Modal({
   );
 }
 
+function CapitalFundDetailsModal({
+  transaction,
+  currentBalances,
+  canReverse,
+  onReverse,
+  close,
+}: {
+  transaction: Row;
+  currentBalances: Row | null;
+  canReverse: boolean;
+  onReverse: () => void;
+  close: () => void;
+}) {
+  const kind = textValue(transaction, "transaction_kind");
+  const isContribution = kind === "capital_contribution";
+  const movement = historyTransactionMovement(transaction, "Capital Funds");
+  const postedAt = textValue(transaction, "approved_at") || textValue(transaction, "created_at");
+  const postedAtLabel = [dateLabel(postedAt), timeLabel(postedAt)].filter(Boolean).join(" · ");
+
+  return (
+    <Modal title={isContribution ? "Capital Funds added" : "Capital to Working Funds transfer"} close={close}>
+      <div className="space-y-5">
+        {canReverse && textValue(transaction, "status") === "approved" ? <div className="flex justify-end"><button type="button" className="button-danger text-[11px]" onClick={onReverse}>Reverse posted transaction</button></div> : null}
+        <div className="border-b border-[var(--color-border)] pb-4">
+          <p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[var(--color-text-secondary)]">{isContribution ? "Amount added to Capital Funds" : "Amount transferred to Working Funds"}</p>
+          <p className="mt-1 text-3xl font-bold tracking-tight text-[var(--color-text-primary)]">{amount(transaction.amount)}</p>
+        </div>
+        <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+          <Metric label="Movement" value={transactionLabel(transaction)} />
+          <Metric label={isContribution ? "Date added" : "Transfer date"} value={dateLabel(transaction.transaction_date)} />
+          <Metric label="From" value={movement.sourceAccount} />
+          <Metric label="To" value={movement.destinationAccount} />
+          <Metric label="Recorded by" value={textValue(transaction, "submitted_by_name", textValue(transaction, "submitted_by", "Unknown"))} />
+          <Metric label="Posted by" value={textValue(transaction, "approved_by_name", textValue(transaction, "approved_by", "Unknown"))} />
+          <Metric label="Posted at" value={postedAtLabel || "—"} />
+        </div>
+        <div className="border-t border-[var(--color-border)] pt-4">
+          <p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[var(--color-text-secondary)]">Current fund balances</p>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <Metric label="Capital Funds" value={amount(currentBalances?.capital_funds)} />
+            <Metric label="Working Funds" value={amount(currentBalances?.working_funds)} />
+          </div>
+        </div>
+        {textValue(transaction, "note") ? <div><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[var(--color-text-secondary)]">Note</p><p className="mt-1 whitespace-pre-wrap text-[11px] leading-5 text-[var(--color-text-primary)]">{textValue(transaction, "note")}</p></div> : null}
+        <div className="border-t border-[var(--color-border)] pt-4 text-[10px] text-[var(--color-text-secondary)]">Transaction ID: <span className="break-all">{textValue(transaction, "id", "—")}</span></div>
+      </div>
+    </Modal>
+  );
+}
+
 function EmptyState({ children }: { children: ReactNode }) {
   return <div className="px-5 py-10 text-center text-[12px] text-[var(--color-text-secondary)]">{children}</div>;
 }
@@ -419,6 +543,7 @@ export function FinanceRevisedWorkspace({
   const [tab, setTab] = useState<RevisedTab>(startingTab);
   const [month, setMonth] = useState(localMonth());
   const [snapshot, setSnapshot] = useState<Row | null>(null);
+  const [currentFundBalances, setCurrentFundBalances] = useState<Row | null>(null);
   const [dailySnapshot, setDailySnapshot] = useState<Row | null>(null);
   const [projects, setProjects] = useState<Row[]>([]);
   const [transactions, setTransactions] = useState<Row[]>([]);
@@ -437,6 +562,7 @@ export function FinanceRevisedWorkspace({
   const [costingError, setCostingError] = useState<string | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<Row | null>(null);
+  const [selectedDailyHistoryRequest, setSelectedDailyHistoryRequest] = useState<Row | null>(null);
   const [selectedRequest, setSelectedRequest] = useState<Row | null>(null);
   const [requestLines, setRequestLines] = useState<Row[]>([]);
   const [reviewRequest, setReviewRequest] = useState<Row | null>(null);
@@ -467,6 +593,14 @@ export function FinanceRevisedWorkspace({
   const [categoryDraft, setCategoryDraft] = useState("");
   const [editingCategory, setEditingCategory] = useState<Row | null>(null);
   const [deleteCategoryTarget, setDeleteCategoryTarget] = useState<Row | null>(null);
+  const [historyFilters, setHistoryFilters] = useState<HistoryFilters>({
+    search: "",
+    period: "all",
+    type: "all",
+    status: "all",
+    project: "all",
+    actor: "all",
+  });
 
   const [cashIn, setCashIn] = useState({
     projectId: "",
@@ -568,12 +702,13 @@ export function FinanceRevisedWorkspace({
         if (page.length < pageSize) return { data: rows, error: null };
       }
     };
-    const [snapshotResult, dailySnapshotResult, projectResult, transactionResult, requestResult, dailyRequestResult, commissionResult, categoryResult] = await Promise.all([
+    const [snapshotResult, currentFundBalancesResult, dailySnapshotResult, projectResult, transactionResult, requestResult, dailyRequestResult, commissionResult, categoryResult] = await Promise.all([
       client.rpc("get_finance_revised_snapshot", {
         p_organization_id: organizationId,
         p_period_start: periodStart,
         p_period_end: periodEnd,
       }),
+      client.rpc("get_finance_revised_current_balances", { p_organization_id: organizationId }),
       client.rpc("get_finance_revised_daily_fund_snapshot", { p_organization_id: organizationId }),
       client.rpc("list_finance_revised_projects", { p_organization_id: organizationId }),
       loadTransactions(),
@@ -583,7 +718,7 @@ export function FinanceRevisedWorkspace({
       client.rpc("list_finance_revised_categories", { p_organization_id: organizationId }),
     ]);
 
-    const errors = [snapshotResult.error, dailySnapshotResult.error, projectResult.error, transactionResult.error, requestResult.error, dailyRequestResult.error, commissionResult.error, categoryResult.error]
+    const errors = [snapshotResult.error, currentFundBalancesResult.error, dailySnapshotResult.error, projectResult.error, transactionResult.error, requestResult.error, dailyRequestResult.error, commissionResult.error, categoryResult.error]
       .filter(Boolean)
       .map((item) => item?.message ?? "Finance data could not be loaded");
     if (errors.length) {
@@ -591,6 +726,7 @@ export function FinanceRevisedWorkspace({
       setError(errors.join(" "));
     }
     setSnapshot((snapshotResult.data as Row | null) ?? null);
+    setCurrentFundBalances((currentFundBalancesResult.data as Row | null) ?? null);
     setDailySnapshot((dailySnapshotResult.data as Row | null) ?? null);
     setProjects((projectResult.data as Row[] | null) ?? []);
     const loadedTransactions = (transactionResult.data as Row[] | null) ?? [];
@@ -627,6 +763,182 @@ export function FinanceRevisedWorkspace({
     }, 0);
     return () => window.clearTimeout(timer);
   }, [onOpenActionHandled, openAction]);
+
+  const historyRows = useMemo<FinanceHistoryRow[]>(() => {
+    const projectById = new Map(
+      projects.map((project) => [textValue(project, "project_fund_id"), project]),
+    );
+    const transactionIds = new Set(transactions.map((transaction) => textValue(transaction, "id")));
+    const dailyFundRequestIdsWithTransactions = new Set(
+      transactions
+        .map((transaction) => textValue(transaction, "daily_fund_request_id"))
+        .filter(Boolean),
+    );
+
+    const projectDetails = (row: Row) => {
+      const projectFundId = textValue(row, "project_fund_id");
+      const project = projectById.get(projectFundId);
+      return {
+        projectFundId,
+        projectName: textValue(project, "project_name", projectFundId ? textValue(row, "project_name", "Project") : ""),
+        clientName: textValue(project, "client_name", textValue(row, "client_name")),
+        companyName: textValue(project, "company_name", textValue(row, "company_name")),
+      };
+    };
+
+    const transactionRows = transactions.map((transaction): FinanceHistoryRow => {
+      const details = projectDetails(transaction);
+      const projectName = details.projectName || (textValue(transaction, "transaction_kind") === "operating_cash_out" ? "Non-project" : "");
+      const movement = historyTransactionMovement(transaction, projectName);
+      const activityAt = historyTimestamp(transaction, "transaction");
+      const activityDate = historyDateValue(transaction, "transaction");
+      const activityTime = textValue(transaction, "approved_at") || textValue(transaction, "submitted_at") || textValue(transaction, "created_at");
+      const submittedBy = textValue(transaction, "submitted_by_name", textValue(transaction, "submitted_by", "Unknown"));
+      const approvedBy = textValue(transaction, "approved_by_name", textValue(transaction, "approved_by", "Pending"));
+      return {
+        key: "transaction-" + textValue(transaction, "id"),
+        kind: "transaction",
+        type: textValue(transaction, "transaction_kind"),
+        sourceRow: transaction,
+        activityAt,
+        activityDate,
+        activityTime,
+        activity: transactionLabel(transaction),
+        category: textValue(transaction, "category"),
+        amount: numberValue(transaction, "amount"),
+        status: textValue(transaction, "status", "unknown"),
+        sourceAccount: movement.sourceAccount,
+        destinationAccount: movement.destinationAccount,
+        projectFundId: details.projectFundId,
+        projectName,
+        clientName: details.clientName,
+        companyName: details.companyName,
+        submittedBy,
+        approvedBy,
+        searchText: [
+          transactionLabel(transaction),
+          textValue(transaction, "category"),
+          movement.sourceAccount,
+          movement.destinationAccount,
+          projectName,
+          details.clientName,
+          details.companyName,
+          submittedBy,
+          approvedBy,
+          textValue(transaction, "reference_number"),
+          textValue(transaction, "note"),
+        ].join(" ").toLowerCase(),
+        sortAt: new Date(activityAt || activityDate || 0).getTime() || 0,
+      };
+    });
+
+    const workingRequestRows = requests
+      .filter((request) => {
+        const supportTransactionId = textValue(request, "support_transaction_id");
+        return !supportTransactionId || !transactionIds.has(supportTransactionId);
+      })
+      .map((request): FinanceHistoryRow => {
+        const details = projectDetails(request);
+        const activityAt = historyTimestamp(request, "working_request");
+        const activityDate = historyDateValue(request, "working_request");
+        const activityTime = textValue(request, "requested_at") || textValue(request, "created_at");
+        const submittedBy = textValue(request, "requested_by_name", textValue(request, "requested_by", "Unknown"));
+        const approvedBy = textValue(request, "approved_by_name", textValue(request, "approved_by", "Pending"));
+        return {
+          key: "working-request-" + textValue(request, "id"),
+          kind: "working_request",
+          type: "working_fund_request",
+          sourceRow: request,
+          activityAt,
+          activityDate,
+          activityTime,
+          activity: "Working Fund request",
+          category: textValue(request, "purpose"),
+          amount: numberValue(request, "approved_amount") || numberValue(request, "requested_amount"),
+          status: textValue(request, "status", "unknown"),
+          sourceAccount: "Working Funds",
+          destinationAccount: details.projectName || "Project",
+          projectFundId: details.projectFundId,
+          projectName: details.projectName,
+          clientName: details.clientName,
+          companyName: details.companyName,
+          submittedBy,
+          approvedBy,
+          searchText: [
+            "Working Fund request",
+            textValue(request, "purpose"),
+            details.projectName,
+            details.clientName,
+            details.companyName,
+            submittedBy,
+            approvedBy,
+          ].join(" ").toLowerCase(),
+          sortAt: new Date(activityAt || activityDate || 0).getTime() || 0,
+        };
+      });
+
+    const dailyRequestRows = dailyFundRequests
+      .filter((request) => !dailyFundRequestIdsWithTransactions.has(textValue(request, "id")))
+      .map((request): FinanceHistoryRow => {
+        const activityAt = historyTimestamp(request, "daily_request");
+        const activityDate = historyDateValue(request, "daily_request");
+        const activityTime = textValue(request, "requested_at") || textValue(request, "created_at");
+        const submittedBy = textValue(request, "requested_by_name", textValue(request, "requested_by", "Unknown"));
+        const approvedBy = textValue(request, "approved_by_name", textValue(request, "approved_by", "Pending"));
+        return {
+          key: "daily-request-" + textValue(request, "id"),
+          kind: "daily_request",
+          type: "daily_fund_request",
+          sourceRow: request,
+          activityAt,
+          activityDate,
+          activityTime,
+          activity: "Daily Fund request",
+          category: textValue(request, "purpose"),
+          amount: numberValue(request, "approved_amount") || numberValue(request, "requested_amount"),
+          status: textValue(request, "status", "unknown"),
+          sourceAccount: "Working Funds",
+          destinationAccount: "Daily Fund",
+          projectFundId: "",
+          projectName: "Non-project",
+          clientName: "",
+          companyName: "",
+          submittedBy,
+          approvedBy,
+          searchText: [
+            "Daily Fund request",
+            textValue(request, "purpose"),
+            "Non-project",
+            "Working Funds",
+            "Daily Fund",
+            submittedBy,
+            approvedBy,
+          ].join(" ").toLowerCase(),
+          sortAt: new Date(activityAt || activityDate || 0).getTime() || 0,
+        };
+      });
+
+    return [...transactionRows, ...workingRequestRows, ...dailyRequestRows].sort((left, right) => right.sortAt - left.sortAt);
+  }, [dailyFundRequests, projects, requests, transactions]);
+
+  const filteredHistoryRows = useMemo(() => {
+    const search = historyFilters.search.trim().toLowerCase();
+    const today = localDate();
+    const currentMonth = today.slice(0, 7);
+    return historyRows.filter((row) => {
+      if (search && !row.searchText.includes(search)) return false;
+      if (historyFilters.period === "today" && String(row.activityDate).slice(0, 10) !== today) return false;
+      if (historyFilters.period === "month" && String(row.activityDate).slice(0, 7) !== currentMonth) return false;
+      if (historyFilters.type !== "all" && row.type !== historyFilters.type) return false;
+      if (historyFilters.status !== "all" && row.status !== historyFilters.status) return false;
+      if (historyFilters.project === "non_project" && row.projectFundId) return false;
+      if (historyFilters.project !== "all" && historyFilters.project !== "non_project" && row.projectFundId !== historyFilters.project) return false;
+      if (historyFilters.actor !== "all" && row.submittedBy !== historyFilters.actor && row.approvedBy !== historyFilters.actor) return false;
+      return true;
+    });
+  }, [historyFilters, historyRows]);
+
+  const historyActorOptions = useMemo(() => [...new Set(historyRows.flatMap((row) => [row.submittedBy, row.approvedBy]).filter(Boolean))].sort(), [historyRows]);
 
   const finish = (message: string) => {
     setNotice(message);
@@ -985,7 +1297,7 @@ export function FinanceRevisedWorkspace({
   const handleWorkingTransfer = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (Number(workingForm.amount) <= 0) return;
-    if (Number(workingForm.amount) > numberValue(snapshot, "capital_funds")) {
+    if (Number(workingForm.amount) > numberValue(currentFundBalances, "capital_funds")) {
       showError(new Error("Transfer amount cannot exceed the available Capital Funds balance."));
       return;
     }
@@ -1221,9 +1533,9 @@ export function FinanceRevisedWorkspace({
       </div>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard><Metric label="Total Cash on Hand" value={amount(projects.reduce((total, project) => total + numberValue(project, "available_balance"), 0) + numberValue(dailySnapshot, "daily_fund_balance"))} detail="Project balances + Daily Fund; unallocated Working Funds excluded" tone="positive" /></MetricCard>
-        <MetricCard><Metric label="Capital Funds balance" value={amount(snapshot?.capital_funds)} detail="Owner investment remaining after transfers" /></MetricCard>
+        <MetricCard><Metric label="Capital Funds balance" value={amount(currentFundBalances?.capital_funds)} detail="Current owner investment remaining after transfers" /></MetricCard>
         <MetricCard><Metric label="Beginning Working Funds" value={amount(snapshot?.beginning_working_funds)} detail={"Balance before " + month} /></MetricCard>
-        <MetricCard><Metric label="Ending Working Funds" value={amount(snapshot?.ending_working_funds)} detail="Available company operating pool" tone={numberValue(snapshot, "ending_working_funds") < 0 ? "negative" : "positive"} /></MetricCard>
+        <MetricCard><Metric label="Working Funds balance" value={amount(currentFundBalances?.working_funds)} detail="Current company operating pool" tone={numberValue(currentFundBalances, "working_funds") < 0 ? "negative" : "positive"} /></MetricCard>
         <MetricCard><Metric label="Pending GM approvals" value={String(numberValue(snapshot, "pending_approvals"))} detail="Cash In, Cash Out, Working Funds, and Daily Fund requests" tone={numberValue(snapshot, "pending_approvals") ? "warning" : "positive"} /></MetricCard>
         <MetricCard><Metric label="Period Cash In" value={amount(snapshot?.period_cash_in)} detail="Client collections recorded manually" tone="positive" /></MetricCard>
         <MetricCard><Metric label="Period Cash Out" value={amount(snapshot?.period_cash_out)} detail="Approved project and operating expenses" /></MetricCard>
@@ -1266,9 +1578,9 @@ export function FinanceRevisedWorkspace({
 
         <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5">
           <div className="grid gap-x-6 gap-y-5 sm:grid-cols-2 xl:grid-cols-4">
-            <Metric label="Capital Funds balance" value={amount(snapshot?.capital_funds)} detail="Owner investment remaining after transfers" />
+            <Metric label="Capital Funds balance" value={amount(currentFundBalances?.capital_funds)} detail="Current owner investment remaining after transfers" />
             <Metric label="Beginning Working Funds" value={amount(snapshot?.beginning_working_funds)} detail={"Balance before " + month} />
-            <Metric label="Ending Working Funds" value={amount(snapshot?.ending_working_funds)} detail="Available company operating pool" tone={numberValue(snapshot, "ending_working_funds") < 0 ? "negative" : "positive"} />
+            <Metric label="Working Funds balance" value={amount(currentFundBalances?.working_funds)} detail="Current company operating pool" tone={numberValue(currentFundBalances, "working_funds") < 0 ? "negative" : "positive"} />
             <Metric label="Completed-project repayments" value={amount(snapshot?.period_working_fund_repayment)} detail="Working Funds returned this period" tone="positive" />
           </div>
         </div>
@@ -1343,7 +1655,7 @@ export function FinanceRevisedWorkspace({
             <table className="w-full min-w-[620px] text-left text-[11px]">
               <thead><tr className="border-b border-[var(--color-border)] text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]"><th className="px-4 py-3">Source</th><th className="px-4 py-3">Type</th><th className="px-4 py-3">Current balance</th><th className="px-4 py-3"></th></tr></thead>
               <tbody>
-                {projects.map((project) => <tr key={textValue(project, "project_fund_id")} className="border-b border-[var(--color-border)] last:border-0"><td className="px-4 py-3"><p className="font-semibold text-[var(--color-text-primary)]">{textValue(project, "project_name", "Project")}</p><p className="mt-1 text-[10px] text-[var(--color-text-secondary)]">{textValue(project, "client_name", "—")} · {textValue(project, "company_name", "—")}</p></td><td className="px-4 py-3 text-[var(--color-text-secondary)]">Project budget</td><td className="px-4 py-3 font-bold text-[var(--color-text-primary)]">{amount(project.available_balance)}</td><td className="px-4 py-3 text-right"><button type="button" className="button-secondary text-[10px]" onClick={() => setSelectedProject(project)}>Open monitoring</button></td></tr>)}
+                {projects.map((project) => <tr key={textValue(project, "project_fund_id")} className="border-b border-[var(--color-border)] last:border-0"><td className="px-4 py-3"><p className="font-semibold text-[var(--color-text-primary)]">{textValue(project, "project_name", "Project")}</p><ClientCompanyNames className="mt-1 text-[10px] text-[var(--color-text-secondary)]" clientName={project.client_name} companyName={project.company_name} /></td><td className="px-4 py-3 text-[var(--color-text-secondary)]">Project budget</td><td className="px-4 py-3 font-bold text-[var(--color-text-primary)]">{amount(project.available_balance)}</td><td className="px-4 py-3 text-right"><button type="button" className="button-secondary text-[10px]" onClick={() => setSelectedProject(project)}>Open monitoring</button></td></tr>)}
                 <tr className="bg-[var(--color-surface-muted)]"><td className="px-4 py-3 font-semibold text-[var(--color-text-primary)]">Daily Fund</td><td className="px-4 py-3 text-[var(--color-text-secondary)]">Non-project expense pool</td><td className="px-4 py-3 font-bold text-[var(--color-text-primary)]">{amount(dailyFundBalance)}</td><td className="px-4 py-3 text-right"><button type="button" className="button-secondary text-[10px]" onClick={() => setTab("requests")}>Open requests</button></td></tr>
                 {!projects.length ? <tr><td colSpan={4}><EmptyState>No project balances are available.</EmptyState></td></tr> : null}
               </tbody>
@@ -1429,7 +1741,7 @@ export function FinanceRevisedWorkspace({
                   const insufficient = textValue(commission, "eligibility_note").toLowerCase().includes("project balance");
                   return (
                     <tr key={textValue(commission, "allocation_id")} className="border-b border-[var(--color-border)] last:border-0">
-                      <td className="px-4 py-3"><p className="font-semibold text-[var(--color-text-primary)]">{textValue(commission, "project_name", "Project")}</p><p className="mt-1 text-[10px] text-[var(--color-text-secondary)]">{textValue(commission, "client_name", "—")} · {textValue(commission, "company_name", "—")}</p></td>
+                      <td className="px-4 py-3"><p className="font-semibold text-[var(--color-text-primary)]">{textValue(commission, "project_name", "Project")}</p><ClientCompanyNames className="mt-1 text-[10px] text-[var(--color-text-secondary)]" clientName={commission.client_name} companyName={commission.company_name} /></td>
                       <td className="px-4 py-3 text-[var(--color-text-primary)]">{textValue(commission, "recipient_name")}</td>
                       <td className="px-4 py-3 text-[var(--color-text-secondary)]">{titleCase(commission.allocation_role)}</td>
                       <td className="px-4 py-3 text-[var(--color-text-secondary)]"><p>{textValue(commission, "quotation_number", "—")}</p><p className="mt-1">{amount(commission.total_quotation)}</p></td>
@@ -1456,7 +1768,7 @@ export function FinanceRevisedWorkspace({
           {projects.map((project) => (
             <article key={textValue(project, "project_fund_id")} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0"><p className="truncate text-[13px] font-semibold text-[var(--color-text-primary)]">{textValue(project, "project_name", "Project")}</p><p className="mt-1 truncate text-[10px] text-[var(--color-text-secondary)]">{textValue(project, "client_name", "—")} · {textValue(project, "company_name", "—")}</p></div>
+                <div className="min-w-0"><p className="truncate text-[13px] font-semibold text-[var(--color-text-primary)]">{textValue(project, "project_name", "Project")}</p><ClientCompanyNames className="mt-1 truncate text-[10px] text-[var(--color-text-secondary)]" clientName={project.client_name} companyName={project.company_name} /></div>
                 <StatusBadge status={textValue(project, "project_status", "open")} />
               </div>
               <dl className="mt-4 grid gap-x-5 gap-y-4 border-t border-[var(--color-border)] pt-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -1476,8 +1788,35 @@ export function FinanceRevisedWorkspace({
   );
 
   const renderHistory = () => (
-    <Panel title="Finance activity history" detail="A journal-style view of approved and pending movements across Capital Funds, Working Funds, and project budgets.">
-      <ActivityTable transactions={transactions} canApprove={gm} onDetails={(transaction) => setSelectedTransaction(transaction)} onReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }} onRevise={canOperate ? beginTransactionRevision : undefined} />
+    <Panel title="Transactions History">
+      <TransactionsHistoryTable
+        rows={filteredHistoryRows}
+        filters={historyFilters}
+        projects={projects}
+        actors={historyActorOptions}
+        canApprove={gm}
+        onFilterChange={(changes) => setHistoryFilters((current) => ({ ...current, ...changes }))}
+        onDetails={(item) => {
+          if (item.kind === "transaction") setSelectedTransaction(item.sourceRow);
+          else if (item.kind === "working_request") void openRequest(item.sourceRow);
+          else setSelectedDailyHistoryRequest(item.sourceRow);
+        }}
+        onReview={(item) => {
+          if (item.kind === "transaction") {
+            setReviewTransaction(item.sourceRow);
+            setDecisionNote("");
+          } else if (item.kind === "working_request") {
+            setReviewRequest(item.sourceRow);
+            setApprovalAmount(textValue(item.sourceRow, "requested_amount"));
+            setDecisionNote("");
+          } else {
+            setReviewDailyFundRequest(item.sourceRow);
+            setApprovalAmount(textValue(item.sourceRow, "requested_amount"));
+            setDecisionNote("");
+          }
+        }}
+        onRevise={canOperate ? beginTransactionRevision : undefined}
+      />
     </Panel>
   );
 
@@ -1547,6 +1886,12 @@ export function FinanceRevisedWorkspace({
     ? numberValue(costingLines[0], "total_direct_cost")
     : numberValue(selectedProject, "total_direct_cost");
   const commissionRevisionSource = revisionSource && textValue(revisionSource, "transaction_kind") === "commission_payout";
+  const selectedWorkingFundRequest = selectedTransaction
+    ? requests.find((request) => textValue(request, "id") === textValue(selectedTransaction, "working_fund_request_id"))
+    : null;
+  const selectedDailyFundRequest = selectedTransaction
+    ? dailyFundRequests.find((request) => textValue(request, "id") === textValue(selectedTransaction, "daily_fund_request_id"))
+    : null;
 
   if (loading && !snapshot && !projects.length && !transactions.length && !requests.length) {
     return <LoadingState variant="section" label="Loading Accounting & Finance..." />;
@@ -1706,8 +2051,8 @@ export function FinanceRevisedWorkspace({
 
       {dialog === "transfer" ? <Modal title="Transfer Capital to Working Funds" detail="This transfer reduces Capital Funds and increases Working Funds by the same amount." close={() => setDialog(null)}>
         <form className="grid gap-4" onSubmit={handleWorkingTransfer}>
-          <div className="rounded-lg border border-[var(--color-accent-border)] bg-[var(--color-accent-subtle)] px-4 py-5 text-center"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[var(--color-accent-text)]">Available Capital Funds</p><p className="mt-2 text-[28px] font-bold tracking-tight text-[var(--color-accent-text)]">{amount(snapshot?.capital_funds)}</p></div>
-          <Field label="Transfer amount" value={workingForm.amount} onChange={(value) => setWorkingForm((current) => ({ ...current, amount: value }))} type="number" min="0.01" max={String(numberValue(snapshot, "capital_funds"))} step="0.01" required />
+          <div className="rounded-lg border border-[var(--color-accent-border)] bg-[var(--color-accent-subtle)] px-4 py-5 text-center"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[var(--color-accent-text)]">Available Capital Funds</p><p className="mt-2 text-[28px] font-bold tracking-tight text-[var(--color-accent-text)]">{amount(currentFundBalances?.capital_funds)}</p></div>
+          <Field label="Transfer amount" value={workingForm.amount} onChange={(value) => setWorkingForm((current) => ({ ...current, amount: value }))} type="number" min="0.01" max={String(numberValue(currentFundBalances, "capital_funds"))} step="0.01" required />
           <div className="flex justify-end gap-2"><button type="button" className="button-secondary" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button-primary" disabled={saving}>Transfer funds</button></div>
         </form>
       </Modal> : null}
@@ -1811,11 +2156,36 @@ export function FinanceRevisedWorkspace({
         <div className="space-y-4"><div className="grid gap-3 sm:grid-cols-3"><Metric label="Amount" value={amount(reviewTransaction.amount)} /><Metric label="Date" value={dateLabel(reviewTransaction.transaction_date)} /><Metric label="Reference" value={textValue(reviewTransaction, "reference_number", "—")} /></div>{textValue(reviewTransaction, "commission_allocation_id") ? <div className="grid gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 sm:grid-cols-3"><Metric label="Commission recipient" value={textValue(reviewTransaction, "commission_recipient_name", "—")} /><Metric label="Commission role" value={titleCase(reviewTransaction.commission_allocation_role)} /><Metric label="Project" value={textValue(reviewTransaction, "project_name", "—")} /></div> : null}<TextArea label={canRequestTransactionRevision(reviewTransaction) ? "Decision note" : "Approval note"} value={decisionNote} onChange={setDecisionNote} placeholder={canRequestTransactionRevision(reviewTransaction) ? "Required when requesting a revision" : "Optional approval note"} /><div className="flex flex-wrap justify-end gap-2">{canRequestTransactionRevision(reviewTransaction) ? <button type="button" className="button-secondary" onClick={() => void reviewTransactionDecision("revision_requested")} disabled={saving || !decisionNote.trim()}>Request revision</button> : null}<button type="button" className="button-primary inline-flex items-center gap-1" onClick={() => void reviewTransactionDecision("approved")} disabled={saving}><Check size={14} /> Approve &amp; post</button></div></div>
       </Modal> : null}
 
+      {selectedDailyHistoryRequest ? <Modal title="Daily Fund request" detail={textValue(selectedDailyHistoryRequest, "purpose", "Non-project expense budget")} close={() => setSelectedDailyHistoryRequest(null)}>
+        <div className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Metric label="Fund date" value={dateLabel(selectedDailyHistoryRequest.fund_date)} />
+            <Metric label="Requested" value={amount(selectedDailyHistoryRequest.requested_amount)} />
+            <Metric label="Approved" value={amount(selectedDailyHistoryRequest.approved_amount)} />
+            <Metric label="Spent" value={amount(selectedDailyHistoryRequest.spent_amount)} />
+            <Metric label="Unused" value={amount(selectedDailyHistoryRequest.unused_amount)} />
+            <Metric label="Status" value={titleCase(selectedDailyHistoryRequest.status)} />
+          </div>
+          <div className="grid gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-[11px] sm:grid-cols-2">
+            <div><p className="text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]">From</p><p className="mt-1 text-[var(--color-text-primary)]">Working Funds</p></div>
+            <div><p className="text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]">To</p><p className="mt-1 text-[var(--color-text-primary)]">Daily Fund</p></div>
+            <div><p className="text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]">Requested by</p><p className="mt-1 break-all text-[var(--color-text-primary)]">{textValue(selectedDailyHistoryRequest, "requested_by_name", textValue(selectedDailyHistoryRequest, "requested_by", "Unknown"))}</p></div>
+            <div><p className="text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]">Reviewed by</p><p className="mt-1 break-all text-[var(--color-text-primary)]">{textValue(selectedDailyHistoryRequest, "approved_by_name", textValue(selectedDailyHistoryRequest, "approved_by", "Pending"))}</p></div>
+            <div><p className="text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]">Requested at</p><p className="mt-1 text-[var(--color-text-primary)]">{dateLabel(selectedDailyHistoryRequest.requested_at)}</p></div>
+            <div><p className="text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]">Reviewed at</p><p className="mt-1 text-[var(--color-text-primary)]">{dateLabel(selectedDailyHistoryRequest.approved_at)}</p></div>
+          </div>
+          {textValue(selectedDailyHistoryRequest, "note") ? <div><p className="text-[10px] font-semibold uppercase tracking-[.06em] text-[var(--color-text-secondary)]">Note</p><p className="mt-1 whitespace-pre-wrap text-[11px] leading-5 text-[var(--color-text-primary)]">{textValue(selectedDailyHistoryRequest, "note")}</p></div> : null}
+          {textValue(selectedDailyHistoryRequest, "decision_note") ? <div><p className="text-[10px] font-semibold uppercase tracking-[.06em] text-[var(--color-text-secondary)]">Decision note</p><p className="mt-1 whitespace-pre-wrap text-[11px] leading-5 text-[var(--color-text-primary)]">{textValue(selectedDailyHistoryRequest, "decision_note")}</p></div> : null}
+        </div>
+      </Modal> : null}
+
       {repaymentRequest ? <Modal title="Return Working Funds" detail="Only completed projects can return approved support. The repayment is an internal project-to-Working-Funds transfer." close={() => setRepaymentRequest(null)}>
         <form className="space-y-4" onSubmit={submitRepayment}><div className="grid gap-3 sm:grid-cols-2"><Metric label="Project" value={textValue(repaymentRequest, "project_name")} /><Field label="Repayment amount" value={repaymentAmount} onChange={setRepaymentAmount} type="number" min="0.01" step="0.01" required /></div><div className="flex justify-end gap-2"><button type="button" className="button-secondary" onClick={() => setRepaymentRequest(null)}>Cancel</button><button type="submit" className="button-primary" disabled={saving}>Submit repayment</button></div></form>
       </Modal> : null}
 
-      {selectedTransaction ? <Modal title={transactionLabel(selectedTransaction)} detail={textValue(selectedTransaction, "project_name", "Daily Fund")} close={() => setSelectedTransaction(null)}>
+      {selectedTransaction && ["capital_contribution", "capital_to_working"].includes(textValue(selectedTransaction, "transaction_kind")) ? <CapitalFundDetailsModal transaction={selectedTransaction} currentBalances={currentFundBalances} canReverse={gm} onReverse={() => { setVoidTransaction(selectedTransaction); setVoidReason(""); setSelectedTransaction(null); }} close={() => setSelectedTransaction(null)} /> : null}
+
+      {selectedTransaction && !["capital_contribution", "capital_to_working"].includes(textValue(selectedTransaction, "transaction_kind")) ? <Modal title={transactionLabel(selectedTransaction)} detail={textValue(selectedTransaction, "project_name", "Daily Fund")} close={() => setSelectedTransaction(null)}>
         <div className="space-y-4">
           {gm && textValue(selectedTransaction, "status") === "approved" ? <div className="flex justify-end"><button type="button" className="button-danger text-[11px]" onClick={() => { setVoidTransaction(selectedTransaction); setVoidReason(""); setSelectedTransaction(null); }}>Reverse posted transaction</button></div> : null}
           <div className="grid gap-3 sm:grid-cols-3">
@@ -1827,6 +2197,14 @@ export function FinanceRevisedWorkspace({
             <Metric label="Submitted at" value={dateLabel(selectedTransaction.submitted_at)} />
             <Metric label="Reverses" value={textValue(selectedTransaction, "reversal_of_transaction_id", "—")} />
           </div>
+          <div className="grid gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 sm:grid-cols-2">
+            <Metric label="From" value={historyTransactionMovement(selectedTransaction, textValue(selectedTransaction, "project_name", "Project")).sourceAccount} />
+            <Metric label="To" value={historyTransactionMovement(selectedTransaction, textValue(selectedTransaction, "project_name", "Project")).destinationAccount} />
+          </div>
+          {selectedWorkingFundRequest || selectedDailyFundRequest ? <div className="flex flex-wrap gap-2">
+            {selectedWorkingFundRequest ? <button type="button" className="button-secondary text-[10px]" onClick={() => { setSelectedTransaction(null); void openRequest(selectedWorkingFundRequest); }}>View Working Fund breakdown</button> : null}
+            {selectedDailyFundRequest ? <button type="button" className="button-secondary text-[10px]" onClick={() => { setSelectedTransaction(null); setSelectedDailyHistoryRequest(selectedDailyFundRequest); }}>View Daily Fund request</button> : null}
+          </div> : null}
           <div className="grid gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-[11px] sm:grid-cols-2">
             <div><p className="text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]">Submitted by</p><p className="mt-1 break-all text-[var(--color-text-primary)]">{textValue(selectedTransaction, "submitted_by_name", textValue(selectedTransaction, "submitted_by", "—"))}</p></div>
             <div><p className="text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]">Reviewed by</p><p className="mt-1 break-all text-[var(--color-text-primary)]">{textValue(selectedTransaction, "reviewed_by_name", textValue(selectedTransaction, "approved_by_name", textValue(selectedTransaction, "reviewed_by", textValue(selectedTransaction, "approved_by", "Pending"))))}</p></div>
@@ -1881,6 +2259,117 @@ export function FinanceRevisedWorkspace({
   );
 }
 
+const historyTypeOptions = [
+  { value: "project_cash_in", label: "Project Cash In" },
+  { value: "project_cash_out", label: "Project Cash Out" },
+  { value: "operating_cash_out", label: "Daily Fund Cash Out" },
+  { value: "capital_contribution", label: "Capital Funds" },
+  { value: "capital_to_working", label: "Capital to Working Funds" },
+  { value: "working_fund_support", label: "Working Fund support" },
+  { value: "working_fund_repayment", label: "Working Fund repayment" },
+  { value: "daily_fund_allocation", label: "Daily Fund allocation" },
+  { value: "daily_fund_return", label: "Daily Fund return" },
+  { value: "commission_payout", label: "Commission payout" },
+  { value: "adjustment", label: "Reversal adjustment" },
+  { value: "working_fund_request", label: "Working Fund request" },
+  { value: "daily_fund_request", label: "Daily Fund request" },
+];
+
+function TransactionsHistoryTable({
+  rows,
+  filters,
+  projects,
+  actors,
+  canApprove,
+  onFilterChange,
+  onDetails,
+  onReview,
+  onRevise,
+}: {
+  rows: FinanceHistoryRow[];
+  filters: HistoryFilters;
+  projects: Row[];
+  actors: string[];
+  canApprove: boolean;
+  onFilterChange: (changes: Partial<HistoryFilters>) => void;
+  onDetails: (item: FinanceHistoryRow) => void;
+  onReview: (item: FinanceHistoryRow) => void;
+  onRevise?: (transaction: Row) => void;
+}) {
+  return (
+    <>
+      <div className="border-b border-[var(--color-border)] p-4 sm:p-5">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+          <label className="block text-[11px] font-medium text-[var(--color-text-primary)] xl:col-span-2">
+            <span>Search</span>
+            <input className="input mt-1 w-full" value={filters.search} onChange={(event) => onFilterChange({ search: event.target.value })} placeholder="Search activity, project, fund, or actor" />
+          </label>
+          <label className="block text-[11px] font-medium text-[var(--color-text-primary)]">
+            <span>Date</span>
+            <select className="input mt-1 w-full" value={filters.period} onChange={(event) => onFilterChange({ period: event.target.value as HistoryFilters["period"] })}>
+              <option value="all">All dates</option>
+              <option value="today">Today</option>
+              <option value="month">This month</option>
+            </select>
+          </label>
+          <label className="block text-[11px] font-medium text-[var(--color-text-primary)]">
+            <span>Movement</span>
+            <select className="input mt-1 w-full" value={filters.type} onChange={(event) => onFilterChange({ type: event.target.value })}>
+              <option value="all">All movements</option>
+              {historyTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+          <label className="block text-[11px] font-medium text-[var(--color-text-primary)]">
+            <span>Status</span>
+            <select className="input mt-1 w-full" value={filters.status} onChange={(event) => onFilterChange({ status: event.target.value })}>
+              <option value="all">All statuses</option>
+              <option value="pending">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="revision_requested">Revision requested</option>
+              <option value="voided">Voided</option>
+              <option value="repaid">Repaid</option>
+              <option value="partially_repaid">Partially repaid</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </label>
+          <label className="block text-[11px] font-medium text-[var(--color-text-primary)]">
+            <span>Project / fund</span>
+            <select className="input mt-1 w-full" value={filters.project} onChange={(event) => onFilterChange({ project: event.target.value })}>
+              <option value="all">All projects and funds</option>
+              <option value="non_project">Non-project / fund activity</option>
+              {projects.map((project) => <option key={textValue(project, "project_fund_id")} value={textValue(project, "project_fund_id")}>{textValue(project, "project_name", "Project")}</option>)}
+            </select>
+          </label>
+          <label className="block text-[11px] font-medium text-[var(--color-text-primary)]">
+            <span>Actor</span>
+            <select className="input mt-1 w-full" value={filters.actor} onChange={(event) => onFilterChange({ actor: event.target.value })}>
+              <option value="all">Everyone</option>
+              {actors.map((actor) => <option key={actor} value={actor}>{actor}</option>)}
+            </select>
+          </label>
+        </div>
+        <p className="mt-3 text-[10px] text-[var(--color-text-secondary)]">{rows.length} transaction{rows.length === 1 ? "" : "s"} shown</p>
+      </div>
+      {rows.length ? <div className="overflow-x-auto">
+        <table className="w-full min-w-[1240px] text-left text-[11px]">
+          <thead><tr className="border-b border-[var(--color-border)] text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]"><th className="px-4 py-3">Date &amp; time</th><th className="px-4 py-3">Activity</th><th className="px-4 py-3">From</th><th className="px-4 py-3">To</th><th className="px-4 py-3">Project / Client / Company</th><th className="px-4 py-3">Amount</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Actors</th><th className="px-4 py-3"></th></tr></thead>
+          <tbody>{rows.map((row) => <tr key={row.key} className="border-b border-[var(--color-border)] last:border-0">
+            <td className="whitespace-nowrap px-4 py-3 text-[var(--color-text-secondary)]"><p>{dateLabel(row.activityDate)}</p>{timeLabel(row.activityTime) ? <p className="mt-1 text-[10px]">{timeLabel(row.activityTime)}</p> : null}</td>
+            <td className="max-w-[220px] px-4 py-3"><p className="font-semibold text-[var(--color-text-primary)]">{row.activity}</p>{row.category ? <p className="mt-1 truncate text-[10px] text-[var(--color-text-secondary)]">{row.category}</p> : null}</td>
+            <td className="px-4 py-3 text-[var(--color-text-secondary)]">{row.sourceAccount}</td>
+            <td className="px-4 py-3 text-[var(--color-text-secondary)]">{row.destinationAccount}</td>
+            <td className="px-4 py-3"><p className="font-semibold text-[var(--color-text-primary)]">{row.projectName || "—"}</p><ClientCompanyNames className="mt-1 text-[10px] text-[var(--color-text-secondary)]" clientName={row.clientName} companyName={row.companyName} /></td>
+            <td className="whitespace-nowrap px-4 py-3 font-semibold tabular-nums text-[var(--color-text-primary)]">{amount(row.amount)}</td>
+            <td className="px-4 py-3"><StatusBadge status={row.status} /></td>
+            <td className="px-4 py-3 text-[10px] text-[var(--color-text-secondary)]"><p><span className="font-semibold text-[var(--color-text-primary)]">Submitted/Requested:</span> {row.submittedBy}</p><p className="mt-1"><span className="font-semibold text-[var(--color-text-primary)]">Approved/Posted:</span> {row.approvedBy}</p></td>
+            <td className="px-4 py-3 text-right"><div className="flex justify-end gap-1"><button type="button" className="button-secondary text-[10px]" onClick={() => onDetails(row)}>Details</button>{canApprove && row.status === "pending" ? <button type="button" className="button-secondary text-[10px]" onClick={() => onReview(row)}>Review</button> : null}{onRevise && row.kind === "transaction" && row.status === "revision_requested" && canRequestTransactionRevision(row.sourceRow) ? <button type="button" className="button-secondary text-[10px]" onClick={() => onRevise(row.sourceRow)}>Correct &amp; resubmit</button> : null}</div></td>
+          </tr>)}</tbody>
+        </table>
+      </div> : <EmptyState>No finance transactions match the selected filters.</EmptyState>}
+    </>
+  );
+}
+
 function ActivityTable({
   transactions,
   canApprove,
@@ -1898,8 +2387,8 @@ function ActivityTable({
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[980px] text-left text-[11px]">
-        <thead><tr className="border-b border-[var(--color-border)] text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]"><th className="px-4 py-3">Date</th><th className="px-4 py-3">Activity</th><th className="px-4 py-3">Project / source</th><th className="px-4 py-3">Category</th><th className="px-4 py-3">Amount</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Actor</th><th className="px-4 py-3"></th></tr></thead>
-        <tbody>{transactions.map((transaction) => <tr key={textValue(transaction, "id")} className="border-b border-[var(--color-border)] last:border-0"><td className="px-4 py-3 text-[var(--color-text-secondary)]">{dateLabel(transaction.transaction_date)}</td><td className="px-4 py-3 font-semibold text-[var(--color-text-primary)]">{transactionLabel(transaction)}</td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{textValue(transaction, "project_name", "Daily Fund")}</td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{textValue(transaction, "category", "—")}</td><td className="px-4 py-3 font-semibold text-[var(--color-text-primary)]">{amount(transaction.amount)}</td><td className="px-4 py-3"><StatusBadge status={textValue(transaction, "status")} /></td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{textValue(transaction, "submitted_by_name", textValue(transaction, "submitted_by", "Unknown"))}</td><td className="px-4 py-3 text-right"><div className="flex justify-end gap-1">{onDetails ? <button type="button" className="button-secondary text-[10px]" onClick={() => onDetails(transaction)}>Details</button> : null}{canApprove && textValue(transaction, "status") === "pending" ? <button type="button" className="button-secondary text-[10px]" onClick={() => onReview(transaction)}>Review</button> : null}{onRevise && textValue(transaction, "status") === "revision_requested" && canRequestTransactionRevision(transaction) ? <button type="button" className="button-secondary text-[10px]" onClick={() => onRevise(transaction)}>Correct &amp; resubmit</button> : null}</div></td></tr>)}</tbody>
+        <thead><tr className="border-b border-[var(--color-border)] text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]"><th className="px-4 py-3">Date</th><th className="px-4 py-3">Activity</th><th className="px-4 py-3">Project / source</th><th className="px-4 py-3">Category</th><th className="px-4 py-3">Amount</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Actors</th><th className="px-4 py-3"></th></tr></thead>
+        <tbody>{transactions.map((transaction) => <tr key={textValue(transaction, "id")} className="border-b border-[var(--color-border)] last:border-0"><td className="px-4 py-3 text-[var(--color-text-secondary)]">{dateLabel(transaction.transaction_date)}</td><td className="px-4 py-3 font-semibold text-[var(--color-text-primary)]">{transactionLabel(transaction)}</td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{textValue(transaction, "project_name", "Daily Fund")}</td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{textValue(transaction, "category", "—")}</td><td className="px-4 py-3 font-semibold text-[var(--color-text-primary)]">{amount(transaction.amount)}</td><td className="px-4 py-3"><StatusBadge status={textValue(transaction, "status")} /></td><td className="px-4 py-3 text-[10px] text-[var(--color-text-secondary)]"><p><span className="font-semibold text-[var(--color-text-primary)]">Submitted:</span> {textValue(transaction, "submitted_by_name", textValue(transaction, "submitted_by", "Unknown"))}</p><p className="mt-1"><span className="font-semibold text-[var(--color-text-primary)]">Posted:</span> {textValue(transaction, "approved_by_name", textValue(transaction, "approved_by", "Pending"))}</p></td><td className="px-4 py-3 text-right"><div className="flex justify-end gap-1">{onDetails ? <button type="button" className="button-secondary text-[10px]" onClick={() => onDetails(transaction)}>Details</button> : null}{canApprove && textValue(transaction, "status") === "pending" ? <button type="button" className="button-secondary text-[10px]" onClick={() => onReview(transaction)}>Review</button> : null}{onRevise && textValue(transaction, "status") === "revision_requested" && canRequestTransactionRevision(transaction) ? <button type="button" className="button-secondary text-[10px]" onClick={() => onRevise(transaction)}>Correct &amp; resubmit</button> : null}</div></td></tr>)}</tbody>
       </table>
     </div>
   );

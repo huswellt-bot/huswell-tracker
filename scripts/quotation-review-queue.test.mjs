@@ -10,17 +10,17 @@ const workspace = readFileSync(
   "utf8",
 );
 
-test("quotation review queue keeps quotation and project in separate cells", () => {
-  assert.match(workspace, /"Price Quotation", "Project", "Client's Name", "Company Name"/);
-  assert.match(workspace, /<td className="px-5 py-3">\{text\(quotation\.quotation_no, "—"\)\}<\/td>\s*<td className="px-5 py-3">\{text\(quotation\.project_name, "—"\)\}<\/td>/);
+test("quotation review queue keeps quotation and project separate from the combined party cell", () => {
+  assert.match(workspace, /"Price Quotation", "Project", "Client \/ Company"/);
+  assert.match(workspace, /<td className="px-5 py-3">\{text\(quotation\.quotation_no, [^}]+\)\}<\/td>\s*<td className="px-5 py-3">\{text\(quotation\.project_name, [^}]+\)\}<\/td>/);
 });
 
 test("GM quotations show only the approved section", () => {
   assert.match(workspace, /const quotationSectionTabs = isGeneralManager\s*\? \(\["approved"\] as const\)/);
 });
 
-test("client and company are separate table values", () => {
-  assert.match(workspace, /"Client's Name", "Company Name"/);
-  assert.doesNotMatch(workspace, /stackedCell\(party\.clientName, party\.companyName\)/);
-  assert.match(workspace, /<td className="px-5 py-3">\{party\.clientName\}<\/td>\s*<td className="px-5 py-3">\{party\.companyName\}<\/td>/);
+test("client and company use the shared conditional stacked renderer", () => {
+  assert.match(workspace, /import \{ ClientCompanyNames \} from "@\/components\/ui\/client-company-names"/);
+  assert.doesNotMatch(workspace, /"Client's Name", "Company Name"/);
+  assert.match(workspace, /<ClientCompanyNames clientName=\{party\.clientName\} companyName=\{party\.companyName\} \/>/);
 });

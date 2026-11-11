@@ -102,6 +102,7 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { MultiSelect, parseMultiSelectValue } from "@/components/ui/multi-select";
 import { NumberInput } from "@/components/ui/number-input";
 import { NotificationDialog } from "@/components/ui/notification-dialog";
+import { ClientCompanyNames } from "@/components/ui/client-company-names";
 import { SearchableLeadSelect, type SearchableLeadOption } from "@/components/ui/searchable-lead-select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { TABLE_PAGE_SIZE, TablePagination } from "@/components/ui/table-pagination";
@@ -171,7 +172,7 @@ type View =
   | "Finance Payables"
   | "Finance Commissions"
   | "Paid commissions"
-  | "Finance Activity History"
+  | "Finance Transactions History"
   | "Payroll & Leave"
   | "Letter Request"
   | "Directory"
@@ -199,7 +200,7 @@ const financeSidebarViews: View[] = [
   "Finance Monitoring",
   "Finance Requests",
   "Finance Commissions",
-  "Finance Activity History",
+  "Finance Transactions History",
 ];
 
 type SidebarQueueCountKey =
@@ -1824,7 +1825,7 @@ const memberRole = (role: string) =>
   ["super_admin", "owner", "admin"].includes(role);
 
 const isInternalFinanceRole = (role: string) =>
-  role === "internal_finance";
+  role === "accountant";
 const isProjectOfficerRole = (role: string) =>
   ["project_manager", "sales_pricing_officer"].includes(role);
 const isPricingOfficerRole = (role: string) =>
@@ -1833,20 +1834,7 @@ const pricingProjectTypeKey = (value: unknown) => {
   const normalized = text(value, "").trim().toLowerCase().replace(/\s+/g, " ");
   return normalized === "mockup" ? "mock up" : normalized;
 };
-const canSubmitQuotationPaymentInUi = (
-  quote: Row,
-  role: string,
-) => {
-  if (
-    role !== "external_finance" ||
-    text(quote.document_type) !== "price_quotation" ||
-    Boolean(quote.costing_source_id) ||
-    text(quote.status) !== "approved"
-  ) {
-    return false;
-  }
-  return true;
-};
+const canSubmitQuotationPaymentInUi = (_quote: Row, _role: string) => false;
 const assignedPaymentReviewerId = (
   quote: Row,
   payment: Row,
@@ -2094,25 +2082,6 @@ const roleReadableTables: Record<string, TableName[]> = {
     "production_material_usage",
     "production_job_activity",
     "finished_product_stock_ins",
-    "announcements",
-    "policies",
-  ],
-  internal_finance: [
-    "profiles",
-    "customers",
-    "suppliers",
-    "leads",
-    "quotations",
-    "commission_summaries",
-    "quotation_payment_records",
-    "announcements",
-    "policies",
-  ],
-  external_finance: [
-    "profiles",
-    "leads",
-    "quotations",
-    "quotation_payment_records",
     "announcements",
     "policies",
   ],
@@ -2389,8 +2358,15 @@ const directory: Module = {
     { key: "tin", label: "TIN" },
   ],
   columns: [
-    { label: "Company name", value: (r) => text(r.company_name, "—") },
-    { label: "Client's Name", value: (r) => text(r.contact_name, "—") },
+    {
+      label: "Client / Company",
+      value: (r) => (
+        <ClientCompanyNames
+          clientName={r.contact_name}
+          companyName={r.company_name}
+        />
+      ),
+    },
     { label: "Contact", value: (r) => text(r.phone) },
     { label: "Email", value: (r) => text(r.email) },
     {
@@ -2474,8 +2450,15 @@ const leads: Module = {
       label: "Project",
       value: (r) => text(r.project_name, "—"),
     },
-    { label: "Client's Name", value: (r) => text(r.contact_name, "—") },
-    { label: "Company name", value: (r) => text(r.client_name, "—") },
+    {
+      label: "Client / Company",
+      value: (r) => (
+        <ClientCompanyNames
+          clientName={r.contact_name}
+          companyName={r.client_name}
+        />
+      ),
+    },
     { label: "Email", value: (r) => text(r.email, "—") },
     { label: "Phone Number", value: (r) => text(r.phone, "—") },
     {
@@ -4219,8 +4202,7 @@ function LeadCoordinatorTransferredLeads({
               <Table
                 labels={[
                   "Date transferred",
-                  "Client's Name",
-                  "Company Name",
+                  "Client / Company",
                   "Project",
                   "Transferred to",
                   "Lead status",
@@ -4228,14 +4210,15 @@ function LeadCoordinatorTransferredLeads({
                 minWidth={980}
                 scrollable
                 scrollContainerClassName="max-h-[560px]"
-                columnWidths={["145px", "160px", "190px", "220px", "220px", "150px"]}
+                columnWidths={["145px", "260px", "220px", "220px", "150px"]}
                 className="lead-coordinator-table modern-page-table"
               >
                 {filteredRows.map((row) => (
                   <tr key={text(row.transfer_id, text(row.lead_id))} className="hover:bg-[#fbfcff]">
                     <td className="px-5 py-3 align-middle">{day(row.transferred_at)}</td>
-                    <td className="px-5 py-3 align-middle">{text(row.contact_name, "—")}</td>
-                    <td className="px-5 py-3 align-middle">{text(row.client_name, "—")}</td>
+                    <td className="px-5 py-3 align-middle">
+                      <ClientCompanyNames clientName={row.contact_name} companyName={row.client_name} />
+                    </td>
                     <td className="px-5 py-3 align-middle">
                       {text(row.project_name, "-")}
                     </td>
@@ -4401,8 +4384,7 @@ function PricingOfficerActiveEndorsements({
               <Table
                 labels={[
                   "Date endorsed",
-                  "Client's Name",
-                  "Company Name",
+                  "Client / Company",
                   "Project",
                   "Endorsed to",
                   "Lead status",
@@ -4410,14 +4392,15 @@ function PricingOfficerActiveEndorsements({
                 minWidth={980}
                 scrollable
                 scrollContainerClassName="max-h-[560px]"
-                columnWidths={["145px", "160px", "190px", "220px", "220px", "150px"]}
+                columnWidths={["145px", "260px", "220px", "220px", "150px"]}
                 className="lead-coordinator-table modern-page-table"
               >
                 {filteredRows.map((row) => (
                   <tr key={text(row.lead_id)} className="hover:bg-[#fbfcff]">
                     <td className="px-5 py-3 align-middle">{day(row.endorsed_at)}</td>
-                    <td className="px-5 py-3 align-middle">{text(row.contact_name, "—")}</td>
-                    <td className="px-5 py-3 align-middle">{text(row.client_name, "—")}</td>
+                    <td className="px-5 py-3 align-middle">
+                      <ClientCompanyNames clientName={row.contact_name} companyName={row.client_name} />
+                    </td>
                     <td className="px-5 py-3 align-middle">
                       {text(row.project_name, "-")}
                     </td>
@@ -5693,13 +5676,12 @@ function LeadImportDialog({
             </div>
             <div className="mt-4 overflow-hidden rounded-lg border border-[#d6dee8]">
               <div className="max-h-[330px] overflow-auto">
-                <table className="w-full min-w-[1900px] text-left text-[12px]">
+                <table className="w-full min-w-[1720px] text-left text-[12px]">
                   <thead className="sticky top-0 z-20 border-y border-[#1F4E79] bg-[#1F4E79] text-white">
                     <tr>
                       <th className="sticky left-0 z-30 w-[72px] min-w-[72px] bg-[#1F4E79] px-3 py-2.5 font-semibold">#</th>
                       <th className="w-[135px] min-w-[135px] whitespace-nowrap px-3 py-2.5 font-semibold">Date recorded</th>
-                      <th className="w-[190px] min-w-[190px] whitespace-nowrap px-3 py-2.5 font-semibold">Contact name</th>
-                      <th className="w-[180px] min-w-[180px] whitespace-nowrap px-3 py-2.5 font-semibold">Company name</th>
+                      <th className="w-[260px] min-w-[260px] whitespace-nowrap px-3 py-2.5 font-semibold">Client / Company</th>
                       <th className="w-[240px] min-w-[240px] whitespace-nowrap px-3 py-2.5 font-semibold">Company address</th>
                       <th className="w-[220px] min-w-[220px] whitespace-nowrap px-3 py-2.5 font-semibold">Email</th>
                       <th className="w-[155px] min-w-[155px] whitespace-nowrap px-3 py-2.5 font-semibold">Contact number</th>
@@ -5716,8 +5698,9 @@ function LeadImportDialog({
                           <span className="font-semibold text-[#202938]">{index + 1}</span>
                         </td>
                         <td className="whitespace-normal break-words px-3 py-2 text-[#344054]">{row.date_sent || "—"}</td>
-                        <td className="whitespace-normal break-words px-3 py-2 font-medium text-[#202938]">{row.contact_name || "—"}</td>
-                        <td className="whitespace-normal break-words px-3 py-2 text-[#344054]">{row.client_name || "—"}</td>
+                        <td className="whitespace-normal break-words px-3 py-2 font-medium text-[#202938]">
+                          <ClientCompanyNames clientName={row.contact_name} companyName={row.client_name} />
+                        </td>
                         <td className="whitespace-normal break-words px-3 py-2 text-[#344054]">{row.address || "—"}</td>
                         <td className="whitespace-normal break-all px-3 py-2 text-[#344054]">{row.email || "—"}</td>
                         <td className="whitespace-normal break-words px-3 py-2 text-[#344054]">{row.phone || "—"}</td>
@@ -7270,10 +7253,10 @@ function Records({
               {visibleOwnLeadChangeRequests.length ? (
                 <div className="lead-change-request-shell">
                   <Table
-                    labels={["Client's Name", "Company Name", "Request", "Submitted", "Status", "Your note", "GM note", "Actions"]}
+                    labels={["Client / Company", "Request", "Submitted", "Status", "Your note", "GM note", "Actions"]}
                     minWidth={1120}
                     scrollable
-                    columnWidths={["13%", "15%", "18%", "10%", "11%", "11%", "11%", "11%"]}
+                    columnWidths={["20%", "18%", "10%", "11%", "14%", "14%", "13%"]}
                     className="lead-change-request-table modern-page-table"
                   >
                     {visibleOwnLeadChangeRequests.map((request) => {
@@ -7287,11 +7270,12 @@ function Records({
                         : labels.length <= 2
                           ? labels.join(", ")
                           : `${labels.slice(0, 2).join(", ")} +${labels.length - 2} more`;
-                      const clientName = display.contactName || (display.deleted ? "Deleted lead" : "Lead record unavailable");
+                      const clientName = display.contactName || (display.deleted ? "Deleted lead" : "");
                       return (
                         <tr key={text(request.id)} className="hover:bg-[#fbfcff]">
-                          <td className="px-5 py-3">{clientName}</td>
-                          <td className="px-5 py-3">{display.clientName || "—"}</td>
+                          <td className="px-5 py-3">
+                            <ClientCompanyNames clientName={clientName} companyName={display.clientName} emptyLabel="Lead record unavailable" />
+                          </td>
                           <td className="px-5 py-3">{changeSummary || "-"}</td>
                           <td className="px-5 py-3">{day(request.submitted_at)}</td>
                           <td className="px-5 py-3"><Status value={request.status} /></td>
@@ -9348,7 +9332,7 @@ function PaymentMonitoring({
   const [paymentOfficerFilter, setPaymentOfficerFilter] = useState("all");
   const [paymentPage, setPaymentPage] = useState(1);
   const isGeneralManager = memberRole(role);
-  const isExternalFinance = role === "external_finance";
+  const isExternalFinance = false;
   const isInternalFinance = isInternalFinanceRole(role);
   const projectOfficers = useMemo(() => projectOfficerOptions(store), [store]);
   const deferredPaymentQuery = useDeferredValue(paymentQuery);
@@ -9494,7 +9478,7 @@ function PaymentMonitoring({
         {rows.length ? (
           <>
           <div className="modern-table-shell">
-          <Table labels={["Quotation", "Project", "Client's Name", "Company Name", "Prepared by", "Payment status", "Pending", "Verified", "Total", "Last receipt", isExternalFinance ? "Payments" : isInternalFinance ? "View" : "Review"]} minWidth={1400}>
+          <Table labels={["Quotation", "Project", "Client / Company", "Prepared by", "Payment status", "Pending", "Verified", "Total", "Last receipt", isExternalFinance ? "Payments" : isInternalFinance ? "View" : "Review"]} minWidth={1400}>
             {visiblePaymentRows.map(({ quote, allRecords, pendingForReview, summary }) => {
               const party = quotationParty(quote, store);
               const preparedBy = text(store.profiles.find((profile) => profile.id === (quote.prepared_by_user_id ?? quote.created_by))?.full_name, text(quote.representative, "Sales Executive"));
@@ -9504,8 +9488,7 @@ function PaymentMonitoring({
               return <tr key={text(quote.id)}>
                 <td className="px-5 py-3">{text(quote.quotation_no, "—")}</td>
                 <td className="px-5 py-3">{text(quote.project_name, "—")}</td>
-                <td className="px-5 py-3">{party.clientName}</td>
-                <td className="px-5 py-3">{party.companyName}</td>
+                <td className="px-5 py-3"><ClientCompanyNames clientName={party.clientName} companyName={party.companyName} /></td>
                 <td className="px-5 py-3">{preparedBy}</td>
                 <td className="px-5 py-3"><PaymentStatusBadge status={summary.status} /></td>
                 <td className="px-5 py-3 font-medium text-[#a76605]">{peso.format(pendingAmountForRow)}</td>
@@ -9808,7 +9791,7 @@ function QuotationCostingOverview({
         )}
         {filteredCostedQuotations.length ? (
           <div className="modern-table-shell">
-          <Table labels={isGeneralManager ? ["Select", "Price Quotation", "Project", "Client's Name", "Company Name", "Project Type", "Status", "Costed", "Actions"] : ["Price Quotation", "Project", "Client's Name", "Company Name", "Project Type", "Status", "Costed", "Actions"]} minWidth={isGeneralManager ? 1260 : 1200} className="!w-full">
+          <Table labels={isGeneralManager ? ["Select", "Price Quotation", "Project", "Client / Company", "Project Type", "Status", "Costed", "Actions"] : ["Price Quotation", "Project", "Client / Company", "Project Type", "Status", "Costed", "Actions"]} minWidth={isGeneralManager ? 1260 : 1200} className="!w-full">
             {filteredCostedQuotations.map((quote) => {
               const party = quotationParty(quote, store);
               return (
@@ -9825,8 +9808,7 @@ function QuotationCostingOverview({
                   )}
                   <td className="px-5 py-3">{text(quote.quotation_no, "—")}</td>
                   <td className="px-5 py-3">{text(quote.project_name, "—")}</td>
-                  <td className="px-5 py-3">{party.clientName}</td>
-                  <td className="px-5 py-3">{party.companyName}</td>
+                  <td className="px-5 py-3"><ClientCompanyNames clientName={party.clientName} companyName={party.companyName} /></td>
                   <td className="px-5 py-3">{text(quote.project_types)}</td>
                   <td className="px-5 py-3"><Status value={quote.status} /></td>
                   <td className="px-5 py-3">{day(quote.pricing_reviewed_at ?? quote.updated_at)}</td>
@@ -10593,8 +10575,7 @@ function ProjectCalendar({
         <Table
           labels={[
             "Quotation No.",
-            "Client's Name",
-            "Company Name",
+            "Client / Company",
             "Start Date",
             "Due Date",
             "Total Lead Time",
@@ -10615,8 +10596,7 @@ function ProjectCalendar({
             const lead = store.leads.find((item) => item.id === quotation?.lead_id);
             return <tr key={text(schedule.id)} className="hover:bg-[#fbfcff]">
               <td className="px-4 py-2">{text(quotation?.quotation_no ?? schedule.quotation_no, "—")}</td>
-              <td className="px-4 py-2">{text(lead?.contact_name ?? quotation?.client_contact_name ?? schedule.client_name, "—")}</td>
-              <td className="px-4 py-2">{text(lead?.client_name ?? quotation?.client_name ?? schedule.client_name, "—")}</td>
+              <td className="px-4 py-2"><ClientCompanyNames clientName={lead?.contact_name ?? quotation?.client_contact_name} companyName={lead?.client_name ?? quotation?.client_name ?? schedule.client_name} /></td>
               <td className="px-4 py-2">{day(schedule.start_date)}</td>
               <td className="px-4 py-2">{day(schedule.due_date)}</td>
               <td className="px-4 py-2 whitespace-nowrap">{totalLeadTime(schedule)}</td>
@@ -14165,7 +14145,7 @@ function Quotations({
               scrollable={pageLayout}
               labels={[
                 isCosting ? "Costing Breakdown" : "Price Quotation",
-                ...(isCosting ? ["Client's Name", "Company Name"] : ["Project"]),
+                ...(isCosting ? ["Client / Company"] : ["Project"]),
                 "Estimated COGS",
                 "Prepared by",
                 isCosting ? "Approval" : "GM approval",
@@ -14196,8 +14176,7 @@ function Quotations({
                 return (
                 <tr key={text(q.id)}>
                   <td className="px-5 py-3">{text(q.quotation_no, "—")}</td>
-                  <td className="px-5 py-3">{isCosting ? party.clientName : text(q.project_name, "—")}</td>
-                  {isCosting && <td className="px-5 py-3">{party.companyName}</td>}
+                  <td className="px-5 py-3">{isCosting ? <ClientCompanyNames clientName={party.clientName} companyName={party.companyName} /> : text(q.project_name, "—")}</td>
                   <td className="px-5 py-3 text-right tabular-nums">
                     {peso.format(n(q.total_cost))}
                   </td>
@@ -15343,7 +15322,7 @@ function PriceQuotationSubmissions({
       ) : activeSubmissions.length ? (
         <>
         <div className="modern-table-shell">
-        <Table labels={["Price Quotation", "Project", "Client's Name", "Company Name", "Status", "Assigned to", queueStage === "gm_revision" ? "Returned" : "Submitted", "Note", "Review"]} minWidth={1120}>
+        <Table labels={["Price Quotation", "Project", "Client / Company", "Status", "Assigned to", queueStage === "gm_revision" ? "Returned" : "Submitted", "Note", "Review"]} minWidth={1120}>
           {visibleSubmissions.map((quotation) => {
             const lead = store.leads.find((item) => item.id === quotation.lead_id);
             const party = quotationParty(quotation, store);
@@ -15351,8 +15330,7 @@ function PriceQuotationSubmissions({
               <tr key={text(quotation.id)}>
                 <td className="px-5 py-3">{text(quotation.quotation_no, "—")}</td>
                 <td className="px-5 py-3">{text(quotation.project_name, text(lead?.project_name, "—"))}</td>
-                <td className="px-5 py-3 font-medium">{party.clientName}</td>
-                <td className="px-5 py-3">{party.companyName}</td>
+                <td className="px-5 py-3 font-medium"><ClientCompanyNames clientName={party.clientName} companyName={party.companyName} /></td>
                 <td className="px-5 py-3"><Status value={queueStage === "gm_revision" ? "gm revision" : submissionLabel(quotation)} /></td>
                 <td className="px-5 py-3">{officerName(quotation)}</td>
                 <td className="px-5 py-3">{day(queueStage === "gm_revision" ? quotation.revision_requested_at ?? quotation.updated_at ?? quotation.created_at : quotation.submitted_at)}</td>
@@ -16023,8 +16001,8 @@ function PriceQuotationWorkspace({
     ? (["approved"] as const)
     : (["draft", "pending", "needs_revision", "approved"] as const);
   const quotationTableLabels = isProjectOfficerRole(role)
-    ? ["Quotation", "Project", "Client's Name", "Company Name", "Status", "Revision", "Note", "Date", "Actions"]
-    : ["Quotation", "Project", "Client's Name", "Company Name", "Prepared by", "Status", "Revision", "Note", "Date", "Actions"];
+    ? ["Quotation", "Project", "Client / Company", "Status", "Revision", "Note", "Date", "Actions"]
+    : ["Quotation", "Project", "Client / Company", "Prepared by", "Status", "Revision", "Note", "Date", "Actions"];
   return (
     <Panel
       title="Price Quotations"
@@ -16092,8 +16070,7 @@ function PriceQuotationWorkspace({
               <tr key={text(quote.id)}>
                 <td className="px-5 py-3">{text(quote.quotation_no, "—")}</td>
                 <td className="px-5 py-3">{text(quote.project_name, text(lead?.project_name, "—"))}</td>
-                <td className="px-5 py-3">{party.clientName}</td>
-                <td className="px-5 py-3">{party.companyName}</td>
+                <td className="px-5 py-3"><ClientCompanyNames clientName={party.clientName} companyName={party.companyName} /></td>
                 {!isProjectOfficerRole(role) && <td className="px-5 py-3">{preparedBy}</td>}
                 <td className="px-5 py-3"><Status value={quote.status} /></td>
                 <td className="px-5 py-3">{priceRevisionRequest ? "Requested" : "—"}</td>
@@ -19559,20 +19536,20 @@ function Submissions({
         </Table>
       ) : <Empty>{productionOnly ? "No production approvals are awaiting review." : "No management approvals are awaiting review."}</Empty>)}
       {tab === "quotations" && (visiblePendingPriceQuotations.length ? (
-        <Table labels={["Select", "Price Quotation", "Project", "Client's Name", "Company Name", "Prepared by", "Submitted", "Note", "Review"]} minWidth={1180}>
+        <Table labels={["Select", "Price Quotation", "Project", "Client / Company", "Prepared by", "Submitted", "Note", "Review"]} minWidth={1180}>
           {visiblePendingPriceQuotations.map((quotation) => {
             const party = quotationParty(quotation, store);
             const note = text(quotation.pricing_submission_note, "").trim();
-            return <tr key={text(quotation.id)}>{renderSelectionCell(`price-${text(quotation.id)}`)}<td className="px-5 py-3">{text(quotation.quotation_no, "—")}</td><td className="px-5 py-3">{text(quotation.project_name, "—")}</td><td className="px-5 py-3 font-medium">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3">{note ? <NoteAction label="View Pricing Officer note" tone="amber" onClick={() => setSubmissionNoteQuotation(quotation)} /> : <span className="text-[11px] text-[#8b92a1]">â€”</span>}</td><td className="px-5 py-3"><ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>;
+            return <tr key={text(quotation.id)}>{renderSelectionCell(`price-${text(quotation.id)}`)}<td className="px-5 py-3">{text(quotation.quotation_no, "—")}</td><td className="px-5 py-3">{text(quotation.project_name, "—")}</td><td className="px-5 py-3 font-medium"><ClientCompanyNames clientName={party.clientName} companyName={party.companyName} /></td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3">{note ? <NoteAction label="View Pricing Officer note" tone="amber" onClick={() => setSubmissionNoteQuotation(quotation)} /> : <span className="text-[11px] text-[#8b92a1]">â€”</span>}</td><td className="px-5 py-3"><ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>;
           })}
         </Table>
       ) : <Empty>No Price Quotations are awaiting review.</Empty>)}
       {tab === "price_revisions" && (visiblePendingPriceQuotationRevisions.length ? (
-        <Table labels={["Select", "Price Quotation", "Project", "Client's Name", "Company Name", "Sales Executive", "Requested", "Review"]} minWidth={1040}>
+        <Table labels={["Select", "Price Quotation", "Project", "Client / Company", "Sales Executive", "Requested", "Review"]} minWidth={1040}>
           {visiblePendingPriceQuotationRevisions.map((request) => {
             const quotation = store.quotations.find((item) => item.id === request.quotation_id);
             const party = quotation ? quotationParty(quotation, store) : { clientName: "-", companyName: "-" };
-            return <tr key={text(request.id)}>{renderSelectionCell(`price-revision-${text(request.id)}`)}<td className="px-5 py-3">{text(quotation?.quotation_no, "Price Quotation")}</td><td className="px-5 py-3">{text(quotation?.project_name, "—")}</td><td className="px-5 py-3">{party.clientName}</td><td className="px-5 py-3">{party.companyName}</td><td className="px-5 py-3">{projectOfficerName(request)}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>;
+            return <tr key={text(request.id)}>{renderSelectionCell(`price-revision-${text(request.id)}`)}<td className="px-5 py-3">{text(quotation?.quotation_no, "Price Quotation")}</td><td className="px-5 py-3">{text(quotation?.project_name, "—")}</td><td className="px-5 py-3"><ClientCompanyNames clientName={party.clientName} companyName={party.companyName} /></td><td className="px-5 py-3">{projectOfficerName(request)}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>;
           })}
         </Table>
       ) : <Empty>No Price Quotation revisions are awaiting review.</Empty>)}
@@ -19582,7 +19559,7 @@ function Submissions({
             "Costing Breakdown",
             "Price Quotation",
             "Project",
-            "Client",
+            "Client / Company",
             "Sales Executive",
             "Submitted",
             "Estimated COGS",
@@ -19590,16 +19567,14 @@ function Submissions({
           ]}
         >
           {visiblePendingCostings.map((quotation) => {
-            const lead = store.leads.find(
-              (item) => item.id === quotation.lead_id,
-            );
+            const party = quotationParty(quotation, store);
             return (
               <tr key={text(quotation.id)}>
                 <td className="px-5 py-3">Costing Breakdown</td>
                 <td className="px-5 py-3">{text(quotation.quotation_no, "—")}</td>
                 <td className="px-5 py-3">{text(quotation.project_name, "—")}</td>
                 <td className="px-5 py-3 font-medium">
-                  {text(quotation.client_contact_name, text(lead?.contact_name, "—"))}
+                  <ClientCompanyNames clientName={party.clientName} companyName={party.companyName} />
                 </td>
                 <td className="px-5 py-3 font-medium">
                   {officerName(quotation)}
@@ -19642,7 +19617,7 @@ function Submissions({
         </Table>
       ) : <Empty>No Costing Breakdown revisions are awaiting review.</Empty>)}
       {tab === "calendar_projects" && (visiblePendingProjectSchedules.length ? (
-        <Table labels={["Select", "Assigned Sales Executive", "Price Quotation", "Client's Name", "Company Name", "Quantity", "Project Type", "Assigned Box Makers", "Agreement", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1640}>
+        <Table labels={["Select", "Assigned Sales Executive", "Price Quotation", "Client / Company", "Quantity", "Project Type", "Assigned Box Makers", "Agreement", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1640}>
           {visiblePendingProjectSchedules.map((schedule) => {
             const quotation = store.quotations.find((item) => item.id === schedule.quotation_id);
             const party = quotation ? quotationParty(quotation, store) : { clientName: text(schedule.client_contact_name, "—"), companyName: text(schedule.client_name, "—") };
@@ -19651,8 +19626,7 @@ function Submissions({
               {renderSelectionCell(`production-${text(schedule.id)}`)}
               <td className="px-5 py-3">{scheduleOfficerName(schedule)}</td>
               <td className="px-5 py-3">{text(schedule.quotation_no)}</td>
-              <td className="px-5 py-3">{party.clientName}</td>
-              <td className="px-5 py-3">{party.companyName}</td>
+              <td className="px-5 py-3"><ClientCompanyNames clientName={party.clientName} companyName={party.companyName} /></td>
               <td className="px-5 py-3">{n(schedule.quantity).toLocaleString()}</td>
               <td className="px-5 py-3">{text(schedule.product_name)}</td>
               <td className="px-5 py-3 whitespace-normal">{assignedBoxMakerLabel(schedule)}</td>
@@ -19667,7 +19641,7 @@ function Submissions({
         </Table>
       ) : <Empty>No production requests are awaiting review.</Empty>)}
       {tab === "calendar_revisions" && (visiblePendingProjectScheduleRevisions.length ? (
-        <Table labels={["Select", "Assigned Sales Executive", "Quotation Code", "Client's Name", "Company Name", "Quantity", "Project Type", "Proposed Start", "Current Start", "Proposed Due", "Current Due", "Project Status", "Review"]} minWidth={1480}>
+        <Table labels={["Select", "Assigned Sales Executive", "Quotation Code", "Client / Company", "Quantity", "Project Type", "Proposed Start", "Current Start", "Proposed Due", "Current Due", "Project Status", "Review"]} minWidth={1480}>
           {visiblePendingProjectScheduleRevisions.map((request) => {
             const schedule = store.project_schedules.find(
               (item) => item.id === request.schedule_id,
@@ -19679,8 +19653,7 @@ function Submissions({
                 {renderSelectionCell(`schedule-revision-${text(request.id)}`)}
                 <td className="px-5 py-3">{projectOfficerName(request)}</td>
                 <td className="px-5 py-3">{text(schedule?.quotation_no)}</td>
-                <td className="px-5 py-3">{party.clientName}</td>
-                <td className="px-5 py-3">{party.companyName}</td>
+                <td className="px-5 py-3"><ClientCompanyNames clientName={party.clientName} companyName={party.companyName} /></td>
                 <td className="px-5 py-3">{n(schedule?.quantity).toLocaleString()}</td>
                 <td className="px-5 py-3">{text(schedule?.product_name)}</td>
                 <td className="px-5 py-3">{day(request.proposed_start_date)}</td>
@@ -19695,7 +19668,7 @@ function Submissions({
         </Table>
       ) : <Empty>No Project Calendar revisions are awaiting review.</Empty>)}
       {tab === "calendar_completions" && (visiblePendingProjectScheduleCompletions.length ? (
-        <Table labels={["Select", "Assigned Sales Executive", "Quotation Code", "Client's Name", "Company Name", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1320}>
+        <Table labels={["Select", "Assigned Sales Executive", "Quotation Code", "Client / Company", "Quantity", "Project Type", "Start Date", "Due Date", "Project Status", "Review"]} minWidth={1320}>
           {visiblePendingProjectScheduleCompletions.map((request) => {
             const schedule = store.project_schedules.find(
               (item) => item.id === request.schedule_id,
@@ -19707,8 +19680,7 @@ function Submissions({
                 {renderSelectionCell(`completion-${text(request.id)}`)}
                 <td className="px-5 py-3">{projectOfficerName(request)}</td>
                 <td className="px-5 py-3">{text(schedule?.quotation_no)}</td>
-                <td className="px-5 py-3">{party.clientName}</td>
-                <td className="px-5 py-3">{party.companyName}</td>
+                <td className="px-5 py-3"><ClientCompanyNames clientName={party.clientName} companyName={party.companyName} /></td>
                 <td className="px-5 py-3">{n(schedule?.quantity).toLocaleString()}</td>
                 <td className="px-5 py-3">{text(schedule?.product_name)}</td>
                 <td className="px-5 py-3">{day(schedule?.start_date)}</td>
@@ -19721,14 +19693,13 @@ function Submissions({
         </Table>
       ) : <Empty>No Project Calendar completion requests are awaiting review.</Empty>)}
       {tab === "projects" && (visiblePendingProjectEdits.length ? (
-        <Table labels={["Project", "Client's Name", "Company Name", "Sales Executive", "Submitted", "Requested changes", "Review"]}>
+        <Table labels={["Project", "Client / Company", "Sales Executive", "Submitted", "Requested changes", "Review"]}>
           {visiblePendingProjectEdits.map((request) => {
             const project = store.leads.find((lead) => lead.id === request.project_id);
             const changes = request.proposed_changes && typeof request.proposed_changes === "object" ? Object.keys(request.proposed_changes as Record<string, unknown>) : [];
             return <tr key={text(request.id)}>
               <td className="px-5 py-3">{text(project?.project_name, "—")}</td>
-              <td className="px-5 py-3">{text(project?.contact_name, "—")}</td>
-              <td className="px-5 py-3">{text(project?.client_name, "—")}</td>
+              <td className="px-5 py-3"><ClientCompanyNames clientName={project?.contact_name} companyName={project?.client_name} /></td>
               <td className="px-5 py-3">{projectOfficerName(request)}</td>
               <td className="px-5 py-3">{day(request.submitted_at)}</td>
               <td className="px-5 py-3">{changes.map((change) => change.replaceAll("_", " ")).join(", ")}</td>
@@ -19738,7 +19709,7 @@ function Submissions({
         </Table>
       ) : <Empty>No project edits are awaiting review.</Empty>)}
       {tab === "leads" && (visiblePendingLeadChanges.length ? (
-        <Table labels={["Lead", "Client's Name", "Company Name", "Sales Executive", "Requested", "Change", "Review"]}>
+        <Table labels={["Lead", "Client / Company", "Sales Executive", "Requested", "Change", "Review"]}>
           {visiblePendingLeadChanges.map((request) => {
             const lead = store.leads.find((item) => item.id === request.lead_id);
             const changes = request.proposed_changes && typeof request.proposed_changes === "object" ? Object.keys(request.proposed_changes as Record<string, unknown>) : [];
@@ -19751,8 +19722,7 @@ function Submissions({
                 : `${changeLabels.slice(0, 2).join(", ")} +${changeLabels.length - 2} more`;
             return <tr key={text(request.id)}>
               <td className="px-5 py-3">{text(lead?.project_name, "—")}</td>
-              <td className="px-5 py-3">{text(lead?.contact_name, "—")}</td>
-              <td className="px-5 py-3">{text(lead?.client_name, "—")}</td>
+              <td className="px-5 py-3"><ClientCompanyNames clientName={lead?.contact_name} companyName={lead?.client_name} /></td>
               <td className="px-5 py-3">{projectOfficerName(request)}</td>
               <td className="px-5 py-3">{day(request.submitted_at)}</td>
               <td className="px-5 py-3">{changeSummary || "-"}</td>
@@ -19762,14 +19732,13 @@ function Submissions({
         </Table>
       ) : <Empty>No lead changes are awaiting review.</Empty>)}
       {tab === "lead_unendorsements" && (visiblePendingLeadUnendorsements.length ? (
-        <Table labels={["Select", "Lead", "Client's Name", "Company Name", "Original owner", "Endorsed officer", "Requested", "Review"]} minWidth={1160}>
+        <Table labels={["Select", "Lead", "Client / Company", "Original owner", "Endorsed officer", "Requested", "Review"]} minWidth={1160}>
           {visiblePendingLeadUnendorsements.map((request) => {
             const lead = store.leads.find((item) => item.id === request.lead_id);
             return <tr key={text(request.id)}>
               {renderSelectionCell(`lead-unendorsement-${text(request.id)}`)}
               <td className="px-5 py-3">{text(lead?.project_name, "—")}</td>
-              <td className="px-5 py-3">{text(lead?.contact_name, "—")}</td>
-              <td className="px-5 py-3">{text(lead?.client_name, "—")}</td>
+              <td className="px-5 py-3"><ClientCompanyNames clientName={lead?.contact_name} companyName={lead?.client_name} /></td>
               <td className="px-5 py-3">{approvalStaffName(request.requested_by)}</td>
               <td className="px-5 py-3">{approvalStaffName(request.endorsed_to)}</td>
               <td className="px-5 py-3">{day(request.requested_at ?? request.created_at)}</td>
@@ -22426,10 +22395,10 @@ function CommissionSummaryView({
         {filteredRows.length ? (
           <>
           <Table
-            labels={["Quotation", "Quotation date", "Client's Name", "Company Name", "Sales Origin", "Co-Worker", "Grand Total", "Client payment", "Pending payment", "Remaining client balance", "Commission amount", "Payout status"]}
+            labels={["Quotation", "Quotation date", "Client / Company", "Sales Origin", "Co-Worker", "Grand Total", "Client payment", "Pending payment", "Remaining client balance", "Commission amount", "Payout status"]}
             minWidth={1640}
             className="commission-summary-table table-fixed"
-            columnWidths={["10%", "8%", "14%", "12%", "11%", "11%", "10%", "9%", "9%", "10%", "10%", "9%"]}
+            columnWidths={["10%", "8%", "20%", "12%", "11%", "11%", "9%", "9%", "10%", "10%", "9%"]}
             alignRightLabels={["Grand Total", "Pending payment", "Remaining client balance", "Commission amount"]}
           >
             {visibleCommissionRows.map((summary) => {
@@ -22463,8 +22432,7 @@ function CommissionSummaryView({
                 <tr key={text(summary.id)}>
                   <td className="px-4 py-3">{text(summary.quotation_no, "—")}</td>
                   <td className="px-4 py-3">{text(summary.created_at, "").slice(0, 10) || "—"}</td>
-                  <td className="px-4 py-3">{party.clientName}</td>
-                  <td className="px-4 py-3">{party.companyName}</td>
+                  <td className="px-4 py-3"><ClientCompanyNames clientName={party.clientName} companyName={party.companyName} /></td>
                   <td className="px-4 py-3">{text(originName, "—")}</td>
                   <td className="px-4 py-3">{text(coworkerName, "—")}</td>
                   <td className="px-4 py-3 text-right font-medium">{peso.format(n(summary.grand_total))}</td>
@@ -23213,9 +23181,11 @@ export function HuswellWorkspace({
   productionApprovalEnabled?: boolean;
   initialView?: View;
 }) {
-  const hasInternalFinanceAccess = internalFinanceEnabled;
-  const financeRole = hasInternalFinanceAccess ? "internal_finance" : role;
-  const revisedFinanceRole = hasInternalFinanceAccess ? "accountant" : role;
+  // Revised Finance access is role-based. A legacy capability row must not
+  // turn a Sales/Pricing account into an Accounting & Finance user.
+  const hasInternalFinanceAccess = role === "accountant";
+  const financeRole = role;
+  const revisedFinanceRole = role;
   const defaultWorkspaceView: View = role === "accountant"
     ? "Finance Overview"
     : role === "lead_coordinator"
@@ -23228,7 +23198,7 @@ export function HuswellWorkspace({
         ? "Approvals"
         : initialView ?? defaultWorkspaceView;
   const financePaymentViewAllowed =
-    hasInternalFinanceAccess || role === "accountant";
+    hasInternalFinanceAccess || ["super_admin", "owner", "admin"].includes(role);
   const safeInitialView = requestedInitialView === "Payment Monitoring" && !financePaymentViewAllowed
     ? defaultWorkspaceView
     : requestedInitialView;
@@ -23237,7 +23207,7 @@ export function HuswellWorkspace({
       ? defaultWorkspaceView
       : safeInitialView,
   );
-  const isCombinedSalesPricingAccount = role === "sales_pricing_officer" && hasInternalFinanceAccess;
+  const isCombinedSalesPricingAccount = false;
   const [sidebarWorkspace, setSidebarWorkspace] = useState<SidebarWorkspace>(
     financeSidebarViews.includes(safeInitialView) ? "finance" : "sales_pricing",
   );
@@ -23288,16 +23258,8 @@ export function HuswellWorkspace({
     }
     const parsed = parseSidebarQueueCounts(data);
     if (!parsed) return;
-    if (hasInternalFinanceAccess) {
-      setSidebarQueueCounts({
-        ...parsed,
-        finance: parsed.finance + parsed.quotation_payments,
-        quotation_payments: 0,
-      });
-      return;
-    }
     setSidebarQueueCounts(parsed);
-  }, [client, currentUserId, currentUserLoaded, hasInternalFinanceAccess, organizationId]);
+  }, [client, currentUserId, currentUserLoaded, organizationId]);
   const canEditOwnProfile = ["owner", "admin", "project_manager", "sales_pricing_officer", "accountant", "lead_coordinator"].includes(
     role,
   );
@@ -23365,11 +23327,6 @@ export function HuswellWorkspace({
           p_organization_id: organizationId,
         });
       }
-      if (table === "quotations" && role === "external_finance") {
-        return client.rpc("external_finance_quotation_rows", {
-          p_organization_id: organizationId,
-        });
-      }
       const childTables: TableName[] = [
         "profiles",
         "quotation_items",
@@ -23392,7 +23349,7 @@ export function HuswellWorkspace({
             .eq("organization_id", organizationId)
             .order("created_at", { ascending: false });
     },
-    [client, organizationId, role],
+    [client, organizationId],
   );
   const refreshTables = useCallback(async (
     requestedTables: TableName[],
@@ -23623,8 +23580,8 @@ export function HuswellWorkspace({
   }, [currentUserId, currentUserLoaded, refreshSidebarQueueCounts]);
   useEffect(() => {
     const isManagement = memberRole(role);
-    const isFinance = hasInternalFinanceAccess || role === "external_finance";
-    const isInternalFinance = hasInternalFinanceAccess;
+    const isFinance = memberRole(role) || role === "accountant";
+    const isInternalFinance = role === "accountant";
     const queueTables = new Set<string>();
     if (isManagement) {
       [
@@ -23654,8 +23611,6 @@ export function HuswellWorkspace({
     if (["owner", "admin", "payroll"].includes(role)) queueTables.add("employee_requests");
     if (isFinance) {
       [
-        "finance_transactions",
-        "finance_account_funding_requests",
         "finance_revised_transactions",
         "finance_working_fund_requests",
         "finance_daily_fund_requests",
@@ -23689,7 +23644,7 @@ export function HuswellWorkspace({
       }
       void client.removeChannel(channel);
     };
-  }, [client, hasInternalFinanceAccess, organizationId, productionApprovalEnabled, refreshSidebarQueueCounts, role]);
+  }, [client, organizationId, productionApprovalEnabled, refreshSidebarQueueCounts, role]);
   useEffect(() => {
     const refreshDate = () => setNavigationDate(new Date());
     refreshDate();
@@ -23714,7 +23669,7 @@ export function HuswellWorkspace({
       "Finance Requests",
       "Finance Commissions",
       "Payment Monitoring",
-      "Finance Activity History",
+      "Finance Transactions History",
       "Commissions",
       "Settings",
     ],
@@ -23736,7 +23691,7 @@ export function HuswellWorkspace({
       "Finance Requests",
       "Finance Commissions",
       "Payment Monitoring",
-      "Finance Activity History",
+      "Finance Transactions History",
       "Commissions",
       "Letter Request",
       "Announcements",
@@ -23761,7 +23716,7 @@ export function HuswellWorkspace({
       "Finance Requests",
       "Finance Commissions",
       "Payment Monitoring",
-      "Finance Activity History",
+      "Finance Transactions History",
       "Commissions",
       "Letter Request",
       "Announcements",
@@ -23792,9 +23747,7 @@ export function HuswellWorkspace({
     ],
     sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Announcements", "Policy"],
     warehouse: ["Dashboard", "Catalog", "Inventory", "Production", "Announcements", "Policy"],
-    accountant: ["Finance Overview", "Finance Transactions", "Finance Daily Fund", "Finance Cash on Hand", "Finance Monitoring", "Finance Requests", "Finance Commissions", "Finance Activity History", "Announcements", "Policy"],
-    internal_finance: ["Finance Overview", "Finance Transactions", "Finance Daily Fund", "Finance Cash on Hand", "Finance Monitoring", "Finance Requests", "Finance Commissions", "Finance Activity History", "Announcements", "Policy"],
-    external_finance: ["Finance Overview", "Finance Transactions", "Finance Daily Fund", "Finance Cash on Hand", "Finance Monitoring", "Finance Requests", "Finance Commissions", "Finance Activity History", "Announcements", "Policy"],
+    accountant: ["Finance Overview", "Finance Transactions", "Finance Daily Fund", "Finance Cash on Hand", "Finance Monitoring", "Finance Requests", "Finance Commissions", "Finance Transactions History", "Announcements", "Policy"],
     lead_coordinator: ["Leads", "Lead Costing", "Announcements", "Policy"],
     payroll: ["Dashboard", "Payroll & Leave", "Letter Request", "Directory", "Announcements", "Policy"],
     production: ["Dashboard", "Production", "Inventory", "Finance Foundation", "Announcements", "Policy"],
@@ -23817,21 +23770,6 @@ export function HuswellWorkspace({
   const allowedRoleViews = [
     ...(allowedViews[role] ?? allowedViews.viewer),
   ];
-  if (
-    hasInternalFinanceAccess &&
-    ["admin", "sales_pricing_officer"].includes(role)
-  ) {
-    allowedRoleViews.push(
-      "Finance Overview",
-      "Finance Transactions",
-      "Finance Daily Fund",
-      "Finance Cash on Hand",
-      "Finance Monitoring",
-      "Finance Requests",
-      "Finance Commissions",
-      "Finance Activity History",
-    );
-  }
   if (productionApprovalOnly && !allowedRoleViews.includes("Approvals")) {
     allowedRoleViews.push("Approvals");
   }
@@ -23871,7 +23809,7 @@ export function HuswellWorkspace({
             { view: "Finance Monitoring", icon: CalendarDays },
             { view: "Finance Requests", icon: FileText },
             { view: "Finance Commissions", icon: PhilippinePeso },
-            { view: "Finance Activity History", icon: ClipboardList },
+            { view: "Finance Transactions History", icon: ClipboardList },
           ],
         },
       ]
@@ -23922,7 +23860,7 @@ export function HuswellWorkspace({
     { view: "Finance Cash on Hand", icon: Wallet },
     { view: "Finance Monitoring", icon: CalendarDays },
     { view: "Finance Commissions", icon: PhilippinePeso },
-    { view: "Finance Activity History", icon: ClipboardList },
+    { view: "Finance Transactions History", icon: ClipboardList },
   ];
   const accountingFinanceItems: {
     view: View;
@@ -23936,7 +23874,7 @@ export function HuswellWorkspace({
     { view: "Finance Monitoring", icon: CalendarDays },
     { view: "Finance Requests", icon: FileText },
     { view: "Finance Commissions", icon: PhilippinePeso },
-    { view: "Finance Activity History", icon: ClipboardList },
+    { view: "Finance Transactions History", icon: ClipboardList },
   ];
   const navBase: {
     label: string;
@@ -23973,7 +23911,7 @@ export function HuswellWorkspace({
         { view: "Letter Request", icon: FileText, badge: sidebarBadge("letter_requests") },
       ],
     },
-  ] : ["internal_finance", "external_finance", "accountant"].includes(role) ? [
+  ] : role === "accountant" ? [
     {
       label: "Finance",
       items: accountingFinanceItems,
@@ -24052,8 +23990,8 @@ export function HuswellWorkspace({
         { view: "Finance Transactions", icon: ReceiptText },
         { view: "Finance Monitoring", icon: CalendarDays },
         { view: "Finance Requests", icon: FileText },
-        { view: "Finance Activity History", icon: ClipboardList },
-        ...(!["external_finance", "internal_finance"].includes(role) ? [{ view: "Commissions" as View, icon: PhilippinePeso }] : []),
+        { view: "Finance Transactions History", icon: ClipboardList },
+        { view: "Commissions", icon: PhilippinePeso },
       ],
     },
     {
@@ -24241,8 +24179,8 @@ export function HuswellWorkspace({
       title: "Paid commissions",
       detail: "Review completed commission payouts by project and pricing officer.",
     },
-    "Finance Activity History": {
-      title: "Activity History",
+    "Finance Transactions History": {
+      title: "Transactions History",
       detail: "Review Capital Funds, Working Funds, project collections, expenses, support, and repayments.",
     },
     Finance: {
@@ -24502,7 +24440,7 @@ export function HuswellWorkspace({
       <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="requests" />
     ) : active === "Finance Commissions" ? (
       <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="commissions" />
-    ) : active === "Finance Activity History" ? (
+    ) : active === "Finance Transactions History" ? (
       <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="history" />
     ) : active === "Finance Supplier Costing" ? (
       <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="projects" />
@@ -24624,7 +24562,7 @@ export function HuswellWorkspace({
               ? "Production Status"
         : view === "Projects"
               ? "Production"
-              : view === "Finance Overview" && (hasInternalFinanceAccess || role === "external_finance")
+              : view === "Finance Overview" && hasInternalFinanceAccess
                 ? "Overview"
               : view === "Finance Funds"
                 ? "Capital & Working Funds"
@@ -24640,24 +24578,18 @@ export function HuswellWorkspace({
                 ? "Project Monitoring"
               : view === "Finance Approvals"
                 ? "GM Approvals"
-              : view === "Finance Transactions" && role === "external_finance"
-                ? "Cash In & Cash Out"
               : view === "Finance Transactions" && hasInternalFinanceAccess
                 ? "Cash In & Cash Out"
               : view === "Finance Accounts"
                 ? "Accounting & Finance"
-              : view === "Finance Budget" && role === "external_finance"
-                ? "Working Fund requests"
               : view === "Finance Budget"
                 ? "Working Fund requests"
               : view === "Finance Supplier Costing"
                 ? "Project Monitoring"
               : view === "Finance Payables"
                 ? "Finance activity"
-              : view === "Finance Activity History"
-                ? "Activity History"
-              : view === "Finance" && role === "external_finance"
-                ? "Accounting & Finance"
+              : view === "Finance Transactions History"
+                ? "Transactions History"
               : view === "Finance" && hasInternalFinanceAccess
                 ? "Accounting & Finance"
               : role === "sales_pricing_officer" && view === "Price Quotation Review"
@@ -24898,7 +24830,7 @@ export function HuswellWorkspace({
                 </Button>
               </div>
             )}
-            {active === "Finance Transactions" && (hasInternalFinanceAccess || role === "accountant" || role === "external_finance" || isManagementRole) && (
+            {active === "Finance Transactions" && (hasInternalFinanceAccess || isManagementRole) && (
               <div className="flex min-w-0 items-center gap-1.5">
                 <Button compact tone="green" onClick={() => setFinanceActionRequest("income")}>
                   <Plus size={13} /> <span className="hidden sm:inline">Cash In</span><span className="sr-only sm:hidden">Cash In</span>

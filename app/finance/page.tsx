@@ -5,26 +5,12 @@ import { redirect } from "next/navigation";
 export default async function FinancePage() {
   const access = await requireWorkspaceAccess();
 
-  if (
-    ![
-      "super_admin",
-      "owner",
-      "admin",
-      "accountant",
-    ].includes(access.role) &&
-    !access.internalFinanceEnabled
-  ) {
+  if (!["super_admin", "owner", "admin", "accountant"].includes(access.role)) {
     redirect("/");
   }
 
   return <HuswellWorkspace
     {...access}
-    initialView={
-      access.internalFinanceEnabled
-        ? "Finance Overview"
-        : ["super_admin", "owner", "admin"].includes(access.role)
-        ? "Finance Overview"
-        : "Finance Overview"
-    }
+    initialView="Finance Overview"
   />;
 }

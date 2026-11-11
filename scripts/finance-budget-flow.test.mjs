@@ -18,6 +18,10 @@ const accountantPage = readFileSync(join(repoRoot, "app", "accountant", "page.ts
 const homePage = readFileSync(join(repoRoot, "app", "page.tsx"), "utf8");
 const migrationPath = join(repoRoot, "supabase", "232_finance_monthly_budget_account_allocations.sql");
 const migration = existsSync(migrationPath) ? readFileSync(migrationPath, "utf8") : "";
+const revisedAccessMigration = readFileSync(
+  join(repoRoot, "supabase", "migrations", "20261111150000_revised_finance_access_and_current_balances.sql"),
+  "utf8",
+);
 const followUpMigrationPath = join(repoRoot, "supabase", "233_finance_gm_budget_only_and_legacy_compatibility.sql");
 const followUpMigration = existsSync(followUpMigrationPath)
   ? readFileSync(followUpMigrationPath, "utf8")
@@ -182,21 +186,19 @@ test("budget realtime refresh includes the new monthly allocation tables", () =>
   assert.match(workspace, /finance_account_funding_requests/);
 });
 
-test("the GM role automatically receives operational Finance access", () => {
+test("the GM and Accountant roles receive the revised Finance access boundary", () => {
   assert.match(workspace, /const canManageBudget = role === "internal_finance";/);
   assert.match(workspace, /const canViewBudget = internal \|\| canGrantBudget;/);
   assert.match(workspace, /const canGrantBudget = budgetOnly \|\| gmBudgetAccess;/);
-  assert.match(mainWorkspace, /const financeRole = hasInternalFinanceAccess\s*\? "internal_finance"\s*:\s*role;/);
-  assert.match(workspaceAccess, /membership\.role === "admin"\s*\|\|/);
-  assert.match(superAdminUsersRoute, /member\.role === "admin"\s*\|\|/);
+  assert.match(mainWorkspace, /const financeRole = role;/);
+  assert.match(workspaceAccess, /\["super_admin", "owner", "admin"\]\.includes\(/);
+  assert.match(superAdminUsersRoute, /member\.role !== "super_admin"/);
   assert.match(superAdminConsole, /Enable Finance operations/);
   assert.match(superAdminConsole, /role === "sales_pricing_officer"/);
   assert.match(superAdminUsersRoute, /role === "sales_pricing_officer"/);
   assert.match(roleLabels, /role === "admin" && internalFinanceEnabled/);
-  const automaticMigrationPath = join(repoRoot, "supabase", "254_gm_finance_operations_automatic.sql");
-  const automaticMigration = readFileSync(automaticMigrationPath, "utf8");
-  assert.match(automaticMigration, /array\['admin', 'internal_finance'\]/);
-  assert.match(automaticMigration, /private\.has_member_capability\(p_organization_id, 'internal_finance'\)/);
+  assert.match(revisedAccessMigration, /array\['super_admin', 'owner', 'admin', 'accountant'\]/);
+  assert.doesNotMatch(revisedAccessMigration, /has_member_capability/);
   assert.match(workspace, /const openBudgetAllocation =/);
   assert.match(workspace, /canManageBudget && \["pending", "revision_requested"\]\.includes\(status\)/);
   assert.match(migration, /create or replace function private\.finance_is_budget_operator/);
@@ -205,16 +207,17 @@ test("the GM role automatically receives operational Finance access", () => {
   assert.match(followUpMigration, /create or replace function private\.finance_is_internal/);
   assert.match(followUpMigration, /create or replace function private\.finance_is_budget_operator/);
   assert.match(followUpMigration, /create or replace function private\.finance_is_budget_viewer/);
-  assert.match(followUpMigration, /internal_finance/);
-  assert.doesNotMatch(followUpMigration, /array\['accountant'[^\]]*\]/i);
+  assert.match(revisedAccessMigration, /finance_revised_can_operate/);
+  assert.match(revisedAccessMigration, /accountant/);
 });
 
 test("finance queue badges use new account funding requests instead of legacy budget requests", () => {
   assert.match(mainWorkspace, /finance_sidebar_queue_counts/);
-  assert.match(mainWorkspace, /finance_account_funding_requests/);
+  assert.match(mainWorkspace, /finance_working_fund_requests/);
   assert.doesNotMatch(mainWorkspace, /finance_budget_requests/);
-  assert.match(migration, /create or replace function public\.finance_sidebar_queue_counts/);
-  assert.match(migration, /if private\.finance_is_budget_operator\(p_organization_id\) then/);
+  assert.match(revisedAccessMigration, /create or replace function public\.finance_sidebar_queue_counts/);
+  assert.match(revisedAccessMigration, /finance_daily_fund_requests/);
+  assert.doesNotMatch(revisedAccessMigration, /finance_account_funding_requests/);
 });
 
 test("revised Working Fund requests replace the old budget navbar actions", () => {
@@ -244,7 +247,7 @@ test("GM and Accounting & Finance navigation expose the simplified Finance workf
   assert.ok(accountantStart >= 0 && accountantEnd > accountantStart);
   assert.match(mainWorkspace.slice(accountantStart, accountantEnd), /Finance Overview|Finance Transactions/);
   const managementStart = mainWorkspace.indexOf('const navBase');
-  const managementEnd = mainWorkspace.indexOf('] : ["internal_finance", "external_finance", "accountant"].includes(role) ?', managementStart);
+  const managementEnd = mainWorkspace.indexOf('] : role === "accountant" ?', managementStart);
   assert.ok(managementStart >= 0 && managementEnd > managementStart);
   const managementNav = mainWorkspace.slice(managementStart, managementEnd);
   assert.match(managementNav, /label: "Finance"/);
@@ -266,8 +269,8 @@ test("GM and Accounting & Finance navigation expose the simplified Finance workf
 
 test("direct Finance routes preserve the same role boundary", () => {
   assert.match(financePage, /super_admin[\s\S]*owner[\s\S]*admin[\s\S]*accountant/);
-  assert.match(financePage, /internalFinanceEnabled/);
-  assert.match(financePage, /\? "Finance Overview"/);
+  assert.doesNotMatch(financePage, /internalFinanceEnabled/);
+  assert.match(financePage, /initialView="Finance Overview"/);
   assert.match(financeReportsPage, /super_admin[\s\S]*owner[\s\S]*admin[\s\S]*accountant/);
   assert.match(financeReportsPage, /access\.role/);
   assert.match(accountantPage, /access\.role !== "accountant"/);

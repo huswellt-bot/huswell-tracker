@@ -11,10 +11,6 @@ const financeFollowUpMigration = readFileSync(
   join(repoRoot, "supabase", "233_finance_gm_budget_only_and_legacy_compatibility.sql"),
   "utf8",
 );
-const financeCapabilityMigration = readFileSync(
-  join(repoRoot, "supabase", "237_internal_finance_member_capability.sql"),
-  "utf8",
-);
 const financeQuotationReadMigration = readFileSync(
   join(repoRoot, "supabase", "240_quotation_finance_capability_read.sql"),
   "utf8",
@@ -51,13 +47,13 @@ test("pending payment receiving-account correction is Internal Finance only", ()
 });
 
 test("Finance realtime subscriptions match the current role boundaries", () => {
-  const start = workspace.indexOf("const isFinance = hasInternalFinanceAccess");
+  const start = workspace.indexOf("const isFinance = memberRole(role) || role === \"accountant\";");
   const end = workspace.indexOf("const queueTables = new Set<string>();", start);
   assert.ok(start >= 0 && end > start);
   const roleScope = workspace.slice(start, end);
-  assert.match(roleScope, /const isFinance = hasInternalFinanceAccess \|\| role === "external_finance";/);
-  assert.match(roleScope, /const isInternalFinance = hasInternalFinanceAccess;/);
-  assert.doesNotMatch(roleScope, /super_admin|owner|admin|accountant/);
+  assert.match(roleScope, /const isFinance = memberRole\(role\) \|\| role === "accountant";/);
+  assert.match(roleScope, /const isInternalFinance = role === "accountant";/);
+  assert.doesNotMatch(roleScope, /finance_transactions|finance_account_funding_requests/);
 });
 
 test("quotation payment reads stay inside the Finance role boundary", () => {
@@ -89,7 +85,7 @@ test("External Finance does not receive the broad transaction receipt delete pat
 test("Payment Monitoring cannot be opened by non-Finance roles", () => {
   assert.match(
     workspace,
-    /const financePaymentViewAllowed =\s+hasInternalFinanceAccess \|\| role === "accountant";/,
+    /const financePaymentViewAllowed =\s+hasInternalFinanceAccess \|\| \["super_admin", "owner", "admin"\]\.includes\(role\);/,
   );
   assert.match(
     workspace,
@@ -98,13 +94,11 @@ test("Payment Monitoring cannot be opened by non-Finance roles", () => {
   assert.match(workspace, /const safeInitialView = requestedInitialView === "Payment Monitoring"/);
 });
 
-test("Dianne's existing Sales and Pricing account receives Finance as a capability", () => {
-  assert.match(financeCapabilityMigration, /organization_member_capabilities/);
-  assert.match(financeCapabilityMigration, /dianne@huswelloffice\.com/);
-  assert.match(financeCapabilityMigration, /member\.role::text = 'sales_pricing_officer'/);
-  assert.match(financeCapabilityMigration, /private\.finance_is_internal/);
-  assert.match(workspace, /internalFinanceEnabled = false/);
-  assert.match(workspace, /role === "internal_finance"/);
+test("Finance access is assigned by the Accountant role, not a capability", () => {
+  assert.match(workspace, /const hasInternalFinanceAccess = role === "accountant";/);
+  assert.match(workspace, /const isCombinedSalesPricingAccount = false;/);
+  assert.doesNotMatch(workspace, /role === "internal_finance"/);
+  assert.doesNotMatch(workspace, /role === "external_finance"/);
 });
 
 test("capability-enabled Internal Finance can read quotations needed for payment approvals", () => {
@@ -127,9 +121,9 @@ test("capability-enabled Internal Finance can read the quotation joined to a pay
   assert.match(financeQuotationBoundaryMigration, /private\.is_assigned_pricing_officer_quotation_visible/);
 });
 
-test("combined Sales and Pricing accounts use separate sidebar workspaces", () => {
+test("Finance and Sales/Pricing remain separate sidebar workspaces", () => {
   assert.match(workspace, /type SidebarWorkspace = "sales_pricing" \| "finance"/);
-  assert.match(workspace, /const isCombinedSalesPricingAccount = role === "sales_pricing_officer" && hasInternalFinanceAccess/);
+  assert.match(workspace, /const isCombinedSalesPricingAccount = false/);
   assert.match(workspace, /id="sidebar-workspace"/);
   assert.match(workspace, /<option value="sales_pricing">Sales &amp; Pricing<\/option>/);
   assert.match(workspace, /<option value="finance">Finance<\/option>/);

@@ -15,6 +15,7 @@ const integrityMigration = readFileSync(join(root, "supabase", "migrations", "20
 const fundModalMigration = readFileSync(join(root, "supabase", "migrations", "20261111091638_revised_finance_gm_fund_modal_simplification.sql"), "utf8");
 const actorVisibilityMigration = readFileSync(join(root, "supabase", "migrations", "20261111122521_revised_finance_actor_visibility.sql"), "utf8");
 const revisionMigration = readFileSync(join(root, "supabase", "migrations", "20261111135536_revised_finance_revision_flow.sql"), "utf8");
+const accessMigration = readFileSync(join(root, "supabase", "migrations", "20261111150000_revised_finance_access_and_current_balances.sql"), "utf8");
 const roleMigration = readFileSync(join(root, "supabase", "migrations", "20261111054901_unify_accounting_finance_role.sql"), "utf8");
 const workspace = readFileSync(join(root, "components", "finance-revised-workspace.tsx"), "utf8");
 const host = readFileSync(join(root, "components", "huswell-workspace.tsx"), "utf8");
@@ -310,7 +311,7 @@ test("repayment UI uses collected project balance instead of support-inclusive b
 });
 
 test("Finance audit actors are visible for transactions and fund requests", () => {
-  assert.match(workspace, />Actor<\/th>/);
+  assert.match(workspace, />Actors<\/th>/);
   assert.match(workspace, />Requested by<\/th>/);
   assert.match(workspace, /submitted_by_name/);
   assert.match(workspace, /requested_by_name/);
@@ -324,6 +325,15 @@ test("Finance audit actors are visible for transactions and fund requests", () =
   assert.match(actorVisibilityMigration, /left join public\.profiles requested_profile/);
   assert.match(actorVisibilityMigration, /left join public\.profiles approved_profile/);
   assert.match(actorVisibilityMigration, /with \(security_invoker = true\)/);
+});
+
+test("revised Finance uses the Accountant role and current fund balances", () => {
+  assert.match(accessMigration, /array\['super_admin', 'owner', 'admin', 'accountant'\]/);
+  assert.doesNotMatch(accessMigration, /has_member_capability\([^)]*internal_finance/);
+  assert.match(accessMigration, /get_finance_revised_current_balances/);
+  assert.match(accessMigration, /finance_revised_business_date/);
+  assert.match(workspace, /get_finance_revised_current_balances/);
+  assert.match(workspace, /currentFundBalances/);
 });
 
 test("Finance Monitoring uses project cards and the shared blue table treatment", () => {
