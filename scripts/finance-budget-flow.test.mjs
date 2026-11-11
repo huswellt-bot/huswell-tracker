@@ -237,8 +237,8 @@ test("full Finance GM access controls Capital, Working, and Daily Funds", () => 
   assert.match(revisedWorkspace, /Daily Fund/);
 });
 
-test("GM navigation keeps Budget-only by default and exposes full Finance with the capability", () => {
-  assert.match(mainWorkspace, /\{ view: "Finance Budget", icon: FileText \}/);
+test("GM and Accounting & Finance navigation expose the simplified Finance workflow", () => {
+  assert.match(mainWorkspace, /\{ view: "Finance Monitoring", icon: CalendarDays \}/);
   const accountantStart = mainWorkspace.indexOf('accountant: ["Finance Overview"');
   const accountantEnd = mainWorkspace.indexOf('internal_finance:', accountantStart);
   assert.ok(accountantStart >= 0 && accountantEnd > accountantStart);
@@ -253,7 +253,7 @@ test("GM navigation keeps Budget-only by default and exposes full Finance with t
   const managementFinanceStart = mainWorkspace.indexOf('const managementFinanceItems');
   const managementFinanceEnd = mainWorkspace.indexOf('const navBase', managementFinanceStart);
   assert.ok(managementFinanceStart >= 0 && managementFinanceEnd > managementFinanceStart);
-  assert.match(mainWorkspace.slice(managementFinanceStart, managementFinanceEnd), /Finance Overview|Finance Reports/);
+  assert.match(mainWorkspace.slice(managementFinanceStart, managementFinanceEnd), /Finance Overview|Finance Monitoring/);
   assert.match(mainWorkspace, /hasInternalFinanceAccess/);
   assert.match(mainWorkspace, /Finance Overview/);
   assert.match(mainWorkspace, /Finance Approvals/);
@@ -267,7 +267,7 @@ test("GM navigation keeps Budget-only by default and exposes full Finance with t
 test("direct Finance routes preserve the same role boundary", () => {
   assert.match(financePage, /super_admin[\s\S]*owner[\s\S]*admin[\s\S]*accountant/);
   assert.match(financePage, /internalFinanceEnabled/);
-  assert.match(financePage, /\? "Finance Budget"/);
+  assert.match(financePage, /\? "Finance Overview"/);
   assert.match(financeReportsPage, /super_admin[\s\S]*owner[\s\S]*admin[\s\S]*accountant/);
   assert.match(financeReportsPage, /access\.role/);
   assert.match(accountantPage, /access\.role !== "accountant"/);

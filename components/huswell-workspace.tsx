@@ -163,6 +163,8 @@ type View =
   | "Finance"
   | "Finance Approvals"
   | "Finance Transactions"
+  | "Finance Monitoring"
+  | "Finance Requests"
   | "Finance Accounts"
   | "Finance Budget"
   | "Finance Supplier Costing"
@@ -190,13 +192,10 @@ type SidebarWorkspace = "sales_pricing" | "finance";
 const financeSidebarViews: View[] = [
   "Finance Overview",
   "Finance Funds",
-  "Finance Daily Fund",
-  "Finance Cash on Hand",
-  "Finance Reports",
   "Finance Approvals",
   "Finance Transactions",
-  "Finance Budget",
-  "Finance Commissions",
+  "Finance Monitoring",
+  "Finance Requests",
   "Finance Activity History",
 ];
 
@@ -23698,13 +23697,10 @@ export function HuswellWorkspace({
       "Approvals",
       "Finance Overview",
       "Finance Funds",
-      "Finance Daily Fund",
-      "Finance Cash on Hand",
-      "Finance Foundation",
-      "Finance Reports",
       "Finance Approvals",
       "Finance Transactions",
-      "Finance Budget",
+      "Finance Monitoring",
+      "Finance Requests",
       "Payment Monitoring",
       "Finance Activity History",
       "Commissions",
@@ -23720,13 +23716,10 @@ export function HuswellWorkspace({
       "Approvals",
       "Finance Overview",
       "Finance Funds",
-      "Finance Daily Fund",
-      "Finance Cash on Hand",
-      "Finance Foundation",
-      "Finance Reports",
       "Finance Approvals",
       "Finance Transactions",
-      "Finance Budget",
+      "Finance Monitoring",
+      "Finance Requests",
       "Payment Monitoring",
       "Finance Activity History",
       "Commissions",
@@ -23745,13 +23738,10 @@ export function HuswellWorkspace({
       "Approvals",
       "Finance Overview",
       "Finance Funds",
-      "Finance Daily Fund",
-      "Finance Cash on Hand",
-      "Finance Foundation",
-      "Finance Reports",
       "Finance Approvals",
       "Finance Transactions",
-      "Finance Budget",
+      "Finance Monitoring",
+      "Finance Requests",
       "Payment Monitoring",
       "Finance Activity History",
       "Commissions",
@@ -23784,9 +23774,9 @@ export function HuswellWorkspace({
     ],
     sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Announcements", "Policy"],
     warehouse: ["Dashboard", "Catalog", "Inventory", "Production", "Announcements", "Policy"],
-    accountant: ["Finance Overview", "Finance Funds", "Finance Daily Fund", "Finance Cash on Hand", "Finance Foundation", "Finance Reports", "Finance Approvals", "Finance Transactions", "Finance Budget", "Finance Commissions", "Payment Monitoring", "Finance Activity History", "Announcements", "Policy"],
-    internal_finance: ["Finance Overview", "Finance Funds", "Finance Daily Fund", "Finance Cash on Hand", "Finance Foundation", "Finance Reports", "Finance", "Finance Approvals", "Finance Transactions", "Finance Budget", "Finance Commissions", "Finance Activity History", "Payment Monitoring", "Announcements", "Policy"],
-    external_finance: ["Finance Overview", "Finance Funds", "Finance Daily Fund", "Finance Cash on Hand", "Finance Foundation", "Finance Reports", "Finance", "Finance Transactions", "Finance Budget", "Finance Commissions", "Payment Monitoring", "Announcements", "Policy"],
+    accountant: ["Finance Overview", "Finance Transactions", "Finance Monitoring", "Finance Requests", "Finance Activity History", "Announcements", "Policy"],
+    internal_finance: ["Finance Overview", "Finance Transactions", "Finance Monitoring", "Finance Requests", "Finance Activity History", "Announcements", "Policy"],
+    external_finance: ["Finance Overview", "Finance Transactions", "Finance Monitoring", "Finance Requests", "Announcements", "Policy"],
     lead_coordinator: ["Leads", "Lead Costing", "Announcements", "Policy"],
     payroll: ["Dashboard", "Payroll & Leave", "Letter Request", "Directory", "Announcements", "Policy"],
     production: ["Dashboard", "Production", "Inventory", "Finance Foundation", "Announcements", "Policy"],
@@ -23815,16 +23805,10 @@ export function HuswellWorkspace({
   ) {
     allowedRoleViews.push(
       "Finance Overview",
-      "Finance Foundation",
-      "Finance Daily Fund",
-      "Finance Cash on Hand",
-      "Finance Reports",
-      "Finance Approvals",
       "Finance Transactions",
-      "Finance Budget",
-      "Finance Commissions",
+      "Finance Monitoring",
+      "Finance Requests",
       "Finance Activity History",
-      "Payment Monitoring",
     );
   }
   if (productionApprovalOnly && !allowedRoleViews.includes("Approvals")) {
@@ -23860,15 +23844,9 @@ export function HuswellWorkspace({
           label: "Finance",
           items: [
             { view: "Finance Overview", icon: Wallet },
-            { view: "Finance Foundation", icon: Landmark },
-            { view: "Finance Daily Fund", icon: Wallet },
-            { view: "Finance Cash on Hand", icon: ReceiptText },
-            { view: "Finance Reports", icon: CalendarDays },
-            { view: "Finance Approvals", icon: ClipboardCheck, badge: sidebarBadge("finance") },
             { view: "Finance Transactions", icon: ReceiptText },
-            { view: "Finance Budget", icon: FileText },
-            { view: "Finance Commissions", icon: PhilippinePeso },
-            { view: "Payment Monitoring", icon: ReceiptText },
+            { view: "Finance Monitoring", icon: CalendarDays },
+            { view: "Finance Requests", icon: FileText },
             { view: "Finance Activity History", icon: ClipboardList },
           ],
         },
@@ -23914,15 +23892,9 @@ export function HuswellWorkspace({
   }[] = [
     { view: "Finance Overview", icon: Wallet },
     { view: "Finance Funds", icon: Landmark },
-    { view: "Finance Daily Fund", icon: Wallet },
-    { view: "Finance Cash on Hand", icon: ReceiptText },
-    { view: "Finance Foundation", icon: Landmark },
-    { view: "Finance Reports", icon: CalendarDays },
     { view: "Finance Approvals", icon: ClipboardCheck, badge: sidebarBadge("finance") },
     { view: "Finance Transactions", icon: ReceiptText },
-    { view: "Finance Budget", icon: FileText },
-    { view: "Finance Commissions", icon: PhilippinePeso },
-    { view: "Payment Monitoring", icon: ReceiptText },
+    { view: "Finance Monitoring", icon: CalendarDays },
     { view: "Finance Activity History", icon: ClipboardList },
   ];
   const navBase: {
@@ -23965,16 +23937,9 @@ export function HuswellWorkspace({
       label: "Finance",
       items: [
         { view: "Finance Overview", icon: Wallet },
-        { view: "Finance Funds", icon: Landmark },
-        { view: "Finance Daily Fund", icon: Wallet },
-        { view: "Finance Cash on Hand", icon: ReceiptText },
-        { view: "Finance Foundation", icon: Landmark },
-        { view: "Finance Reports", icon: CalendarDays },
-        { view: "Finance Approvals", icon: ClipboardCheck, badge: sidebarBadge("finance") },
         { view: "Finance Transactions", icon: ReceiptText },
-        { view: "Finance Budget", icon: FileText },
-        { view: "Finance Commissions", icon: PhilippinePeso },
-        { view: "Payment Monitoring", icon: ReceiptText },
+        { view: "Finance Monitoring", icon: CalendarDays },
+        { view: "Finance Requests", icon: FileText },
         { view: "Finance Activity History", icon: ClipboardList },
         { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
@@ -23985,14 +23950,9 @@ export function HuswellWorkspace({
       label: "Finance",
       items: [
         { view: "Finance Overview", icon: Wallet },
-        { view: "Finance Funds", icon: Landmark },
-        { view: "Finance Daily Fund", icon: Wallet },
-        { view: "Finance Cash on Hand", icon: ReceiptText },
-        { view: "Finance Foundation", icon: Landmark },
-        { view: "Finance Reports", icon: CalendarDays },
-        { view: "Finance Transactions", icon: ReceiptText, badge: sidebarBadge("finance") },
-        { view: "Finance Budget", icon: FileText },
-        { view: "Payment Monitoring", icon: ReceiptText, badge: sidebarBadge("quotation_payments") },
+        { view: "Finance Transactions", icon: ReceiptText },
+        { view: "Finance Monitoring", icon: CalendarDays },
+        { view: "Finance Requests", icon: FileText },
         { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
       ],
@@ -24002,16 +23962,9 @@ export function HuswellWorkspace({
       label: "Finance",
       items: [
         { view: "Finance Overview", icon: Wallet },
-        { view: "Finance Funds", icon: Landmark },
-        { view: "Finance Daily Fund", icon: Wallet },
-        { view: "Finance Cash on Hand", icon: ReceiptText },
-        { view: "Finance Foundation", icon: Landmark },
-        { view: "Finance Reports", icon: CalendarDays },
-        { view: "Finance Approvals", icon: ClipboardCheck, badge: sidebarBadge("finance") },
         { view: "Finance Transactions", icon: ReceiptText },
-        { view: "Finance Budget", icon: FileText },
-        { view: "Finance Commissions", icon: PhilippinePeso },
-        { view: "Payment Monitoring", icon: ReceiptText },
+        { view: "Finance Monitoring", icon: CalendarDays },
+        { view: "Finance Requests", icon: FileText },
         { view: "Finance Activity History", icon: ClipboardList },
         { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
@@ -24081,9 +24034,10 @@ export function HuswellWorkspace({
       label: "Finance",
       items: [
         { view: "Finance Overview", icon: Wallet },
-        { view: "Finance Foundation", icon: Landmark },
-        { view: "Finance", icon: Wallet, badge: sidebarBadge("finance") },
-        { view: "Payment Monitoring", icon: ReceiptText, badge: hasInternalFinanceAccess ? undefined : sidebarBadge("quotation_payments") },
+        { view: "Finance Transactions", icon: ReceiptText },
+        { view: "Finance Monitoring", icon: CalendarDays },
+        { view: "Finance Requests", icon: FileText },
+        { view: "Finance Activity History", icon: ClipboardList },
         ...(!["external_finance", "internal_finance"].includes(role) ? [{ view: "Commissions" as View, icon: PhilippinePeso }] : []),
       ],
     },
@@ -24229,8 +24183,12 @@ export function HuswellWorkspace({
       detail: "Manage the revised project-ledger Finance flow.",
     },
     "Finance Reports": {
-      title: "Project Finance Monitoring",
+      title: "Finance Monitoring",
       detail: "Review each project’s client collections, direct expenses, Working Fund support, costing, and remaining balance.",
+    },
+    "Finance Monitoring": {
+      title: "Finance Monitoring",
+      detail: "Review each project’s collections, direct-cost costing, Cash Out, support, and remaining balance.",
     },
     "Finance Approvals": {
       title: "GM approvals",
@@ -24247,6 +24205,10 @@ export function HuswellWorkspace({
     "Finance Budget": {
       title: "Working Fund Requests",
       detail: "Request itemized temporary Working Fund support for a selected project.",
+    },
+    "Finance Requests": {
+      title: "Finance Requests",
+      detail: "Request project Working Funds for shortages and Daily Fund for non-project expenses.",
     },
     "Finance Commissions": {
       title: "Commission Payables",
@@ -24511,6 +24473,8 @@ export function HuswellWorkspace({
       <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="dashboard" />
     ) : active === "Finance Reports" ? (
       <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="projects" />
+    ) : active === "Finance Monitoring" ? (
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="projects" />
     ) : active === "Finance Approvals" ? (
       <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="approvals" />
     ) : active === "Finance Transactions" ? (
@@ -24518,6 +24482,8 @@ export function HuswellWorkspace({
     ) : active === "Finance Accounts" ? (
       <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="dashboard" />
     ) : active === "Finance Budget" ? (
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="requests" />
+    ) : active === "Finance Requests" ? (
       <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="requests" />
     ) : active === "Finance Commissions" ? (
       <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="commissions" />

@@ -243,12 +243,12 @@ test("category creation remains server-authorized for Finance roles", () => {
 });
 
 test("the revised Finance sidebar exposes the unified workflow", () => {
-  assert.match(workspaceShell, /"Finance Approvals"/);
   assert.match(workspaceShell, /"Finance Transactions"/);
-  assert.match(workspaceShell, /"Finance Budget"/);
-  assert.match(workspaceShell, /view: "Finance Reports", icon: CalendarDays/);
-  assert.match(workspaceShell, /view === "Finance Reports"[\s\S]{0,120}"Project Monitoring"/);
-  assert.match(workspaceShell, /view === "Finance Transactions"[\s\S]{0,160}"Cash In & Cash Out"/);
+  assert.match(workspaceShell, /"Finance Monitoring"/);
+  assert.match(workspaceShell, /"Finance Requests"/);
+  assert.match(workspaceShell, /view: "Finance Monitoring", icon: CalendarDays/);
+  assert.match(workspaceShell, /active === "Finance Monitoring"[\s\S]{0,180}initialTab="projects"/);
+  assert.match(workspaceShell, /view === "Finance Transactions"/);
   assert.doesNotMatch(workspaceShell, /view: "Finance Accounts"|view: "Finance Supplier Costing"|view: "Finance Payables"/);
   assert.match(workspaceShell, /active === "Finance Transactions"/);
   assert.match(workspaceShell, /initialTab="transactions"/);

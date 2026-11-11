@@ -23,7 +23,7 @@ export default async function FinancePage() {
       access.internalFinanceEnabled
         ? "Finance Overview"
         : ["super_admin", "owner", "admin"].includes(access.role)
-        ? "Finance Budget"
+        ? "Finance Overview"
         : "Finance Overview"
     }
   />;

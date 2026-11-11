@@ -101,6 +101,40 @@ const activityLabel = (activity: PdfRow) => {
   return text(activity.transaction_kind).replaceAll("_", " ");
 };
 
+type PdfCostingGroup = {
+  key: string;
+  productDescription: string;
+  productQuantity: unknown;
+  totalDirectCost: number;
+  lines: PdfRow[];
+};
+
+const numberValue = (row: PdfRow, key: string) => {
+  const value = Number(row[key]);
+  return Number.isFinite(value) ? value : 0;
+};
+
+const groupCostingLines = (lines: PdfRow[]): PdfCostingGroup[] => {
+  const groups = new Map<string, PdfCostingGroup>();
+  lines.forEach((line, index) => {
+    const key = text(line.quotation_item_id, "product-" + index);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.lines.push(line);
+      existing.totalDirectCost = numberValue(line, "product_total_direct_cost") || existing.totalDirectCost;
+      return;
+    }
+    groups.set(key, {
+      key,
+      productDescription: text(line.product_description, "Product"),
+      productQuantity: line.product_quantity,
+      totalDirectCost: numberValue(line, "product_total_direct_cost"),
+      lines: [line],
+    });
+  });
+  return [...groups.values()];
+};
+
 export function FinanceProjectPdf({
   project,
   costingLines,
@@ -110,10 +144,15 @@ export function FinanceProjectPdf({
   costingLines: PdfRow[];
   activities: PdfRow[];
 }) {
+  const costingGroups = groupCostingLines(costingLines);
+  const totalDirectCost = costingLines.length
+    ? numberValue(costingLines[0], "total_direct_cost")
+    : numberValue(project, "total_direct_cost");
+
   return (
     <Document title={"Project Finance - " + text(project.project_name)}>
       <Page size="A4" style={styles.page}>
-        <Text style={styles.title}>Project Finance Monitoring</Text>
+        <Text style={styles.title}>Finance Monitoring</Text>
         <Text style={styles.subtitle}>
           Generated {dateLabel(new Date().toISOString())} · Accounting & Finance ledger
         </Text>
@@ -140,7 +179,7 @@ export function FinanceProjectPdf({
           <Text style={styles.sectionTitle}>Financial totals</Text>
           <View style={styles.grid}>
             <View style={styles.metric}><Text style={styles.label}>Total quotation</Text><Text style={styles.value}>{amount(project.total_quotation)}</Text></View>
-            <View style={styles.metric}><Text style={styles.label}>Total direct cost</Text><Text style={styles.value}>{amount(project.total_direct_cost)}</Text></View>
+            <View style={styles.metric}><Text style={styles.label}>Total Direct Cost</Text><Text style={styles.value}>{amount(totalDirectCost)}</Text></View>
             <View style={styles.metric}><Text style={styles.label}>Client Cash In</Text><Text style={styles.value}>{amount(project.client_cash_in)}</Text></View>
             <View style={styles.metric}><Text style={styles.label}>Project Cash Out</Text><Text style={styles.value}>{amount(project.cash_out)}</Text></View>
             <View style={styles.metric}><Text style={styles.label}>Commission total</Text><Text style={styles.value}>{amount(project.commission_total)}</Text></View>
@@ -152,21 +191,36 @@ export function FinanceProjectPdf({
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Costing breakdown</Text>
-          <View style={styles.row}>
-            <Text style={styles.headCell}>Description</Text>
-            <Text style={styles.headCell}>Qty</Text>
-            <Text style={styles.headCell}>Unit cost</Text>
-            <Text style={styles.headCell}>Total</Text>
-          </View>
-          {costingLines.length ? costingLines.map((line) => (
-            <View style={styles.row} key={text(line.line_id)}>
-              <Text style={styles.cell}>{text(line.description)}</Text>
-              <Text style={styles.cell}>{text(line.quantity)}</Text>
-              <Text style={styles.cell}>{amount(line.unit_cost)}</Text>
-              <Text style={styles.cell}>{amount(line.line_total)}</Text>
+          <Text style={styles.sectionTitle}>Costing breakdown · Pricing Officer direct costs</Text>
+          {costingLines.length ? costingGroups.map((group) => (
+            <View key={group.key} style={{ marginBottom: 10 }}>
+              <View style={styles.row}>
+                <Text style={{ ...styles.cell, fontWeight: 700 }}>{text(group.productDescription)}</Text>
+                <Text style={styles.cell}>Quotation qty: {text(group.productQuantity)}</Text>
+                <Text style={{ ...styles.cell, fontWeight: 700 }}>{amount(group.totalDirectCost)}</Text>
+              </View>
+              <View style={styles.row}>
+                <Text style={styles.headCell}>Direct-cost line</Text>
+                <Text style={styles.headCell}>Qty</Text>
+                <Text style={styles.headCell}>Unit cost</Text>
+                <Text style={styles.headCell}>Line total</Text>
+              </View>
+              {group.lines.map((line) => (
+                <View style={styles.row} key={text(line.line_id)}>
+                  <Text style={styles.cell}>{text(line.description)}</Text>
+                  <Text style={styles.cell}>{text(line.quantity)}</Text>
+                  <Text style={styles.cell}>{amount(line.unit_cost)}</Text>
+                  <Text style={styles.cell}>{amount(line.line_total)}</Text>
+                </View>
+              ))}
             </View>
-          )) : <Text style={styles.small}>No costing lines are available for this quotation.</Text>}
+          )) : <Text style={styles.small}>No submitted direct-cost lines are available for this quotation.</Text>}
+          <View style={styles.row}>
+            <Text style={{ ...styles.cell, fontWeight: 700 }}>Total Direct Cost</Text>
+            <Text style={styles.cell}></Text>
+            <Text style={styles.cell}></Text>
+            <Text style={{ ...styles.cell, fontWeight: 700 }}>{amount(totalDirectCost)}</Text>
+          </View>
         </View>
 
         <View style={styles.section}>

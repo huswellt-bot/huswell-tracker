@@ -9,7 +9,9 @@ const migration = [
   readFileSync(join(root, "supabase", "migrations", "20261111054845_revised_finance_ledger.sql"), "utf8"),
   readFileSync(join(root, "supabase", "migrations", "20261111054855_revised_finance_categories.sql"), "utf8"),
   readFileSync(join(root, "supabase", "migrations", "20261111054858_revised_finance_daily_fund.sql"), "utf8"),
+  readFileSync(join(root, "supabase", "migrations", "20261111070000_revised_finance_costing_monitoring.sql"), "utf8"),
 ].join("\n");
+const integrityMigration = readFileSync(join(root, "supabase", "migrations", "20261111064207_revised_finance_integrity_fixes.sql"), "utf8");
 const roleMigration = readFileSync(join(root, "supabase", "migrations", "20261111054901_unify_accounting_finance_role.sql"), "utf8");
 const workspace = readFileSync(join(root, "components", "finance-revised-workspace.tsx"), "utf8");
 const host = readFileSync(join(root, "components", "huswell-workspace.tsx"), "utf8");
@@ -64,6 +66,27 @@ test("revised Finance categories support both directions and safe management", (
   assert.match(migration, /return 'archived'/);
 });
 
+test("revised Finance approval badges include all pending ledger requests", () => {
+  assert.match(integrityMigration, /create or replace function public\.finance_sidebar_queue_counts/);
+  assert.match(integrityMigration, /private\.finance_revised_can_operate\(p_organization_id\)/);
+  assert.match(integrityMigration, /from public\.finance_revised_transactions[\s\S]*status = 'pending'/);
+  assert.match(integrityMigration, /from public\.finance_working_fund_requests[\s\S]*status = 'pending'/);
+  assert.match(integrityMigration, /from public\.finance_daily_fund_requests[\s\S]*status = 'pending'/);
+});
+
+test("system Finance categories cannot be deleted", () => {
+  assert.match(integrityMigration, /if v_category\.is_system then/);
+  assert.match(integrityMigration, /System Finance categories cannot be deleted/);
+  assert.match(workspace, /!Boolean\(category\.is_system\)/);
+});
+
+test("repayment reversal restores the Working Fund request state", () => {
+  assert.match(integrityMigration, /finance_revised_sync_working_fund_request_status/);
+  assert.match(integrityMigration, /transaction\.status = 'approved'/);
+  assert.match(integrityMigration, /finance_revised_request_status_after_reversal/);
+  assert.match(integrityMigration, /new\.status = 'voided'/);
+});
+
 test("Daily Fund isolates non-project Cash Out from Working Funds", () => {
   assert.match(migration, /create table if not exists public\.finance_daily_fund_requests/);
   assert.match(migration, /create or replace function public\.create_finance_revised_daily_fund_request/);
@@ -104,6 +127,7 @@ test("revised Finance exposes only authenticated RPC entry points", () => {
     "get_finance_revised_snapshot",
     "list_finance_revised_projects",
     "list_finance_revised_costing_lines",
+    "list_finance_revised_costing_breakdown",
   ]) {
     assert.match(migration, new RegExp("create or replace function public\\." + functionName));
     assert.match(migration, new RegExp("grant execute on function public\\." + functionName));
@@ -126,9 +150,9 @@ test("the visible Finance flow is project-ledger based", () => {
   assert.match(workspace, /Accounting &(?:amp;| )Finance/);
   assert.match(workspace, /Capital & Working Funds/);
   assert.match(workspace, /Cash In & Cash Out/);
-  assert.match(workspace, /Working Fund Requests/);
+  assert.match(workspace, /Finance Requests/);
   assert.match(workspace, /Project Finance Monitoring/);
-  assert.match(workspace, /Open project breakdown/);
+  assert.match(workspace, /Open breakdown/);
   assert.match(workspace, /Project Cash In breakdown/);
   assert.match(workspace, /Project Cash Out breakdown/);
   assert.match(workspace, /Commission Payables/);
@@ -143,7 +167,7 @@ test("the visible Finance flow is project-ledger based", () => {
   assert.match(workspace, /delete_finance_revised_category/);
   assert.match(workspace, /Hover a category to show actions/);
   assert.match(workspace, /Daily Fund/);
-  assert.match(workspace, /GM approvals/);
+  assert.match(workspace, /GM Approvals/);
   assert.match(workspace, /Reverse posted transaction/);
   assert.match(workspace, /create_finance_revised_daily_fund_request/);
   assert.match(workspace, /create_finance_revised_daily_fund_return/);
@@ -160,4 +184,27 @@ test("the visible Finance flow is project-ledger based", () => {
   assert.match(host, /Finance Commissions/);
   assert.match(host, /FinanceRevisedWorkspace/);
   assert.doesNotMatch(workspace, /finance_account_id|finance_accounts/);
+});
+
+test("costing errors block misleading project PDF exports", () => {
+  assert.match(workspace, /costingError/);
+  assert.match(workspace, /PDF export is disabled/);
+  assert.match(workspace, /Retry costing/);
+  assert.match(workspace, /disabled=\{saving \|\| detailLoading \|\| Boolean\(costingError\)\}/);
+});
+
+test("Finance Monitoring reads the submitted direct-cost payload by quotation product", () => {
+  assert.match(migration, /create or replace function public\.list_finance_revised_costing_breakdown/);
+  assert.match(migration, /quotation_item_id uuid/);
+  assert.match(migration, /product_description text/);
+  assert.match(migration, /product_total_direct_cost numeric/);
+  assert.match(migration, /total_direct_cost numeric/);
+  assert.match(migration, /price_quotation_product_costings product_costing/);
+  assert.match(migration, /price_quotation_costing_lines line/);
+  assert.match(migration, /calculation_type = 'fixed_amount'/);
+  assert.match(migration, /grant execute on function public\.list_finance_revised_costing_breakdown\(uuid, uuid\) to authenticated/);
+  assert.match(workspace, /list_finance_revised_costing_breakdown/);
+  assert.match(workspace, /Total Direct Cost/);
+  assert.match(workspace, /Pricing Officer submitted direct-cost lines/);
+  assert.match(workspace, /GM markups, selling price, VAT, commission, and profit are excluded/);
 });
