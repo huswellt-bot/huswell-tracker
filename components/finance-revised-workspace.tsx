@@ -1307,7 +1307,7 @@ export function FinanceRevisedWorkspace({
                 <div className="min-w-0"><p className="truncate text-[13px] font-semibold text-[var(--color-text-primary)]">{textValue(project, "project_name", "Project")}</p><p className="mt-1 truncate text-[10px] text-[var(--color-text-secondary)]">{textValue(project, "client_name", "—")} · {textValue(project, "company_name", "—")}</p></div>
                 <StatusBadge status={textValue(project, "project_status", "open")} />
               </div>
-              <dl className="mt-4 grid gap-x-5 gap-y-4 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-subtle)] p-3 sm:grid-cols-2 lg:grid-cols-3">
+              <dl className="mt-4 grid gap-x-5 gap-y-4 border-t border-[var(--color-border)] pt-4 sm:grid-cols-2 lg:grid-cols-3">
                 <div><dt className="text-[10px] text-[var(--color-text-secondary)]">Quotation</dt><dd className="mt-1 text-[13px] font-semibold tabular-nums text-[var(--color-text-primary)]">{amount(project.total_quotation)}</dd></div>
                 <div><dt className="text-[10px] text-[var(--color-text-secondary)]">Total Direct Cost</dt><dd className="mt-1 text-[13px] font-semibold tabular-nums text-[var(--color-text-primary)]">{amount(project.total_direct_cost)}</dd></div>
                 <div><dt className="text-[10px] text-[var(--color-text-secondary)]">Cash In</dt><dd className="mt-1 text-[13px] font-semibold tabular-nums text-[var(--color-success-text)]">{amount(project.client_cash_in)}</dd></div>
