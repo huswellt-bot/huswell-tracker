@@ -1669,11 +1669,12 @@ export function FinanceRevisedWorkspace({
             </div>
           </div>
 
-          {deleteCategoryTarget ? <div className="rounded-lg border border-[var(--color-danger-border)] bg-[var(--color-danger-subtle)] p-3">
-            <p className="text-[11px] font-semibold text-[var(--color-danger-text)]">Delete “{textValue(deleteCategoryTarget, "name") }”?</p>
-            <p className="mt-1 text-[10px] leading-4 text-[var(--color-danger-text)]">If it is already used, it will be archived so historical Finance records keep their category.</p>
-            <div className="mt-3 flex justify-end gap-2"><button type="button" className="button-secondary text-[11px]" onClick={() => setDeleteCategoryTarget(null)}>Cancel</button><button type="button" className="button-danger text-[11px]" onClick={() => void confirmDeleteCategory()} disabled={saving}>Delete category</button></div>
-          </div> : null}
+          {deleteCategoryTarget ? <Modal title={"Delete " + textValue(deleteCategoryTarget, "name", "category") + "?"} close={() => setDeleteCategoryTarget(null)}>
+            <div className="space-y-4">
+              <p className="text-[12px] text-[var(--color-text-primary)]">Are you sure you want to delete this category?</p>
+              <div className="flex justify-end gap-2"><button type="button" className="button-secondary text-[11px]" onClick={() => setDeleteCategoryTarget(null)}>Cancel</button><button type="button" className="button-danger text-[11px]" onClick={() => void confirmDeleteCategory()} disabled={saving}>Delete category</button></div>
+            </div>
+          </Modal> : null}
 
           <div className="flex justify-end"><button type="button" className="button-secondary" onClick={closeCategoryManager}>Done</button></div>
         </div>

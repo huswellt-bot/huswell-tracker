@@ -84,6 +84,12 @@ test("system Finance categories cannot be deleted", () => {
   assert.match(workspace, /!Boolean\(category\.is_system\)/);
 });
 
+test("Finance category deletion uses a modal confirmation", () => {
+  assert.match(workspace, /deleteCategoryTarget \? <Modal/);
+  assert.match(workspace, /Are you sure you want to delete this category/);
+  assert.match(workspace, /onClick=\{\(\) => void confirmDeleteCategory\(\)\}/);
+});
+
 test("repayment reversal restores the Working Fund request state", () => {
   assert.match(integrityMigration, /finance_revised_sync_working_fund_request_status/);
   assert.match(integrityMigration, /transaction\.status = 'approved'/);
