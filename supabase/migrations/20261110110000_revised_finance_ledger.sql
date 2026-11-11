@@ -133,11 +133,22 @@ begin
 end;
 $$;
 
-alter table public.finance_working_fund_requests
-  add constraint finance_working_fund_requests_support_transaction_fk
-  foreign key (support_transaction_id)
-  references public.finance_revised_transactions(id)
-  on delete restrict;
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conrelid = 'public.finance_working_fund_requests'::regclass
+      and conname = 'finance_working_fund_requests_support_transaction_fk'
+  ) then
+    alter table public.finance_working_fund_requests
+      add constraint finance_working_fund_requests_support_transaction_fk
+      foreign key (support_transaction_id)
+      references public.finance_revised_transactions(id)
+      on delete restrict;
+  end if;
+end;
+$$;
 
 create table if not exists public.finance_revised_ledger_entries (
   id uuid primary key default gen_random_uuid(),
