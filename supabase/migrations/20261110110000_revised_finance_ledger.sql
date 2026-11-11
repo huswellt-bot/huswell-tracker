@@ -48,6 +48,33 @@ create table if not exists public.finance_working_fund_request_lines (
   created_at timestamptz not null default now()
 );
 
+-- The ledger posting and reversal functions below validate Daily Fund links at
+-- function-creation time. Define the request table here so the ledger remains
+-- deployable before the Daily Fund policy/feed migration runs next.
+create table if not exists public.finance_daily_fund_requests (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  fund_date date not null default current_date,
+  requested_amount numeric(14,2) not null check (requested_amount > 0),
+  approved_amount numeric(14,2),
+  returned_amount numeric(14,2) not null default 0 check (returned_amount >= 0),
+  status text not null default 'pending' check (status in (
+    'pending', 'approved', 'rejected',
+    'partially_returned', 'returned', 'cancelled'
+  )),
+  purpose text not null check (btrim(purpose) <> ''),
+  note text,
+  requested_by uuid not null references auth.users(id) on delete restrict,
+  requested_at timestamptz not null default now(),
+  approved_by uuid references auth.users(id) on delete set null,
+  approved_at timestamptz,
+  decision_note text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  check (approved_amount is null or (approved_amount > 0 and approved_amount <= requested_amount)),
+  check (approved_amount is null or returned_amount <= approved_amount)
+);
+
 create table if not exists public.finance_revised_transactions (
   id uuid primary key default gen_random_uuid(),
   organization_id uuid not null references public.organizations(id) on delete cascade,
