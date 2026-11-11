@@ -209,6 +209,12 @@ test("Cash In and Cash Out actions are kept in the activity panel", () => {
   assert.doesNotMatch(workspace, /Project Cash Out is limited to that project&apos;s balance/);
 });
 
+test("Finance Overview renders each metric in its own card", () => {
+  assert.match(workspace, /function MetricCard\(/);
+  assert.match(workspace, /<MetricCard><Metric label="Total Cash on Hand"/);
+  assert.match(workspace, /<MetricCard><Metric label="Open commission payables"/);
+});
+
 test("costing errors block misleading project PDF exports", () => {
   assert.match(workspace, /costingError/);
   assert.match(workspace, /PDF export is disabled/);

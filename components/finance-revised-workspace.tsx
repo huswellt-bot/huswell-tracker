@@ -256,6 +256,10 @@ function Metric({
   );
 }
 
+function MetricCard({ children }: { children: ReactNode }) {
+  return <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">{children}</div>;
+}
+
 function Field({
   label,
   value,
@@ -1215,18 +1219,16 @@ export function FinanceRevisedWorkspace({
           <RefreshCw size={14} className={loading ? "animate-spin" : undefined} /> Refresh ledger
         </button>
       </div>
-      <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5">
-        <div className="grid gap-x-6 gap-y-5 sm:grid-cols-2 xl:grid-cols-4">
-          <Metric label="Total Cash on Hand" value={amount(projects.reduce((total, project) => total + numberValue(project, "available_balance"), 0) + numberValue(dailySnapshot, "daily_fund_balance"))} detail="Project balances + Daily Fund; unallocated Working Funds excluded" tone="positive" />
-          <Metric label="Capital Funds balance" value={amount(snapshot?.capital_funds)} detail="Owner investment remaining after transfers" />
-          <Metric label="Beginning Working Funds" value={amount(snapshot?.beginning_working_funds)} detail={"Balance before " + month} />
-          <Metric label="Ending Working Funds" value={amount(snapshot?.ending_working_funds)} detail="Available company operating pool" tone={numberValue(snapshot, "ending_working_funds") < 0 ? "negative" : "positive"} />
-          <Metric label="Pending GM approvals" value={String(numberValue(snapshot, "pending_approvals"))} detail="Cash In, Cash Out, Working Funds, and Daily Fund requests" tone={numberValue(snapshot, "pending_approvals") ? "warning" : "positive"} />
-          <Metric label="Period Cash In" value={amount(snapshot?.period_cash_in)} detail="Client collections recorded manually" tone="positive" />
-          <Metric label="Period Cash Out" value={amount(snapshot?.period_cash_out)} detail="Approved project and operating expenses" />
-          <Metric label="Daily Fund balance" value={amount(dailySnapshot?.daily_fund_balance)} detail="Available for non-project Cash Out" tone={numberValue(dailySnapshot, "daily_fund_balance") < 0 ? "negative" : "positive"} />
-          <Metric label="Open commission payables" value={amount(snapshot?.commission_payables_open)} detail="Locked commission allocations not yet paid" tone={numberValue(snapshot, "commission_payables_open") ? "warning" : "positive"} />
-        </div>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard><Metric label="Total Cash on Hand" value={amount(projects.reduce((total, project) => total + numberValue(project, "available_balance"), 0) + numberValue(dailySnapshot, "daily_fund_balance"))} detail="Project balances + Daily Fund; unallocated Working Funds excluded" tone="positive" /></MetricCard>
+        <MetricCard><Metric label="Capital Funds balance" value={amount(snapshot?.capital_funds)} detail="Owner investment remaining after transfers" /></MetricCard>
+        <MetricCard><Metric label="Beginning Working Funds" value={amount(snapshot?.beginning_working_funds)} detail={"Balance before " + month} /></MetricCard>
+        <MetricCard><Metric label="Ending Working Funds" value={amount(snapshot?.ending_working_funds)} detail="Available company operating pool" tone={numberValue(snapshot, "ending_working_funds") < 0 ? "negative" : "positive"} /></MetricCard>
+        <MetricCard><Metric label="Pending GM approvals" value={String(numberValue(snapshot, "pending_approvals"))} detail="Cash In, Cash Out, Working Funds, and Daily Fund requests" tone={numberValue(snapshot, "pending_approvals") ? "warning" : "positive"} /></MetricCard>
+        <MetricCard><Metric label="Period Cash In" value={amount(snapshot?.period_cash_in)} detail="Client collections recorded manually" tone="positive" /></MetricCard>
+        <MetricCard><Metric label="Period Cash Out" value={amount(snapshot?.period_cash_out)} detail="Approved project and operating expenses" /></MetricCard>
+        <MetricCard><Metric label="Daily Fund balance" value={amount(dailySnapshot?.daily_fund_balance)} detail="Available for non-project Cash Out" tone={numberValue(dailySnapshot, "daily_fund_balance") < 0 ? "negative" : "positive"} /></MetricCard>
+        <MetricCard><Metric label="Open commission payables" value={amount(snapshot?.commission_payables_open)} detail="Locked commission allocations not yet paid" tone={numberValue(snapshot, "commission_payables_open") ? "warning" : "positive"} /></MetricCard>
       </div>
       <Panel title="Approval queue" detail="GM approval is the posting event. Pending rows have not changed a balance yet.">
         <ApprovalTable
