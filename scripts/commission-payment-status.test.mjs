@@ -32,6 +32,10 @@ const productionConfirmedSummariesMigration = readFileSync(
   join(repoRoot, "supabase", "252_commission_summary_production_visibility.sql"),
   "utf8",
 );
+const financeProductionRemovalMigration = readFileSync(
+  join(repoRoot, "supabase", "migrations", "20261109100000_remove_finance_production_requirement.sql"),
+  "utf8",
+);
 const commissionSummaryAccessMigration = readFileSync(
   join(repoRoot, "supabase", "253_revoke_anon_commission_summary_access.sql"),
   "utf8",
@@ -42,6 +46,10 @@ const workspace = readFileSync(
 );
 const financeWorkspace = readFileSync(
   join(repoRoot, "components", "finance-workspace.tsx"),
+  "utf8",
+);
+const revisedFinanceWorkspace = readFileSync(
+  join(repoRoot, "components", "finance-revised-workspace.tsx"),
   "utf8",
 );
 
@@ -95,14 +103,16 @@ test("commission payables separate waiting projects from fully paid payout rows"
   assert.match(financeWorkspace, /bg-\[#218b55\][^>]*>Pay commission<\/button>/);
 });
 
-test("commission payables require an approved Production-page schedule", () => {
-  assert.match(productionConfirmedPayablesMigration, /commission_quotation_is_production_confirmed/);
-  assert.match(productionConfirmedPayablesMigration, /schedule\.status = 'approved'::public\.approval_status/);
-  assert.match(productionConfirmedPayablesMigration, /finance_commission_payable_quotation_ids/);
-  assert.match(productionConfirmedPayablesMigration, /enforce_commission_production_confirmation/);
-  assert.match(financeWorkspace, /productionConfirmedQuotationIdSet/);
-  assert.match(financeWorkspace, /finance_commission_payable_quotation_ids/);
-  assert.match(financeWorkspace, /Commission payouts.*approved Production schedule/s);
+test("Finance commission transactions no longer require Production", () => {
+  assert.match(financeProductionRemovalMigration, /finance_commission_payable_quotation_ids/);
+  assert.match(financeProductionRemovalMigration, /commission_summary_allocations allocation/);
+  assert.match(financeProductionRemovalMigration, /drop trigger if exists finance_transactions_commission_production_guard/);
+  assert.match(financeProductionRemovalMigration, /drop function if exists private\.enforce_commission_production_confirmation/);
+  assert.doesNotMatch(financeProductionRemovalMigration, /Commission payouts require an approved Production schedule/);
+  assert.doesNotMatch(financeWorkspace, /productionConfirmedQuotationIdSet/);
+  assert.doesNotMatch(financeWorkspace, /finance_commission_payable_quotation_ids/);
+  assert.doesNotMatch(financeWorkspace, /Commission payouts.*approved Production schedule/s);
+  assert.doesNotMatch(financeWorkspace, /"project_schedules"/);
 });
 
 test("Commission Summary rows require an approved Production-page schedule", () => {
@@ -127,18 +137,15 @@ test("project transaction notes open from a note icon modal", () => {
   assert.match(financeWorkspace, /layer="top"/);
 });
 
-test("paid commissions have a dedicated Internal Finance history page", () => {
-  assert.match(workspace, /"Paid commissions"/);
-  assert.match(workspace, /initialTab="commission_history"/);
-  assert.match(financeWorkspace, /tab === "commission_history" && internal/);
-  assert.match(financeWorkspace, /title="Paid commissions"/);
-  assert.match(financeWorkspace, /placeholder="Search commission payouts"/);
-  assert.match(financeWorkspace, /placeholder="Search paid commissions"/);
-  assert.match(financeWorkspace, /filteredPayablesRows/);
-  assert.match(financeWorkspace, /filteredPaidCommissionRows/);
-  assert.match(financeWorkspace, /Boolean\(transaction\.commission_allocation_id\)/);
-  assert.match(financeWorkspace, /stringValue\(transaction, "payment_status"\) === "paid"/);
-  assert.match(financeWorkspace, /profileName\(allocation\.recipient_user_id\)/);
-  assert.match(financeWorkspace, /if \(transaction\.supplier_payable_id \|\| transaction\.commission_summary_id \|\| transaction\.commission_allocation_id\) return total;/);
-  assert.match(financeWorkspace, /if \(transaction\.commission_summary_id \|\| transaction\.commission_allocation_id\) return;/);
+test("commission payouts use the revised project ledger and activity history", () => {
+  assert.match(workspace, /initialTab="commissions"/);
+  assert.match(workspace, /initialTab="history"/);
+  assert.match(revisedFinanceWorkspace, /title="Commission Payables"/);
+  assert.match(revisedFinanceWorkspace, /list_finance_revised_commission_payables/);
+  assert.match(revisedFinanceWorkspace, /create_finance_revised_commission_payout/);
+  assert.match(revisedFinanceWorkspace, /Request payout/);
+  assert.match(revisedFinanceWorkspace, /Project Cash Out/);
+  assert.match(revisedFinanceWorkspace, /Activity History/);
+  assert.match(revisedFinanceWorkspace, /commission_allocation_id/);
+  assert.doesNotMatch(revisedFinanceWorkspace, /commission_history/);
 });

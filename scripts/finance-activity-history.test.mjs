@@ -21,9 +21,9 @@ test("Finance activity history is a separate final Finance navigation item for G
   assert.match(mainWorkspace, /\{ view: "Finance Activity History", icon: ClipboardList \}/);
   assert.match(mainWorkspace, /active === "Finance Activity History"/);
   const externalStart = mainWorkspace.indexOf('] : role === "external_finance" ?');
-  const salesStart = mainWorkspace.indexOf('] : role === "sales_pricing_officer" ?', externalStart);
-  assert.ok(externalStart >= 0 && salesStart > externalStart);
-  assert.doesNotMatch(mainWorkspace.slice(externalStart, salesStart), /Finance Activity History/);
+  const accountantStart = mainWorkspace.indexOf('] : role === "accountant" ?', externalStart);
+  assert.ok(externalStart >= 0 && accountantStart > externalStart);
+  assert.doesNotMatch(mainWorkspace.slice(externalStart, accountantStart), /Finance Activity History/);
 });
 
 test("activity history uses one consistent table schema and server-side role authorization", () => {

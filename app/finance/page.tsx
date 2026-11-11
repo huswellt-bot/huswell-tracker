@@ -10,8 +10,7 @@ export default async function FinancePage() {
       "super_admin",
       "owner",
       "admin",
-      "internal_finance",
-      "external_finance",
+      "accountant",
     ].includes(access.role) &&
     !access.internalFinanceEnabled
   ) {

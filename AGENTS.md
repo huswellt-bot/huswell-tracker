@@ -14,7 +14,7 @@
 - Customize components to match the project's identity.
 - Use Geist Sans and Lucide Icons when appropriate.
 - Prefer flat design, solid colors, and consistent spacing.
-- Maintain clear visual hierarchy and standard component sizes.
+- Maintain clear visual hierarchy and standard component sizes.co
 - Use consistent border radius, typically 4–12px.
 - Ensure accessibility and mobile responsiveness.
 - Preserve existing designs unless redesign is requested.

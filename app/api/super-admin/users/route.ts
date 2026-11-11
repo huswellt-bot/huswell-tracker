@@ -257,8 +257,7 @@ export async function POST(request: Request) {
     body?.role === "admin" ||
     body?.role === "project_manager" ||
     body?.role === "sales_pricing_officer" ||
-    body?.role === "internal_finance" ||
-    body?.role === "external_finance" ||
+    body?.role === "accountant" ||
     body?.role === "lead_coordinator"
       ? body.role
       : null;
@@ -429,8 +428,7 @@ export async function PATCH(request: Request) {
     body?.role === "admin" ||
     body?.role === "project_manager" ||
     body?.role === "sales_pricing_officer" ||
-    body?.role === "internal_finance" ||
-    body?.role === "external_finance" ||
+    body?.role === "accountant" ||
     body?.role === "lead_coordinator"
       ? body.role
       : null;

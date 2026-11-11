@@ -11,8 +11,6 @@ export const workspaceRoles = [
   "production",
   "warehouse",
   "accountant",
-  "internal_finance",
-  "external_finance",
   "lead_coordinator",
   "payroll",
   "viewer",
@@ -61,7 +59,6 @@ export async function requireWorkspaceAccess() {
 
   const internalFinanceEnabled =
     membership.role === "admin" ||
-    membership.role === "internal_finance" ||
     internalFinanceCapability?.capability === "internal_finance";
 
   const isManagementRole = ["super_admin", "owner", "admin"].includes(

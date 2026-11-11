@@ -2098,7 +2098,6 @@ export function FinanceWorkspace({
   const [suppliers, setSuppliers] = useState<Row[]>([]);
   const [commissionAllocations, setCommissionAllocations] = useState<Row[]>([]);
   const [commissionSummaries, setCommissionSummaries] = useState<Row[]>([]);
-  const [productionConfirmedQuotationIds, setProductionConfirmedQuotationIds] = useState<string[]>([]);
   const [profiles, setProfiles] = useState<Row[]>([]);
   const [paymentRecords, setPaymentRecords] = useState<Row[]>([]);
   const [quotationPaymentRecords, setQuotationPaymentRecords] = useState<Row[]>([]);
@@ -2198,9 +2197,6 @@ export function FinanceWorkspace({
         : emptyFinanceRequest();
       const commissionSummariesRequest = internal
         ? client.from("commission_summaries").select("quotation_id,quotation_no,client_name,project_name,grand_total,commission_split_option").eq("organization_id", organizationId).order("created_at", { ascending: false })
-        : emptyFinanceRequest();
-      const productionConfirmedQuotationIdsRequest = internal
-        ? client.rpc("finance_commission_payable_quotation_ids", { p_organization_id: organizationId })
         : emptyFinanceRequest();
       const quotationsRequest = budgetOnly
         ? emptyFinanceRequest()
@@ -2302,7 +2298,6 @@ export function FinanceWorkspace({
         fundingRequestAccountsRequest,
         accountTypesRequest,
         commissionSummariesRequest,
-        productionConfirmedQuotationIdsRequest,
         financeActivityRequest,
         operatingCostEntriesRequest,
       ]);
@@ -2319,7 +2314,7 @@ export function FinanceWorkspace({
       setQuotations((requests[6].data ?? []) as Row[]);
       setQuotationDirectCosts((requests[14].data ?? []) as Row[]);
       setProjectExpenseRows((requests[15].data ?? []) as Row[]);
-      setOperatingCostEntries((requests[27].data ?? []) as Row[]);
+      setOperatingCostEntries((requests[26].data ?? []) as Row[]);
       setPayables((requests[7].data ?? []) as Row[]);
       setSuppliers((requests[8].data ?? []) as Row[]);
       const loadedAllocations = (requests[9].data ?? []) as Row[];
@@ -2337,12 +2332,7 @@ export function FinanceWorkspace({
       setFundingRequestAccounts((requests[22].data ?? []) as Row[]);
       setAccountTypes((requests[23].data ?? []) as Row[]);
       setCommissionSummaries((requests[24].data ?? []) as Row[]);
-      setProductionConfirmedQuotationIds(
-        ((requests[25].data ?? []) as Row[])
-          .map((row) => stringValue(row, "quotation_id"))
-          .filter(Boolean),
-      );
-      setFinanceActivityRows((requests[26].data ?? []) as Row[]);
+      setFinanceActivityRows((requests[25].data ?? []) as Row[]);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "Finance data could not load.");
     } finally {
@@ -2382,7 +2372,6 @@ export function FinanceWorkspace({
           "commission_summary_allocations",
           "quotation_payment_records",
           "activity_log",
-          "project_schedules",
           "leads",
           "quotations",
           "suppliers",
@@ -2536,14 +2525,8 @@ export function FinanceWorkspace({
     return map;
   }, [paymentRecords]);
 
-  const productionConfirmedQuotationIdSet = useMemo(
-    () => new Set(productionConfirmedQuotationIds),
-    [productionConfirmedQuotationIds],
-  );
-
   const eligibleCommissionAllocationsForOptions = useMemo(() => commissionAllocations.filter((allocation) => {
     if (stringValue(allocation, "status") !== "not_yet_paid") return false;
-    if (!productionConfirmedQuotationIdSet.has(stringValue(allocation, "quotation_id"))) return false;
     const quotation = quotationForId(allocation.quotation_id);
     const summary = commissionSummaryForQuotation(allocation.quotation_id);
     const verifiedAt = verifiedPaymentByQuotation.get(stringValue(allocation, "quotation_id"));
@@ -2554,7 +2537,7 @@ export function FinanceWorkspace({
       && total > 0
       && verifiedAmount + 0.001 >= total
     );
-  }), [commissionAllocations, commissionSummaryForQuotation, productionConfirmedQuotationIdSet, quotationForId, verifiedPaymentByQuotation, verifiedPaymentTotalsByQuotation]);
+  }), [commissionAllocations, commissionSummaryForQuotation, quotationForId, verifiedPaymentByQuotation, verifiedPaymentTotalsByQuotation]);
 
   const accountOptions = useMemo<SearchableOption[]>(
     () => (transactionDirection === "expense" && !internal ? availableExpenseAccounts : activeAccounts).map((account) => ({
@@ -3089,7 +3072,6 @@ export function FinanceWorkspace({
   );
   const eligibleCommissionAllocations = useMemo(() => commissionAllocations.filter((allocation) => {
     if (stringValue(allocation, "status") !== "not_yet_paid") return false;
-    if (!productionConfirmedQuotationIdSet.has(stringValue(allocation, "quotation_id"))) return false;
     const quotation = quotationForId(allocation.quotation_id);
     const summary = commissionSummaryForQuotation(allocation.quotation_id);
     const verifiedAt = verifiedPaymentByQuotation.get(stringValue(allocation, "quotation_id"));
@@ -3100,7 +3082,7 @@ export function FinanceWorkspace({
       && total > 0
       && verifiedAmount + 0.001 >= total
     );
-  }), [commissionAllocations, commissionSummaryForQuotation, productionConfirmedQuotationIdSet, quotationForId, verifiedPaymentByQuotation, verifiedPaymentTotalsByQuotation]);
+  }), [commissionAllocations, commissionSummaryForQuotation, quotationForId, verifiedPaymentByQuotation, verifiedPaymentTotalsByQuotation]);
   const transactionPayables = useMemo(
     () => transactions.filter((transaction) => !Boolean(transaction.is_voided) && stringValue(transaction, "transaction_type") === "expense" && stringValue(transaction, "approval_status") === "approved" && stringValue(transaction, "payment_status") === "unpaid"),
     [transactions],
@@ -3109,11 +3091,10 @@ export function FinanceWorkspace({
     () => ({
       commission: commissionAllocations.filter((allocation) => (
         stringValue(allocation, "status") === "not_yet_paid"
-        && productionConfirmedQuotationIdSet.has(stringValue(allocation, "quotation_id"))
       )),
       supplier: payables.filter((payable) => !["paid", "cancelled"].includes(stringValue(payable, "status"))),
     }),
-    [commissionAllocations, payables, productionConfirmedQuotationIdSet],
+    [commissionAllocations, payables],
   );
   const eligibleCommissionAllocationIds = useMemo(
     () => new Set(eligibleCommissionAllocations.map((allocation) => String(allocation.id))),
@@ -3240,11 +3221,10 @@ export function FinanceWorkspace({
   const openCommissionBalance = useMemo(
     () => commissionAllocations.reduce((total, allocation) => (
       stringValue(allocation, "status") === "not_yet_paid"
-        && productionConfirmedQuotationIdSet.has(stringValue(allocation, "quotation_id"))
         ? total + numericValue(allocation, "amount")
         : total
     ), 0),
-    [commissionAllocations, productionConfirmedQuotationIdSet],
+    [commissionAllocations],
   );
   const openLedgerPayableBalance = useMemo(
     () => transactionPayables.reduce((total, transaction) => {
@@ -4878,7 +4858,7 @@ export function FinanceWorkspace({
 
           {payablesSection === "commission" && (
             <div id="payables-panel-commission" role="tabpanel" aria-labelledby="payables-tab-commission">
-          <Panel title="Commission payouts" detail="Only approved Production schedules appear here. Each Sales Origin and Co-Worker allocation is paid separately after the project is fully paid and the final client payment is verified.">
+          <Panel title="Commission payouts" detail="Only projects with fully verified client payment appear here. Each Sales Origin and Co-Worker allocation is paid separately after the project is fully paid.">
             <div className="px-4 pt-3 sm:px-5">
               <label className="relative block max-w-md">
                 <Search size={15} className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]" />

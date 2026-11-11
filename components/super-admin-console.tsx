@@ -626,8 +626,7 @@ export function SuperAdminConsole({
                   <option value="project_manager">Sales Executive</option>
                   <option value="admin">General Manager</option>
                   <option value="sales_pricing_officer">Sales &amp; Pricing Officer</option>
-                  <option value="internal_finance">Internal Finance</option>
-                  <option value="external_finance">External Finance</option>
+                  <option value="accountant">Accounting &amp; Finance</option>
                   <option value="lead_coordinator">Lead &amp; Costing Coordinator</option>
                 </select>
               </label>
@@ -859,8 +858,7 @@ export function SuperAdminConsole({
                   <option value="project_manager">Sales Executive</option>
                   <option value="admin">General Manager</option>
                   <option value="sales_pricing_officer">Sales &amp; Pricing Officer</option>
-                  <option value="internal_finance">Internal Finance</option>
-                  <option value="external_finance">External Finance</option>
+                  <option value="accountant">Accounting &amp; Finance</option>
                   <option value="lead_coordinator">Lead &amp; Costing Coordinator</option>
                 </select>
               </label>

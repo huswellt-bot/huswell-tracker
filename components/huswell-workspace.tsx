@@ -122,13 +122,9 @@ const DynamicLeadCostingWorkspace = dynamic(
   () => import("@/components/lead-costing-index-workspace").then((module) => module.LeadCostingIndexWorkspace),
   { loading: () => <LoadingState variant="section" label="Loading Lead & Costing..." /> },
 );
-const DynamicFinanceWorkspace = dynamic(
-  () => import("@/components/finance-workspace").then((module) => module.FinanceWorkspace),
-  { loading: () => <LoadingState variant="section" label="Loading Finance..." /> },
-);
-const DynamicFinanceFoundationWorkspace = dynamic(
-  () => import("@/components/finance-foundation-workspace").then((module) => module.FinanceFoundationWorkspace),
-  { loading: () => <LoadingState variant="section" label="Loading Financial Foundation..." /> },
+const DynamicFinanceRevisedWorkspace = dynamic(
+  () => import("@/components/finance-revised-workspace").then((module) => module.FinanceRevisedWorkspace),
+  { loading: () => <LoadingState variant="section" label="Loading Accounting & Finance..." /> },
 );
 
 PdfFont.register({
@@ -159,6 +155,9 @@ type View =
   | "Sales"
   | "Expenses"
   | "Finance Overview"
+  | "Finance Funds"
+  | "Finance Daily Fund"
+  | "Finance Cash on Hand"
   | "Finance Foundation"
   | "Finance Reports"
   | "Finance"
@@ -168,6 +167,7 @@ type View =
   | "Finance Budget"
   | "Finance Supplier Costing"
   | "Finance Payables"
+  | "Finance Commissions"
   | "Paid commissions"
   | "Finance Activity History"
   | "Payroll & Leave"
@@ -185,22 +185,18 @@ type View =
   | "Profile";
 
 type FinanceActionRequest = "income" | "expense";
-type FinanceBudgetActionRequest = "grant" | "allocate";
 type SidebarWorkspace = "sales_pricing" | "finance";
 
 const financeSidebarViews: View[] = [
   "Finance Overview",
-  "Finance Foundation",
+  "Finance Funds",
+  "Finance Daily Fund",
+  "Finance Cash on Hand",
   "Finance Reports",
-  "Finance",
   "Finance Approvals",
   "Finance Transactions",
-  "Finance Accounts",
   "Finance Budget",
-  "Finance Supplier Costing",
-  "Finance Payables",
-  "Paid commissions",
-  "Payment Monitoring",
+  "Finance Commissions",
   "Finance Activity History",
 ];
 
@@ -15463,7 +15459,6 @@ function PriceQuotationWorkspace({
   >([]);
   const [saving, setSaving] = useState(false);
   const [quotationTab, setQuotationTab] = useState<"draft" | "pending" | "needs_revision" | "approved">(() => isProjectOfficerRole(role) ? "draft" : memberRole(role) ? "approved" : "pending");
-  const [approvedPaymentTab, setApprovedPaymentTab] = useState<"outstanding" | "paid">("outstanding");
   const [quotationQuery, setQuotationQuery] = useState("");
   const quotationDefaultMonth = isPricingOfficerRole(role) ? "" : currentMonth();
   const [quotationMonth, setQuotationMonth] = useState(quotationDefaultMonth);
@@ -15475,7 +15470,6 @@ function PriceQuotationWorkspace({
   const [reviewing, setReviewing] = useState<Row | null>(null);
   const [revisionNoteQuote, setRevisionNoteQuote] = useState<Row | null>(null);
   const [illustrationQuote, setIllustrationQuote] = useState<Row | null>(null);
-  const [paymentQuote, setPaymentQuote] = useState<Row | null>(null);
   const [printAfterOpen, setPrintAfterOpen] = useState(false);
   const canPrepare = isProjectOfficerRole(role);
   const isGeneralManager = memberRole(role);
@@ -15538,29 +15532,12 @@ function PriceQuotationWorkspace({
     ).map(([id, name]) => ({ id, name })).filter((officer) => officer.id),
     [preparedByKey, preparedByName, quotations],
   );
-  const approvedPaymentCounts = useMemo(() => {
-    let outstanding = 0;
-    let paid = 0;
-    quotations
-      .filter((quote) => text(quote.status) === "approved")
-      .forEach((quote) => {
-        const paymentStatus = quotationPaymentSummary(quote, store.quotation_payment_records).status;
-        if (paymentStatus === "paid" || paymentStatus === "overpaid") paid += 1;
-        else outstanding += 1;
-      });
-    return { outstanding, paid };
-  }, [quotations, store.quotation_payment_records]);
   const deferredQuotationQuery = useDeferredValue(quotationQuery);
   const filteredQuotations = useMemo(() => {
     if (editorOpen) return [];
     const search = deferredQuotationQuery.trim().toLowerCase();
     return quotations.filter((quote) => {
       if (text(quote.status) !== quotationTab) return false;
-      if (quotationTab === "approved") {
-        const paymentStatus = quotationPaymentSummary(quote, store.quotation_payment_records).status;
-        const isPaid = paymentStatus === "paid" || paymentStatus === "overpaid";
-        if (approvedPaymentTab === "paid" ? !isPaid : isPaid) return false;
-      }
       if (preparedByFilter !== "all" && preparedByKey(quote) !== preparedByFilter) return false;
       const quotationDate = text(
         text(quote.status) === "approved"
@@ -15577,7 +15554,7 @@ function PriceQuotationWorkspace({
       ].map((value) => text(value).toLowerCase()).join(" ");
       return searchable.includes(search);
     }).sort(newestActivityFirst);
-  }, [approvedPaymentTab, deferredQuotationQuery, editorOpen, preparedByFilter, preparedByKey, preparedByName, quotationMonth, quotationTab, quotations, store.quotation_payment_records]);
+  }, [deferredQuotationQuery, editorOpen, preparedByFilter, preparedByKey, preparedByName, quotationMonth, quotationTab, quotations]);
   const quotationPageCount = Math.max(1, Math.ceil(filteredQuotations.length / TABLE_PAGE_SIZE));
   const activeQuotationPage = Math.min(quotationPage, quotationPageCount);
   const visibleQuotations = filteredQuotations.slice(
@@ -15586,7 +15563,7 @@ function PriceQuotationWorkspace({
   );
   useEffect(() => {
     setQuotationPage(1);
-  }, [approvedPaymentTab, preparedByFilter, quotationMonth, quotationQuery, quotationTab]);
+  }, [preparedByFilter, quotationMonth, quotationQuery, quotationTab]);
   const availableLeads = useMemo(
     () =>
       store.leads.filter(
@@ -16040,13 +16017,12 @@ function PriceQuotationWorkspace({
     setPdfWindow(nextWindow);
     setPdfQuote(quote);
   };
-  const showPaymentStatus = quotationTab === "approved";
   const quotationSectionTabs = isGeneralManager
     ? (["approved"] as const)
     : (["draft", "pending", "needs_revision", "approved"] as const);
   const quotationTableLabels = isProjectOfficerRole(role)
-    ? ["Quotation", "Project", "Client's Name", "Company Name", "Status", "Revision", "Note", ...(showPaymentStatus ? ["Payment status", "Verified", "Total"] : []), "Date", "Actions"]
-    : ["Quotation", "Project", "Client's Name", "Company Name", "Prepared by", "Status", "Revision", "Note", ...(showPaymentStatus ? ["Payment status", "Verified", "Total"] : []), "Date", "Actions"];
+    ? ["Quotation", "Project", "Client's Name", "Company Name", "Status", "Revision", "Note", "Date", "Actions"]
+    : ["Quotation", "Project", "Client's Name", "Company Name", "Prepared by", "Status", "Revision", "Note", "Date", "Actions"];
   return (
     <Panel
       title="Price Quotations"
@@ -16073,12 +16049,6 @@ function PriceQuotationWorkspace({
             return <button key={tab} type="button" onClick={() => setQuotationTab(tab)} aria-current={quotationTab === tab ? "page" : undefined} className="app-tab">{labels[tab]} ({quotations.filter((quote) => text(quote.status) === tab).length})</button>;
           })}
         </nav>
-        {quotationTab === "approved" && (
-          <nav aria-label="Approved quotation payment status" className="app-tabs mt-3">
-            <button type="button" onClick={() => setApprovedPaymentTab("outstanding")} aria-current={approvedPaymentTab === "outstanding" ? "page" : undefined} className="app-tab">Outstanding ({approvedPaymentCounts.outstanding})</button>
-            <button type="button" onClick={() => setApprovedPaymentTab("paid")} aria-current={approvedPaymentTab === "paid" ? "page" : undefined} className="app-tab">Paid ({approvedPaymentCounts.paid})</button>
-          </nav>
-        )}
         <div className="flex flex-wrap items-center gap-2 border-b border-[#edf0f5] py-3">
           <label className="relative min-w-0 flex-1 sm:min-w-56 sm:max-w-sm" htmlFor="price-quotation-search"><Search className="search-icon pointer-events-none absolute left-3 text-[#8b92a1]" size={15} /><span className="sr-only">Search quotations</span><input id="price-quotation-search" type="search" value={quotationQuery} onChange={(event) => setQuotationQuery(event.target.value)} placeholder="Search quotations" className="search-input w-full rounded-lg border border-[#d9e0e9] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#c43b43]" /></label>
           <label className="flex items-center gap-2 text-[12px] text-[#687386]"><span className="whitespace-nowrap">Month</span><input type="month" value={quotationMonth} onClick={(event) => event.currentTarget.showPicker?.()} onChange={(event) => setQuotationMonth(event.target.value)} className="min-h-9 rounded-lg border border-[#d9e0e9] bg-white px-2 text-[12px] text-[#202938] outline-none focus:border-[#c43b43]" /></label>
@@ -16092,7 +16062,7 @@ function PriceQuotationWorkspace({
         <div className="modern-table-shell">
         <Table
           labels={quotationTableLabels}
-          minWidth={isProjectOfficerRole(role) ? (showPaymentStatus ? 1320 : 1120) : (showPaymentStatus ? 1460 : 1260)}
+          minWidth={isProjectOfficerRole(role) ? 1120 : 1260}
           className="!w-full"
         >
           {visibleQuotations.map((quote) => {
@@ -16103,7 +16073,6 @@ function PriceQuotationWorkspace({
             const pricingOfficerRevision = isPricingOfficerRevision(quote);
             const canEditAsOrigin = canManageQuotationAsOrigin(quote);
             const editable = canEditAsOrigin && !isLegacy && !pricingOfficerRevision && ["draft", "needs_revision"].includes(text(quote.status));
-            const paymentSummary = showPaymentStatus ? quotationPaymentSummary(quote, store.quotation_payment_records) : null;
             const priceRevisionRequest = store.price_quotation_revision_requests.find(
               (request) =>
                 request.quotation_id === quote.id &&
@@ -16127,7 +16096,6 @@ function PriceQuotationWorkspace({
                 <td className="px-5 py-3"><Status value={quote.status} /></td>
                 <td className="px-5 py-3">{priceRevisionRequest ? "Requested" : "—"}</td>
                 <td className="px-5 py-3">{text(quote.status) === "needs_revision" ? <NoteAction label="View revision note" tone="amber" onClick={() => setRevisionNoteQuote(quote)} /> : "—"}</td>
-                {paymentSummary && <><td className="px-5 py-3"><PaymentStatusBadge status={paymentSummary.status} /></td><td className="px-5 py-3">{peso.format(paymentSummary.verified)}</td><td className="px-5 py-3">{peso.format(paymentSummary.total)}</td></>}
                 <td className="px-5 py-3">{text(quote.status) === "approved" ? day(quote.approved_at) : day(quote.submitted_at)}</td>
                 <td className="px-5 py-3"><div className="flex items-center gap-1">
                   {editable && canPrepare && (
@@ -16153,11 +16121,6 @@ function PriceQuotationWorkspace({
                   )}
                   {canEditAsOrigin && !isLegacy && text(quote.status) === "approved" && (
                     <ActionIcon label="Edit and resubmit Price Quotation" tone="amber" loading={saving} disabled={saving || Boolean(priceRevisionRequest)} onClick={() => void beginRevision(quote)}><RotateCcw size={15} /></ActionIcon>
-                  )}
-                  {canSubmitQuotationPaymentInUi(quote, role) && (
-                    <ActionIcon label="Record client payment" confirm={false} onClick={() => setPaymentQuote(quote)}>
-                      <ReceiptText size={15} />
-                    </ActionIcon>
                   )}
                   {canDeletePriceQuotation(quote) && (
                     <ActionIcon
@@ -16324,7 +16287,6 @@ function PriceQuotationWorkspace({
       )}
       {pdfQuote && <QuotationDocument quote={pdfQuote} store={store} close={() => { setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); }} onPdfError={(message) => { if (pdfWindow && !pdfWindow.closed) pdfWindow.close(); setPdfQuote(null); setPdfWindow(null); setPrintAfterOpen(false); notice(message); }} autoExportPdf pdfWindow={pdfWindow} printAfterOpen={printAfterOpen} hidden showInternalCosting={isGeneralManager} />}
       {reviewing && <PriceQuotationReview quotation={reviewing} store={store} saving={saving} showInternalMarkups={isGeneralManager} allowPrintingComputations={role === "sales_pricing_officer"} close={() => setReviewing(null)} notice={notice} reload={reload} />}
-      {paymentQuote && <QuotationPaymentDialog quote={paymentQuote} store={store} orgId={orgId} role={role} historyOnly={role === "external_finance"} close={() => setPaymentQuote(null)} reload={reload} />}
     </Panel>
   );
 }
@@ -23249,13 +23211,11 @@ export function HuswellWorkspace({
   productionApprovalEnabled?: boolean;
   initialView?: View;
 }) {
-  const hasInternalFinanceAccess =
-    internalFinanceEnabled || role === "internal_finance";
+  const hasInternalFinanceAccess = internalFinanceEnabled;
   const financeRole = hasInternalFinanceAccess ? "internal_finance" : role;
-  const defaultWorkspaceView: View = ["internal_finance", "external_finance"].includes(role)
+  const revisedFinanceRole = hasInternalFinanceAccess ? "accountant" : role;
+  const defaultWorkspaceView: View = role === "accountant"
     ? "Finance Overview"
-    : role === "accountant"
-      ? "Announcements"
     : role === "lead_coordinator"
       ? "Leads"
       : "Dashboard";
@@ -23266,7 +23226,7 @@ export function HuswellWorkspace({
         ? "Approvals"
         : initialView ?? defaultWorkspaceView;
   const financePaymentViewAllowed =
-    hasInternalFinanceAccess || role === "external_finance";
+    hasInternalFinanceAccess || role === "accountant";
   const safeInitialView = requestedInitialView === "Payment Monitoring" && !financePaymentViewAllowed
     ? defaultWorkspaceView
     : requestedInitialView;
@@ -23293,8 +23253,6 @@ export function HuswellWorkspace({
   const [policyAction, setPolicyAction] = useState<"announcement" | "policy" | null>(null);
   const [financeActionRequest, setFinanceActionRequest] = useState<FinanceActionRequest | null>(null);
   const clearFinanceActionRequest = useCallback(() => setFinanceActionRequest(null), []);
-  const [financeBudgetActionRequest, setFinanceBudgetActionRequest] = useState<FinanceBudgetActionRequest | null>(null);
-  const clearFinanceBudgetActionRequest = useCallback(() => setFinanceBudgetActionRequest(null), []);
   const [signOutOpen, setSignOutOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [navigationDate, setNavigationDate] = useState(() => new Date());
@@ -23338,7 +23296,7 @@ export function HuswellWorkspace({
     }
     setSidebarQueueCounts(parsed);
   }, [client, currentUserId, currentUserLoaded, hasInternalFinanceAccess, organizationId]);
-  const canEditOwnProfile = ["owner", "admin", "project_manager", "sales_pricing_officer", "internal_finance", "external_finance", "lead_coordinator"].includes(
+  const canEditOwnProfile = ["owner", "admin", "project_manager", "sales_pricing_officer", "accountant", "lead_coordinator"].includes(
     role,
   );
   useEffect(() => {
@@ -23738,8 +23696,16 @@ export function HuswellWorkspace({
       "Projects",
       "Price Quotations",
       "Approvals",
+      "Finance Overview",
+      "Finance Funds",
+      "Finance Daily Fund",
+      "Finance Cash on Hand",
       "Finance Foundation",
+      "Finance Reports",
+      "Finance Approvals",
+      "Finance Transactions",
       "Finance Budget",
+      "Payment Monitoring",
       "Finance Activity History",
       "Commissions",
       "Settings",
@@ -23752,8 +23718,16 @@ export function HuswellWorkspace({
       "Price Quotations",
       "Quotation Costing Overview",
       "Approvals",
+      "Finance Overview",
+      "Finance Funds",
+      "Finance Daily Fund",
+      "Finance Cash on Hand",
       "Finance Foundation",
+      "Finance Reports",
+      "Finance Approvals",
+      "Finance Transactions",
       "Finance Budget",
+      "Payment Monitoring",
       "Finance Activity History",
       "Commissions",
       "Letter Request",
@@ -23769,8 +23743,16 @@ export function HuswellWorkspace({
       "Price Quotations",
       "Quotation Costing Overview",
       "Approvals",
+      "Finance Overview",
+      "Finance Funds",
+      "Finance Daily Fund",
+      "Finance Cash on Hand",
       "Finance Foundation",
+      "Finance Reports",
+      "Finance Approvals",
+      "Finance Transactions",
       "Finance Budget",
+      "Payment Monitoring",
       "Finance Activity History",
       "Commissions",
       "Letter Request",
@@ -23802,9 +23784,9 @@ export function HuswellWorkspace({
     ],
     sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Announcements", "Policy"],
     warehouse: ["Dashboard", "Catalog", "Inventory", "Production", "Announcements", "Policy"],
-    accountant: ["Announcements", "Policy"],
-    internal_finance: ["Finance Overview", "Finance Foundation", "Finance Reports", "Finance", "Finance Approvals", "Finance Transactions", "Finance Accounts", "Finance Budget", "Finance Supplier Costing", "Finance Payables", "Paid commissions", "Finance Activity History", "Payment Monitoring", "Announcements", "Policy"],
-    external_finance: ["Finance Overview", "Finance Foundation", "Finance Reports", "Finance", "Finance Transactions", "Finance Budget", "Finance Supplier Costing", "Payment Monitoring", "Announcements", "Policy"],
+    accountant: ["Finance Overview", "Finance Funds", "Finance Daily Fund", "Finance Cash on Hand", "Finance Foundation", "Finance Reports", "Finance Approvals", "Finance Transactions", "Finance Budget", "Finance Commissions", "Payment Monitoring", "Finance Activity History", "Announcements", "Policy"],
+    internal_finance: ["Finance Overview", "Finance Funds", "Finance Daily Fund", "Finance Cash on Hand", "Finance Foundation", "Finance Reports", "Finance", "Finance Approvals", "Finance Transactions", "Finance Budget", "Finance Commissions", "Finance Activity History", "Payment Monitoring", "Announcements", "Policy"],
+    external_finance: ["Finance Overview", "Finance Funds", "Finance Daily Fund", "Finance Cash on Hand", "Finance Foundation", "Finance Reports", "Finance", "Finance Transactions", "Finance Budget", "Finance Commissions", "Payment Monitoring", "Announcements", "Policy"],
     lead_coordinator: ["Leads", "Lead Costing", "Announcements", "Policy"],
     payroll: ["Dashboard", "Payroll & Leave", "Letter Request", "Directory", "Announcements", "Policy"],
     production: ["Dashboard", "Production", "Inventory", "Finance Foundation", "Announcements", "Policy"],
@@ -23834,14 +23816,13 @@ export function HuswellWorkspace({
     allowedRoleViews.push(
       "Finance Overview",
       "Finance Foundation",
+      "Finance Daily Fund",
+      "Finance Cash on Hand",
       "Finance Reports",
       "Finance Approvals",
       "Finance Transactions",
-      "Finance Accounts",
       "Finance Budget",
-      "Finance Supplier Costing",
-      "Finance Payables",
-      "Paid commissions",
+      "Finance Commissions",
       "Finance Activity History",
       "Payment Monitoring",
     );
@@ -23880,14 +23861,13 @@ export function HuswellWorkspace({
           items: [
             { view: "Finance Overview", icon: Wallet },
             { view: "Finance Foundation", icon: Landmark },
+            { view: "Finance Daily Fund", icon: Wallet },
+            { view: "Finance Cash on Hand", icon: ReceiptText },
             { view: "Finance Reports", icon: CalendarDays },
             { view: "Finance Approvals", icon: ClipboardCheck, badge: sidebarBadge("finance") },
             { view: "Finance Transactions", icon: ReceiptText },
-            { view: "Finance Accounts", icon: Wallet },
             { view: "Finance Budget", icon: FileText },
-            { view: "Finance Supplier Costing", icon: ReceiptText },
-            { view: "Finance Payables", icon: Wallet },
-            { view: "Paid commissions", icon: PhilippinePeso },
+            { view: "Finance Commissions", icon: PhilippinePeso },
             { view: "Payment Monitoring", icon: ReceiptText },
             { view: "Finance Activity History", icon: ClipboardList },
           ],
@@ -23931,20 +23911,20 @@ export function HuswellWorkspace({
     view: View;
     icon: typeof LayoutDashboard;
     badge?: number;
-  }[] = hasInternalFinanceAccess
-    ? [
-        { view: "Finance Foundation", icon: Landmark },
-        { view: "Finance Approvals", icon: ClipboardCheck, badge: sidebarBadge("finance") },
-        { view: "Finance Transactions", icon: ReceiptText },
-        { view: "Finance Accounts", icon: Wallet },
-        { view: "Finance Budget", icon: FileText },
-        { view: "Finance Supplier Costing", icon: ReceiptText },
-        { view: "Finance Payables", icon: Wallet },
-        { view: "Paid commissions", icon: PhilippinePeso },
-        { view: "Payment Monitoring", icon: ReceiptText },
-        { view: "Finance Activity History", icon: ClipboardList },
-      ]
-    : [{ view: "Finance Foundation", icon: Landmark }, { view: "Finance Budget", icon: FileText }, { view: "Finance Activity History", icon: ClipboardList }];
+  }[] = [
+    { view: "Finance Overview", icon: Wallet },
+    { view: "Finance Funds", icon: Landmark },
+    { view: "Finance Daily Fund", icon: Wallet },
+    { view: "Finance Cash on Hand", icon: ReceiptText },
+    { view: "Finance Foundation", icon: Landmark },
+    { view: "Finance Reports", icon: CalendarDays },
+    { view: "Finance Approvals", icon: ClipboardCheck, badge: sidebarBadge("finance") },
+    { view: "Finance Transactions", icon: ReceiptText },
+    { view: "Finance Budget", icon: FileText },
+    { view: "Finance Commissions", icon: PhilippinePeso },
+    { view: "Payment Monitoring", icon: ReceiptText },
+    { view: "Finance Activity History", icon: ClipboardList },
+  ];
   const navBase: {
     label: string;
     items: { view: View; icon: typeof LayoutDashboard; badge?: number }[];
@@ -23985,15 +23965,15 @@ export function HuswellWorkspace({
       label: "Finance",
       items: [
         { view: "Finance Overview", icon: Wallet },
+        { view: "Finance Funds", icon: Landmark },
+        { view: "Finance Daily Fund", icon: Wallet },
+        { view: "Finance Cash on Hand", icon: ReceiptText },
         { view: "Finance Foundation", icon: Landmark },
         { view: "Finance Reports", icon: CalendarDays },
         { view: "Finance Approvals", icon: ClipboardCheck, badge: sidebarBadge("finance") },
         { view: "Finance Transactions", icon: ReceiptText },
-        { view: "Finance Accounts", icon: Wallet },
         { view: "Finance Budget", icon: FileText },
-        { view: "Finance Supplier Costing", icon: ReceiptText },
-        { view: "Finance Payables", icon: Wallet },
-        { view: "Paid commissions", icon: PhilippinePeso },
+        { view: "Finance Commissions", icon: PhilippinePeso },
         { view: "Payment Monitoring", icon: ReceiptText },
         { view: "Finance Activity History", icon: ClipboardList },
         { view: "Announcements", icon: MessageSquareText },
@@ -24005,12 +23985,34 @@ export function HuswellWorkspace({
       label: "Finance",
       items: [
         { view: "Finance Overview", icon: Wallet },
+        { view: "Finance Funds", icon: Landmark },
+        { view: "Finance Daily Fund", icon: Wallet },
+        { view: "Finance Cash on Hand", icon: ReceiptText },
         { view: "Finance Foundation", icon: Landmark },
         { view: "Finance Reports", icon: CalendarDays },
         { view: "Finance Transactions", icon: ReceiptText, badge: sidebarBadge("finance") },
         { view: "Finance Budget", icon: FileText },
-        { view: "Finance Supplier Costing", icon: ReceiptText },
         { view: "Payment Monitoring", icon: ReceiptText, badge: sidebarBadge("quotation_payments") },
+        { view: "Announcements", icon: MessageSquareText },
+        { view: "Policy", icon: ScrollText },
+      ],
+    },
+  ] : role === "accountant" ? [
+    {
+      label: "Finance",
+      items: [
+        { view: "Finance Overview", icon: Wallet },
+        { view: "Finance Funds", icon: Landmark },
+        { view: "Finance Daily Fund", icon: Wallet },
+        { view: "Finance Cash on Hand", icon: ReceiptText },
+        { view: "Finance Foundation", icon: Landmark },
+        { view: "Finance Reports", icon: CalendarDays },
+        { view: "Finance Approvals", icon: ClipboardCheck, badge: sidebarBadge("finance") },
+        { view: "Finance Transactions", icon: ReceiptText },
+        { view: "Finance Budget", icon: FileText },
+        { view: "Finance Commissions", icon: PhilippinePeso },
+        { view: "Payment Monitoring", icon: ReceiptText },
+        { view: "Finance Activity History", icon: ClipboardList },
         { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
       ],
@@ -24207,46 +24209,56 @@ export function HuswellWorkspace({
       detail: expenses.detail,
     },
     "Finance Overview": {
-      title: "Finance Overview",
-      detail: role === "external_finance"
-        ? "Track submitted money movements, budget requests, and supplier obligations."
-        : "Monitor cash, approvals, receivables, and payables.",
+      title: "Accounting & Finance",
+      detail: "Monitor Capital Funds, Working Funds, project balances, collections, and GM approvals.",
+    },
+    "Finance Funds": {
+      title: "Capital & Working Funds",
+      detail: "Monitor owner investment, Capital → Working transfers, Working Fund usage, and completed-project repayments.",
+    },
+    "Finance Daily Fund": {
+      title: "Daily Fund",
+      detail: "Request, spend, monitor, and return the non-project expense budget funded from Working Funds.",
+    },
+    "Finance Cash on Hand": {
+      title: "Cash on Hand",
+      detail: "See approved project collections and each project balance plus the separate Daily Fund balance. Unallocated Working Funds are excluded.",
     },
     "Finance Foundation": {
-      title: "Financial Foundation",
-      detail: "Keep Company Working Funds, Project Funds, labor payments, operating costs, and break-even targets separate and traceable.",
+      title: "Accounting & Finance",
+      detail: "Manage the revised project-ledger Finance flow.",
     },
     "Finance Reports": {
-      title: "Monthly Finance Report",
-      detail: "Review verified Cash In, Cash Out, and Net Earnings by month.",
+      title: "Project Finance Monitoring",
+      detail: "Review each project’s client collections, direct expenses, Working Fund support, costing, and remaining balance.",
     },
     "Finance Approvals": {
-      title: "Pending approvals",
-      detail: "Review every open Cash In and Cash Out decision in one queue.",
+      title: "GM approvals",
+      detail: "Approve or return Cash In, Cash Out, Working Fund support, and repayment transactions.",
     },
     "Finance Transactions": {
-      title: role === "external_finance" ? "Transaction" : "Transaction history",
-      detail: role === "external_finance"
-        ? "Submit and review External Finance Cash In and Cash Out transactions."
-        : "Review posted and pending Finance transactions.",
+      title: "Cash In & Cash Out",
+      detail: "Record manual project collections and Cash Out movements without account or bank budgets.",
     },
     "Finance Accounts": {
-      title: "Accounts",
-      detail: "Manage Internal Finance accounts and account balances.",
+      title: "Accounting & Finance",
+      detail: "Finance accounts are no longer used in the revised project-ledger flow.",
     },
     "Finance Budget": {
-      title: role === "external_finance" ? "Funding requests" : "Budget & allocations",
-      detail: role === "external_finance"
-        ? "Request budget for a specific active Finance account."
-        : "Review the GM monthly pool, account allocations, and account funding requests.",
+      title: "Working Fund Requests",
+      detail: "Request itemized temporary Working Fund support for a selected project.",
+    },
+    "Finance Commissions": {
+      title: "Commission Payables",
+      detail: "Submit project-linked commission payouts after full client collection and monitor GM approval.",
     },
     "Finance Supplier Costing": {
-      title: "Supplier costing",
-      detail: "Record and review supplier costing connected to projects.",
+      title: "Project Finance Monitoring",
+      detail: "Review project costing and project-ledger totals.",
     },
     "Finance Payables": {
-      title: "Payables",
-      detail: "Review supplier and commission payables.",
+      title: "Finance activity",
+      detail: "Review approved and pending movements in the revised ledger.",
     },
     "Paid commissions": {
       title: "Paid commissions",
@@ -24254,11 +24266,11 @@ export function HuswellWorkspace({
     },
     "Finance Activity History": {
       title: "Finance activity history",
-      detail: "Review budget, account, transaction, funding, and commission activity.",
+      detail: "Review Capital Funds, Working Funds, project collections, expenses, support, and repayments.",
     },
     Finance: {
-      title: role === "external_finance" ? "External Finance" : hasInternalFinanceAccess ? "Internal Finance" : "Finance",
-      detail: "Manage finance transactions, accounts, budget requests, and supplier costing.",
+      title: "Accounting & Finance",
+      detail: "Manage project-ledger transactions, Working Fund requests, approvals, and monitoring.",
     },
     "Payroll & Leave": {
       title: "Payroll & Leave",
@@ -24286,12 +24298,8 @@ export function HuswellWorkspace({
         : "Review every pending management decision from one queue.",
     },
     "Payment Monitoring": {
-      title: hasInternalFinanceAccess ? "Approved projects" : "Project Payment History",
-      detail: role === "external_finance"
-        ? "View each project's payment history. Record new receipts in Finance > Transaction > Record Cash In."
-        : hasInternalFinanceAccess
-          ? "Browse approved projects; review pending receipts in Internal Finance > Pending approvals."
-          : "Payment monitoring is available to Finance roles only.",
+      title: "Project Finance Monitoring",
+      detail: "View isolated project balances, Cash In/Cash Out activity, costing, and exportable project reports.",
     },
     "Payment Reviews": {
       title: "Payment Reviews",
@@ -24492,37 +24500,42 @@ export function HuswellWorkspace({
         role={role}
       />
     ) : active === "Finance Overview" ? (
-      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} overviewOnly />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="dashboard" />
+    ) : active === "Finance Funds" ? (
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="funds" />
+    ) : active === "Finance Daily Fund" ? (
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="daily_fund" />
+    ) : active === "Finance Cash on Hand" ? (
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="cash_on_hand" />
     ) : active === "Finance Foundation" ? (
-      <DynamicFinanceFoundationWorkspace key={active} organizationId={organizationId} role={financeRole} />
-    ) : active === "Finance Reports" && isManagementRole ? (
-      <GeneralManagerMonthlyFinanceReport orgId={organizationId} />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="dashboard" />
     ) : active === "Finance Reports" ? (
-      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} reportOnly />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="projects" />
     ) : active === "Finance Approvals" ? (
-      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} initialTab="approvals" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="approvals" />
     ) : active === "Finance Transactions" ? (
-      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} initialTab="transactions" openAction={financeActionRequest} onOpenActionHandled={clearFinanceActionRequest} />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="transactions" openAction={financeActionRequest} onOpenActionHandled={clearFinanceActionRequest} />
     ) : active === "Finance Accounts" ? (
-      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} initialTab="accounts" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="dashboard" />
     ) : active === "Finance Budget" ? (
-      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} budgetAction={financeBudgetActionRequest} onBudgetActionHandled={clearFinanceBudgetActionRequest} initialTab="budget" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="requests" />
+    ) : active === "Finance Commissions" ? (
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="commissions" />
     ) : active === "Finance Activity History" ? (
-      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} initialTab="activity_history" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="history" />
     ) : active === "Finance Supplier Costing" ? (
-      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} initialTab="supplier_costing" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="projects" />
     ) : active === "Finance Payables" ? (
-      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} initialTab="payables" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="transactions" />
     ) : active === "Paid commissions" ? (
-      <DynamicFinanceWorkspace key={active} organizationId={organizationId} role={financeRole} gmBudgetAccess={isManagementRole && hasInternalFinanceAccess} initialTab="commission_history" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="commissions" />
     ) : active === "Finance" ? (
-      <DynamicFinanceWorkspace
+      <DynamicFinanceRevisedWorkspace
         key={active}
         organizationId={organizationId}
-        role={financeRole}
-        gmBudgetAccess={isManagementRole && hasInternalFinanceAccess}
-        openAction={financeActionRequest}
-        onOpenActionHandled={clearFinanceActionRequest}
+        role={revisedFinanceRole}
+        isGm={isManagementRole}
+        initialTab="dashboard"
       />
     ) : active === "Commissions" ? (
       <CommissionSummaryView
@@ -24564,12 +24577,7 @@ export function HuswellWorkspace({
         productionOnly={productionApprovalOnly}
       />
     ) : active === "Payment Monitoring" ? (
-      <PaymentMonitoring
-        store={store}
-        orgId={organizationId}
-        reload={reload}
-        role={financeRole}
-      />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="projects" />
     ) : active === "Payment Reviews" ? (
       <PaymentMonitoring
         store={store}
@@ -24637,32 +24645,34 @@ export function HuswellWorkspace({
               ? "Production"
               : view === "Finance Overview" && (hasInternalFinanceAccess || role === "external_finance")
                 ? "Overview"
+              : view === "Finance Funds"
+                ? "Capital & Working Funds"
               : view === "Finance Foundation"
-                ? "Financial Foundation"
+                ? "Accounting & Finance"
               : view === "Finance Reports"
-                ? "Monthly report"
+                ? "Project Monitoring"
               : view === "Finance Approvals"
-                ? "Pending approvals"
+                ? "GM approvals"
               : view === "Finance Transactions" && role === "external_finance"
-                ? "Transaction"
+                ? "Cash In & Cash Out"
               : view === "Finance Transactions" && hasInternalFinanceAccess
-                ? "Transaction history"
+                ? "Cash In & Cash Out"
               : view === "Finance Accounts"
-                ? "Accounts"
+                ? "Accounting & Finance"
               : view === "Finance Budget" && role === "external_finance"
-                ? "Funding requests"
+                ? "Working Fund requests"
               : view === "Finance Budget"
-                ? "Budget & allocations"
+                ? "Working Fund requests"
               : view === "Finance Supplier Costing"
-                ? "Supplier costing"
+                ? "Project Monitoring"
               : view === "Finance Payables"
-                ? "Payables"
+                ? "Finance activity"
               : view === "Finance Activity History"
                 ? "Finance activity history"
               : view === "Finance" && role === "external_finance"
-                ? "External Finance"
+                ? "Accounting & Finance"
               : view === "Finance" && hasInternalFinanceAccess
-                ? "Internal Finance"
+                ? "Accounting & Finance"
               : role === "sales_pricing_officer" && view === "Price Quotation Review"
                 ? "Quotation Review Queue"
               : view === "Quotation Costing Overview"
@@ -24674,9 +24684,9 @@ export function HuswellWorkspace({
               : view === "Approvals"
                 ? "Approval Center"
               : view === "Payment Monitoring" && hasInternalFinanceAccess
-                ? "Approved projects"
+                ? "Project Monitoring"
               : view === "Payment Monitoring"
-                ? "Project Payment History"
+                ? "Project Monitoring"
               : view === "Payment Reviews"
                 ? "Payment Reviews"
               : view;
@@ -24901,7 +24911,7 @@ export function HuswellWorkspace({
                 </Button>
               </div>
             )}
-            {active === "Finance Transactions" && role === "external_finance" && (
+            {active === "Finance Transactions" && (hasInternalFinanceAccess || role === "accountant" || role === "external_finance" || isManagementRole) && (
               <div className="flex min-w-0 items-center gap-1.5">
                 <Button compact tone="green" onClick={() => setFinanceActionRequest("income")}>
                   <Plus size={13} /> <span className="hidden sm:inline">Cash In</span><span className="sr-only sm:hidden">Cash In</span>
@@ -24909,18 +24919,6 @@ export function HuswellWorkspace({
                 <Button compact onClick={() => setFinanceActionRequest("expense")}>
                   <Plus size={13} /> <span className="hidden sm:inline">Cash Out</span><span className="sr-only sm:hidden">Cash Out</span>
                 </Button>
-              </div>
-            )}
-            {active === "Finance Budget" && isManagementRole && (
-              <div className="flex min-w-0 items-center gap-1.5">
-                <button type="button" onClick={() => setFinanceBudgetActionRequest("grant")} className="button-danger min-h-7 px-3 text-[12px]">
-                  <Plus size={13} /> <span>Budget</span>
-                </button>
-                {hasInternalFinanceAccess && (
-                  <button type="button" onClick={() => setFinanceBudgetActionRequest("allocate")} className="button-danger min-h-7 px-3 text-[12px]">
-                    <Wallet size={13} /> <span>Allocate budget</span>
-                  </button>
-                )}
               </div>
             )}
             <span className="sr-only">{activePageHeader.title}</span>

@@ -6,6 +6,7 @@ import test from "node:test";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const workspace = readFileSync(join(repoRoot, "components", "finance-workspace.tsx"), "utf8");
+const revisedWorkspace = readFileSync(join(repoRoot, "components", "finance-revised-workspace.tsx"), "utf8");
 const workspaceShell = readFileSync(join(repoRoot, "components", "huswell-workspace.tsx"), "utf8");
 const tablePagination = readFileSync(join(repoRoot, "components", "ui", "table-pagination.tsx"), "utf8");
 const globalStyles = readFileSync(join(repoRoot, "app", "globals.css"), "utf8");
@@ -174,23 +175,26 @@ test("quotation payment notes remain optional and are shown only from the real p
   assert.match(transactionDialog, /stringValue\(payment, "notes"/);
 });
 
-test("quotation payment note input has a server-side length limit", () => {
-  assert.match(paymentRoute, /MAX_NOTES_LENGTH = 1000/);
-  assert.match(paymentRoute, /notes\.length > MAX_NOTES_LENGTH/);
+test("retired quotation payment receipts cannot write the legacy payment flow", () => {
+  assert.match(paymentRoute, /isSameOrigin/);
+  assert.match(paymentRoute, /Quotation payment receipts are retired/);
+  assert.match(paymentRoute, /Finance > Cash In & Cash Out/);
+  assert.match(paymentRoute, /\{ status: 410 \}/);
+  assert.doesNotMatch(paymentRoute, /MAX_NOTES_LENGTH|quotation_payment_records/);
 });
 
 test("External Finance actions are labeled and placed in the top navbar", () => {
-  assert.match(topHeader, /active === "Finance Transactions" && role === "external_finance"/);
+  assert.match(topHeader, /active === "Finance Transactions" && \(hasInternalFinanceAccess/);
   assert.match(topHeader, /<span className="hidden sm:inline">Cash In<\/span>/);
   assert.match(topHeader, /<span className="hidden sm:inline">Cash Out<\/span>/);
   assert.doesNotMatch(transactionTable, /Record Cash In|Submit Cash Out/);
 });
 
-test("top navbar actions request the existing Finance form", () => {
+test("top navbar actions open the revised Finance transaction form", () => {
   assert.match(workspaceShell, /financeActionRequest/);
   assert.match(workspaceShell, /openAction=\{financeActionRequest\}/);
-  assert.match(workspace, /openAction\?: Direction \| null/);
-  assert.match(workspace, /setFormDirection\(openAction\)/);
+  assert.match(revisedWorkspace, /openAction\?: "income" \| "expense" \| null/);
+  assert.match(revisedWorkspace, /setTab\("transactions"\)/);
 });
 
 test("the quotation payment toggle is labeled Project payment", () => {
@@ -238,17 +242,14 @@ test("category creation remains server-authorized for Finance roles", () => {
   assert.match(financeRoleMigration, /Only Internal Finance can update finance categories/);
 });
 
-test("Internal and External Finance expose their sections in the main sidebar", () => {
+test("the revised Finance sidebar exposes the unified workflow", () => {
   assert.match(workspaceShell, /"Finance Approvals"/);
   assert.match(workspaceShell, /"Finance Transactions"/);
-  assert.match(workspaceShell, /"Finance Accounts"/);
   assert.match(workspaceShell, /"Finance Budget"/);
-  assert.match(workspaceShell, /"Finance Supplier Costing"/);
-  assert.match(workspaceShell, /"Finance Payables"/);
   assert.match(workspaceShell, /view: "Finance Reports", icon: CalendarDays/);
-  assert.match(workspaceShell, /view === "Finance Reports"[\s\S]{0,120}"Monthly report"/);
-  assert.match(workspaceShell, /view === "Finance Transactions" && role === "external_finance"[\s\S]{0,100}"Transaction"/);
-  assert.match(workspaceShell, /view === "Finance Transactions" && hasInternalFinanceAccess[\s\S]{0,120}"Transaction history"/);
+  assert.match(workspaceShell, /view === "Finance Reports"[\s\S]{0,120}"Project Monitoring"/);
+  assert.match(workspaceShell, /view === "Finance Transactions"[\s\S]{0,160}"Cash In & Cash Out"/);
+  assert.doesNotMatch(workspaceShell, /view: "Finance Accounts"|view: "Finance Supplier Costing"|view: "Finance Payables"/);
   assert.match(workspaceShell, /active === "Finance Transactions"/);
   assert.match(workspaceShell, /initialTab="transactions"/);
 });
@@ -272,7 +273,7 @@ test("Finance uses Project terminology without changing technical quotation iden
 });
 
 test("External Finance Cash In uses the semantic green action", () => {
-  assert.match(topHeader, /active === "Finance Transactions" && role === "external_finance"/);
+  assert.match(topHeader, /active === "Finance Transactions" && \(hasInternalFinanceAccess/);
   assert.match(topHeader, /<Button compact tone="green"/);
   assert.match(topHeader, /<span className="hidden sm:inline">Cash Out<\/span>/);
 });

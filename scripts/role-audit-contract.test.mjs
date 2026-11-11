@@ -89,7 +89,7 @@ test("External Finance does not receive the broad transaction receipt delete pat
 test("Payment Monitoring cannot be opened by non-Finance roles", () => {
   assert.match(
     workspace,
-    /const financePaymentViewAllowed =\s+hasInternalFinanceAccess \|\| role === "external_finance";/,
+    /const financePaymentViewAllowed =\s+hasInternalFinanceAccess \|\| role === "accountant";/,
   );
   assert.match(
     workspace,

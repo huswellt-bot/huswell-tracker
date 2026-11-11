@@ -6,7 +6,7 @@ export default async function FinanceReportsPage() {
   const access = await requireWorkspaceAccess();
 
   if (
-    !["internal_finance", "external_finance"].includes(access.role) &&
+    !["super_admin", "owner", "admin", "accountant"].includes(access.role) &&
     !access.internalFinanceEnabled
   ) {
     redirect("/");

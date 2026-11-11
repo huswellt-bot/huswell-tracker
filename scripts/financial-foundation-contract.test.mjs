@@ -44,14 +44,16 @@ test("labor workflow is rate-based, accomplishment-verified, and Tuesday/Friday 
   assert.match(workspace, /Tuesday & Friday payment runs/);
 });
 
-test("operating cost and break-even monitoring are surfaced in the application shell", () => {
+test("the revised project-ledger Finance workspace replaces the old foundation shell", () => {
   assert.match(migration, /expected_monthly_amount numeric/);
   assert.match(migration, /v_break_even_sales/);
   assert.match(migration, /v_required_sales/);
   assert.match(workspace, /OperatingCostsPanel/);
   assert.match(workspace, /BreakEvenPanel/);
   assert.match(shell, /Finance Foundation/);
-  assert.match(shell, /DynamicFinanceFoundationWorkspace/);
+  assert.match(shell, /DynamicFinanceRevisedWorkspace/);
+  assert.match(shell, /active === "Finance Foundation"/);
+  assert.match(shell, /active === "Finance Foundation"[\s\S]*initialTab="dashboard"/);
 });
 
 test("foundation RPCs are not executable by anon or public", () => {

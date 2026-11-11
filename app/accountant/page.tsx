@@ -7,5 +7,5 @@ export default async function AccountantPage() {
 
   if (access.role !== "accountant") redirect("/");
 
-  return <HuswellWorkspace {...access} initialView="Announcements" />;
+  return <HuswellWorkspace {...access} initialView="Finance Overview" />;
 }
