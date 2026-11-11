@@ -23897,6 +23897,17 @@ export function HuswellWorkspace({
     { view: "Finance Monitoring", icon: CalendarDays },
     { view: "Finance Activity History", icon: ClipboardList },
   ];
+  const accountingFinanceItems: {
+    view: View;
+    icon: typeof LayoutDashboard;
+    badge?: number;
+  }[] = [
+    { view: "Finance Overview", icon: Wallet },
+    { view: "Finance Transactions", icon: ReceiptText },
+    { view: "Finance Monitoring", icon: CalendarDays },
+    { view: "Finance Requests", icon: FileText },
+    { view: "Finance Activity History", icon: ClipboardList },
+  ];
   const navBase: {
     label: string;
     items: { view: View; icon: typeof LayoutDashboard; badge?: number }[];
@@ -23932,40 +23943,14 @@ export function HuswellWorkspace({
         { view: "Letter Request", icon: FileText, badge: sidebarBadge("letter_requests") },
       ],
     },
-  ] : role === "internal_finance" ? [
+  ] : ["internal_finance", "external_finance", "accountant"].includes(role) ? [
     {
       label: "Finance",
-      items: [
-        { view: "Finance Overview", icon: Wallet },
-        { view: "Finance Transactions", icon: ReceiptText },
-        { view: "Finance Monitoring", icon: CalendarDays },
-        { view: "Finance Requests", icon: FileText },
-        { view: "Finance Activity History", icon: ClipboardList },
-        { view: "Announcements", icon: MessageSquareText },
-        { view: "Policy", icon: ScrollText },
-      ],
+      items: accountingFinanceItems,
     },
-  ] : role === "external_finance" ? [
     {
-      label: "Finance",
+      label: "Company",
       items: [
-        { view: "Finance Overview", icon: Wallet },
-        { view: "Finance Transactions", icon: ReceiptText },
-        { view: "Finance Monitoring", icon: CalendarDays },
-        { view: "Finance Requests", icon: FileText },
-        { view: "Announcements", icon: MessageSquareText },
-        { view: "Policy", icon: ScrollText },
-      ],
-    },
-  ] : role === "accountant" ? [
-    {
-      label: "Finance",
-      items: [
-        { view: "Finance Overview", icon: Wallet },
-        { view: "Finance Transactions", icon: ReceiptText },
-        { view: "Finance Monitoring", icon: CalendarDays },
-        { view: "Finance Requests", icon: FileText },
-        { view: "Finance Activity History", icon: ClipboardList },
         { view: "Announcements", icon: MessageSquareText },
         { view: "Policy", icon: ScrollText },
       ],
@@ -24191,7 +24176,7 @@ export function HuswellWorkspace({
       detail: "Review each project’s collections, direct-cost costing, Cash Out, support, and remaining balance.",
     },
     "Finance Approvals": {
-      title: "GM approvals",
+      title: "GM Approvals",
       detail: "Approve or return Cash In, Cash Out, Working Fund support, and repayment transactions.",
     },
     "Finance Transactions": {
@@ -24227,7 +24212,7 @@ export function HuswellWorkspace({
       detail: "Review completed commission payouts by project and pricing officer.",
     },
     "Finance Activity History": {
-      title: "Finance activity history",
+      title: "Activity History",
       detail: "Review Capital Funds, Working Funds, project collections, expenses, support, and repayments.",
     },
     Finance: {
@@ -24618,7 +24603,7 @@ export function HuswellWorkspace({
               : view === "Finance Reports"
                 ? "Project Monitoring"
               : view === "Finance Approvals"
-                ? "GM approvals"
+                ? "GM Approvals"
               : view === "Finance Transactions" && role === "external_finance"
                 ? "Cash In & Cash Out"
               : view === "Finance Transactions" && hasInternalFinanceAccess
@@ -24634,7 +24619,7 @@ export function HuswellWorkspace({
               : view === "Finance Payables"
                 ? "Finance activity"
               : view === "Finance Activity History"
-                ? "Finance activity history"
+                ? "Activity History"
               : view === "Finance" && role === "external_finance"
                 ? "Accounting & Finance"
               : view === "Finance" && hasInternalFinanceAccess

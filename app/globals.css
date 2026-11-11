@@ -547,6 +547,27 @@ table tbody td {
   background: #1F4E79 !important;
   color: #ffffff !important;
 }
+.finance-revised-workspace table thead,
+.finance-revised-workspace table thead tr {
+  border-color: #1F4E79 !important;
+  background: #1F4E79 !important;
+  color: #ffffff !important;
+}
+.finance-revised-workspace table thead th {
+  background: #1F4E79 !important;
+  color: #ffffff !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0 !important;
+  line-height: 1.25;
+  padding: var(--space-table-y) var(--space-table-x) !important;
+}
+.finance-revised-workspace table :is(th, td) {
+  padding: var(--space-table-y) var(--space-table-x) !important;
+}
+.finance-revised-workspace table tbody tr {
+  border-color: var(--color-border) !important;
+}
 .costing-detail-table :is(th, td) {
   padding-top: var(--space-table-detail-y) !important;
   padding-bottom: var(--space-table-detail-y) !important;

@@ -239,12 +239,12 @@ test("full Finance GM access controls Capital, Working, and Daily Funds", () => 
 
 test("GM and Accounting & Finance navigation expose the simplified Finance workflow", () => {
   assert.match(mainWorkspace, /\{ view: "Finance Monitoring", icon: CalendarDays \}/);
-  const accountantStart = mainWorkspace.indexOf('accountant: ["Finance Overview"');
-  const accountantEnd = mainWorkspace.indexOf('internal_finance:', accountantStart);
+  const accountantStart = mainWorkspace.indexOf('const accountingFinanceItems');
+  const accountantEnd = mainWorkspace.indexOf('const navBase', accountantStart);
   assert.ok(accountantStart >= 0 && accountantEnd > accountantStart);
   assert.match(mainWorkspace.slice(accountantStart, accountantEnd), /Finance Overview|Finance Transactions/);
   const managementStart = mainWorkspace.indexOf('const navBase');
-  const managementEnd = mainWorkspace.indexOf('] : role === "internal_finance" ?', managementStart);
+  const managementEnd = mainWorkspace.indexOf('] : ["internal_finance", "external_finance", "accountant"].includes(role) ?', managementStart);
   assert.ok(managementStart >= 0 && managementEnd > managementStart);
   const managementNav = mainWorkspace.slice(managementStart, managementEnd);
   assert.match(managementNav, /label: "Finance"/);

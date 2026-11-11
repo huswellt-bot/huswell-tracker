@@ -25,6 +25,7 @@ type Row = Record<string, unknown>;
 type RevisedTab = "dashboard" | "funds" | "daily_fund" | "cash_on_hand" | "transactions" | "requests" | "approvals" | "projects" | "commissions" | "history";
 type DialogKind = "capital" | "transfer" | "daily_request" | "daily_return" | "cash_in" | "cash_out" | null;
 type CategoryDirection = "income" | "expense";
+type ApprovalTab = "all" | "cash_in" | "cash_out" | "working_funds" | "daily_fund";
 
 const addCategoryOptionValue = "__add_revised_finance_category__";
 
@@ -160,7 +161,7 @@ function Metric({
           ? "text-[var(--color-warning-text)]"
           : "text-[var(--color-text-primary)]";
   return (
-    <div className="min-w-0 border-b border-[var(--color-border)] pb-3">
+    <div className="min-w-0 pb-1">
       <p className="text-[10px] font-semibold uppercase tracking-[.07em] text-[var(--color-text-secondary)]">{label}</p>
       <p className={"mt-1 text-xl font-bold tracking-tight " + toneClass}>{value}</p>
       {detail ? <p className="mt-1 text-[10px] leading-4 text-[var(--color-text-secondary)]">{detail}</p> : null}
@@ -176,6 +177,7 @@ function Field({
   placeholder,
   required = false,
   min,
+  max,
   step,
 }: {
   label: string;
@@ -185,6 +187,7 @@ function Field({
   placeholder?: string;
   required?: boolean;
   min?: string;
+  max?: string;
   step?: string;
 }) {
   return (
@@ -198,6 +201,7 @@ function Field({
         placeholder={placeholder}
         required={required}
         min={min}
+        max={max}
         step={step}
       />
     </label>
@@ -338,6 +342,7 @@ export function FinanceRevisedWorkspace({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogKind>(null);
+  const [approvalTab, setApprovalTab] = useState<ApprovalTab>("all");
   const [selectedProject, setSelectedProject] = useState<Row | null>(null);
   const [costingLines, setCostingLines] = useState<Row[]>([]);
   const [costingError, setCostingError] = useState<string | null>(null);
@@ -392,16 +397,9 @@ export function FinanceRevisedWorkspace({
   });
   const [capitalForm, setCapitalForm] = useState({
     amount: "",
-    period: month,
-    date: localDate(),
-    reference: "",
-    note: "",
   });
   const [workingForm, setWorkingForm] = useState({
     amount: "",
-    date: localDate(),
-    reference: "",
-    note: "",
   });
   const [requestForm, setRequestForm] = useState<{
     projectId: string;
@@ -802,14 +800,10 @@ export function FinanceRevisedWorkspace({
       const { error: requestError } = await client.rpc("create_finance_revised_capital_contribution", {
         p_organization_id: organizationId,
         p_amount: Number(capitalForm.amount),
-        p_period_label: capitalForm.period,
-        p_transaction_date: capitalForm.date,
-        p_reference_number: capitalForm.reference || null,
-        p_note: capitalForm.note || null,
       });
       if (requestError) throw new Error(requestError.message);
       setDialog(null);
-      setCapitalForm({ amount: "", period: month, date: localDate(), reference: "", note: "" });
+      setCapitalForm({ amount: "" });
       finish("Capital Funds were added to the ledger.");
     } catch (caught) {
       showError(caught);
@@ -821,18 +815,19 @@ export function FinanceRevisedWorkspace({
   const handleWorkingTransfer = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (Number(workingForm.amount) <= 0) return;
+    if (Number(workingForm.amount) > numberValue(snapshot, "capital_funds")) {
+      showError(new Error("Transfer amount cannot exceed the available Capital Funds balance."));
+      return;
+    }
     setSaving(true);
     try {
       const { error: requestError } = await client.rpc("create_finance_revised_capital_to_working", {
         p_organization_id: organizationId,
         p_amount: Number(workingForm.amount),
-        p_transaction_date: workingForm.date,
-        p_reference_number: workingForm.reference || null,
-        p_note: workingForm.note || null,
       });
       if (requestError) throw new Error(requestError.message);
       setDialog(null);
-      setWorkingForm({ amount: "", date: localDate(), reference: "", note: "" });
+      setWorkingForm({ amount: "" });
       finish("Capital Funds were transferred to Working Funds.");
     } catch (caught) {
       showError(caught);
@@ -1040,16 +1035,18 @@ export function FinanceRevisedWorkspace({
           <RefreshCw size={14} className={loading ? "animate-spin" : undefined} /> Refresh ledger
         </button>
       </div>
-      <div className="grid gap-x-6 gap-y-4 border-y border-[var(--color-border)] px-1 py-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Metric label="Total Cash on Hand" value={amount(projects.reduce((total, project) => total + numberValue(project, "available_balance"), 0) + numberValue(dailySnapshot, "daily_fund_balance"))} detail="Project balances + Daily Fund; unallocated Working Funds excluded" tone="positive" />
-        <Metric label="Capital Funds balance" value={amount(snapshot?.capital_funds)} detail="Owner investment remaining after transfers" />
-        <Metric label="Beginning Working Funds" value={amount(snapshot?.beginning_working_funds)} detail={"Balance before " + month} />
-        <Metric label="Ending Working Funds" value={amount(snapshot?.ending_working_funds)} detail="Available company operating pool" tone={numberValue(snapshot, "ending_working_funds") < 0 ? "negative" : "positive"} />
-        <Metric label="Pending GM approvals" value={String(numberValue(snapshot, "pending_approvals"))} detail="Cash In, Cash Out, and repayments" tone={numberValue(snapshot, "pending_approvals") ? "warning" : "positive"} />
-        <Metric label="Period Cash In" value={amount(snapshot?.period_cash_in)} detail="Client collections recorded manually" tone="positive" />
-        <Metric label="Period Cash Out" value={amount(snapshot?.period_cash_out)} detail="Approved project and operating expenses" />
-        <Metric label="Daily Fund balance" value={amount(dailySnapshot?.daily_fund_balance)} detail="Available for non-project Cash Out" tone={numberValue(dailySnapshot, "daily_fund_balance") < 0 ? "negative" : "positive"} />
-        <Metric label="Open commission payables" value={amount(snapshot?.commission_payables_open)} detail="Locked commission allocations not yet paid" tone={numberValue(snapshot, "commission_payables_open") ? "warning" : "positive"} />
+      <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5">
+        <div className="grid gap-x-6 gap-y-5 sm:grid-cols-2 xl:grid-cols-4">
+          <Metric label="Total Cash on Hand" value={amount(projects.reduce((total, project) => total + numberValue(project, "available_balance"), 0) + numberValue(dailySnapshot, "daily_fund_balance"))} detail="Project balances + Daily Fund; unallocated Working Funds excluded" tone="positive" />
+          <Metric label="Capital Funds balance" value={amount(snapshot?.capital_funds)} detail="Owner investment remaining after transfers" />
+          <Metric label="Beginning Working Funds" value={amount(snapshot?.beginning_working_funds)} detail={"Balance before " + month} />
+          <Metric label="Ending Working Funds" value={amount(snapshot?.ending_working_funds)} detail="Available company operating pool" tone={numberValue(snapshot, "ending_working_funds") < 0 ? "negative" : "positive"} />
+          <Metric label="Pending GM approvals" value={String(numberValue(snapshot, "pending_approvals"))} detail="Cash In, Cash Out, and repayments" tone={numberValue(snapshot, "pending_approvals") ? "warning" : "positive"} />
+          <Metric label="Period Cash In" value={amount(snapshot?.period_cash_in)} detail="Client collections recorded manually" tone="positive" />
+          <Metric label="Period Cash Out" value={amount(snapshot?.period_cash_out)} detail="Approved project and operating expenses" />
+          <Metric label="Daily Fund balance" value={amount(dailySnapshot?.daily_fund_balance)} detail="Available for non-project Cash Out" tone={numberValue(dailySnapshot, "daily_fund_balance") < 0 ? "negative" : "positive"} />
+          <Metric label="Open commission payables" value={amount(snapshot?.commission_payables_open)} detail="Locked commission allocations not yet paid" tone={numberValue(snapshot, "commission_payables_open") ? "warning" : "positive"} />
+        </div>
       </div>
       <Panel title="How the revised flow works" detail="The ledger keeps each project budget isolated. Working Fund support is an internal transfer, not project Cash In.">
         <div className="grid gap-3 p-4 text-[11px] leading-5 text-[var(--color-text-secondary)] md:grid-cols-3">
@@ -1093,11 +1090,13 @@ export function FinanceRevisedWorkspace({
           </button>
         </div>
 
-        <div className="grid gap-x-6 gap-y-4 border-y border-[var(--color-border)] px-1 py-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Metric label="Capital Funds balance" value={amount(snapshot?.capital_funds)} detail="Owner investment remaining after transfers" />
-          <Metric label="Beginning Working Funds" value={amount(snapshot?.beginning_working_funds)} detail={"Balance before " + month} />
-          <Metric label="Ending Working Funds" value={amount(snapshot?.ending_working_funds)} detail="Available company operating pool" tone={numberValue(snapshot, "ending_working_funds") < 0 ? "negative" : "positive"} />
-          <Metric label="Completed-project repayments" value={amount(snapshot?.period_working_fund_repayment)} detail="Working Funds returned this period" tone="positive" />
+        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5">
+          <div className="grid gap-x-6 gap-y-5 sm:grid-cols-2 xl:grid-cols-4">
+            <Metric label="Capital Funds balance" value={amount(snapshot?.capital_funds)} detail="Owner investment remaining after transfers" />
+            <Metric label="Beginning Working Funds" value={amount(snapshot?.beginning_working_funds)} detail={"Balance before " + month} />
+            <Metric label="Ending Working Funds" value={amount(snapshot?.ending_working_funds)} detail="Available company operating pool" tone={numberValue(snapshot, "ending_working_funds") < 0 ? "negative" : "positive"} />
+            <Metric label="Completed-project repayments" value={amount(snapshot?.period_working_fund_repayment)} detail="Working Funds returned this period" tone="positive" />
+          </div>
         </div>
 
         <Panel title="GM fund controls" detail="Capital Funds are owner investment. Working Funds can only be created by transferring an approved amount from Capital Funds.">
@@ -1128,11 +1127,13 @@ export function FinanceRevisedWorkspace({
 
     return (
       <div className="space-y-5">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <Metric label="Daily Fund balance" value={amount(dailySnapshot?.daily_fund_balance)} detail="Available for all non-project Cash Out" tone={numberValue(dailySnapshot, "daily_fund_balance") < 0 ? "negative" : "positive"} />
-          <Metric label="Working Funds balance" value={amount(dailySnapshot?.working_funds_balance)} detail="Source of approved Daily Fund allocations" />
-          <Metric label="Unused by request" value={amount(dailySnapshot?.unused_by_request)} detail="Can be returned to Working Funds" tone="warning" />
-          <Metric label="Pending requests" value={String(numberValue(dailySnapshot, "pending_requests"))} detail="Waiting for GM approval" tone={numberValue(dailySnapshot, "pending_requests") ? "warning" : "positive"} />
+        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <Metric label="Daily Fund balance" value={amount(dailySnapshot?.daily_fund_balance)} detail="Available for all non-project Cash Out" tone={numberValue(dailySnapshot, "daily_fund_balance") < 0 ? "negative" : "positive"} />
+            <Metric label="Working Funds balance" value={amount(dailySnapshot?.working_funds_balance)} detail="Source of approved Daily Fund allocations" />
+            <Metric label="Unused by request" value={amount(dailySnapshot?.unused_by_request)} detail="Can be returned to Working Funds" tone="warning" />
+            <Metric label="Pending requests" value={String(numberValue(dailySnapshot, "pending_requests"))} detail="Waiting for GM approval" tone={numberValue(dailySnapshot, "pending_requests") ? "warning" : "positive"} />
+          </div>
         </div>
 
         <Panel
@@ -1165,18 +1166,19 @@ export function FinanceRevisedWorkspace({
 
     return (
       <div className="space-y-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div><p className="text-[10px] font-semibold uppercase tracking-[.12em] text-[var(--color-text-secondary)]">Approved ledger balances</p><p className="mt-1 text-[12px] leading-5 text-[var(--color-text-secondary)]">Cash on Hand is organized by the source that currently holds the money. Pending Cash In, Cash Out, Daily Fund requests, and returns are excluded until GM approval.</p></div>
+        <div className="flex justify-end">
           <button type="button" className="button-secondary inline-flex items-center gap-2 text-[11px]" onClick={() => void load()} disabled={loading}><RefreshCw size={14} className={loading ? "animate-spin" : undefined} /> Refresh Cash on Hand</button>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Metric label="Total Cash on Hand" value={amount(totalCashOnHand)} detail="Each project balance + Daily Fund" tone={totalCashOnHand < 0 ? "negative" : "positive"} />
-          <Metric label="Daily Fund" value={amount(dailyFundBalance)} detail="Available for non-project Cash Out" />
+        <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Metric label="Total Cash on Hand" value={amount(totalCashOnHand)} detail="Each project balance + Daily Fund" tone={totalCashOnHand < 0 ? "negative" : "positive"} />
+            <Metric label="Daily Fund" value={amount(dailyFundBalance)} detail="Available for non-project Cash Out" />
+          </div>
         </div>
 
         <Panel title="Cash on Hand breakdown" detail="Each project keeps its own balance. Daily Fund is shown as the separate non-project pool. Unallocated Working Funds are excluded from this page.">
-          <div className="overflow-x-auto">
+          <div className="table-shell overflow-x-auto">
             <table className="w-full min-w-[620px] text-left text-[11px]">
               <thead><tr className="border-b border-[var(--color-border)] text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]"><th className="px-4 py-3">Source</th><th className="px-4 py-3">Type</th><th className="px-4 py-3">Current balance</th><th className="px-4 py-3"></th></tr></thead>
               <tbody>
@@ -1296,16 +1298,16 @@ export function FinanceRevisedWorkspace({
   );
 
   const renderProjects = () => (
-    <Panel title="Finance Monitoring" detail="Each project starts with the important totals. Open a project to inspect collections, expenses, the submitted costing, and the PDF.">
+    <div className="grid gap-4 sm:grid-cols-2">
       {projects.length ? (
-        <div className="divide-y divide-[var(--color-border)]">
+        <>
           {projects.map((project) => (
-            <article key={textValue(project, "project_fund_id")} className="p-4 sm:p-5">
+            <article key={textValue(project, "project_fund_id")} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4 sm:p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0"><p className="truncate text-[13px] font-semibold text-[var(--color-text-primary)]">{textValue(project, "project_name", "Project")}</p><p className="mt-1 truncate text-[10px] text-[var(--color-text-secondary)]">{textValue(project, "client_name", "—")} · {textValue(project, "company_name", "—")}</p></div>
                 <StatusBadge status={textValue(project, "project_status", "open")} />
               </div>
-              <dl className="mt-4 grid gap-x-6 gap-y-3 border-y border-[var(--color-border)] py-3 sm:grid-cols-3 lg:grid-cols-6">
+              <dl className="mt-4 grid gap-x-5 gap-y-4 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-subtle)] p-3 sm:grid-cols-2 lg:grid-cols-3">
                 <div><dt className="text-[10px] text-[var(--color-text-secondary)]">Quotation</dt><dd className="mt-1 text-[13px] font-semibold tabular-nums text-[var(--color-text-primary)]">{amount(project.total_quotation)}</dd></div>
                 <div><dt className="text-[10px] text-[var(--color-text-secondary)]">Total Direct Cost</dt><dd className="mt-1 text-[13px] font-semibold tabular-nums text-[var(--color-text-primary)]">{amount(project.total_direct_cost)}</dd></div>
                 <div><dt className="text-[10px] text-[var(--color-text-secondary)]">Cash In</dt><dd className="mt-1 text-[13px] font-semibold tabular-nums text-[var(--color-success-text)]">{amount(project.client_cash_in)}</dd></div>
@@ -1316,9 +1318,9 @@ export function FinanceRevisedWorkspace({
               <button type="button" className="button-secondary mt-4 inline-flex items-center gap-1 text-[11px]" onClick={() => void openProject(project)}>Open breakdown <ChevronRight size={14} /></button>
             </article>
           ))}
-        </div>
-      ) : <EmptyState>No project funds are available for this organization.</EmptyState>}
-    </Panel>
+        </>
+      ) : <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)]"><EmptyState>No project funds are available for this organization.</EmptyState></div>}
+    </div>
   );
 
   const renderHistory = () => (
@@ -1331,23 +1333,68 @@ export function FinanceRevisedWorkspace({
     const pendingTransactions = transactions.filter((transaction) => textValue(transaction, "status") === "pending");
     const pendingRequests = requests.filter((request) => textValue(request, "status") === "pending");
     const pendingDailyFundRequests = dailyFundRequests.filter((request) => textValue(request, "status") === "pending");
+    const approvalBucket = (transaction: Row): Exclude<ApprovalTab, "all"> => {
+      const kind = textValue(transaction, "transaction_kind");
+      if (kind === "project_cash_in") return "cash_in";
+      if (["working_fund_support", "working_fund_repayment"].includes(kind)) return "working_funds";
+      if (["daily_fund_allocation", "daily_fund_return"].includes(kind)) return "daily_fund";
+      return "cash_out";
+    };
+    const transactionCounts = {
+      cash_in: pendingTransactions.filter((transaction) => approvalBucket(transaction) === "cash_in").length,
+      cash_out: pendingTransactions.filter((transaction) => approvalBucket(transaction) === "cash_out").length,
+      working_funds: pendingTransactions.filter((transaction) => approvalBucket(transaction) === "working_funds").length + pendingRequests.length,
+      daily_fund: pendingTransactions.filter((transaction) => approvalBucket(transaction) === "daily_fund").length + pendingDailyFundRequests.length,
+    };
+    const approvalCounts: Record<ApprovalTab, number> = {
+      all: pendingTransactions.length + pendingRequests.length + pendingDailyFundRequests.length,
+      ...transactionCounts,
+    };
+    const visiblePendingTransactions = approvalTab === "all"
+      ? pendingTransactions
+      : pendingTransactions.filter((transaction) => approvalBucket(transaction) === approvalTab);
+    const approvalTabs: Array<{ key: ApprovalTab; label: string }> = [
+      { key: "all", label: "All" },
+      { key: "cash_in", label: "Cash In" },
+      { key: "cash_out", label: "Cash Out" },
+      { key: "working_funds", label: "Working Funds" },
+      { key: "daily_fund", label: "Daily Fund" },
+    ];
+    const transactionTitle = approvalTab === "cash_in"
+      ? "Pending Cash In"
+      : approvalTab === "cash_out"
+        ? "Pending Cash Out"
+        : approvalTab === "working_funds"
+          ? "Pending Working Fund activity"
+          : approvalTab === "daily_fund"
+            ? "Pending Daily Fund activity"
+            : "Pending Finance transactions";
 
     return (
       <div className="space-y-5">
-        <Panel title="Pending Finance transactions" detail="Cash In, Cash Out, fund movements, repayments, and commission payouts remain outside the balances until GM approval.">
+        <div role="tablist" aria-label="GM approval request types" className="flex overflow-x-auto rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-1">
+          {approvalTabs.map((item) => {
+            const selected = approvalTab === item.key;
+            return <button key={item.key} type="button" role="tab" aria-selected={selected} onClick={() => setApprovalTab(item.key)} className={"inline-flex min-h-9 shrink-0 items-center gap-2 rounded-md px-3 text-[11px] font-semibold transition-colors " + (selected ? "bg-[var(--color-accent)] text-[var(--color-on-accent)]" : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)]")}>
+              {item.label}
+              {approvalCounts[item.key] > 0 ? <span className={"min-w-5 rounded-full px-1.5 py-0.5 text-center text-[10px] " + (selected ? "bg-white text-[var(--color-accent-text)]" : "bg-[var(--color-accent-subtle)] text-[var(--color-accent-text)]")}>{approvalCounts[item.key] > 99 ? "99+" : approvalCounts[item.key]}</span> : null}
+            </button>;
+          })}
+        </div>
+        <Panel title={transactionTitle} detail="Pending rows do not change a balance until the GM approves them.">
           <ActivityTable
-            transactions={pendingTransactions}
+            transactions={visiblePendingTransactions}
             canApprove={gm}
             onDetails={(transaction) => setSelectedTransaction(transaction)}
             onReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }}
           />
         </Panel>
-        <Panel title="Pending Working Fund requests" detail="Each request is tied to one project and includes the itemized breakdown submitted by Accounting & Finance.">
+        {approvalTab === "all" || approvalTab === "working_funds" ? <Panel title="Pending Working Fund requests" detail="Each request is tied to one project and includes the itemized breakdown submitted by Accounting & Finance.">
           {pendingRequests.length ? <div className="overflow-x-auto"><table className="w-full min-w-[860px] text-left text-[11px]"><thead><tr className="border-b border-[var(--color-border)] text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]"><th className="px-4 py-3">Project</th><th className="px-4 py-3">Purpose</th><th className="px-4 py-3">Breakdown</th><th className="px-4 py-3">Requested</th><th className="px-4 py-3"></th></tr></thead><tbody>{pendingRequests.map((request) => <tr key={textValue(request, "id")} className="border-b border-[var(--color-border)] last:border-0"><td className="px-4 py-3 font-semibold text-[var(--color-text-primary)]">{textValue(request, "project_name", "Project")}</td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{textValue(request, "purpose")}</td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{textValue(request, "breakdown_line_count", "0")} lines · {amount(request.breakdown_total)}</td><td className="px-4 py-3 font-semibold">{amount(request.requested_amount)}</td><td className="px-4 py-3 text-right"><div className="flex justify-end gap-2"><button type="button" className="button-secondary text-[10px]" onClick={() => void openRequest(request)}>View breakdown</button>{gm ? <button type="button" className="button-secondary text-[10px]" onClick={() => { setReviewRequest(request); setApprovalAmount(textValue(request, "requested_amount")); setDecisionNote(""); }}>Review</button> : null}</div></td></tr>)}</tbody></table></div> : <EmptyState>No pending Working Fund requests.</EmptyState>}
-        </Panel>
-        <Panel title="Pending Daily Fund requests" detail="Approval transfers the approved amount from Working Funds into the Daily Fund for non-project Cash Out.">
+        </Panel> : null}
+        {approvalTab === "all" || approvalTab === "daily_fund" ? <Panel title="Pending Daily Fund requests" detail="Approval transfers the approved amount from Working Funds into the Daily Fund for non-project Cash Out.">
           {pendingDailyFundRequests.length ? <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-[11px]"><thead><tr className="border-b border-[var(--color-border)] text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]"><th className="px-4 py-3">Fund date</th><th className="px-4 py-3">Purpose</th><th className="px-4 py-3">Requested</th><th className="px-4 py-3"></th></tr></thead><tbody>{pendingDailyFundRequests.map((request) => <tr key={textValue(request, "id")} className="border-b border-[var(--color-border)] last:border-0"><td className="px-4 py-3 text-[var(--color-text-secondary)]">{dateLabel(request.fund_date)}</td><td className="px-4 py-3 font-semibold text-[var(--color-text-primary)]">{textValue(request, "purpose")}</td><td className="px-4 py-3 font-semibold">{amount(request.requested_amount)}</td><td className="px-4 py-3 text-right">{gm ? <button type="button" className="button-secondary text-[10px]" onClick={() => { setReviewDailyFundRequest(request); setApprovalAmount(textValue(request, "requested_amount")); setDecisionNote(""); }}>Review</button> : <span className="text-[10px] text-[var(--color-text-secondary)]">GM review required</span>}</td></tr>)}</tbody></table></div> : <EmptyState>No pending Daily Fund requests.</EmptyState>}
-        </Panel>
+        </Panel> : null}
       </div>
     );
   };
@@ -1362,14 +1409,8 @@ export function FinanceRevisedWorkspace({
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[.12em] text-[var(--color-text-secondary)]">Finance redesign</p>
-          <h1 className="mt-1 text-[24px] font-bold tracking-tight text-[var(--color-text-primary)]">{tab === "funds" ? "Capital & Working Funds" : tab === "daily_fund" ? "Daily Fund" : tab === "cash_on_hand" ? "Cash on Hand" : tab === "transactions" ? "Cash In & Cash Out" : tab === "requests" ? "Finance Requests" : tab === "approvals" ? "GM Approvals" : tab === "projects" ? "Finance Monitoring" : tab === "history" ? "Activity History" : "Accounting & Finance"}</h1>
-          <p className="mt-1 max-w-2xl text-[12px] leading-5 text-[var(--color-text-secondary)]">{tab === "funds" ? "Monitor owner investment, Capital → Working transfers, Working Fund usage, and completed-project repayments." : tab === "daily_fund" ? "Manage the daily non-project expense budget funded from Working Funds." : tab === "cash_on_hand" ? "See total approved collections and exactly where the currently available cash is held." : "Project-ledger finance: client collections fund their own project, Working Funds cover approved temporary needs, and the GM controls posting."}</p>
-        </div>
-      </div>
+    <div className="finance-revised-workspace space-y-5">
+      <h1 className="text-[24px] font-bold tracking-tight text-[var(--color-text-primary)]">{tab === "funds" ? "Capital & Working Funds" : tab === "daily_fund" ? "Daily Fund" : tab === "cash_on_hand" ? "Cash on Hand" : tab === "transactions" ? "Cash In & Cash Out" : tab === "requests" ? "Finance Requests" : tab === "approvals" ? "GM Approvals" : tab === "projects" ? "Finance Monitoring" : tab === "history" ? "Activity History" : "Accounting & Finance"}</h1>
 
       {notice ? <div className="rounded-lg border border-[var(--color-success-border)] bg-[var(--color-success-subtle)] px-4 py-3 text-[12px] text-[var(--color-success-text)]">{notice}</div> : null}
       {error ? <div className="rounded-lg border border-[var(--color-danger-border)] bg-[var(--color-danger-subtle)] px-4 py-3 text-[12px] text-[var(--color-danger-text)]">{error}</div> : null}
@@ -1482,23 +1523,19 @@ export function FinanceRevisedWorkspace({
       </Modal> : null}
 
       {dialog === "capital" ? <Modal title="Add Capital Funds" detail="Record owner investment. The GM action posts immediately to the Capital Funds ledger." close={() => setDialog(null)}>
-        <form className="grid gap-3 sm:grid-cols-2" onSubmit={handleCapital}>
+        <form className="grid gap-4" onSubmit={handleCapital}>
           <Field label="Amount" value={capitalForm.amount} onChange={(value) => setCapitalForm((current) => ({ ...current, amount: value }))} type="number" min="0.01" step="0.01" required />
-          <Field label="Quarter / period" value={capitalForm.period} onChange={(value) => setCapitalForm((current) => ({ ...current, period: value }))} placeholder="2026 Q4" required />
-          <Field label="Investment date" value={capitalForm.date} onChange={(value) => setCapitalForm((current) => ({ ...current, date: value }))} type="date" required />
-          <Field label="Reference" value={capitalForm.reference} onChange={(value) => setCapitalForm((current) => ({ ...current, reference: value }))} placeholder="Optional reference" />
-          <div className="sm:col-span-2"><TextArea label="Note" value={capitalForm.note} onChange={(value) => setCapitalForm((current) => ({ ...current, note: value }))} placeholder="Owner investment details" /></div>
-          <div className="flex justify-end gap-2 sm:col-span-2"><button type="button" className="button-secondary" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button-primary" disabled={saving}>Add Capital Funds</button></div>
+          <p className="text-[10px] leading-4 text-[var(--color-text-secondary)]">The date will be recorded automatically when the Capital Funds transaction is submitted.</p>
+          <div className="flex justify-end gap-2"><button type="button" className="button-secondary" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button-primary" disabled={saving}>Add Capital Funds</button></div>
         </form>
       </Modal> : null}
 
       {dialog === "transfer" ? <Modal title="Transfer Capital to Working Funds" detail="This transfer reduces Capital Funds and increases Working Funds by the same amount." close={() => setDialog(null)}>
-        <form className="grid gap-3 sm:grid-cols-2" onSubmit={handleWorkingTransfer}>
-          <Field label="Transfer amount" value={workingForm.amount} onChange={(value) => setWorkingForm((current) => ({ ...current, amount: value }))} type="number" min="0.01" step="0.01" required />
-          <Field label="Transfer date" value={workingForm.date} onChange={(value) => setWorkingForm((current) => ({ ...current, date: value }))} type="date" required />
-          <Field label="Reference" value={workingForm.reference} onChange={(value) => setWorkingForm((current) => ({ ...current, reference: value }))} placeholder="Optional reference" />
-          <div className="sm:col-span-2"><TextArea label="Note" value={workingForm.note} onChange={(value) => setWorkingForm((current) => ({ ...current, note: value }))} placeholder="Why is this amount being moved?" /></div>
-          <div className="flex justify-end gap-2 sm:col-span-2"><button type="button" className="button-secondary" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button-primary" disabled={saving}>Transfer funds</button></div>
+        <form className="grid gap-4" onSubmit={handleWorkingTransfer}>
+          <div className="rounded-lg border border-[var(--color-accent-border)] bg-[var(--color-accent-subtle)] px-4 py-5 text-center"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[var(--color-accent-text)]">Available Capital Funds</p><p className="mt-2 text-[28px] font-bold tracking-tight text-[var(--color-accent-text)]">{amount(snapshot?.capital_funds)}</p></div>
+          <Field label="Transfer amount" value={workingForm.amount} onChange={(value) => setWorkingForm((current) => ({ ...current, amount: value }))} type="number" min="0.01" max={String(numberValue(snapshot, "capital_funds"))} step="0.01" required />
+          <p className="text-[10px] leading-4 text-[var(--color-text-secondary)]">The transfer date will be recorded automatically.</p>
+          <div className="flex justify-end gap-2"><button type="button" className="button-secondary" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button-primary" disabled={saving}>Transfer funds</button></div>
         </form>
       </Modal> : null}
 
@@ -1598,7 +1635,6 @@ export function FinanceRevisedWorkspace({
           </div>
           <dl className="grid gap-x-6 gap-y-3 border-y border-[var(--color-border)] py-4 sm:grid-cols-2 lg:grid-cols-4">
             <Metric label="Quotation" value={amount(selectedProject.total_quotation)} />
-            <Metric label="Total Direct Cost" value={amount(selectedCostingTotal)} />
             <Metric label="Client Cash In" value={amount(selectedProject.client_cash_in)} tone="positive" />
             <Metric label="Project balance" value={amount(selectedProject.available_balance)} tone={numberValue(selectedProject, "available_balance") < 0 ? "negative" : "positive"} />
             <Metric label="Project Cash Out" value={amount(selectedProject.cash_out)} />
@@ -1607,8 +1643,8 @@ export function FinanceRevisedWorkspace({
             <Metric label="Outstanding support" value={amount(selectedProject.outstanding_working_fund)} tone={numberValue(selectedProject, "outstanding_working_fund") ? "warning" : "positive"} />
           </dl>
           <Panel title="Costing breakdown" detail="Pricing Officer submitted direct-cost lines grouped under each quotation product. GM markups, selling price, VAT, commission, and profit are excluded.">
-            {detailLoading ? <LoadingState variant="section" label="Loading submitted costing..." /> : costingError ? <div className="space-y-3 p-4 text-[11px]"><p className="text-[var(--color-danger)]">The costing breakdown could not be loaded, so PDF export is disabled.</p><p className="text-[var(--color-text-secondary)]">{costingError}</p><button type="button" className="button-secondary" onClick={() => void openProject(selectedProject)} disabled={detailLoading}>Retry costing</button></div> : costingLines.length ? <div className="space-y-4 p-4">
-              <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] pb-3"><span className="text-[11px] font-semibold text-[var(--color-text-primary)]">Total Direct Cost</span><span className="text-[15px] font-bold tabular-nums text-[var(--color-text-primary)]">{amount(selectedCostingTotal)}</span></div>
+            {detailLoading ? <LoadingState variant="section" label="Loading submitted costing..." /> : costingError ? <div className="space-y-3 p-4 text-[11px]"><p className="text-[var(--color-danger)]">The costing breakdown could not be loaded, so PDF export is disabled.</p><p className="text-[var(--color-text-secondary)]">{costingError}</p><button type="button" className="button-secondary" onClick={() => void openProject(selectedProject)} disabled={detailLoading}>Retry costing</button></div> : costingLines.length ? <div className="flex flex-col gap-4 p-4">
+              <div className="order-last flex items-center justify-between gap-3 border-t-2 border-b-0 border-[var(--color-border-strong)] pt-3"><span className="text-[11px] font-bold uppercase tracking-[.04em] text-[var(--color-text-primary)]">Total Direct Cost</span><span className="text-[15px] font-bold tabular-nums text-[var(--color-text-primary)]">{amount(selectedCostingTotal)}</span></div>
               {selectedCostingGroups.map((group) => <div key={group.key} className="border-b border-[var(--color-border)] pb-4 last:border-0 last:pb-0">
                 <div className="flex flex-wrap items-baseline justify-between gap-2"><div><p className="text-[11px] font-semibold text-[var(--color-text-primary)]">{group.productDescription}</p><p className="mt-1 text-[10px] text-[var(--color-text-secondary)]">Quotation quantity: {group.productQuantity}</p></div><span className="text-[11px] font-semibold tabular-nums text-[var(--color-text-primary)]">Product direct cost: {amount(group.totalDirectCost)}</span></div>
                 <div className="mt-3 overflow-x-auto"><table className="w-full min-w-[600px] text-left text-[11px]"><thead><tr className="border-b border-[var(--color-border)] text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]"><th className="px-2 py-2">Direct-cost line</th><th className="px-2 py-2">Qty</th><th className="px-2 py-2">Unit cost</th><th className="px-2 py-2">Line total</th></tr></thead><tbody>{group.lines.map((line) => <tr key={textValue(line, "line_id")} className="border-b border-[var(--color-border)] last:border-0"><td className="px-2 py-2">{textValue(line, "description")}</td><td className="px-2 py-2">{textValue(line, "quantity")}</td><td className="px-2 py-2">{amount(line.unit_cost)}</td><td className="px-2 py-2 font-semibold">{amount(line.line_total)}</td></tr>)}</tbody></table></div>

@@ -12,9 +12,11 @@ const migration = [
   readFileSync(join(root, "supabase", "migrations", "20261111070000_revised_finance_costing_monitoring.sql"), "utf8"),
 ].join("\n");
 const integrityMigration = readFileSync(join(root, "supabase", "migrations", "20261111064207_revised_finance_integrity_fixes.sql"), "utf8");
+const fundModalMigration = readFileSync(join(root, "supabase", "migrations", "20261111085800_revised_finance_gm_fund_modal_simplification.sql"), "utf8");
 const roleMigration = readFileSync(join(root, "supabase", "migrations", "20261111054901_unify_accounting_finance_role.sql"), "utf8");
 const workspace = readFileSync(join(root, "components", "finance-revised-workspace.tsx"), "utf8");
 const host = readFileSync(join(root, "components", "huswell-workspace.tsx"), "utf8");
+const globalStyles = readFileSync(join(root, "app", "globals.css"), "utf8");
 const userAdmin = readFileSync(join(root, "components", "super-admin-console.tsx"), "utf8");
 
 test("revised Finance uses a separate project-ledger data path", () => {
@@ -191,6 +193,47 @@ test("costing errors block misleading project PDF exports", () => {
   assert.match(workspace, /PDF export is disabled/);
   assert.match(workspace, /Retry costing/);
   assert.match(workspace, /disabled=\{saving \|\| detailLoading \|\| Boolean\(costingError\)\}/);
+});
+
+test("GM fund modals use automatic dates and only the required amount fields", () => {
+  const capitalStart = workspace.indexOf('{dialog === "capital"');
+  const transferStart = workspace.indexOf('{dialog === "transfer"');
+  const dailyStart = workspace.indexOf('{dialog === "daily_request"', transferStart);
+  assert.ok(capitalStart >= 0 && transferStart > capitalStart && dailyStart > transferStart);
+  const capitalModal = workspace.slice(capitalStart, transferStart);
+  const transferModal = workspace.slice(transferStart, dailyStart);
+  assert.match(capitalModal, /<Field label="Amount"/);
+  assert.doesNotMatch(capitalModal, /Quarter \/ period|Investment date|label="Reference"|label="Note"/);
+  assert.match(transferModal, /Available Capital Funds/);
+  assert.match(transferModal, /<Field label="Transfer amount"/);
+  assert.doesNotMatch(transferModal, /Transfer date|label="Reference"|label="Note"/);
+  assert.match(fundModalMigration, /create or replace function public\.create_finance_revised_capital_contribution/);
+  assert.match(fundModalMigration, /create or replace function public\.create_finance_revised_capital_to_working/);
+  assert.match(fundModalMigration, /transaction_date,[\s\S]*current_date/);
+  assert.match(fundModalMigration, /period_label,[\s\S]*null/);
+  assert.match(fundModalMigration, /reference_number,[\s\S]*null/);
+  assert.match(fundModalMigration, /note,[\s\S]*null/);
+});
+
+test("GM approvals are organized into counted request tabs", () => {
+  assert.match(workspace, /aria-label="GM approval request types"/);
+  assert.match(workspace, /label: "All"/);
+  assert.match(workspace, /label: "Cash In"/);
+  assert.match(workspace, /label: "Cash Out"/);
+  assert.match(workspace, /label: "Working Funds"/);
+  assert.match(workspace, /label: "Daily Fund"/);
+  assert.match(workspace, /approvalCounts/);
+  assert.match(workspace, /Pending Working Fund requests/);
+  assert.match(workspace, /Pending Daily Fund requests/);
+});
+
+test("Finance Monitoring uses project cards and the shared blue table treatment", () => {
+  assert.match(workspace, /grid gap-4 sm:grid-cols-2/);
+  assert.match(workspace, /Open breakdown/);
+  assert.match(workspace, /order-last flex items-center/);
+  assert.match(globalStyles, /\.finance-revised-workspace table thead/);
+  assert.match(globalStyles, /background: #1F4E79/);
+  assert.match(globalStyles, /color: #ffffff/);
 });
 
 test("Finance Monitoring reads the submitted direct-cost payload by quotation product", () => {
