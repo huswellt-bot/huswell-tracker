@@ -101,7 +101,7 @@ import { FileUploadControl } from "@/components/ui/file-upload-control";
 import { LoadingState } from "@/components/ui/loading-state";
 import { MultiSelect, parseMultiSelectValue } from "@/components/ui/multi-select";
 import { NumberInput } from "@/components/ui/number-input";
-import { NotificationDialog, NotificationToast } from "@/components/ui/notification-dialog";
+import { NotificationDialog } from "@/components/ui/notification-dialog";
 import { SearchableLeadSelect, type SearchableLeadOption } from "@/components/ui/searchable-lead-select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { TABLE_PAGE_SIZE, TablePagination } from "@/components/ui/table-pagination";
@@ -24955,7 +24955,7 @@ export function HuswellWorkspace({
           </div>
         </header>
         <div className={`workspace-content ${(["Projects", "Price Quotations", "Price Quotation Review", "Approvals", "Payment Monitoring", "Payment Reviews", "Announcements", "Policy"].includes(active)) ? "p-0" : "p-2 sm:p-3 lg:p-4"}`}>
-          {message && <NotificationToast message={message} close={() => setMessage(null)} />}
+          {message && <NotificationDialog message={message} close={() => setMessage(null)} />}
           {content}
         </div>
       </main>

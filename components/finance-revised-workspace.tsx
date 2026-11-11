@@ -19,6 +19,7 @@ import { pdf } from "@react-pdf/renderer";
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { FinanceProjectPdf } from "@/components/finance-project-pdf";
 import { LoadingState } from "@/components/ui/loading-state";
+import { NotificationDialog } from "@/components/ui/notification-dialog";
 import { createClient } from "@/lib/supabase/client";
 
 type Row = Record<string, unknown>;
@@ -585,7 +586,10 @@ export function FinanceRevisedWorkspace({
     const errors = [snapshotResult.error, dailySnapshotResult.error, projectResult.error, transactionResult.error, requestResult.error, dailyRequestResult.error, commissionResult.error, categoryResult.error]
       .filter(Boolean)
       .map((item) => item?.message ?? "Finance data could not be loaded");
-    if (errors.length) setError(errors.join(" "));
+    if (errors.length) {
+      setNotice(null);
+      setError(errors.join(" "));
+    }
     setSnapshot((snapshotResult.data as Row | null) ?? null);
     setDailySnapshot((dailySnapshotResult.data as Row | null) ?? null);
     setProjects((projectResult.data as Row[] | null) ?? []);
@@ -1583,8 +1587,8 @@ export function FinanceRevisedWorkspace({
     <div className="finance-revised-workspace space-y-5">
       <h1 className="text-[24px] font-bold tracking-tight text-[var(--color-text-primary)]">{tab === "funds" ? "Capital & Working Funds" : tab === "daily_fund" ? "Daily Fund" : tab === "cash_on_hand" ? "Cash on Hand" : tab === "transactions" ? "Cash In & Cash Out" : tab === "requests" ? "Finance Requests" : tab === "approvals" ? "GM Approvals" : tab === "projects" ? "Finance Monitoring" : tab === "history" ? "Activity History" : "Accounting & Finance"}</h1>
 
-      {notice ? <div className="rounded-lg border border-[var(--color-success-border)] bg-[var(--color-success-subtle)] px-4 py-3 text-[12px] text-[var(--color-success-text)]">{notice}</div> : null}
-      {error ? <div className="rounded-lg border border-[var(--color-danger-border)] bg-[var(--color-danger-subtle)] px-4 py-3 text-[12px] text-[var(--color-danger-text)]">{error}</div> : null}
+      {notice ? <NotificationDialog message={notice} title="Finance update" tone="success" primaryLabel="Close" close={() => setNotice(null)} /> : null}
+      {error ? <NotificationDialog message={error} title="Finance error" tone="error" primaryLabel="Close" close={() => setError(null)} /> : null}
 
       {tab === "dashboard" ? renderDashboard() : tab === "funds" ? renderFunds() : tab === "daily_fund" ? renderDailyFund() : tab === "cash_on_hand" ? renderCashOnHand() : tab === "transactions" ? renderTransactions() : tab === "requests" ? renderRequests() : tab === "approvals" ? renderApprovals() : tab === "projects" ? renderProjects() : tab === "commissions" ? renderCommissions() : renderHistory()}
 

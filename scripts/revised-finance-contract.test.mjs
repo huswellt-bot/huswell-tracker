@@ -197,6 +197,16 @@ test("costing errors block misleading project PDF exports", () => {
   assert.match(workspace, /disabled=\{saving \|\| detailLoading \|\| Boolean\(costingError\)\}/);
 });
 
+test("Finance notifications use dismissible modal dialogs", () => {
+  assert.match(workspace, /NotificationDialog/);
+  assert.match(workspace, /title="Finance update"/);
+  assert.match(workspace, /title="Finance error"/);
+  assert.doesNotMatch(workspace, /notice \? <div/);
+  assert.doesNotMatch(workspace, /error \? <div/);
+  assert.match(host, /NotificationDialog message=\{message\}/);
+  assert.doesNotMatch(host, /NotificationToast/);
+});
+
 test("GM fund modals use automatic dates and only the required amount fields", () => {
   const capitalStart = workspace.indexOf('{dialog === "capital"');
   const transferStart = workspace.indexOf('{dialog === "transfer"');
