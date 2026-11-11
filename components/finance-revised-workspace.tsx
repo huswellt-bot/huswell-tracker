@@ -209,7 +209,6 @@ const groupCostingLines = (lines: Row[]): CostingGroup[] => {
 
 function Panel({
   title,
-  detail,
   action,
   children,
 }: {
@@ -223,7 +222,6 @@ function Panel({
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border)] px-4 py-3 sm:px-5">
         <div>
           <h2 className="text-[13px] font-semibold text-[var(--color-text-primary)]">{title}</h2>
-          {detail ? <p className="mt-1 max-w-3xl text-[11px] leading-4 text-[var(--color-text-secondary)]">{detail}</p> : null}
         </div>
         {action}
       </div>
@@ -235,7 +233,6 @@ function Panel({
 function Metric({
   label,
   value,
-  detail,
   tone = "neutral",
 }: {
   label: string;
@@ -255,7 +252,6 @@ function Metric({
     <div className="min-w-0 pb-1">
       <p className="text-[10px] font-semibold uppercase tracking-[.07em] text-[var(--color-text-secondary)]">{label}</p>
       <p className={"mt-1 text-xl font-bold tracking-tight " + toneClass}>{value}</p>
-      {detail ? <p className="mt-1 text-[10px] leading-4 text-[var(--color-text-secondary)]">{detail}</p> : null}
     </div>
   );
 }
@@ -342,7 +338,6 @@ function StatusBadge({ status }: { status: string }) {
 
 function Modal({
   title,
-  detail,
   close,
   children,
   wide = false,
@@ -361,7 +356,6 @@ function Modal({
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-[17px] font-semibold text-[var(--color-text-primary)]">{title}</h2>
-            {detail ? <p className="mt-1 text-[12px] leading-5 text-[var(--color-text-secondary)]">{detail}</p> : null}
           </div>
           <button type="button" onClick={close} className="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]" aria-label="Close dialog"><X size={18} /></button>
         </div>
@@ -1234,13 +1228,6 @@ export function FinanceRevisedWorkspace({
           <Metric label="Open commission payables" value={amount(snapshot?.commission_payables_open)} detail="Locked commission allocations not yet paid" tone={numberValue(snapshot, "commission_payables_open") ? "warning" : "positive"} />
         </div>
       </div>
-      <Panel title="How the revised flow works" detail="The ledger keeps each project budget isolated. Working Fund support is an internal transfer, not project Cash In.">
-        <div className="grid gap-3 p-4 text-[11px] leading-5 text-[var(--color-text-secondary)] md:grid-cols-3">
-          <div className="border-l-2 border-[var(--color-success-border)] pl-3"><strong className="text-[var(--color-text-primary)]">1. Capital → Working</strong><br />GM records owner investment and transfers the allowed amount into Working Funds.</div>
-          <div className="border-l-2 border-[var(--color-warning-border)] pl-3"><strong className="text-[var(--color-text-primary)]">2. Project budget first</strong><br />Client Cash In belongs only to its selected project. A project Cash Out cannot use another project&apos;s balance.</div>
-          <div className="border-l-2 border-[var(--color-border-strong)] pl-3"><strong className="text-[var(--color-text-primary)]">3. Return after completion</strong><br />Only a completed project can repay approved Working Fund support, fully or partially.</div>
-        </div>
-      </Panel>
       <Panel title="Approval queue" detail="GM approval is the posting event. Pending rows have not changed a balance yet.">
         <ApprovalTable
           items={pendingApprovalItems}
@@ -1286,7 +1273,6 @@ export function FinanceRevisedWorkspace({
 
         <Panel title="GM fund controls" detail="Capital Funds are owner investment. Working Funds can only be created by transferring an approved amount from Capital Funds.">
           <div className="flex flex-wrap items-center justify-between gap-3 p-4">
-            <p className="max-w-2xl text-[11px] leading-5 text-[var(--color-text-secondary)]">Adding Capital Funds and transferring Capital → Working Funds posts directly through the GM-only ledger controls. Operating expenses, project support, and completed-project repayments are monitored below.</p>
             {gm ? <div className="flex flex-wrap gap-2"><button type="button" className="button-secondary inline-flex items-center gap-2 text-[11px]" onClick={() => setDialog("capital")}><Landmark size={14} /> Add Capital Funds</button><button type="button" className="button-primary inline-flex items-center gap-2 text-[11px]" onClick={() => setDialog("transfer")}><Wallet size={14} /> Transfer to Working Funds</button></div> : <span className="text-[11px] font-semibold text-[var(--color-text-secondary)]">GM controls required for fund changes</span>}
           </div>
         </Panel>
@@ -1321,19 +1307,7 @@ export function FinanceRevisedWorkspace({
           </div>
         </div>
 
-        <Panel
-          title="Daily Fund"
-          detail="Daily Fund is a controlled sub-budget for non-project expenses. Approved allocations reduce Working Funds, and non-project Cash Out reduces Daily Fund."
-          action={<button type="button" className="button-primary inline-flex items-center gap-2 text-[11px]" onClick={() => setDialog("daily_request")} disabled={!canOperate}><Plus size={14} /> Request Daily Fund</button>}
-        >
-          <div className="grid gap-3 p-4 text-[11px] text-[var(--color-text-secondary)] sm:grid-cols-3">
-            <div><span className="font-semibold text-[var(--color-text-primary)]">Allocate</span><br />Finance requests a Daily Fund amount for a date and purpose. GM approval transfers it from Working Funds.</div>
-            <div><span className="font-semibold text-[var(--color-text-primary)]">Spend</span><br />Every non-project Cash Out uses the Daily Fund balance and keeps its Cash Out category.</div>
-            <div><span className="font-semibold text-[var(--color-text-primary)]">Return</span><br />Unused Daily Fund can be returned to Working Funds after the day or period.</div>
-          </div>
-        </Panel>
-
-        <Panel title="Daily Fund requests" detail="Approved amounts become Daily Fund only after GM approval. Spending and returns are tracked against each request.">
+        <Panel title="Daily Fund requests" detail="Approved amounts become Daily Fund only after GM approval. Spending and returns are tracked against each request." action={<button type="button" className="button-primary inline-flex items-center gap-2 text-[11px]" onClick={() => setDialog("daily_request")} disabled={!canOperate}><Plus size={14} /> Request Daily Fund</button>}>
           {dailyFundRequests.length ? <div className="overflow-x-auto"><table className="w-full min-w-[1160px] text-left text-[11px]"><thead><tr className="border-b border-[var(--color-border)] text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]"><th className="px-4 py-3">Date</th><th className="px-4 py-3">Purpose</th><th className="px-4 py-3">Requested</th><th className="px-4 py-3">Approved</th><th className="px-4 py-3">Spent</th><th className="px-4 py-3">Returned</th><th className="px-4 py-3">Unused</th><th className="px-4 py-3">Requested by</th><th className="px-4 py-3">Status</th><th className="px-4 py-3"></th></tr></thead><tbody>{dailyFundRequests.map((request) => { const status = textValue(request, "status"); const unused = numberValue(request, "unused_amount"); return <tr key={textValue(request, "id")} className="border-b border-[var(--color-border)] last:border-0"><td className="px-4 py-3 text-[var(--color-text-secondary)]">{dateLabel(request.fund_date)}</td><td className="max-w-[250px] px-4 py-3"><p className="font-semibold text-[var(--color-text-primary)]">{textValue(request, "purpose")}</p>{textValue(request, "note") ? <p className="mt-1 text-[10px] text-[var(--color-text-secondary)]">{textValue(request, "note")}</p> : null}</td><td className="px-4 py-3">{amount(request.requested_amount)}</td><td className="px-4 py-3 font-semibold">{amount(request.approved_amount)}</td><td className="px-4 py-3">{amount(request.spent_amount)}</td><td className="px-4 py-3">{amount(request.returned_amount)}</td><td className="px-4 py-3 font-semibold text-[var(--color-warning-text)]">{amount(request.unused_amount)}</td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{textValue(request, "requested_by_name", textValue(request, "requested_by", "Unknown"))}</td><td className="px-4 py-3"><StatusBadge status={status} /></td><td className="px-4 py-3"><div className="flex flex-wrap justify-end gap-2">{gm && status === "pending" ? <button type="button" className="button-secondary text-[10px]" onClick={() => { setReviewDailyFundRequest(request); setApprovalAmount(textValue(request, "requested_amount")); setDecisionNote(""); }}>Review</button> : null}{canOperate && ["approved", "partially_returned"].includes(status) && unused > 0 ? <button type="button" className="button-secondary text-[10px]" onClick={() => { setDailyFundReturnRequest(request); setDailyFundReturnAmount(String(unused)); }}>Return unused</button> : null}</div></td></tr>; })}</tbody></table></div> : <EmptyState>No Daily Fund requests yet.</EmptyState>}
         </Panel>
 
@@ -1432,13 +1406,6 @@ export function FinanceRevisedWorkspace({
       >
         {dailyFundRequests.length ? <div className="overflow-x-auto"><table className="w-full min-w-[1020px] text-left text-[11px]"><thead><tr className="border-b border-[var(--color-border)] text-[10px] uppercase tracking-[.06em] text-[var(--color-text-secondary)]"><th className="px-4 py-3">Fund date</th><th className="px-4 py-3">Purpose</th><th className="px-4 py-3">Requested</th><th className="px-4 py-3">Approved</th><th className="px-4 py-3">Spent</th><th className="px-4 py-3">Unused</th><th className="px-4 py-3">Requested by</th><th className="px-4 py-3">Status</th><th className="px-4 py-3"></th></tr></thead><tbody>{dailyFundRequests.map((request) => { const status = textValue(request, "status"); const unused = numberValue(request, "unused_amount"); return <tr key={textValue(request, "id")} className="border-b border-[var(--color-border)] last:border-0"><td className="px-4 py-3 text-[var(--color-text-secondary)]">{dateLabel(request.fund_date)}</td><td className="max-w-[260px] px-4 py-3 font-semibold text-[var(--color-text-primary)]">{textValue(request, "purpose")}</td><td className="px-4 py-3">{amount(request.requested_amount)}</td><td className="px-4 py-3 font-semibold">{amount(request.approved_amount)}</td><td className="px-4 py-3">{amount(request.spent_amount)}</td><td className="px-4 py-3 font-semibold text-[var(--color-warning-text)]">{amount(unused)}</td><td className="px-4 py-3 text-[var(--color-text-secondary)]">{textValue(request, "requested_by_name", textValue(request, "requested_by", "Unknown"))}</td><td className="px-4 py-3"><StatusBadge status={status} /></td><td className="px-4 py-3 text-right">{canOperate && ["approved", "partially_returned"].includes(status) && unused > 0 ? <button type="button" className="button-secondary text-[10px]" onClick={() => { setDailyFundReturnRequest(request); setDailyFundReturnAmount(String(unused)); }}>Return unused</button> : null}</td></tr>; })}</tbody></table></div> : <EmptyState>No Daily Fund requests yet.</EmptyState>}
       </Panel>
-      <Panel title="What happens after approval" detail="The support transfer is recorded as Working Funds out and project funds in. It does not count as a client collection.">
-        <div className="grid gap-3 p-4 text-[11px] leading-5 text-[var(--color-text-secondary)] md:grid-cols-3">
-          <div><span className="font-semibold text-[var(--color-text-primary)]">Request</span><br />Accounting & Finance selects the project and adds each planned expense.</div>
-          <div><span className="font-semibold text-[var(--color-text-primary)]">GM approves</span><br />GM may approve the full amount, a lower amount, or reject. A corrected request can then be submitted as a new request.</div>
-          <div><span className="font-semibold text-[var(--color-text-primary)]">Repayment</span><br />After completion, the project returns the borrowed support. Partial repayment is allowed.</div>
-        </div>
-      </Panel>
     </div>
   );
 
@@ -1476,9 +1443,6 @@ export function FinanceRevisedWorkspace({
             </table>
           </div>
         ) : <EmptyState>No unpaid commission allocations are available.</EmptyState>}
-      </Panel>
-      <Panel title="Commission rule" detail="Commission amounts are fixed by the approved quotation and paid in full per allocation. Partial client collections do not release commission. Working Fund support never counts as client Cash In.">
-        <p className="p-4 text-[11px] leading-5 text-[var(--color-text-secondary)]">A commission allocation is a payable record first. It becomes a project Cash Out only after the project is fully collected and the GM approves the payout.</p>
       </Panel>
     </div>
   );
@@ -1631,9 +1595,8 @@ export function FinanceRevisedWorkspace({
                 </button>
               ))}
             </div>
-            <span className="mt-1 block text-[10px] text-[var(--color-text-secondary)]">Project Cash Out uses the selected project balance. Non-project Cash Out uses the Daily Fund balance.</span>
           </div>
-          {cashOut.source === "project" ? <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Project</span><select className="input mt-1 w-full" value={cashOut.projectId} onChange={(event) => setCashOut((current) => ({ ...current, projectId: event.target.value }))} disabled={Boolean(revisionSource)} required><option value="">Select project</option>{openProjects.map((project) => <option key={textValue(project, "project_fund_id")} value={textValue(project, "project_fund_id")}>{textValue(project, "project_name")} · Project budget</option>)}</select></label> : <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Daily Fund request</span><select className="input mt-1 w-full" value={cashOut.dailyFundRequestId} onChange={(event) => setCashOut((current) => ({ ...current, dailyFundRequestId: event.target.value }))} required><option value="">Select an approved Daily Fund request</option>{dailyFundRequests.filter((request) => ["approved", "partially_returned"].includes(textValue(request, "status")) && numberValue(request, "unused_amount") > 0).map((request) => <option key={textValue(request, "id")} value={textValue(request, "id")}>{dateLabel(request.fund_date)} · {textValue(request, "purpose")} · {amount(request.unused_amount)} remaining</option>)}</select><span className="mt-1 block text-[10px] text-[var(--color-text-secondary)]">Every non-project Cash Out is assigned to an approved Daily Fund request so its remaining budget can be tracked.</span></label>}
+          {cashOut.source === "project" ? <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Project</span><select className="input mt-1 w-full" value={cashOut.projectId} onChange={(event) => setCashOut((current) => ({ ...current, projectId: event.target.value }))} disabled={Boolean(revisionSource)} required><option value="">Select project</option>{openProjects.map((project) => <option key={textValue(project, "project_fund_id")} value={textValue(project, "project_fund_id")}>{textValue(project, "project_name")} · Project budget</option>)}</select></label> : <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Daily Fund request</span><select className="input mt-1 w-full" value={cashOut.dailyFundRequestId} onChange={(event) => setCashOut((current) => ({ ...current, dailyFundRequestId: event.target.value }))} required><option value="">Select an approved Daily Fund request</option>{dailyFundRequests.filter((request) => ["approved", "partially_returned"].includes(textValue(request, "status")) && numberValue(request, "unused_amount") > 0).map((request) => <option key={textValue(request, "id")} value={textValue(request, "id")}>{dateLabel(request.fund_date)} · {textValue(request, "purpose")} · {amount(request.unused_amount)} remaining</option>)}</select></label>}
           <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Cash Out category</span><div className="mt-1 flex items-center gap-2"><select className="input w-full" value={cashOut.categoryId} onChange={(event) => handleCategorySelection("expense", event.target.value)} required><option value="">Select Cash Out category</option>{categories.filter((category) => textValue(category, "direction") === "expense").map((category) => <option key={textValue(category, "category_id")} value={textValue(category, "category_id")}>{textValue(category, "name")}</option>)}<option value={addCategoryOptionValue}>＋ Add Cash Out category</option></select><button type="button" className="button-secondary inline-flex shrink-0 items-center gap-1 text-[10px]" onClick={() => openCategoryManager("expense")}><Tag size={13} /> Manage</button></div></label>
           <Field label="Amount" value={cashOut.amount} onChange={(value) => setCashOut((current) => ({ ...current, amount: value }))} type="number" min="0.01" step="0.01" required />
           <Field label="Cash Out date" value={cashOut.date} onChange={(value) => setCashOut((current) => ({ ...current, date: value }))} type="date" required />
@@ -1691,12 +1654,11 @@ export function FinanceRevisedWorkspace({
           <div>
             <div className="mb-2 flex items-center justify-between gap-2">
               <p className="text-[11px] font-semibold text-[var(--color-text-primary)]">{categoryManagerDirection === "income" ? "Cash In categories" : "Cash Out categories"}</p>
-              <span className="text-[10px] text-[var(--color-text-secondary)]">Hover a category to show actions</span>
             </div>
             <div className="space-y-1.5">
               {categories.filter((category) => textValue(category, "direction") === categoryManagerDirection).map((category) => (
                 <div key={textValue(category, "category_id")} className="group flex items-center justify-between gap-3 rounded-md border border-[var(--color-border)] px-3 py-2.5">
-                  <div className="min-w-0"><p className="truncate text-[11px] font-medium text-[var(--color-text-primary)]">{textValue(category, "name")}</p><p className="mt-0.5 text-[10px] text-[var(--color-text-secondary)]">{Boolean(category.is_system) ? "Default category" : "Custom category"}</p></div>
+                  <div className="min-w-0"><p className="truncate text-[11px] font-medium text-[var(--color-text-primary)]">{textValue(category, "name")}</p></div>
                   <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                     <button type="button" className="grid h-7 w-7 place-items-center rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text-primary)]" onClick={() => startCategoryEdit(category)} aria-label={`Edit ${textValue(category, "name")} category`} title="Edit category"><Pencil size={14} /></button>
                     {!Boolean(category.is_system) ? <button type="button" className="grid h-7 w-7 place-items-center rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-danger-subtle)] hover:text-[var(--color-danger-text)]" onClick={() => { setDeleteCategoryTarget(category); setEditingCategory(null); setCategoryDraft(""); }} aria-label={`Delete ${textValue(category, "name")} category`} title="Delete category"><Trash2 size={14} /></button> : null}
@@ -1730,7 +1692,6 @@ export function FinanceRevisedWorkspace({
           </div>
           <div className="grid gap-3 sm:grid-cols-2"><Field label="Payout date" value={commissionForm.date} onChange={(value) => setCommissionForm((current) => ({ ...current, date: value }))} type="date" required /><Field label="Reference" value={commissionForm.reference} onChange={(value) => setCommissionForm((current) => ({ ...current, reference: value }))} placeholder="Optional voucher/reference" /></div>
           <TextArea label="Note" value={commissionForm.note} onChange={(value) => setCommissionForm((current) => ({ ...current, note: value }))} placeholder="Optional commission payout note" />
-          <p className="text-[11px] leading-5 text-[var(--color-text-secondary)]">The approved commission allocation is paid in full. The amount cannot be edited, and the project balance will change only after GM approval.</p>
           <div className="flex justify-end gap-2"><button type="button" className="button-secondary" onClick={() => setSelectedCommission(null)}>Cancel</button><button type="submit" className="button-primary" disabled={saving}>Submit for GM approval</button></div>
         </form>
       </Modal> : null}
@@ -1738,7 +1699,6 @@ export function FinanceRevisedWorkspace({
       {dialog === "capital" ? <Modal title="Add Capital Funds" detail="Record owner investment. The GM action posts immediately to the Capital Funds ledger." close={() => setDialog(null)}>
         <form className="grid gap-4" onSubmit={handleCapital}>
           <Field label="Amount" value={capitalForm.amount} onChange={(value) => setCapitalForm((current) => ({ ...current, amount: value }))} type="number" min="0.01" step="0.01" required />
-          <p className="text-[10px] leading-4 text-[var(--color-text-secondary)]">The date will be recorded automatically when the Capital Funds transaction is submitted.</p>
           <div className="flex justify-end gap-2"><button type="button" className="button-secondary" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button-primary" disabled={saving}>Add Capital Funds</button></div>
         </form>
       </Modal> : null}
@@ -1747,7 +1707,6 @@ export function FinanceRevisedWorkspace({
         <form className="grid gap-4" onSubmit={handleWorkingTransfer}>
           <div className="rounded-lg border border-[var(--color-accent-border)] bg-[var(--color-accent-subtle)] px-4 py-5 text-center"><p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[var(--color-accent-text)]">Available Capital Funds</p><p className="mt-2 text-[28px] font-bold tracking-tight text-[var(--color-accent-text)]">{amount(snapshot?.capital_funds)}</p></div>
           <Field label="Transfer amount" value={workingForm.amount} onChange={(value) => setWorkingForm((current) => ({ ...current, amount: value }))} type="number" min="0.01" max={String(numberValue(snapshot, "capital_funds"))} step="0.01" required />
-          <p className="text-[10px] leading-4 text-[var(--color-text-secondary)]">The transfer date will be recorded automatically.</p>
           <div className="flex justify-end gap-2"><button type="button" className="button-secondary" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button-primary" disabled={saving}>Transfer funds</button></div>
         </form>
       </Modal> : null}
@@ -1758,7 +1717,6 @@ export function FinanceRevisedWorkspace({
           <Field label="Fund date" value={dailyFundForm.date} onChange={(value) => setDailyFundForm((current) => ({ ...current, date: value }))} type="date" required />
           <div className="sm:col-span-2"><Field label="Purpose" value={dailyFundForm.purpose} onChange={(value) => setDailyFundForm((current) => ({ ...current, purpose: value }))} placeholder="Daily office and operating expenses" required /></div>
           <div className="sm:col-span-2"><TextArea label="Note" value={dailyFundForm.note} onChange={(value) => setDailyFundForm((current) => ({ ...current, note: value }))} placeholder="Optional breakdown or context for the GM" /></div>
-          <p className="text-[11px] leading-5 text-[var(--color-text-secondary)] sm:col-span-2">After approval, this budget becomes available for all non-project Cash Out. Unused funds can be returned to Working Funds.</p>
           <div className="flex justify-end gap-2 sm:col-span-2"><button type="button" className="button-secondary" onClick={() => setDialog(null)}>Cancel</button><button type="submit" className="button-primary" disabled={saving}>Submit Daily Fund request</button></div>
         </form>
       </Modal> : null}
@@ -1766,7 +1724,6 @@ export function FinanceRevisedWorkspace({
       {dailyFundReturnRequest ? <Modal title="Return unused Daily Fund" detail="The return goes back to Working Funds after GM approval." close={() => setDailyFundReturnRequest(null)}>
         <form className="space-y-4" onSubmit={submitDailyFundReturn}>
           <div className="grid gap-3 sm:grid-cols-3"><Metric label="Fund date" value={dateLabel(dailyFundReturnRequest.fund_date)} /><Metric label="Unused amount" value={amount(dailyFundReturnRequest.unused_amount)} tone="warning" /><Field label="Return amount" value={dailyFundReturnAmount} onChange={setDailyFundReturnAmount} type="number" min="0.01" step="0.01" required /></div>
-          <p className="text-[11px] leading-5 text-[var(--color-text-secondary)]">This does not create Cash In or Cash Out. It moves unused Daily Fund back into the Working Funds pool.</p>
           <div className="flex justify-end gap-2"><button type="button" className="button-secondary" onClick={() => setDailyFundReturnRequest(null)}>Cancel</button><button type="submit" className="button-primary" disabled={saving}>Submit return</button></div>
         </form>
       </Modal> : null}
@@ -1824,7 +1781,6 @@ export function FinanceRevisedWorkspace({
               <Field label="Approved amount" value={approvalAmount} onChange={setApprovalAmount} type="number" min="0.01" step="0.01" required />
             </div>
             <TextArea label="Decision note" value={decisionNote} onChange={setDecisionNote} placeholder="Optional note for Accounting & Finance" />
-            <p className="text-[11px] leading-5 text-[var(--color-text-secondary)]">If the breakdown is wrong, reject this request and submit a corrected request.</p>
             <div className="flex flex-wrap justify-end gap-2"><button type="button" className="button-secondary" onClick={() => void reviewRequestDecision("rejected")} disabled={saving}>Reject</button><button type="button" className="button-primary inline-flex items-center gap-1" onClick={() => void reviewRequestDecision("approved")} disabled={saving}><Check size={14} /> Approve &amp; release</button></div>
           </div>
         </Modal>
@@ -1845,18 +1801,17 @@ export function FinanceRevisedWorkspace({
             </div>
             {textValue(reviewDailyFundRequest, "note") ? <p className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 text-[11px] leading-5 text-[var(--color-text-secondary)]">{textValue(reviewDailyFundRequest, "note")}</p> : null}
             <TextArea label="Decision note" value={decisionNote} onChange={setDecisionNote} placeholder="Optional note for Accounting & Finance" />
-            <p className="text-[11px] leading-5 text-[var(--color-text-secondary)]">If the request is wrong, reject it and submit a corrected Daily Fund request.</p>
             <div className="flex flex-wrap justify-end gap-2"><button type="button" className="button-secondary" onClick={() => void reviewDailyFundDecision("rejected")} disabled={saving}>Reject</button><button type="button" className="button-primary inline-flex items-center gap-1" onClick={() => void reviewDailyFundDecision("approved")} disabled={saving}><Check size={14} /> Approve &amp; allocate</button></div>
           </div>
         </Modal>
       ) : null}
 
       {reviewTransaction ? <Modal title="Review Finance transaction" detail={transactionLabel(reviewTransaction) + " · " + textValue(reviewTransaction, "project_name", "Working Funds")} close={() => setReviewTransaction(null)}>
-        <div className="space-y-4"><div className="grid gap-3 sm:grid-cols-3"><Metric label="Amount" value={amount(reviewTransaction.amount)} /><Metric label="Date" value={dateLabel(reviewTransaction.transaction_date)} /><Metric label="Reference" value={textValue(reviewTransaction, "reference_number", "—")} /></div>{textValue(reviewTransaction, "commission_allocation_id") ? <div className="grid gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 sm:grid-cols-3"><Metric label="Commission recipient" value={textValue(reviewTransaction, "commission_recipient_name", "—")} /><Metric label="Commission role" value={titleCase(reviewTransaction.commission_allocation_role)} /><Metric label="Project" value={textValue(reviewTransaction, "project_name", "—")} /></div> : null}<TextArea label={canRequestTransactionRevision(reviewTransaction) ? "Decision note" : "Approval note"} value={decisionNote} onChange={setDecisionNote} placeholder={canRequestTransactionRevision(reviewTransaction) ? "Required when requesting a revision" : "Optional approval note"} /><p className="text-[11px] leading-5 text-[var(--color-text-secondary)]">{canRequestTransactionRevision(reviewTransaction) ? "Approve to post this Cash In or Cash Out. If the details are wrong, request a revision with a clear correction note; no ledger entry is posted." : "Approve to post this transaction. Corrections for Cash In and Cash Out use the revision workflow."}</p><div className="flex flex-wrap justify-end gap-2">{canRequestTransactionRevision(reviewTransaction) ? <button type="button" className="button-secondary" onClick={() => void reviewTransactionDecision("revision_requested")} disabled={saving || !decisionNote.trim()}>Request revision</button> : null}<button type="button" className="button-primary inline-flex items-center gap-1" onClick={() => void reviewTransactionDecision("approved")} disabled={saving}><Check size={14} /> Approve &amp; post</button></div></div>
+        <div className="space-y-4"><div className="grid gap-3 sm:grid-cols-3"><Metric label="Amount" value={amount(reviewTransaction.amount)} /><Metric label="Date" value={dateLabel(reviewTransaction.transaction_date)} /><Metric label="Reference" value={textValue(reviewTransaction, "reference_number", "—")} /></div>{textValue(reviewTransaction, "commission_allocation_id") ? <div className="grid gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3 sm:grid-cols-3"><Metric label="Commission recipient" value={textValue(reviewTransaction, "commission_recipient_name", "—")} /><Metric label="Commission role" value={titleCase(reviewTransaction.commission_allocation_role)} /><Metric label="Project" value={textValue(reviewTransaction, "project_name", "—")} /></div> : null}<TextArea label={canRequestTransactionRevision(reviewTransaction) ? "Decision note" : "Approval note"} value={decisionNote} onChange={setDecisionNote} placeholder={canRequestTransactionRevision(reviewTransaction) ? "Required when requesting a revision" : "Optional approval note"} /><div className="flex flex-wrap justify-end gap-2">{canRequestTransactionRevision(reviewTransaction) ? <button type="button" className="button-secondary" onClick={() => void reviewTransactionDecision("revision_requested")} disabled={saving || !decisionNote.trim()}>Request revision</button> : null}<button type="button" className="button-primary inline-flex items-center gap-1" onClick={() => void reviewTransactionDecision("approved")} disabled={saving}><Check size={14} /> Approve &amp; post</button></div></div>
       </Modal> : null}
 
       {repaymentRequest ? <Modal title="Return Working Funds" detail="Only completed projects can return approved support. The repayment is an internal project-to-Working-Funds transfer." close={() => setRepaymentRequest(null)}>
-        <form className="space-y-4" onSubmit={submitRepayment}><div className="grid gap-3 sm:grid-cols-2"><Metric label="Project" value={textValue(repaymentRequest, "project_name")} /><Field label="Repayment amount" value={repaymentAmount} onChange={setRepaymentAmount} type="number" min="0.01" step="0.01" required /></div><p className="text-[11px] leading-5 text-[var(--color-text-secondary)]">This does not create a client Cash In and does not add a project expense. GM approval is still required before the Working Funds balance changes.</p><div className="flex justify-end gap-2"><button type="button" className="button-secondary" onClick={() => setRepaymentRequest(null)}>Cancel</button><button type="submit" className="button-primary" disabled={saving}>Submit repayment</button></div></form>
+        <form className="space-y-4" onSubmit={submitRepayment}><div className="grid gap-3 sm:grid-cols-2"><Metric label="Project" value={textValue(repaymentRequest, "project_name")} /><Field label="Repayment amount" value={repaymentAmount} onChange={setRepaymentAmount} type="number" min="0.01" step="0.01" required /></div><div className="flex justify-end gap-2"><button type="button" className="button-secondary" onClick={() => setRepaymentRequest(null)}>Cancel</button><button type="submit" className="button-primary" disabled={saving}>Submit repayment</button></div></form>
       </Modal> : null}
 
       {selectedTransaction ? <Modal title={transactionLabel(selectedTransaction)} detail={textValue(selectedTransaction, "project_name", "Daily Fund")} close={() => setSelectedTransaction(null)}>
@@ -1884,7 +1839,6 @@ export function FinanceRevisedWorkspace({
 
       {voidTransaction ? <Modal title="Reverse Finance transaction" detail={transactionLabel(voidTransaction) + " · " + amount(voidTransaction.amount)} close={() => { setVoidTransaction(null); setVoidReason(""); }}>
         <form className="space-y-4" onSubmit={submitVoid}>
-          <p className="text-[11px] leading-5 text-[var(--color-text-secondary)]">This keeps the original posted row in history as voided and creates an opposite ledger adjustment. The reversal is blocked if an incoming balance has already been used.</p>
           <TextArea label="Reversal reason" value={voidReason} onChange={setVoidReason} placeholder="Explain why this posted transaction must be reversed" />
           <div className="flex justify-end gap-2"><button type="button" className="button-secondary" onClick={() => { setVoidTransaction(null); setVoidReason(""); }}>Cancel</button><button type="submit" className="button-danger" disabled={saving || !voidReason.trim()}>Reverse transaction</button></div>
         </form>
@@ -1895,7 +1849,6 @@ export function FinanceRevisedWorkspace({
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-[.08em] text-[var(--color-text-secondary)]">Project Finance Monitoring</p>
-              <p className="mt-1 text-[11px] text-[var(--color-text-secondary)]">Quotation {textValue(selectedProject, "quotation_number", "—")} · client collections and expenses remain isolated to this project.</p>
             </div>
             <button type="button" className="button-secondary inline-flex items-center gap-2 text-[11px]" onClick={() => void generateProjectPdf()} disabled={saving || detailLoading || Boolean(costingError)}><Download size={14} /> Generate PDF</button>
           </div>

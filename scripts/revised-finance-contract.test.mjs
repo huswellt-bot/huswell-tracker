@@ -169,7 +169,6 @@ test("the visible Finance flow is project-ledger based", () => {
   assert.match(workspace, /create_finance_revised_category/);
   assert.match(workspace, /update_finance_revised_category/);
   assert.match(workspace, /delete_finance_revised_category/);
-  assert.match(workspace, /Hover a category to show actions/);
   assert.match(workspace, /Daily Fund/);
   assert.match(workspace, /GM Approvals/);
   assert.match(workspace, /Reverse posted transaction/);
@@ -194,6 +193,10 @@ test("Cash In and Cash Out actions are kept in the activity panel", () => {
   assert.match(workspace, /title="Revised Finance activity"/);
   assert.match(workspace, /Record Cash In/);
   assert.match(workspace, /Record Cash Out/);
+  assert.doesNotMatch(workspace, /detail \? <p className=/);
+  assert.doesNotMatch(workspace, /How the revised flow works/);
+  assert.doesNotMatch(workspace, /What happens after approval/);
+  assert.doesNotMatch(workspace, /Commission rule/);
   assert.doesNotMatch(workspace, /Enter any collection amount manually\. No downpayment percentage or automatic payment restriction is applied/);
   assert.doesNotMatch(workspace, /The project, amount, collection date, reference, and note are entered in a modal/);
   assert.doesNotMatch(workspace, /Choose a project for project expenses or Working Funds for an operating expense/);
@@ -223,8 +226,8 @@ test("Cash Out uses an explicit Project or Non-project source toggle", () => {
   assert.match(workspace, /aria-label="Cash Out source"/);
   assert.match(workspace, /aria-pressed=\{cashOut\.source === source\}/);
   assert.match(workspace, /cashOut\.source === "project"/);
-  assert.match(workspace, /Project Cash Out uses the selected project balance/);
-  assert.match(workspace, /Non-project Cash Out uses the Daily Fund balance/);
+  assert.doesNotMatch(workspace, /Project Cash Out uses the selected project balance/);
+  assert.doesNotMatch(workspace, /Non-project Cash Out uses the Daily Fund balance/);
   assert.match(workspace, /p_project_fund_id: isProjectCashOut \? cashOut\.projectId : null/);
   assert.match(workspace, /p_daily_fund_request_id: isProjectCashOut \? null : cashOut\.dailyFundRequestId/);
 });
