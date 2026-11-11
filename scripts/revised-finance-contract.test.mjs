@@ -157,10 +157,6 @@ test("Finance uses one Accounting & Finance membership role", () => {
 });
 
 test("the visible Finance flow is project-ledger based", () => {
-  assert.match(workspace, /Accounting &(?:amp;| )Finance/);
-  assert.match(workspace, /Capital & Working Funds/);
-  assert.match(workspace, /Cash In & Cash Out/);
-  assert.match(workspace, /Finance Requests/);
   assert.match(workspace, /Project Finance Monitoring/);
   assert.match(workspace, /Open breakdown/);
   assert.match(workspace, /Project Cash In breakdown/);
@@ -176,7 +172,6 @@ test("the visible Finance flow is project-ledger based", () => {
   assert.match(workspace, /update_finance_revised_category/);
   assert.match(workspace, /delete_finance_revised_category/);
   assert.match(workspace, /Daily Fund/);
-  assert.match(workspace, /GM Approvals/);
   assert.match(workspace, /Reverse posted transaction/);
   assert.match(workspace, /create_finance_revised_daily_fund_request/);
   assert.match(workspace, /create_finance_revised_daily_fund_return/);
@@ -213,6 +208,10 @@ test("Finance Overview renders each metric in its own card", () => {
   assert.match(workspace, /function MetricCard\(/);
   assert.match(workspace, /<MetricCard><Metric label="Total Cash on Hand"/);
   assert.match(workspace, /<MetricCard><Metric label="Open commission payables"/);
+});
+
+test("Finance pages do not repeat the sidebar page heading", () => {
+  assert.doesNotMatch(workspace, /<h1/);
 });
 
 test("costing errors block misleading project PDF exports", () => {

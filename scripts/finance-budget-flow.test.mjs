@@ -233,7 +233,7 @@ test("full Finance GM access controls Capital, Working, and Daily Funds", () => 
   assert.match(revisedWorkspace, /create_finance_revised_capital_contribution/);
   assert.match(revisedWorkspace, /create_finance_revised_capital_to_working/);
   assert.match(revisedWorkspace, /review_finance_revised_daily_fund_request/);
-  assert.match(revisedWorkspace, /Capital & Working Funds/);
+  assert.match(mainWorkspace, /Finance Funds/);
   assert.match(revisedWorkspace, /Daily Fund/);
 });
 

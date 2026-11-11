@@ -145,7 +145,7 @@ test("commission payouts use the revised project ledger and activity history", (
   assert.match(revisedFinanceWorkspace, /create_finance_revised_commission_payout/);
   assert.match(revisedFinanceWorkspace, /Request payout/);
   assert.match(revisedFinanceWorkspace, /Project Cash Out/);
-  assert.match(revisedFinanceWorkspace, /Activity History/);
+  assert.match(workspace, /Finance Activity History/);
   assert.match(revisedFinanceWorkspace, /commission_allocation_id/);
   assert.doesNotMatch(revisedFinanceWorkspace, /commission_history/);
 });

@@ -1554,8 +1554,6 @@ export function FinanceRevisedWorkspace({
 
   return (
     <div className="finance-revised-workspace space-y-5">
-      <h1 className="text-[24px] font-bold tracking-tight text-[var(--color-text-primary)]">{tab === "funds" ? "Capital & Working Funds" : tab === "daily_fund" ? "Daily Fund" : tab === "cash_on_hand" ? "Cash on Hand" : tab === "transactions" ? "Cash In & Cash Out" : tab === "requests" ? "Finance Requests" : tab === "approvals" ? "GM Approvals" : tab === "projects" ? "Finance Monitoring" : tab === "history" ? "Activity History" : "Accounting & Finance"}</h1>
-
       {notice ? <NotificationDialog message={notice} title="Finance update" tone="success" primaryLabel="Close" close={() => setNotice(null)} /> : null}
       {error ? <NotificationDialog message={error} title="Finance error" tone="error" primaryLabel="Close" close={() => setError(null)} /> : null}
 
