@@ -1381,15 +1381,14 @@ export function FinanceRevisedWorkspace({
 
   const renderTransactions = () => (
     <div className="space-y-5">
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Panel title="Project Cash In" detail="Enter any collection amount manually. No downpayment percentage or automatic payment restriction is applied." action={<button type="button" className="button-primary inline-flex items-center gap-2 text-[11px]" onClick={() => setDialog("cash_in")} disabled={!canOperate}><ArrowDownToLine size={15} /> Record Cash In</button>}>
-          <p className="p-4 text-[11px] leading-5 text-[var(--color-text-secondary)]">The project, amount, collection date, reference, and note are entered in a modal. GM approval is required before the selected project balance changes.</p>
-        </Panel>
-        <Panel title="Cash Out" detail="Choose a project for project expenses or Working Funds for an operating expense." action={<button type="button" className="button-primary inline-flex items-center gap-2 text-[11px]" onClick={() => setDialog("cash_out")} disabled={!canOperate}><ArrowUpFromLine size={15} /> Record Cash Out</button>}>
-        <p className="p-4 text-[11px] leading-5 text-[var(--color-text-secondary)]">Project Cash Out is limited to that project&apos;s balance. Non-project Cash Out is limited to the Daily Fund balance. GM approval is required before posting.</p>
-        </Panel>
-      </div>
-      <Panel title="Revised Finance activity" detail="Only approved rows affect the Capital, Working Fund, or project balances.">
+      <Panel
+        title="Revised Finance activity"
+        detail="Only approved rows affect the Capital, Working Fund, or project balances."
+        action={<div className="flex flex-wrap justify-end gap-2">
+          <button type="button" className="button-primary inline-flex items-center gap-2 text-[11px]" onClick={() => setDialog("cash_in")} disabled={!canOperate}><ArrowDownToLine size={15} /> Record Cash In</button>
+          <button type="button" className="button-primary inline-flex items-center gap-2 text-[11px]" onClick={() => setDialog("cash_out")} disabled={!canOperate}><ArrowUpFromLine size={15} /> Record Cash Out</button>
+        </div>}
+      >
         <ActivityTable transactions={transactions} canApprove={gm} onDetails={(transaction) => setSelectedTransaction(transaction)} onReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }} onRevise={canOperate ? beginTransactionRevision : undefined} />
       </Panel>
     </div>

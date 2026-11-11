@@ -190,6 +190,16 @@ test("the visible Finance flow is project-ledger based", () => {
   assert.doesNotMatch(workspace, /finance_account_id|finance_accounts/);
 });
 
+test("Cash In and Cash Out actions are kept in the activity panel", () => {
+  assert.match(workspace, /title="Revised Finance activity"/);
+  assert.match(workspace, /Record Cash In/);
+  assert.match(workspace, /Record Cash Out/);
+  assert.doesNotMatch(workspace, /Enter any collection amount manually\. No downpayment percentage or automatic payment restriction is applied/);
+  assert.doesNotMatch(workspace, /The project, amount, collection date, reference, and note are entered in a modal/);
+  assert.doesNotMatch(workspace, /Choose a project for project expenses or Working Funds for an operating expense/);
+  assert.doesNotMatch(workspace, /Project Cash Out is limited to that project&apos;s balance/);
+});
+
 test("costing errors block misleading project PDF exports", () => {
   assert.match(workspace, /costingError/);
   assert.match(workspace, /PDF export is disabled/);
