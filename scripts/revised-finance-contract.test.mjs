@@ -13,6 +13,7 @@ const migration = [
 ].join("\n");
 const integrityMigration = readFileSync(join(root, "supabase", "migrations", "20261111064207_revised_finance_integrity_fixes.sql"), "utf8");
 const fundModalMigration = readFileSync(join(root, "supabase", "migrations", "20261111085800_revised_finance_gm_fund_modal_simplification.sql"), "utf8");
+const actorVisibilityMigration = readFileSync(join(root, "supabase", "migrations", "20261111121304_revised_finance_actor_visibility.sql"), "utf8");
 const roleMigration = readFileSync(join(root, "supabase", "migrations", "20261111054901_unify_accounting_finance_role.sql"), "utf8");
 const workspace = readFileSync(join(root, "components", "finance-revised-workspace.tsx"), "utf8");
 const host = readFileSync(join(root, "components", "huswell-workspace.tsx"), "utf8");
@@ -225,6 +226,23 @@ test("GM approvals are organized into counted request tabs", () => {
   assert.match(workspace, /approvalCounts/);
   assert.match(workspace, /Pending Working Fund requests/);
   assert.match(workspace, /Pending Daily Fund requests/);
+});
+
+test("Finance audit actors are visible for transactions and fund requests", () => {
+  assert.match(workspace, />Actor<\/th>/);
+  assert.match(workspace, />Requested by<\/th>/);
+  assert.match(workspace, /submitted_by_name/);
+  assert.match(workspace, /requested_by_name/);
+  assert.match(workspace, /approved_by_name/);
+  assert.match(workspace, /Requested at/);
+  assert.match(workspace, /Reviewed by/);
+  assert.match(actorVisibilityMigration, /create or replace view public\.finance_revised_working_fund_request_feed/);
+  assert.match(actorVisibilityMigration, /create or replace view public\.finance_revised_daily_fund_request_feed/);
+  assert.match(actorVisibilityMigration, /requested_by_name/);
+  assert.match(actorVisibilityMigration, /approved_by_name/);
+  assert.match(actorVisibilityMigration, /left join public\.profiles requested_profile/);
+  assert.match(actorVisibilityMigration, /left join public\.profiles approved_profile/);
+  assert.match(actorVisibilityMigration, /with \(security_invoker = true\)/);
 });
 
 test("Finance Monitoring uses project cards and the shared blue table treatment", () => {
