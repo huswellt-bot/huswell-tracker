@@ -26,6 +26,7 @@ type Row = Record<string, unknown>;
 type RevisedTab = "dashboard" | "funds" | "daily_fund" | "cash_on_hand" | "transactions" | "requests" | "approvals" | "projects" | "commissions" | "history";
 type DialogKind = "capital" | "transfer" | "daily_request" | "daily_return" | "cash_in" | "cash_out" | null;
 type CategoryDirection = "income" | "expense";
+type CashOutSource = "project" | "non_project";
 type ApprovalTab = "all" | "cash_in" | "cash_out" | "working_funds" | "daily_fund";
 type ApprovalItemKind = "transaction" | "working_request" | "daily_request";
 
@@ -478,6 +479,7 @@ export function FinanceRevisedWorkspace({
     note: "",
   });
   const [cashOut, setCashOut] = useState({
+    source: "project" as CashOutSource,
     projectId: "",
     dailyFundRequestId: "",
     categoryId: "",
@@ -662,6 +664,7 @@ export function FinanceRevisedWorkspace({
       return;
     }
     setCashOut({
+      source: ["project_cash_out", "commission_payout"].includes(kind) ? "project" : "non_project",
       projectId: ["project_cash_out", "commission_payout"].includes(kind) ? textValue(transaction, "project_fund_id") : "",
       dailyFundRequestId: kind === "operating_cash_out" ? textValue(transaction, "daily_fund_request_id") : "",
       categoryId: textValue(transaction, "category_id"),
@@ -712,33 +715,34 @@ export function FinanceRevisedWorkspace({
   const handleCashOut = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const commissionRevision = revisionSource && textValue(revisionSource, "transaction_kind") === "commission_payout";
-    if ((!cashOut.categoryId && !commissionRevision) || Number(cashOut.amount) <= 0 || (!cashOut.projectId && !cashOut.dailyFundRequestId)) return;
+    const isProjectCashOut = cashOut.source === "project";
+    if ((!cashOut.categoryId && !commissionRevision) || Number(cashOut.amount) <= 0 || (isProjectCashOut ? !cashOut.projectId : !cashOut.dailyFundRequestId)) return;
     setSaving(true);
     try {
       const { error: requestError } = revisionSource
         ? await client.rpc("resubmit_finance_revised_transaction", {
           p_original_transaction_id: textValue(revisionSource, "id"),
-          p_project_fund_id: cashOut.projectId || null,
+          p_project_fund_id: isProjectCashOut ? cashOut.projectId : null,
           p_amount: Number(cashOut.amount),
           p_category_id: cashOut.categoryId || null,
           p_transaction_date: cashOut.date,
           p_reference_number: cashOut.reference || null,
           p_note: cashOut.note || null,
-          p_daily_fund_request_id: cashOut.projectId ? null : cashOut.dailyFundRequestId,
+          p_daily_fund_request_id: isProjectCashOut ? null : cashOut.dailyFundRequestId,
         })
         : await client.rpc("create_finance_revised_cash_out_with_category", {
           p_organization_id: organizationId,
-          p_project_fund_id: cashOut.projectId || null,
+          p_project_fund_id: isProjectCashOut ? cashOut.projectId : null,
           p_amount: Number(cashOut.amount),
           p_category_id: cashOut.categoryId,
           p_transaction_date: cashOut.date,
           p_reference_number: cashOut.reference || null,
           p_note: cashOut.note || null,
-          p_daily_fund_request_id: cashOut.projectId ? null : cashOut.dailyFundRequestId,
+          p_daily_fund_request_id: isProjectCashOut ? null : cashOut.dailyFundRequestId,
         });
       if (requestError) throw new Error(requestError.message);
       closeTransactionDialog();
-      setCashOut({ projectId: "", dailyFundRequestId: "", categoryId: "", amount: "", date: localDate(), reference: "", note: "" });
+      setCashOut({ source: "project", projectId: "", dailyFundRequestId: "", categoryId: "", amount: "", date: localDate(), reference: "", note: "" });
       finish(revisionSource ? "Corrected Cash Out was resubmitted for GM approval." : "Cash Out was submitted for GM approval.");
     } catch (caught) {
       showError(caught);
@@ -1605,10 +1609,32 @@ export function FinanceRevisedWorkspace({
         </form>
       </Modal> : null}
 
-      {dialog === "cash_out" && !commissionRevisionSource ? <Modal title={revisionSource ? "Correct and resubmit Cash Out" : "Record Cash Out"} detail={revisionSource ? "Update the requested correction. The original submission remains in the audit history." : "Choose a project for project expenses or leave Project blank for a non-project expense from Daily Fund."} close={closeTransactionDialog}>
+      {dialog === "cash_out" && !commissionRevisionSource ? <Modal title={revisionSource ? "Correct and resubmit Cash Out" : "Record Cash Out"} detail={revisionSource ? "Update the requested correction. The original submission remains in the audit history." : "Choose Project or Non-project. Project expenses use the selected project balance. Non-project expenses use an approved Daily Fund request."} close={closeTransactionDialog}>
         <form className="grid gap-3 sm:grid-cols-2" onSubmit={handleCashOut}>
-        <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Budget source</span><select className="input mt-1 w-full" value={cashOut.projectId} onChange={(event) => setCashOut((current) => ({ ...current, projectId: event.target.value, dailyFundRequestId: "" }))} disabled={Boolean(revisionSource)}><option value="">Daily Fund · Non-project expense</option>{openProjects.map((project) => <option key={textValue(project, "project_fund_id")} value={textValue(project, "project_fund_id")}>{textValue(project, "project_name")} · Project budget</option>)}</select></label>
-          {!cashOut.projectId ? <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Daily Fund request</span><select className="input mt-1 w-full" value={cashOut.dailyFundRequestId} onChange={(event) => setCashOut((current) => ({ ...current, dailyFundRequestId: event.target.value }))} required><option value="">Select an approved Daily Fund request</option>{dailyFundRequests.filter((request) => ["approved", "partially_returned"].includes(textValue(request, "status")) && numberValue(request, "unused_amount") > 0).map((request) => <option key={textValue(request, "id")} value={textValue(request, "id")}>{dateLabel(request.fund_date)} · {textValue(request, "purpose")} · {amount(request.unused_amount)} remaining</option>)}</select><span className="mt-1 block text-[10px] text-[var(--color-text-secondary)]">Every non-project Cash Out is assigned to an approved Daily Fund request so its remaining budget can be tracked.</span></label> : null}
+          <div className="sm:col-span-2">
+            <span className="block text-[11px] font-medium text-[var(--color-text-primary)]">Cash Out source</span>
+            <div className="mt-1 grid grid-cols-2 gap-2" role="group" aria-label="Cash Out source">
+              {(["project", "non_project"] as CashOutSource[]).map((source) => (
+                <button
+                  key={source}
+                  type="button"
+                  className={"button-secondary text-[11px] " + (cashOut.source === source ? "border-[var(--color-accent)] bg-[var(--color-surface-muted)] text-[var(--color-text-primary)]" : "")}
+                  onClick={() => setCashOut((current) => ({
+                    ...current,
+                    source,
+                    projectId: source === "project" ? current.projectId : "",
+                    dailyFundRequestId: source === "non_project" ? current.dailyFundRequestId : "",
+                  }))}
+                  disabled={Boolean(revisionSource)}
+                  aria-pressed={cashOut.source === source}
+                >
+                  {source === "project" ? "Project" : "Non-project"}
+                </button>
+              ))}
+            </div>
+            <span className="mt-1 block text-[10px] text-[var(--color-text-secondary)]">Project Cash Out uses the selected project balance. Non-project Cash Out uses the Daily Fund balance.</span>
+          </div>
+          {cashOut.source === "project" ? <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Project</span><select className="input mt-1 w-full" value={cashOut.projectId} onChange={(event) => setCashOut((current) => ({ ...current, projectId: event.target.value }))} disabled={Boolean(revisionSource)} required><option value="">Select project</option>{openProjects.map((project) => <option key={textValue(project, "project_fund_id")} value={textValue(project, "project_fund_id")}>{textValue(project, "project_name")} · Project budget</option>)}</select></label> : <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Daily Fund request</span><select className="input mt-1 w-full" value={cashOut.dailyFundRequestId} onChange={(event) => setCashOut((current) => ({ ...current, dailyFundRequestId: event.target.value }))} required><option value="">Select an approved Daily Fund request</option>{dailyFundRequests.filter((request) => ["approved", "partially_returned"].includes(textValue(request, "status")) && numberValue(request, "unused_amount") > 0).map((request) => <option key={textValue(request, "id")} value={textValue(request, "id")}>{dateLabel(request.fund_date)} · {textValue(request, "purpose")} · {amount(request.unused_amount)} remaining</option>)}</select><span className="mt-1 block text-[10px] text-[var(--color-text-secondary)]">Every non-project Cash Out is assigned to an approved Daily Fund request so its remaining budget can be tracked.</span></label>}
           <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Cash Out category</span><div className="mt-1 flex items-center gap-2"><select className="input w-full" value={cashOut.categoryId} onChange={(event) => handleCategorySelection("expense", event.target.value)} required><option value="">Select Cash Out category</option>{categories.filter((category) => textValue(category, "direction") === "expense").map((category) => <option key={textValue(category, "category_id")} value={textValue(category, "category_id")}>{textValue(category, "name")}</option>)}<option value={addCategoryOptionValue}>＋ Add Cash Out category</option></select><button type="button" className="button-secondary inline-flex shrink-0 items-center gap-1 text-[10px]" onClick={() => openCategoryManager("expense")}><Tag size={13} /> Manage</button></div></label>
           <Field label="Amount" value={cashOut.amount} onChange={(value) => setCashOut((current) => ({ ...current, amount: value }))} type="number" min="0.01" step="0.01" required />
           <Field label="Cash Out date" value={cashOut.date} onChange={(value) => setCashOut((current) => ({ ...current, date: value }))} type="date" required />

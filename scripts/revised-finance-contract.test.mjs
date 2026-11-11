@@ -207,6 +207,18 @@ test("Finance notifications use dismissible modal dialogs", () => {
   assert.doesNotMatch(host, /NotificationToast/);
 });
 
+test("Cash Out uses an explicit Project or Non-project source toggle", () => {
+  assert.match(workspace, /type CashOutSource = "project" \| "non_project"/);
+  assert.match(workspace, /Cash Out source/);
+  assert.match(workspace, /aria-label="Cash Out source"/);
+  assert.match(workspace, /aria-pressed=\{cashOut\.source === source\}/);
+  assert.match(workspace, /cashOut\.source === "project"/);
+  assert.match(workspace, /Project Cash Out uses the selected project balance/);
+  assert.match(workspace, /Non-project Cash Out uses the Daily Fund balance/);
+  assert.match(workspace, /p_project_fund_id: isProjectCashOut \? cashOut\.projectId : null/);
+  assert.match(workspace, /p_daily_fund_request_id: isProjectCashOut \? null : cashOut\.dailyFundRequestId/);
+});
+
 test("GM fund modals use automatic dates and only the required amount fields", () => {
   const capitalStart = workspace.indexOf('{dialog === "capital"');
   const transferStart = workspace.indexOf('{dialog === "transfer"');
