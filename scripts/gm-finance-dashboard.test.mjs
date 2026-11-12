@@ -14,7 +14,7 @@ const workspace = readFileSync(
   "utf8",
 );
 const revisedMigration = readFileSync(
-  join(repoRoot, "supabase", "migrations", "20261112074513_retire_legacy_finance_surface.sql"),
+  join(repoRoot, "supabase", "migrations", "20261112004726_20261112074513_retire_legacy_finance_surface.sql"),
   "utf8",
 );
 
