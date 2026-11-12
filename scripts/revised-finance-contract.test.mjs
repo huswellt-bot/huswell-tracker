@@ -13,11 +13,14 @@ const migration = [
 ].join("\n");
 const integrityMigration = readFileSync(join(root, "supabase", "migrations", "20261111083110_revised_finance_integrity_fixes.sql"), "utf8");
 const fundModalMigration = readFileSync(join(root, "supabase", "migrations", "20261111091638_revised_finance_gm_fund_modal_simplification.sql"), "utf8");
+const workingToCapitalMigration = readFileSync(join(root, "supabase", "migrations", "20261112100000_revised_finance_working_to_capital.sql"), "utf8");
 const actorVisibilityMigration = readFileSync(join(root, "supabase", "migrations", "20261111122521_revised_finance_actor_visibility.sql"), "utf8");
 const revisionMigration = readFileSync(join(root, "supabase", "migrations", "20261111135536_revised_finance_revision_flow.sql"), "utf8");
 const accessMigration = readFileSync(join(root, "supabase", "migrations", "20261111233138_revised_finance_access_and_current_balances.sql"), "utf8");
 const legacyBoundaryMigration = readFileSync(join(root, "supabase", "migrations", "20261112004726_20261112074513_retire_legacy_finance_surface.sql"), "utf8");
 const accountantWriteMigration = readFileSync(join(root, "supabase", "migrations", "20261112004737_20261112091500_revised_finance_accountant_write_boundary.sql"), "utf8");
+const sharedPoolMigration = readFileSync(join(root, "supabase", "migrations", "20261112113000_revised_finance_shared_daily_pool_and_receipts.sql"), "utf8");
+const reviewFixMigration = readFileSync(join(root, "supabase", "migrations", "20261112130000_revised_finance_review_fixes.sql"), "utf8");
 const roleMigration = readFileSync(join(root, "supabase", "migrations", "20261111054901_unify_accounting_finance_role.sql"), "utf8");
 const workspace = readFileSync(join(root, "components", "finance-revised-workspace.tsx"), "utf8");
 const host = readFileSync(join(root, "components", "huswell-workspace.tsx"), "utf8");
@@ -116,6 +119,52 @@ test("Daily Fund isolates non-project Cash Out from Working Funds", () => {
   assert.match(migration, /daily_fund_request_id/);
 });
 
+test("shared Daily Fund pool and receipt evidence are enforced by the revised flow", () => {
+  assert.match(sharedPoolMigration, /add column if not exists receipt_storage_path/);
+  assert.match(sharedPoolMigration, /add constraint finance_revised_transactions_daily_fund_link_check/);
+  assert.match(sharedPoolMigration, /transaction_kind in \('daily_fund_return', 'operating_cash_out', 'adjustment'\)/);
+  assert.match(sharedPoolMigration, /create or replace function public\.create_finance_revised_cash_out_with_receipt/);
+  assert.match(sharedPoolMigration, /if p_project_fund_id is null/);
+  assert.match(sharedPoolMigration, /private\.finance_revised_balance\(p_organization_id, 'daily'\)/);
+  assert.match(sharedPoolMigration, /create or replace function private\.post_finance_revised_transaction_pool_v2/);
+  assert.match(sharedPoolMigration, /create or replace function public\.create_finance_revised_daily_fund_pool_return/);
+  assert.match(sharedPoolMigration, /'available_for_return'/);
+  assert.match(sharedPoolMigration, /finance_revised_validate_receipt/);
+  assert.match(sharedPoolMigration, /insert into storage\.buckets \(id, name, public\)/);
+  assert.match(sharedPoolMigration, /values \('finance-receipts', 'finance-receipts', false\)/);
+  assert.match(sharedPoolMigration, /finance receipts: revised transaction upload/);
+  assert.match(sharedPoolMigration, /revoke all on function public\.create_finance_revised_cash_out_with_category/);
+  assert.match(sharedPoolMigration, /grant execute on function public\.create_finance_revised_cash_out_with_receipt/);
+  assert.match(workspace, /Balance after Cash In/);
+  assert.match(workspace, /Current Daily Fund balance/);
+  assert.match(workspace, /View receipt/);
+  assert.doesNotMatch(workspace, /dailyFundRequestId: ""/);
+});
+
+test("shared Daily Fund returns can be reversed and pool reporting is explicit", () => {
+  assert.match(reviewFixMigration, /transaction_kind = 'daily_fund_return'[\s\S]*daily_fund_request_id is not null/);
+  assert.match(reviewFixMigration, /Shared-pool returns have no request ID[\s\S]*generic ledger reversal/);
+  assert.match(reviewFixMigration, /null::numeric as unused_amount/);
+  assert.match(reviewFixMigration, /shared_pool_balance/);
+  assert.match(reviewFixMigration, /shared_pool_spent_amount/);
+  assert.match(reviewFixMigration, /shared_pool_returned_amount/);
+});
+
+test("Finance receipt validation checks stored object metadata and retires old upload policies", () => {
+  assert.match(reviewFixMigration, /p_receipt_content_type is null/);
+  assert.match(reviewFixMigration, /storage_object\.metadata ->> 'mimetype'/);
+  assert.match(reviewFixMigration, /storage_object\.metadata ->> 'size'/);
+  assert.match(reviewFixMigration, /allowed_mime_types = array\['image\/jpeg', 'image\/png', 'image\/webp'\]/);
+  assert.match(reviewFixMigration, /case[\s\S]*split_part\(name, '\/', 1\)::uuid[\s\S]*else null/);
+  assert.match(reviewFixMigration, /drop policy if exists "finance receipts: pending transaction upload"/);
+  assert.match(reviewFixMigration, /drop policy if exists "finance receipts: pending transaction read"/);
+  assert.match(reviewFixMigration, /drop policy if exists "finance receipts: pending transaction delete"/);
+});
+
+test("legacy Finance Foundation links fall back to an authorized workspace", () => {
+  assert.match(host, /requestedInitialView === "Finance Foundation"[\s\S]*defaultWorkspaceView/);
+});
+
 test("revised Finance exposes only authenticated RPC entry points", () => {
   for (const functionName of [
     "list_finance_revised_categories",
@@ -195,8 +244,10 @@ test("the visible Finance flow is project-ledger based", () => {
   assert.match(workspace, /delete_finance_revised_category/);
   assert.match(workspace, /Daily Fund/);
   assert.match(workspace, /Reverse posted transaction/);
+  assert.match(workspace, /Remove Capital Funds/);
+  assert.match(workspace, /Return to Capital Funds/);
   assert.match(workspace, /create_finance_revised_daily_fund_request/);
-  assert.match(workspace, /create_finance_revised_daily_fund_return/);
+  assert.match(workspace, /create_finance_revised_daily_fund_pool_return/);
   assert.match(workspace, /Cash on Hand breakdown/);
   assert.match(workspace, /Total Cash on Hand/);
   assert.match(workspace, /submitted_by_name/);
@@ -212,10 +263,14 @@ test("the visible Finance flow is project-ledger based", () => {
   assert.doesNotMatch(workspace, /finance_account_id|finance_accounts/);
 });
 
-test("Cash In and Cash Out actions are kept in the activity panel", () => {
+test("Cash In and Cash Out forms remain modal-only", () => {
   assert.match(workspace, /title="Revised Finance activity"/);
-  assert.match(workspace, /Record Cash In/);
-  assert.match(workspace, /Record Cash Out/);
+  assert.match(workspace, /dialog === "cash_in"/);
+  assert.match(workspace, /dialog === "cash_out"/);
+  const transactionsStart = workspace.indexOf("const renderTransactions");
+  const requestsStart = workspace.indexOf("const renderRequests", transactionsStart);
+  assert.ok(transactionsStart >= 0 && requestsStart > transactionsStart);
+  assert.doesNotMatch(workspace.slice(transactionsStart, requestsStart), /Record Cash In|Record Cash Out/);
   assert.doesNotMatch(workspace, /detail \? <p className=/);
   assert.doesNotMatch(workspace, /How the revised flow works/);
   assert.doesNotMatch(workspace, /What happens after approval/);
@@ -262,7 +317,10 @@ test("Cash Out uses an explicit Project or Non-project source toggle", () => {
   assert.doesNotMatch(workspace, /Project Cash Out uses the selected project balance/);
   assert.doesNotMatch(workspace, /Non-project Cash Out uses the Daily Fund balance/);
   assert.match(workspace, /p_project_fund_id: isProjectCashOut \? cashOut\.projectId : null/);
-  assert.match(workspace, /p_daily_fund_request_id: isProjectCashOut \? null : cashOut\.dailyFundRequestId/);
+  assert.doesNotMatch(workspace, /p_daily_fund_request_id/);
+  assert.match(workspace, /create_finance_revised_cash_out_with_receipt/);
+  assert.match(workspace, /Balance after Cash Out/);
+  assert.match(workspace, /receiptFile/);
 });
 
 test("GM fund modals use automatic dates and only the required amount fields", () => {
@@ -285,8 +343,46 @@ test("GM fund modals use automatic dates and only the required amount fields", (
   assert.match(fundModalMigration, /note,[\s\S]*null/);
 });
 
+test("Capital Funds details stay concise and removal is balance-gated", () => {
+  const modalStart = workspace.indexOf("function CapitalFundDetailsModal");
+  const modalEnd = workspace.indexOf("function EmptyState", modalStart);
+  assert.ok(modalStart >= 0 && modalEnd > modalStart);
+  const capitalModal = workspace.slice(modalStart, modalEnd);
+  assert.match(capitalModal, /<Metric label="Amount" value=\{amount\(transaction\.amount\)\}/);
+  assert.match(capitalModal, /<Metric label="Date" value=\{dateLabel\(transaction\.transaction_date\)\}/);
+  assert.match(capitalModal, /canRemove/);
+  assert.match(capitalModal, /Remove Capital Funds/);
+  assert.doesNotMatch(capitalModal, /<Metric label="(?:Movement|From|To|Recorded by|Posted by|Current fund balances|Transaction ID)"/);
+  assert.match(workspace, /canRemoveSelectedCapital/);
+  assert.match(workspace, /numberValue\(currentFundBalances, "capital_funds"\) \+ 0\.001 >= selectedTransactionAmount/);
+  assert.match(accessMigration, /funds have already been used/);
+});
+
+test("GM can return a chosen Working Funds amount to Capital Funds", () => {
+  assert.match(workspace, /dialog === "return_capital"/);
+  assert.match(workspace, /Return Working Funds to Capital Funds/);
+  assert.match(workspace, /<Field label="Return amount"/);
+  assert.match(workspace, /create_finance_revised_working_to_capital/);
+  assert.match(workspace, /numberValue\(currentFundBalances, "working_funds"\)/);
+  assert.match(workingToCapitalMigration, /working_to_capital/);
+  assert.match(workingToCapitalMigration, /create or replace function public\.create_finance_revised_working_to_capital/);
+  assert.match(workingToCapitalMigration, /Working Funds balance is not enough for this return/);
+  assert.match(workingToCapitalMigration, /revoke all on function public\.create_finance_revised_working_to_capital\(uuid, numeric\) from public, anon/);
+  assert.match(workingToCapitalMigration, /grant execute on function public\.create_finance_revised_working_to_capital\(uuid, numeric\) to authenticated/);
+});
+
+test("Fund activities use one tabbed table", () => {
+  assert.match(workspace, /aria-label="Fund activity types"/);
+  assert.match(workspace, /const \[fundActivityTab, setFundActivityTab\]/);
+  assert.match(workspace, /const activityTransactions = showingCapitalActivity \? capitalTransactions : workingTransactions/);
+  assert.match(workspace, /<ActivityTable transactions=\{activityTransactions\}/);
+});
+
 test("GM approvals are organized into counted request tabs", () => {
-  assert.match(workspace, /aria-label="GM approval request types"/);
+  assert.match(workspace, /aria-label="Finance approval request types"/);
+  assert.match(workspace, /className="app-tabs overflow-x-auto border-b/);
+  assert.match(workspace, /className="app-tab whitespace-nowrap"/);
+  assert.match(workspace, /app-tab-count/);
   assert.match(workspace, /label: "All"/);
   assert.match(workspace, /label: "Cash In"/);
   assert.match(workspace, /label: "Cash Out"/);
@@ -377,6 +473,7 @@ test("GM and Accounting & Finance receive separate revised Finance navigation", 
   const accountingViews = host.slice(accountingStart, financeViewsStart);
   assert.match(gmViews, /Finance Funds/);
   assert.match(gmViews, /Finance Approvals/);
+  assert.match(host, /isManagementRole\r?\n                  \? "Overview"/);
   assert.doesNotMatch(gmViews, /"Finance Transactions"|"Finance Requests"|"Finance Commissions"/);
   assert.match(accountingViews, /Finance Transactions/);
   assert.match(accountingViews, /Finance Requests/);
@@ -386,10 +483,18 @@ test("GM and Accounting & Finance receive separate revised Finance navigation", 
   assert.match(host, /active === "Finance Transactions" && hasInternalFinanceAccess/);
 });
 
-test("Finance Monitoring uses project cards and the shared blue table treatment", () => {
-  assert.match(workspace, /grid gap-4 sm:grid-cols-2/);
-  assert.match(workspace, /Open breakdown/);
-  assert.match(workspace, /order-last flex items-center/);
+test("Finance Monitoring uses a project table and the shared blue table treatment", () => {
+  const projectsStart = workspace.indexOf("const renderProjects");
+  const historyStart = workspace.indexOf("const renderHistory", projectsStart);
+  assert.ok(projectsStart >= 0 && historyStart > projectsStart);
+  const projectsRenderer = workspace.slice(projectsStart, historyStart);
+  assert.match(projectsRenderer, /<table className="app-table w-full min-w-\[1240px\] text-left text-\[11px\]">/);
+  assert.match(projectsRenderer, /<th>Project<\/th>/);
+  assert.match(projectsRenderer, /<th>Total Direct Cost<\/th>/);
+  assert.match(projectsRenderer, /<th>Project balance<\/th>/);
+  assert.match(projectsRenderer, /Open breakdown/);
+  assert.doesNotMatch(projectsRenderer, /<article /);
+  assert.doesNotMatch(projectsRenderer, /grid gap-4 sm:grid-cols-2/);
   assert.match(globalStyles, /\.finance-revised-workspace table thead/);
   assert.match(globalStyles, /background: #1F4E79/);
   assert.match(globalStyles, /color: #ffffff/);

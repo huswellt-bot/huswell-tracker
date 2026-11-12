@@ -33,14 +33,21 @@ test("Transactions History uses one unified revised Finance table", () => {
   assert.match(revisedWorkspace, /finance_revised_working_fund_request_feed/);
   assert.match(revisedWorkspace, /finance_revised_daily_fund_request_feed/);
   assert.match(revisedWorkspace, /function TransactionsHistoryTable/);
+  assert.match(revisedWorkspace, /<div className="table-shell overflow-x-auto">/);
+  assert.match(revisedWorkspace, /finance activit\{rows\.length === 1 \? "y" : "ies"\} shown/);
+  assert.match(revisedWorkspace, /<table className="app-table w-full min-w-\[1240px\] text-left text-\[11px\]" aria-label="Finance money movement history">/);
   assert.match(revisedWorkspace, /Date &amp; time.*Activity.*From.*To.*Project \/ Client \/ Company.*Amount.*Status.*Actors/);
   assert.match(revisedWorkspace, /historyTransactionMovement/);
 });
 
-test("Capital Funds activity opens a dedicated movement details modal", () => {
+test("Capital Funds activity opens a concise details modal with a guarded removal action", () => {
   assert.match(revisedWorkspace, /function CapitalFundDetailsModal/);
-  assert.match(revisedWorkspace, /Current fund balances/);
-  assert.match(revisedWorkspace, /Date added/);
+  assert.match(revisedWorkspace, /<Metric label="Amount" value=\{amount\(transaction\.amount\)\}/);
+  assert.match(revisedWorkspace, /<Metric label="Date" value=\{dateLabel\(transaction\.transaction_date\)\}/);
+  assert.match(revisedWorkspace, /Remove Capital Funds/);
+  assert.match(revisedWorkspace, /canRemoveSelectedCapital/);
+  assert.doesNotMatch(revisedWorkspace, /Current fund balances/);
+  assert.doesNotMatch(revisedWorkspace, /Date added/);
   assert.match(revisedWorkspace, /CapitalFundDetailsModal transaction=\{selectedTransaction\}/);
   assert.match(revisedWorkspace, /Capital Funds added/);
   assert.match(revisedWorkspace, /Capital to Working Funds transfer/);

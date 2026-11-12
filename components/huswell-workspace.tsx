@@ -23219,7 +23219,9 @@ export function HuswellWorkspace({
         : initialView ?? defaultWorkspaceView;
   const normalizedInitialView: View = requestedInitialView === "Finance Daily Fund"
     ? "Finance Requests"
-    : requestedInitialView;
+    : requestedInitialView === "Finance Foundation"
+      ? defaultWorkspaceView
+      : requestedInitialView;
   const financePaymentViewAllowed =
     hasInternalFinanceAccess || ["super_admin", "owner", "admin"].includes(role);
   const safeInitialView = normalizedInitialView === "Payment Monitoring" && !financePaymentViewAllowed
@@ -24156,7 +24158,7 @@ export function HuswellWorkspace({
       detail: "Review each project’s collections, direct-cost costing, Cash Out, support, and remaining balance.",
     },
     "Finance Approvals": {
-      title: "GM Approvals",
+      title: "Finance Approval",
       detail: "Approve or return Cash In, Cash Out, Working Fund support, and repayment transactions.",
     },
     "Finance Transactions": {
@@ -24576,7 +24578,7 @@ export function HuswellWorkspace({
               ? "Production"
               : view === "Finance Overview"
                 ? isManagementRole
-                  ? "GM Finance"
+                  ? "Overview"
                   : "Accounting & Finance"
               : view === "Finance Funds"
                 ? "Capital & Working Funds"
@@ -24591,7 +24593,7 @@ export function HuswellWorkspace({
               : view === "Finance Reports"
                 ? "Project Monitoring"
               : view === "Finance Approvals"
-                ? "GM Approvals"
+                ? "Finance Approval"
               : view === "Finance Transactions" && hasInternalFinanceAccess
                 ? "Cash In & Cash Out"
               : view === "Finance Accounts"
