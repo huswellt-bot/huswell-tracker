@@ -21,6 +21,7 @@ const legacyBoundaryMigration = readFileSync(join(root, "supabase", "migrations"
 const accountantWriteMigration = readFileSync(join(root, "supabase", "migrations", "20261112004737_20261112091500_revised_finance_accountant_write_boundary.sql"), "utf8");
 const sharedPoolMigration = readFileSync(join(root, "supabase", "migrations", "20261112113000_revised_finance_shared_daily_pool_and_receipts.sql"), "utf8");
 const reviewFixMigration = readFileSync(join(root, "supabase", "migrations", "20261112130000_revised_finance_review_fixes.sql"), "utf8");
+const retiredReceiptPolicyMigration = readFileSync(join(root, "supabase", "migrations", "20261112143000_remove_retired_finance_receipt_policies.sql"), "utf8");
 const roleMigration = readFileSync(join(root, "supabase", "migrations", "20261111054901_unify_accounting_finance_role.sql"), "utf8");
 const workspace = readFileSync(join(root, "components", "finance-revised-workspace.tsx"), "utf8");
 const host = readFileSync(join(root, "components", "huswell-workspace.tsx"), "utf8");
@@ -159,6 +160,13 @@ test("Finance receipt validation checks stored object metadata and retires old u
   assert.match(reviewFixMigration, /drop policy if exists "finance receipts: pending transaction upload"/);
   assert.match(reviewFixMigration, /drop policy if exists "finance receipts: pending transaction read"/);
   assert.match(reviewFixMigration, /drop policy if exists "finance receipts: pending transaction delete"/);
+});
+
+test("retired generic Finance receipt policies cannot affect quotation image uploads", () => {
+  assert.match(retiredReceiptPolicyMigration, /drop policy if exists "finance receipts: authorized read"/);
+  assert.match(retiredReceiptPolicyMigration, /drop policy if exists "finance receipts: finance delete"/);
+  assert.match(retiredReceiptPolicyMigration, /drop policy if exists "finance receipts: finance upload"/);
+  assert.doesNotMatch(retiredReceiptPolicyMigration, /create policy/);
 });
 
 test("legacy Finance Foundation links fall back to an authorized workspace", () => {
