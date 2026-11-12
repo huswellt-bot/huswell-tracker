@@ -6,7 +6,7 @@ import test from "node:test";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const accessMigration = readFileSync(
-  join(repoRoot, "supabase", "migrations", "20261111150000_revised_finance_access_and_current_balances.sql"),
+  join(repoRoot, "supabase", "migrations", "20261111233138_revised_finance_access_and_current_balances.sql"),
   "utf8",
 ).toLowerCase();
 const roleMigration = readFileSync(

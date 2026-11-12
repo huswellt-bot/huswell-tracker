@@ -13,6 +13,10 @@ const workspace = readFileSync(
   join(repoRoot, "components", "huswell-workspace.tsx"),
   "utf8",
 );
+const revisedMigration = readFileSync(
+  join(repoRoot, "supabase", "migrations", "20261112074513_retire_legacy_finance_surface.sql"),
+  "utf8",
+);
 
 test("GM Finance dashboard aggregate is role-restricted and returns the money-flow payload", () => {
   assert.match(migration, /private\.has_text_role\(/);
@@ -24,6 +28,15 @@ test("GM Finance dashboard aggregate is role-restricted and returns the money-fl
   assert.match(migration, /'commission_payables_open'/);
   assert.match(migration, /'monthly_cash_flow'/);
   assert.match(migration, /grant execute on function public\.shared_kpi_finance_dashboard/);
+});
+
+test("GM Finance dashboard reads the revised project ledger", () => {
+  assert.match(revisedMigration, /create or replace function public\.shared_kpi_finance_dashboard/);
+  assert.match(revisedMigration, /finance_revised_ledger_entries/);
+  assert.match(revisedMigration, /'project', 'daily'/);
+  assert.doesNotMatch(revisedMigration, /shared_kpi_finance_dashboard_prod_gate_legacy/);
+  assert.doesNotMatch(revisedMigration, /from public\.finance_accounts/);
+  assert.doesNotMatch(revisedMigration, /from public\.finance_transactions/);
 });
 
 test("GM dashboard renders the cash position and supporting financial metrics", () => {

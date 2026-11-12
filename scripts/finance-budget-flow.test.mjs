@@ -19,7 +19,7 @@ const homePage = readFileSync(join(repoRoot, "app", "page.tsx"), "utf8");
 const migrationPath = join(repoRoot, "supabase", "232_finance_monthly_budget_account_allocations.sql");
 const migration = existsSync(migrationPath) ? readFileSync(migrationPath, "utf8") : "";
 const revisedAccessMigration = readFileSync(
-  join(repoRoot, "supabase", "migrations", "20261111150000_revised_finance_access_and_current_balances.sql"),
+  join(repoRoot, "supabase", "migrations", "20261111233138_revised_finance_access_and_current_balances.sql"),
   "utf8",
 );
 const followUpMigrationPath = join(repoRoot, "supabase", "233_finance_gm_budget_only_and_legacy_compatibility.sql");

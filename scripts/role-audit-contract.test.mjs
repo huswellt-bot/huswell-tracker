@@ -89,9 +89,9 @@ test("Payment Monitoring cannot be opened by non-Finance roles", () => {
   );
   assert.match(
     workspace,
-    /if \(view === "Payment Monitoring" && !financePaymentViewAllowed\)/,
+    /if \(targetView === "Payment Monitoring" && !financePaymentViewAllowed\)/,
   );
-  assert.match(workspace, /const safeInitialView = requestedInitialView === "Payment Monitoring"/);
+  assert.match(workspace, /const safeInitialView = normalizedInitialView === "Payment Monitoring"/);
 });
 
 test("Finance access is assigned by the Accountant role, not a capability", () => {

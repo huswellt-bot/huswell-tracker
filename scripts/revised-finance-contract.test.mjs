@@ -15,7 +15,9 @@ const integrityMigration = readFileSync(join(root, "supabase", "migrations", "20
 const fundModalMigration = readFileSync(join(root, "supabase", "migrations", "20261111091638_revised_finance_gm_fund_modal_simplification.sql"), "utf8");
 const actorVisibilityMigration = readFileSync(join(root, "supabase", "migrations", "20261111122521_revised_finance_actor_visibility.sql"), "utf8");
 const revisionMigration = readFileSync(join(root, "supabase", "migrations", "20261111135536_revised_finance_revision_flow.sql"), "utf8");
-const accessMigration = readFileSync(join(root, "supabase", "migrations", "20261111150000_revised_finance_access_and_current_balances.sql"), "utf8");
+const accessMigration = readFileSync(join(root, "supabase", "migrations", "20261111233138_revised_finance_access_and_current_balances.sql"), "utf8");
+const legacyBoundaryMigration = readFileSync(join(root, "supabase", "migrations", "20261112074513_retire_legacy_finance_surface.sql"), "utf8");
+const accountantWriteMigration = readFileSync(join(root, "supabase", "migrations", "20261112091500_revised_finance_accountant_write_boundary.sql"), "utf8");
 const roleMigration = readFileSync(join(root, "supabase", "migrations", "20261111054901_unify_accounting_finance_role.sql"), "utf8");
 const workspace = readFileSync(join(root, "components", "finance-revised-workspace.tsx"), "utf8");
 const host = readFileSync(join(root, "components", "huswell-workspace.tsx"), "utf8");
@@ -155,6 +157,25 @@ test("Finance uses one Accounting & Finance membership role", () => {
   assert.match(userAdmin, /value="accountant">Accounting &amp; Finance/);
   assert.doesNotMatch(userAdmin, /value="internal_finance">Internal Finance/);
   assert.doesNotMatch(userAdmin, /value="external_finance">External Finance/);
+});
+
+test("legacy Finance roles, capabilities, and RPCs are blocked", () => {
+  assert.match(legacyBoundaryMigration, /organization_members_no_legacy_finance_roles/);
+  assert.match(legacyBoundaryMigration, /role::text in \('internal_finance', 'external_finance'\)/);
+  assert.match(legacyBoundaryMigration, /delete from public\.organization_member_capabilities/);
+  assert.match(legacyBoundaryMigration, /select false/);
+  assert.match(legacyBoundaryMigration, /p\.proname = any/);
+  assert.match(legacyBoundaryMigration, /'create_finance_account'/);
+  assert.match(legacyBoundaryMigration, /'create_finance_category'/);
+  assert.match(legacyBoundaryMigration, /'create_finance_transaction'/);
+  assert.match(legacyBoundaryMigration, /'approve_and_pay_finance_transaction'/);
+  assert.match(legacyBoundaryMigration, /'register_quotation_payment_with_account'/);
+  assert.match(legacyBoundaryMigration, /'resubmit_quotation_payment_with_account'/);
+  assert.match(legacyBoundaryMigration, /'update_pending_quotation_payment_account'/);
+  assert.match(legacyBoundaryMigration, /finance_accounts/);
+  assert.match(legacyBoundaryMigration, /finance_account_balances/);
+  assert.match(legacyBoundaryMigration, /finance_account_budget_summary/);
+  assert.match(legacyBoundaryMigration, /finance_transactions/);
 });
 
 test("the visible Finance flow is project-ledger based", () => {
@@ -334,6 +355,35 @@ test("revised Finance uses the Accountant role and current fund balances", () =>
   assert.match(accessMigration, /finance_revised_business_date/);
   assert.match(workspace, /get_finance_revised_current_balances/);
   assert.match(workspace, /currentFundBalances/);
+});
+
+test("GM approval is separate from Accountant operational Finance writes", () => {
+  assert.match(workspace, /const canOperate = role === "accountant"/);
+  assert.match(accountantWriteMigration, /finance_revised_is_accountant/);
+  assert.match(accountantWriteMigration, /create_finance_revised_cash_in_with_category_accountant_legacy/);
+  assert.match(accountantWriteMigration, /create_finance_revised_cash_out_with_category_accountant_legacy/);
+  assert.match(accountantWriteMigration, /create_finance_working_fund_request_accountant_legacy/);
+  assert.match(accountantWriteMigration, /create_finance_revised_daily_fund_request_accountant_legacy/);
+  assert.match(accountantWriteMigration, /grant execute on function public\.create_finance_revised_cash_in_with_category\(uuid, uuid, numeric, uuid, date, text, text\) to authenticated/);
+  assert.match(accountantWriteMigration, /grant execute on function public\.create_finance_revised_cash_out_with_category\(uuid, uuid, numeric, uuid, date, text, text, uuid\) to authenticated/);
+});
+
+test("GM and Accounting & Finance receive separate revised Finance navigation", () => {
+  const gmStart = host.indexOf("const gmFinanceSidebarViews");
+  const accountingStart = host.indexOf("const accountingFinanceSidebarViews");
+  const financeViewsStart = host.indexOf("const financeSidebarViews");
+  assert.ok(gmStart >= 0 && accountingStart > gmStart && financeViewsStart > accountingStart);
+  const gmViews = host.slice(gmStart, accountingStart);
+  const accountingViews = host.slice(accountingStart, financeViewsStart);
+  assert.match(gmViews, /Finance Funds/);
+  assert.match(gmViews, /Finance Approvals/);
+  assert.doesNotMatch(gmViews, /"Finance Transactions"|"Finance Requests"|"Finance Commissions"/);
+  assert.match(accountingViews, /Finance Transactions/);
+  assert.match(accountingViews, /Finance Requests/);
+  assert.match(accountingViews, /Finance Commissions/);
+  assert.doesNotMatch(accountingViews, /"Finance Funds"|"Finance Approvals"/);
+  assert.match(host, /const targetView: View = view === "Finance Daily Fund" \? "Finance Requests" : view/);
+  assert.match(host, /active === "Finance Transactions" && hasInternalFinanceAccess/);
 });
 
 test("Finance Monitoring uses project cards and the shared blue table treatment", () => {

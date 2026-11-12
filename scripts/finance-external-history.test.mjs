@@ -184,7 +184,7 @@ test("retired quotation payment receipts cannot write the legacy payment flow", 
 });
 
 test("External Finance actions are labeled and placed in the top navbar", () => {
-  assert.match(topHeader, /active === "Finance Transactions" && \(hasInternalFinanceAccess/);
+  assert.match(topHeader, /active === "Finance Transactions" && hasInternalFinanceAccess/);
   assert.match(topHeader, /<span className="hidden sm:inline">Cash In<\/span>/);
   assert.match(topHeader, /<span className="hidden sm:inline">Cash Out<\/span>/);
   assert.doesNotMatch(transactionTable, /Record Cash In|Submit Cash Out/);
@@ -273,7 +273,7 @@ test("Finance uses Project terminology without changing technical quotation iden
 });
 
 test("External Finance Cash In uses the semantic green action", () => {
-  assert.match(topHeader, /active === "Finance Transactions" && \(hasInternalFinanceAccess/);
+  assert.match(topHeader, /active === "Finance Transactions" && hasInternalFinanceAccess/);
   assert.match(topHeader, /<Button compact tone="green"/);
   assert.match(topHeader, /<span className="hidden sm:inline">Cash Out<\/span>/);
 });

@@ -190,17 +190,28 @@ type View =
 type FinanceActionRequest = "income" | "expense";
 type SidebarWorkspace = "sales_pricing" | "finance";
 
-const financeSidebarViews: View[] = [
+const gmFinanceSidebarViews: View[] = [
   "Finance Overview",
   "Finance Funds",
   "Finance Approvals",
+  "Finance Cash on Hand",
+  "Finance Monitoring",
+  "Finance Transactions History",
+];
+const accountingFinanceSidebarViews: View[] = [
+  "Finance Overview",
   "Finance Transactions",
-  "Finance Daily Fund",
   "Finance Cash on Hand",
   "Finance Monitoring",
   "Finance Requests",
   "Finance Commissions",
   "Finance Transactions History",
+];
+const financeSidebarViews: View[] = [
+  ...gmFinanceSidebarViews,
+  ...accountingFinanceSidebarViews,
+  // Kept as an internal alias so old links can be redirected into Requests.
+  "Finance Daily Fund",
 ];
 
 type SidebarQueueCountKey =
@@ -23184,6 +23195,15 @@ export function HuswellWorkspace({
   // Revised Finance access is role-based. A legacy capability row must not
   // turn a Sales/Pricing account into an Accounting & Finance user.
   const hasInternalFinanceAccess = role === "accountant";
+  const isManagementRole = memberRole(role);
+  const financeViewsForRole = useMemo(
+    () => isManagementRole
+      ? gmFinanceSidebarViews
+      : role === "accountant"
+        ? accountingFinanceSidebarViews
+        : [],
+    [isManagementRole, role],
+  );
   const financeRole = role;
   const revisedFinanceRole = role;
   const defaultWorkspaceView: View = role === "accountant"
@@ -23197,11 +23217,16 @@ export function HuswellWorkspace({
       : initialView === "Submissions"
         ? "Approvals"
         : initialView ?? defaultWorkspaceView;
+  const normalizedInitialView: View = requestedInitialView === "Finance Daily Fund"
+    ? "Finance Requests"
+    : requestedInitialView;
   const financePaymentViewAllowed =
     hasInternalFinanceAccess || ["super_admin", "owner", "admin"].includes(role);
-  const safeInitialView = requestedInitialView === "Payment Monitoring" && !financePaymentViewAllowed
+  const safeInitialView = normalizedInitialView === "Payment Monitoring" && !financePaymentViewAllowed
     ? defaultWorkspaceView
-    : requestedInitialView;
+    : financeSidebarViews.includes(normalizedInitialView) && !financeViewsForRole.includes(normalizedInitialView)
+      ? defaultWorkspaceView
+      : normalizedInitialView;
   const [active, setActive] = useState<View>(
     isTemporarilyHiddenView(safeInitialView)
       ? defaultWorkspaceView
@@ -23209,13 +23234,13 @@ export function HuswellWorkspace({
   );
   const isCombinedSalesPricingAccount = false;
   const [sidebarWorkspace, setSidebarWorkspace] = useState<SidebarWorkspace>(
-    financeSidebarViews.includes(safeInitialView) ? "finance" : "sales_pricing",
+    financeViewsForRole.includes(safeInitialView) ? "finance" : "sales_pricing",
   );
   const [leadMode, setLeadMode] = useState<LeadWorkspaceMode>("leads");
   const [mobile, setMobile] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [financeMenuOpen, setFinanceMenuOpen] = useState(
-    () => memberRole(role) && financeSidebarViews.includes(safeInitialView),
+    () => isManagementRole && financeViewsForRole.includes(safeInitialView),
   );
   const [store, setStore] = useState<Store>(blank);
   const [loading, setLoading] = useState(true);
@@ -23287,34 +23312,39 @@ export function HuswellWorkspace({
   const selectLeadWorkspaceMode = useCallback((mode: LeadWorkspaceMode) => {
     setLeadMode(mode);
     setActive(mode === "quotation" ? "Price Quotations" : "Leads");
-  }, []);
+  }, [setActive]);
   const navigate = useCallback((view: View) => {
-    if (isTemporarilyHiddenView(view)) {
+    const targetView: View = view === "Finance Daily Fund" ? "Finance Requests" : view;
+    if (financeSidebarViews.includes(targetView) && !financeViewsForRole.includes(targetView)) {
       setActive(defaultWorkspaceView);
       return;
     }
-    if (view === "Payment Monitoring" && !financePaymentViewAllowed) {
+    if (isTemporarilyHiddenView(targetView)) {
       setActive(defaultWorkspaceView);
       return;
     }
-    if (view === "Costing Breakdown") return selectLeadWorkspaceMode("quotation");
-    if (view === "Submissions") {
+    if (targetView === "Payment Monitoring" && !financePaymentViewAllowed) {
+      setActive(defaultWorkspaceView);
+      return;
+    }
+    if (targetView === "Costing Breakdown") return selectLeadWorkspaceMode("quotation");
+    if (targetView === "Submissions") {
       setActive("Approvals");
       return;
     }
-    if (view === "Price Quotations") {
+    if (targetView === "Price Quotations") {
       setLeadMode("quotation");
       setActive("Price Quotations");
       return;
     }
-    if (view === "Projects") {
+    if (targetView === "Projects") {
       setLeadMode("projects");
       setActive("Projects");
       return;
     }
-    if (view === "Leads") setLeadMode("leads");
-    setActive(view);
-  }, [defaultWorkspaceView, financePaymentViewAllowed, selectLeadWorkspaceMode]);
+    if (targetView === "Leads") setLeadMode("leads");
+    setActive(targetView);
+  }, [defaultWorkspaceView, financePaymentViewAllowed, financeViewsForRole, selectLeadWorkspaceMode, setActive]);
   const switchSidebarWorkspace = useCallback((workspace: SidebarWorkspace) => {
     setSidebarWorkspace(workspace);
     navigate(workspace === "finance" ? "Finance Overview" : "Dashboard");
@@ -23662,12 +23692,8 @@ export function HuswellWorkspace({
       "Finance Overview",
       "Finance Funds",
       "Finance Approvals",
-      "Finance Transactions",
-      "Finance Daily Fund",
       "Finance Cash on Hand",
       "Finance Monitoring",
-      "Finance Requests",
-      "Finance Commissions",
       "Payment Monitoring",
       "Finance Transactions History",
       "Commissions",
@@ -23684,12 +23710,8 @@ export function HuswellWorkspace({
       "Finance Overview",
       "Finance Funds",
       "Finance Approvals",
-      "Finance Transactions",
-      "Finance Daily Fund",
       "Finance Cash on Hand",
       "Finance Monitoring",
-      "Finance Requests",
-      "Finance Commissions",
       "Payment Monitoring",
       "Finance Transactions History",
       "Commissions",
@@ -23709,12 +23731,8 @@ export function HuswellWorkspace({
       "Finance Overview",
       "Finance Funds",
       "Finance Approvals",
-      "Finance Transactions",
-      "Finance Daily Fund",
       "Finance Cash on Hand",
       "Finance Monitoring",
-      "Finance Requests",
-      "Finance Commissions",
       "Payment Monitoring",
       "Finance Transactions History",
       "Commissions",
@@ -23747,7 +23765,7 @@ export function HuswellWorkspace({
     ],
     sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Announcements", "Policy"],
     warehouse: ["Dashboard", "Catalog", "Inventory", "Production", "Announcements", "Policy"],
-    accountant: ["Finance Overview", "Finance Transactions", "Finance Daily Fund", "Finance Cash on Hand", "Finance Monitoring", "Finance Requests", "Finance Commissions", "Finance Transactions History", "Announcements", "Policy"],
+    accountant: ["Finance Overview", "Finance Transactions", "Finance Cash on Hand", "Finance Monitoring", "Finance Requests", "Finance Commissions", "Finance Transactions History", "Announcements", "Policy"],
     lead_coordinator: ["Leads", "Lead Costing", "Announcements", "Policy"],
     payroll: ["Dashboard", "Payroll & Leave", "Letter Request", "Directory", "Announcements", "Policy"],
     production: ["Dashboard", "Production", "Inventory", "Finance Foundation", "Announcements", "Policy"],
@@ -23765,7 +23783,6 @@ export function HuswellWorkspace({
       "Policy",
     ],
   };
-  const isManagementRole = memberRole(role);
   const productionApprovalOnly = productionApprovalEnabled && !isManagementRole;
   const allowedRoleViews = [
     ...(allowedViews[role] ?? allowedViews.viewer),
@@ -23804,7 +23821,6 @@ export function HuswellWorkspace({
           items: [
             { view: "Finance Overview", icon: Wallet },
             { view: "Finance Transactions", icon: ReceiptText },
-            { view: "Finance Daily Fund", icon: Wallet },
             { view: "Finance Cash on Hand", icon: Wallet },
             { view: "Finance Monitoring", icon: CalendarDays },
             { view: "Finance Requests", icon: FileText },
@@ -23855,11 +23871,8 @@ export function HuswellWorkspace({
     { view: "Finance Overview", icon: Wallet },
     { view: "Finance Funds", icon: Landmark },
     { view: "Finance Approvals", icon: ClipboardCheck, badge: sidebarBadge("finance") },
-    { view: "Finance Transactions", icon: ReceiptText },
-    { view: "Finance Daily Fund", icon: Wallet },
     { view: "Finance Cash on Hand", icon: Wallet },
     { view: "Finance Monitoring", icon: CalendarDays },
-    { view: "Finance Commissions", icon: PhilippinePeso },
     { view: "Finance Transactions History", icon: ClipboardList },
   ];
   const accountingFinanceItems: {
@@ -23869,7 +23882,6 @@ export function HuswellWorkspace({
   }[] = [
     { view: "Finance Overview", icon: Wallet },
     { view: "Finance Transactions", icon: ReceiptText },
-    { view: "Finance Daily Fund", icon: Wallet },
     { view: "Finance Cash on Hand", icon: Wallet },
     { view: "Finance Monitoring", icon: CalendarDays },
     { view: "Finance Requests", icon: FileText },
@@ -24019,10 +24031,10 @@ export function HuswellWorkspace({
     }))
     .filter((group) => group.items.length > 0);
   useEffect(() => {
-    if (isManagementRole && financeSidebarViews.includes(active)) {
+    if (isManagementRole && financeViewsForRole.includes(active)) {
       setFinanceMenuOpen(true);
     }
-  }, [active, isManagementRole]);
+  }, [active, financeViewsForRole, isManagementRole]);
   const pageHeader: Record<View, { title: string; detail: string }> = {
     Dashboard: {
       title: isProjectOfficerRole(role) ? "KPI Dashboard" : role === "admin" ? "Performance" : "Dashboard",
@@ -24562,8 +24574,10 @@ export function HuswellWorkspace({
               ? "Production Status"
         : view === "Projects"
               ? "Production"
-              : view === "Finance Overview" && hasInternalFinanceAccess
-                ? "Overview"
+              : view === "Finance Overview"
+                ? isManagementRole
+                  ? "GM Finance"
+                  : "Accounting & Finance"
               : view === "Finance Funds"
                 ? "Capital & Working Funds"
               : view === "Finance Daily Fund"
@@ -24830,7 +24844,7 @@ export function HuswellWorkspace({
                 </Button>
               </div>
             )}
-            {active === "Finance Transactions" && (hasInternalFinanceAccess || isManagementRole) && (
+            {active === "Finance Transactions" && hasInternalFinanceAccess && (
               <div className="flex min-w-0 items-center gap-1.5">
                 <Button compact tone="green" onClick={() => setFinanceActionRequest("income")}>
                   <Plus size={13} /> <span className="hidden sm:inline">Cash In</span><span className="sr-only sm:hidden">Cash In</span>

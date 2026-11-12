@@ -514,7 +514,9 @@ export function FinanceRevisedWorkspace({
 }) {
   const client = useMemo(() => createClient(), []);
   const gm = isGm ?? ["super_admin", "owner", "admin"].includes(role);
-  const canOperate = gm || role === "accountant";
+  // GM reviews and posts submitted Finance activity; Accounting & Finance
+  // records Cash In/Cash Out and submits fund requests.
+  const canOperate = role === "accountant";
   const startingTab: RevisedTab =
     initialTab === "funds"
       ? "funds"
@@ -755,14 +757,14 @@ export function FinanceRevisedWorkspace({
   }, [load]);
 
   useEffect(() => {
-    if (!openAction) return;
+    if (!openAction || !canOperate) return;
     const timer = window.setTimeout(() => {
       setTab("transactions");
       setDialog(openAction === "income" ? "cash_in" : "cash_out");
       onOpenActionHandled?.();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [onOpenActionHandled, openAction]);
+  }, [canOperate, onOpenActionHandled, openAction]);
 
   const historyRows = useMemo<FinanceHistoryRow[]>(() => {
     const projectById = new Map(
@@ -1672,10 +1674,10 @@ export function FinanceRevisedWorkspace({
       <Panel
         title="Revised Finance activity"
         detail="Only approved rows affect the Capital, Working Fund, or project balances."
-        action={<div className="flex flex-wrap justify-end gap-2">
-          <button type="button" className="button-primary inline-flex items-center gap-2 text-[11px]" onClick={() => setDialog("cash_in")} disabled={!canOperate}><ArrowDownToLine size={15} /> Record Cash In</button>
-          <button type="button" className="button-primary inline-flex items-center gap-2 text-[11px]" onClick={() => setDialog("cash_out")} disabled={!canOperate}><ArrowUpFromLine size={15} /> Record Cash Out</button>
-        </div>}
+        action={canOperate ? <div className="flex flex-wrap justify-end gap-2">
+          <button type="button" className="button-primary inline-flex items-center gap-2 text-[11px]" onClick={() => setDialog("cash_in")}><ArrowDownToLine size={15} /> Record Cash In</button>
+          <button type="button" className="button-primary inline-flex items-center gap-2 text-[11px]" onClick={() => setDialog("cash_out")}><ArrowUpFromLine size={15} /> Record Cash Out</button>
+        </div> : null}
       >
         <ActivityTable transactions={transactions} canApprove={gm} onDetails={(transaction) => setSelectedTransaction(transaction)} onReview={(transaction) => { setReviewTransaction(transaction); setDecisionNote(""); }} onRevise={canOperate ? beginTransactionRevision : undefined} />
       </Panel>
