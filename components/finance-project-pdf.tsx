@@ -200,7 +200,7 @@ export function FinanceProjectPdf({
                 <Text style={{ ...styles.cell, fontWeight: 700 }}>{amount(group.totalDirectCost)}</Text>
               </View>
               <View style={styles.row}>
-                <Text style={styles.headCell}>Direct-cost line</Text>
+                <Text style={styles.headCell}>Description</Text>
                 <Text style={styles.headCell}>Qty</Text>
                 <Text style={styles.headCell}>Unit cost</Text>
                 <Text style={styles.headCell}>Line total</Text>

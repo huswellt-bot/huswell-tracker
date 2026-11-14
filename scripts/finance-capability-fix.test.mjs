@@ -9,6 +9,10 @@ const accessMigration = readFileSync(
   join(repoRoot, "supabase", "migrations", "20261111233138_revised_finance_access_and_current_balances.sql"),
   "utf8",
 ).toLowerCase();
+const combinedRoleMigration = readFileSync(
+  join(repoRoot, "supabase", "migrations", "20261114090000_revised_finance_combined_role.sql"),
+  "utf8",
+).toLowerCase();
 const roleMigration = readFileSync(
   join(repoRoot, "supabase", "migrations", "20261111054901_unify_accounting_finance_role.sql"),
   "utf8",
@@ -18,10 +22,12 @@ const workspace = readFileSync(
   "utf8",
 );
 
-test("revised Finance recognizes only the Accountant membership role", () => {
+test("revised Finance recognizes Accountant or an explicit combined-role capability", () => {
   assert.match(accessMigration, /array\['super_admin', 'owner', 'admin', 'accountant'\]/);
   assert.doesNotMatch(accessMigration, /has_member_capability/);
-  assert.match(workspace, /const hasInternalFinanceAccess = role === "accountant";/);
+  assert.match(workspace, /const hasInternalFinanceAccess =\s*role === "accountant" \|\| internalFinanceEnabled;/);
+  assert.match(combinedRoleMigration, /finance_revised_has_combined_access/);
+  assert.match(combinedRoleMigration, /capability = 'revised_finance'/);
   assert.match(workspace, /role === "accountant" \? \[/);
 });
 
@@ -41,7 +47,7 @@ test("Finance approval counts use only revised pending rows", () => {
 });
 
 test("revised Finance removes the legacy capability toggle from the user-management path", () => {
-  assert.match(workspace, /const isCombinedSalesPricingAccount = false;/);
+  assert.match(workspace, /const isCombinedSalesPricingAccount =\s*role === "sales_pricing_officer" && internalFinanceEnabled;/);
   assert.doesNotMatch(workspace, /role === "internal_finance"/);
   assert.doesNotMatch(workspace, /role === "external_finance"/);
 });

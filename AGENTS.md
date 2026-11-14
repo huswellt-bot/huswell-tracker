@@ -46,13 +46,14 @@
 
 ## Automatic Testing and Verification
 - Automatically verify every added or modified feature.
-- Prefer the official Playwright CLI for interactive browser testing.
-- If Playwright CLI is unavailable, request permission to install or configure it; report blocked verification rather than claiming success.
+- Do not use or install Playwright CLI unless the user explicitly requests it.
+- Use available non-Playwright browser/UI tools, direct HTTP checks, source-level checks, and non-Playwright automated tests as appropriate.
+- If interactive browser verification is unavailable, report it as blocked rather than installing Playwright or claiming success.
 - Test affected buttons, forms, navigation, and user workflows.
 - Verify actual behavior, not just successful builds or page rendering.
 - Check browser errors and relevant failed network requests.
 - Verify database operations when applicable, using isolated test data.
-- Run relevant build, type-check, lint, and existing automated tests.
+- Run relevant build, type-check, lint, and non-Playwright automated tests.
 - Fix detected errors and retest; report unresolved failures.
 - Check related functionality for regressions.
 - Never perform destructive tests against production data.
@@ -66,7 +67,7 @@
 2. Identify affected functionality and dependencies.
 3. Implement the smallest complete solution.
 4. Run relevant static checks and existing tests.
-5. Use Playwright CLI to verify affected user-facing behavior.
+5. Use available non-Playwright verification methods to verify affected user-facing behavior.
 6. Fix detected errors and retest.
 7. Check related functionality for regressions.
 8. Briefly report verification results and limitations.

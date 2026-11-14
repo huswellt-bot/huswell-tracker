@@ -31,12 +31,12 @@ const isMissingProductionApprovalTable = (
 const isMissingMemberCapabilityTable = (
   error: { code?: string } | null | undefined,
 ) => Boolean(error && ["42P01", "PGRST205"].includes(error.code ?? ""));
-// Revised Finance is assigned through the Accountant membership role. Keep
-// the legacy request fields temporarily readable so older clients do not
-// break, but never create or retain capability-based Finance access.
+// The legacy request field remains compatible with the existing admin UI, but
+// only a delegated revised_finance capability can combine Finance with the
+// Sales & Pricing Officer membership role. Retired internal_finance access is
+// never created or retained.
 const canReceiveInternalFinanceCapability = (role: string | null) => {
-  void role;
-  return false;
+  return role === "sales_pricing_officer";
 };
 
 async function getSuperAdminOrganization() {
@@ -145,6 +145,7 @@ export async function GET() {
     { data: profiles, error: profileError },
     { data: projectTypeAssignments, error: assignmentError },
     { data: productionApprovals, error: productionApprovalError },
+    { data: financeCapabilities, error: financeCapabilityError },
   ] = await Promise.all([
     userIds.length
       ? admin.from("profiles").select("id, signature_url").in("id", userIds)
@@ -163,14 +164,24 @@ export async function GET() {
           .eq("is_active", true)
           .in("user_id", userIds)
       : Promise.resolve({ data: [], error: null }),
+    userIds.length
+      ? admin
+          .from("organization_member_capabilities")
+          .select("user_id, capability")
+          .eq("organization_id", organizationId)
+          .eq("capability", "revised_finance")
+          .in("user_id", userIds)
+      : Promise.resolve({ data: [], error: null }),
   ]);
   if (
     profileError ||
     assignmentError ||
     (productionApprovalError &&
-      !isMissingProductionApprovalTable(productionApprovalError))
+      !isMissingProductionApprovalTable(productionApprovalError)) ||
+    (financeCapabilityError &&
+      !isMissingMemberCapabilityTable(financeCapabilityError))
   )
-    return json({ error: profileError?.message ?? assignmentError?.message ?? productionApprovalError?.message ?? "Unable to load user details." }, 500);
+    return json({ error: profileError?.message ?? assignmentError?.message ?? productionApprovalError?.message ?? financeCapabilityError?.message ?? "Unable to load user details." }, 500);
 
   const authUsers = new Map(
     (authData.users ?? []).map((user) => [user.id, user]),
@@ -189,6 +200,9 @@ export async function GET() {
       .filter((permission) => permission.is_active)
       .map((permission) => permission.user_id),
   );
+  const revisedFinanceUserIds = new Set(
+    (financeCapabilities ?? []).map((capability) => capability.user_id),
+  );
   return Response.json({
     users: (memberships ?? [])
       .filter((member) => member.role !== "super_admin")
@@ -202,7 +216,8 @@ export async function GET() {
               : (user?.email ?? "Unnamed user"),
           email: user?.email ?? "—",
           role: member.role,
-          internal_finance_enabled: member.role === "accountant",
+          internal_finance_enabled:
+            member.role === "accountant" || revisedFinanceUserIds.has(member.user_id),
           project_types: projectTypesByUserId.get(member.user_id) ?? [],
           production_approval_enabled: productionApprovalUserIds.has(member.user_id),
           signature_url: profileByUserId.get(member.user_id)?.signature_url ?? null,
@@ -307,7 +322,7 @@ export async function POST(request: Request) {
         {
           organization_id: organizationId,
           user_id: userId,
-          capability: "internal_finance",
+          capability: "revised_finance",
           granted_by: actorUserId,
         },
         { onConflict: "organization_id,user_id,capability" },
@@ -445,7 +460,7 @@ export async function PATCH(request: Request) {
     .select("capability")
     .eq("organization_id", organizationId)
     .eq("user_id", userId)
-    .eq("capability", "internal_finance")
+    .eq("capability", "revised_finance")
     .maybeSingle();
   if (
     capabilityReadError &&
@@ -456,7 +471,7 @@ export async function PATCH(request: Request) {
     canReceiveInternalFinanceCapability(role) &&
     (typeof body?.internal_finance_enabled === "boolean"
       ? body.internal_finance_enabled
-      : existingCapability?.capability === "internal_finance");
+      : existingCapability?.capability === "revised_finance");
   let productionApprovalEnabled = productionApprovalRequested === true;
   if (
     role === "sales_pricing_officer" &&
@@ -512,7 +527,7 @@ export async function PATCH(request: Request) {
         {
           organization_id: organizationId,
           user_id: userId,
-          capability: "internal_finance",
+          capability: "revised_finance",
           granted_by: actorUserId,
         },
         { onConflict: "organization_id,user_id,capability" },
@@ -522,7 +537,7 @@ export async function PATCH(request: Request) {
         .delete()
         .eq("organization_id", organizationId)
         .eq("user_id", userId)
-        .eq("capability", "internal_finance");
+        .eq("capability", "revised_finance");
   if (
     capabilityMutation.error &&
     !isMissingMemberCapabilityTable(capabilityMutation.error)

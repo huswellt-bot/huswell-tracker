@@ -269,11 +269,11 @@ test("GM and Accounting & Finance navigation expose the simplified Finance workf
 
 test("direct Finance routes preserve the same role boundary", () => {
   assert.match(financePage, /super_admin[\s\S]*owner[\s\S]*admin[\s\S]*accountant/);
-  assert.doesNotMatch(financePage, /internalFinanceEnabled/);
+  assert.match(financePage, /internalFinanceEnabled/);
   assert.match(financePage, /initialView="Finance Overview"/);
   assert.match(financeReportsPage, /super_admin[\s\S]*owner[\s\S]*admin[\s\S]*accountant/);
-  assert.match(financeReportsPage, /access\.role/);
-  assert.match(accountantPage, /access\.role !== "accountant"/);
+  assert.match(financeReportsPage, /internalFinanceEnabled/);
+  assert.match(accountantPage, /access\.role !== "accountant" && !access\.internalFinanceEnabled/);
   assert.match(accountantPage, /initialView="Finance Overview"/);
   assert.match(homePage, /role === "accountant"\) redirect\("\/finance"\)/);
   assert.doesNotMatch(homePage, /internal_finance|external_finance/);

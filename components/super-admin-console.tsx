@@ -55,12 +55,11 @@ const displayRole = (role: string, internalFinanceEnabled = false) =>
   workspaceRoleLabel(role, internalFinanceEnabled);
 const isPricingRole = (role: string) =>
   role === "sales_pricing_officer";
-// Finance access is assigned by the Accounting & Finance membership role.
-// The legacy capability control remains type-compatible for old saved form
-// state, but it is no longer offered to any role.
+// The Finance access control is shown only for a Sales & Pricing Officer so
+// that the primary role remains intact while a delegated Finance capability
+// is granted explicitly.
 const canReceiveInternalFinanceCapability = (role: string) => {
-  void role;
-  return false;
+  return role === "sales_pricing_officer";
 };
 const titleCase = (value: string) =>
   value.replace(
@@ -677,7 +676,7 @@ export function SuperAdminConsole({
                   <span>
                     <span className="block">Enable Finance operations</span>
                     <span className="mt-0.5 block text-[12px] font-normal text-[#7d8797]">
-                      Allows this account to manage Finance accounts, budgets, and transaction approvals.
+                      Allows this account to access the Accounting & Finance workspace and manage Finance operations.
                     </span>
                   </span>
                 </label>
@@ -930,7 +929,7 @@ export function SuperAdminConsole({
                   <span>
                     <span className="block">Enable Finance operations</span>
                     <span className="mt-0.5 block text-[12px] font-normal text-[#7d8797]">
-                      Allows this account to manage Finance accounts, budgets, and transaction approvals.
+                      Allows this account to access the Accounting & Finance workspace and manage Finance operations.
                     </span>
                   </span>
                 </label>

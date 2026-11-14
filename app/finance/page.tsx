@@ -5,7 +5,10 @@ import { redirect } from "next/navigation";
 export default async function FinancePage() {
   const access = await requireWorkspaceAccess();
 
-  if (!["super_admin", "owner", "admin", "accountant"].includes(access.role)) {
+  if (
+    !["super_admin", "owner", "admin", "accountant"].includes(access.role) &&
+    !access.internalFinanceEnabled
+  ) {
     redirect("/");
   }
 

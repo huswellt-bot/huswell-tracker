@@ -20,7 +20,10 @@ export function ClientCompanyNames({
 }: ClientCompanyNamesProps) {
   const client = normalizePartyName(clientName);
   const company = normalizePartyName(companyName);
-  const names = [client, company].filter(Boolean);
+  const names = [client, company].filter((name, index, values) =>
+    Boolean(name)
+    && values.findIndex((candidate) => candidate.toLowerCase() === name.toLowerCase()) === index,
+  );
 
   if (!names.length) return <span className={className}>{emptyLabel}</span>;
 

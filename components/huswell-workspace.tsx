@@ -194,14 +194,12 @@ const gmFinanceSidebarViews: View[] = [
   "Finance Overview",
   "Finance Funds",
   "Finance Approvals",
-  "Finance Cash on Hand",
   "Finance Monitoring",
   "Finance Transactions History",
 ];
 const accountingFinanceSidebarViews: View[] = [
   "Finance Overview",
   "Finance Transactions",
-  "Finance Cash on Hand",
   "Finance Monitoring",
   "Finance Requests",
   "Finance Commissions",
@@ -23192,17 +23190,16 @@ export function HuswellWorkspace({
   productionApprovalEnabled?: boolean;
   initialView?: View;
 }) {
-  // Revised Finance access is role-based. A legacy capability row must not
-  // turn a Sales/Pricing account into an Accounting & Finance user.
-  const hasInternalFinanceAccess = role === "accountant";
+  const hasInternalFinanceAccess =
+    role === "accountant" || internalFinanceEnabled;
   const isManagementRole = memberRole(role);
   const financeViewsForRole = useMemo(
     () => isManagementRole
       ? gmFinanceSidebarViews
-      : role === "accountant"
+      : hasInternalFinanceAccess
         ? accountingFinanceSidebarViews
         : [],
-    [isManagementRole, role],
+    [hasInternalFinanceAccess, isManagementRole],
   );
   const financeRole = role;
   const revisedFinanceRole = role;
@@ -23219,6 +23216,8 @@ export function HuswellWorkspace({
         : initialView ?? defaultWorkspaceView;
   const normalizedInitialView: View = requestedInitialView === "Finance Daily Fund"
     ? "Finance Requests"
+    : requestedInitialView === "Finance Cash on Hand"
+      ? "Finance Overview"
     : requestedInitialView === "Finance Foundation"
       ? defaultWorkspaceView
       : requestedInitialView;
@@ -23234,7 +23233,8 @@ export function HuswellWorkspace({
       ? defaultWorkspaceView
       : safeInitialView,
   );
-  const isCombinedSalesPricingAccount = false;
+  const isCombinedSalesPricingAccount =
+    role === "sales_pricing_officer" && internalFinanceEnabled;
   const [sidebarWorkspace, setSidebarWorkspace] = useState<SidebarWorkspace>(
     financeViewsForRole.includes(safeInitialView) ? "finance" : "sales_pricing",
   );
@@ -23316,7 +23316,11 @@ export function HuswellWorkspace({
     setActive(mode === "quotation" ? "Price Quotations" : "Leads");
   }, [setActive]);
   const navigate = useCallback((view: View) => {
-    const targetView: View = view === "Finance Daily Fund" ? "Finance Requests" : view;
+    const targetView: View = view === "Finance Daily Fund"
+      ? "Finance Requests"
+      : view === "Finance Cash on Hand"
+        ? "Finance Overview"
+        : view;
     if (financeSidebarViews.includes(targetView) && !financeViewsForRole.includes(targetView)) {
       setActive(defaultWorkspaceView);
       return;
@@ -23694,7 +23698,6 @@ export function HuswellWorkspace({
       "Finance Overview",
       "Finance Funds",
       "Finance Approvals",
-      "Finance Cash on Hand",
       "Finance Monitoring",
       "Payment Monitoring",
       "Finance Transactions History",
@@ -23712,7 +23715,6 @@ export function HuswellWorkspace({
       "Finance Overview",
       "Finance Funds",
       "Finance Approvals",
-      "Finance Cash on Hand",
       "Finance Monitoring",
       "Payment Monitoring",
       "Finance Transactions History",
@@ -23733,7 +23735,6 @@ export function HuswellWorkspace({
       "Finance Overview",
       "Finance Funds",
       "Finance Approvals",
-      "Finance Cash on Hand",
       "Finance Monitoring",
       "Payment Monitoring",
       "Finance Transactions History",
@@ -23767,7 +23768,7 @@ export function HuswellWorkspace({
     ],
     sales: ["Dashboard", "Quotations", "Catalog", "Sales", "Directory", "Announcements", "Policy"],
     warehouse: ["Dashboard", "Catalog", "Inventory", "Production", "Announcements", "Policy"],
-    accountant: ["Finance Overview", "Finance Transactions", "Finance Cash on Hand", "Finance Monitoring", "Finance Requests", "Finance Commissions", "Finance Transactions History", "Announcements", "Policy"],
+    accountant: ["Finance Overview", "Finance Transactions", "Finance Monitoring", "Finance Requests", "Finance Commissions", "Finance Transactions History", "Announcements", "Policy"],
     lead_coordinator: ["Leads", "Lead Costing", "Announcements", "Policy"],
     payroll: ["Dashboard", "Payroll & Leave", "Letter Request", "Directory", "Announcements", "Policy"],
     production: ["Dashboard", "Production", "Inventory", "Finance Foundation", "Announcements", "Policy"],
@@ -23788,6 +23789,7 @@ export function HuswellWorkspace({
   const productionApprovalOnly = productionApprovalEnabled && !isManagementRole;
   const allowedRoleViews = [
     ...(allowedViews[role] ?? allowedViews.viewer),
+    ...(isCombinedSalesPricingAccount ? accountingFinanceSidebarViews : []),
   ];
   if (productionApprovalOnly && !allowedRoleViews.includes("Approvals")) {
     allowedRoleViews.push("Approvals");
@@ -23823,7 +23825,6 @@ export function HuswellWorkspace({
           items: [
             { view: "Finance Overview", icon: Wallet },
             { view: "Finance Transactions", icon: ReceiptText },
-            { view: "Finance Cash on Hand", icon: Wallet },
             { view: "Finance Monitoring", icon: CalendarDays },
             { view: "Finance Requests", icon: FileText },
             { view: "Finance Commissions", icon: PhilippinePeso },
@@ -23873,7 +23874,6 @@ export function HuswellWorkspace({
     { view: "Finance Overview", icon: Wallet },
     { view: "Finance Funds", icon: Landmark },
     { view: "Finance Approvals", icon: ClipboardCheck, badge: sidebarBadge("finance") },
-    { view: "Finance Cash on Hand", icon: Wallet },
     { view: "Finance Monitoring", icon: CalendarDays },
     { view: "Finance Transactions History", icon: ClipboardList },
   ];
@@ -23884,7 +23884,6 @@ export function HuswellWorkspace({
   }[] = [
     { view: "Finance Overview", icon: Wallet },
     { view: "Finance Transactions", icon: ReceiptText },
-    { view: "Finance Cash on Hand", icon: Wallet },
     { view: "Finance Monitoring", icon: CalendarDays },
     { view: "Finance Requests", icon: FileText },
     { view: "Finance Commissions", icon: PhilippinePeso },
@@ -24130,7 +24129,7 @@ export function HuswellWorkspace({
       detail: expenses.detail,
     },
     "Finance Overview": {
-      title: "Accounting & Finance",
+      title: "Dashboard",
       detail: "Monitor Capital Funds, Working Funds, project balances, collections, and GM approvals.",
     },
     "Finance Funds": {
@@ -24141,9 +24140,11 @@ export function HuswellWorkspace({
       title: "Daily Fund",
       detail: "Request, spend, monitor, and return the non-project expense budget funded from Working Funds.",
     },
+    // Legacy deep links are redirected to the Dashboard page, but remain typed
+    // here so old bookmarks do not break the workspace title lookup.
     "Finance Cash on Hand": {
-      title: "Cash on Hand",
-      detail: "See approved project collections and each project balance plus the separate Daily Fund balance. Unallocated Working Funds are excluded.",
+      title: "Dashboard",
+      detail: "Cash on hand and Daily Fund totals are shown on the Dashboard page.",
     },
     "Finance Foundation": {
       title: "Accounting & Finance",
@@ -24429,45 +24430,44 @@ export function HuswellWorkspace({
         role={role}
       />
     ) : active === "Finance Overview" ? (
-      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="dashboard" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} internalFinanceEnabled={internalFinanceEnabled} initialTab="dashboard" />
     ) : active === "Finance Funds" ? (
-      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="funds" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} internalFinanceEnabled={internalFinanceEnabled} initialTab="funds" />
     ) : active === "Finance Daily Fund" ? (
-      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="daily_fund" />
-    ) : active === "Finance Cash on Hand" ? (
-      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="cash_on_hand" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} internalFinanceEnabled={internalFinanceEnabled} initialTab="daily_fund" />
     ) : active === "Finance Foundation" ? (
-      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="dashboard" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} internalFinanceEnabled={internalFinanceEnabled} initialTab="dashboard" />
     ) : active === "Finance Reports" ? (
-      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="projects" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} internalFinanceEnabled={internalFinanceEnabled} initialTab="projects" />
     ) : active === "Finance Monitoring" ? (
-      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="projects" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} internalFinanceEnabled={internalFinanceEnabled} initialTab="projects" />
     ) : active === "Finance Approvals" ? (
-      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="approvals" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} internalFinanceEnabled={internalFinanceEnabled} initialTab="approvals" />
     ) : active === "Finance Transactions" ? (
-      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="transactions" openAction={financeActionRequest} onOpenActionHandled={clearFinanceActionRequest} />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} internalFinanceEnabled={internalFinanceEnabled} initialTab="transactions" openAction={financeActionRequest} onOpenActionHandled={clearFinanceActionRequest} />
     ) : active === "Finance Accounts" ? (
-      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="dashboard" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} internalFinanceEnabled={internalFinanceEnabled} initialTab="dashboard" />
     ) : active === "Finance Budget" ? (
-      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="requests" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} internalFinanceEnabled={internalFinanceEnabled} initialTab="requests" />
     ) : active === "Finance Requests" ? (
-      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="requests" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} internalFinanceEnabled={internalFinanceEnabled} initialTab="requests" />
     ) : active === "Finance Commissions" ? (
-      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="commissions" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} internalFinanceEnabled={internalFinanceEnabled} initialTab="commissions" />
     ) : active === "Finance Transactions History" ? (
-      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="history" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} internalFinanceEnabled={internalFinanceEnabled} initialTab="history" />
     ) : active === "Finance Supplier Costing" ? (
-      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="projects" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} internalFinanceEnabled={internalFinanceEnabled} initialTab="projects" />
     ) : active === "Finance Payables" ? (
-      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="transactions" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} internalFinanceEnabled={internalFinanceEnabled} initialTab="transactions" />
     ) : active === "Paid commissions" ? (
-      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="commissions" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} internalFinanceEnabled={internalFinanceEnabled} initialTab="commissions" />
     ) : active === "Finance" ? (
       <DynamicFinanceRevisedWorkspace
         key={active}
         organizationId={organizationId}
         role={revisedFinanceRole}
         isGm={isManagementRole}
+        internalFinanceEnabled={internalFinanceEnabled}
         initialTab="dashboard"
       />
     ) : active === "Commissions" ? (
@@ -24510,7 +24510,7 @@ export function HuswellWorkspace({
         productionOnly={productionApprovalOnly}
       />
     ) : active === "Payment Monitoring" ? (
-      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} initialTab="projects" />
+      <DynamicFinanceRevisedWorkspace key={active} organizationId={organizationId} role={revisedFinanceRole} isGm={isManagementRole} internalFinanceEnabled={internalFinanceEnabled} initialTab="projects" />
     ) : active === "Payment Reviews" ? (
       <PaymentMonitoring
         store={store}
@@ -24577,15 +24577,11 @@ export function HuswellWorkspace({
         : view === "Projects"
               ? "Production"
               : view === "Finance Overview"
-                ? isManagementRole
-                  ? "Overview"
-                  : "Accounting & Finance"
+                ? "Dashboard"
               : view === "Finance Funds"
                 ? "Capital & Working Funds"
               : view === "Finance Daily Fund"
                 ? "Daily Fund"
-              : view === "Finance Cash on Hand"
-                ? "Cash on Hand"
               : view === "Finance Commissions"
                 ? "Commission Payables"
               : view === "Finance Foundation"

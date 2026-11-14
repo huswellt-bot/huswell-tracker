@@ -49,10 +49,21 @@ export async function requireWorkspaceAccess() {
     .eq("id", membership.organization_id)
     .single();
 
-  // Revised Finance has one operational role. Management roles retain GM
-  // access through their verified membership role; no legacy capability can
-  // turn a Sales/Pricing account into a Finance user.
-  const internalFinanceEnabled = membership.role === "accountant";
+  // Revised Finance uses the Accountant role or an explicit revised_finance
+  // capability. Retired legacy capabilities never grant this access.
+  const { data: combinedFinanceCapability } =
+    membership.role === "sales_pricing_officer"
+      ? await supabase
+          .from("organization_member_capabilities")
+          .select("capability")
+          .eq("organization_id", membership.organization_id)
+          .eq("user_id", user.id)
+          .eq("capability", "revised_finance")
+          .maybeSingle()
+      : { data: null };
+
+  const internalFinanceEnabled =
+    membership.role === "accountant" || Boolean(combinedFinanceCapability);
 
   const isManagementRole = ["super_admin", "owner", "admin"].includes(
     String(membership.role),

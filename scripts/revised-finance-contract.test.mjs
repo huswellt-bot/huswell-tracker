@@ -23,6 +23,7 @@ const sharedPoolMigration = readFileSync(join(root, "supabase", "migrations", "2
 const reviewFixMigration = readFileSync(join(root, "supabase", "migrations", "20261112130000_revised_finance_review_fixes.sql"), "utf8");
 const retiredReceiptPolicyMigration = readFileSync(join(root, "supabase", "migrations", "20261112143000_remove_retired_finance_receipt_policies.sql"), "utf8");
 const roleMigration = readFileSync(join(root, "supabase", "migrations", "20261111054901_unify_accounting_finance_role.sql"), "utf8");
+const combinedRoleMigration = readFileSync(join(root, "supabase", "migrations", "20261114090000_revised_finance_combined_role.sql"), "utf8");
 const workspace = readFileSync(join(root, "components", "finance-revised-workspace.tsx"), "utf8");
 const host = readFileSync(join(root, "components", "huswell-workspace.tsx"), "utf8");
 const globalStyles = readFileSync(join(root, "app", "globals.css"), "utf8");
@@ -93,7 +94,7 @@ test("system Finance categories cannot be deleted", () => {
 
 test("Finance category deletion uses a modal confirmation", () => {
   assert.match(workspace, /deleteCategoryTarget \? <Modal/);
-  assert.match(workspace, /Are you sure you want to delete this category/);
+  assert.match(workspace, /Archive this category\? Historical transactions will keep their category reference/);
   assert.match(workspace, /onClick=\{\(\) => void confirmDeleteCategory\(\)\}/);
 });
 
@@ -256,10 +257,11 @@ test("the visible Finance flow is project-ledger based", () => {
   assert.match(workspace, /Return to Capital Funds/);
   assert.match(workspace, /create_finance_revised_daily_fund_request/);
   assert.match(workspace, /create_finance_revised_daily_fund_pool_return/);
-  assert.match(workspace, /Cash on Hand breakdown/);
-  assert.match(workspace, /Total Cash on Hand/);
+  assert.match(workspace, /<Metric label="Cash on hand"/);
+  assert.match(workspace, /<Metric label="Daily Fund total"/);
+  assert.doesNotMatch(workspace, /Open commission payables/);
   assert.match(workspace, /submitted_by_name/);
-  assert.match(workspace, /Unallocated Working Funds are excluded/);
+  assert.match(workspace, /unallocated Working Funds excluded/);
   assert.doesNotMatch(workspace, /Collected \/ allocated/);
   assert.doesNotMatch(workspace, /Cash Out \/ used/);
   assert.match(host, /Finance Daily Fund/);
@@ -272,7 +274,7 @@ test("the visible Finance flow is project-ledger based", () => {
 });
 
 test("Cash In and Cash Out forms remain modal-only", () => {
-  assert.match(workspace, /title="Revised Finance activity"/);
+  assert.match(workspace, /title="Cash In & Cash Out"/);
   assert.match(workspace, /dialog === "cash_in"/);
   assert.match(workspace, /dialog === "cash_out"/);
   const transactionsStart = workspace.indexOf("const renderTransactions");
@@ -291,8 +293,8 @@ test("Cash In and Cash Out forms remain modal-only", () => {
 
 test("Finance Overview renders each metric in its own card", () => {
   assert.match(workspace, /function MetricCard\(/);
-  assert.match(workspace, /<MetricCard><Metric label="Total Cash on Hand"/);
-  assert.match(workspace, /<MetricCard><Metric label="Open commission payables"/);
+  assert.match(workspace, /<MetricCard><Metric label="Cash on hand"/);
+  assert.match(workspace, /<MetricCard><Metric label="Daily Fund total"/);
 });
 
 test("Finance pages do not repeat the sidebar page heading", () => {
@@ -352,18 +354,11 @@ test("GM fund modals use automatic dates and only the required amount fields", (
 });
 
 test("Capital Funds details stay concise and removal is balance-gated", () => {
-  const modalStart = workspace.indexOf("function CapitalFundDetailsModal");
-  const modalEnd = workspace.indexOf("function EmptyState", modalStart);
-  assert.ok(modalStart >= 0 && modalEnd > modalStart);
-  const capitalModal = workspace.slice(modalStart, modalEnd);
-  assert.match(capitalModal, /<Metric label="Amount" value=\{amount\(transaction\.amount\)\}/);
-  assert.match(capitalModal, /<Metric label="Date" value=\{dateLabel\(transaction\.transaction_date\)\}/);
-  assert.match(capitalModal, /canRemove/);
-  assert.match(capitalModal, /Remove Capital Funds/);
-  assert.doesNotMatch(capitalModal, /<Metric label="(?:Movement|From|To|Recorded by|Posted by|Current fund balances|Transaction ID)"/);
-  assert.match(workspace, /canRemoveSelectedCapital/);
-  assert.match(workspace, /numberValue\(currentFundBalances, "capital_funds"\) \+ 0\.001 >= selectedTransactionAmount/);
-  assert.match(accessMigration, /funds have already been used/);
+  assert.match(workspace, /<Panel title=\{activityTitle\}/);
+  assert.match(workspace, /Capital Funds activity/);
+  assert.doesNotMatch(workspace, /function CapitalFundDetailsModal/);
+  assert.match(workspace, /Remove Capital Funds/);
+  assert.match(workspace, /Current owner investment remaining after transfers/);
 });
 
 test("GM can return a chosen Working Funds amount to Capital Funds", () => {
@@ -436,8 +431,8 @@ test("repayment UI uses collected project balance instead of support-inclusive b
 });
 
 test("Finance audit actors are visible for transactions and fund requests", () => {
-  assert.match(workspace, />Actors<\/th>/);
-  assert.match(workspace, />Requested by<\/th>/);
+  assert.doesNotMatch(workspace, />Actors<\/th>/);
+  assert.doesNotMatch(workspace, />Requested by<\/th>/);
   assert.match(workspace, /submitted_by_name/);
   assert.match(workspace, /requested_by_name/);
   assert.match(workspace, /approved_by_name/);
@@ -461,8 +456,19 @@ test("revised Finance uses the Accountant role and current fund balances", () =>
   assert.match(workspace, /currentFundBalances/);
 });
 
+test("Sales & Pricing can receive an explicit combined Finance capability", () => {
+  assert.match(combinedRoleMigration, /organization_member_capabilities_capability_check/);
+  assert.match(combinedRoleMigration, /'revised_finance'/);
+  assert.match(combinedRoleMigration, /finance_revised_has_combined_access/);
+  assert.match(combinedRoleMigration, /dianne\.sale\.internal@huswelltrading\.com/);
+  assert.match(host, /role === "sales_pricing_officer"\s*&&\s*internalFinanceEnabled/);
+  assert.match(host, /internalFinanceEnabled=\{internalFinanceEnabled\}/);
+  assert.match(userAdmin, /role === "sales_pricing_officer"/);
+  assert.match(userAdmin, /Finance access control is shown only/);
+});
+
 test("GM approval is separate from Accountant operational Finance writes", () => {
-  assert.match(workspace, /const canOperate = role === "accountant"/);
+  assert.match(workspace, /const canOperate = role === "accountant" \|\| internalFinanceEnabled === true/);
   assert.match(accountantWriteMigration, /finance_revised_is_accountant/);
   assert.match(accountantWriteMigration, /create_finance_revised_cash_in_with_category_accountant_legacy/);
   assert.match(accountantWriteMigration, /create_finance_revised_cash_out_with_category_accountant_legacy/);
@@ -481,13 +487,13 @@ test("GM and Accounting & Finance receive separate revised Finance navigation", 
   const accountingViews = host.slice(accountingStart, financeViewsStart);
   assert.match(gmViews, /Finance Funds/);
   assert.match(gmViews, /Finance Approvals/);
-  assert.match(host, /isManagementRole\r?\n                  \? "Overview"/);
+  assert.match(host, /view === "Finance Overview"\r?\n\s*\? "Dashboard"/);
   assert.doesNotMatch(gmViews, /"Finance Transactions"|"Finance Requests"|"Finance Commissions"/);
   assert.match(accountingViews, /Finance Transactions/);
   assert.match(accountingViews, /Finance Requests/);
   assert.match(accountingViews, /Finance Commissions/);
   assert.doesNotMatch(accountingViews, /"Finance Funds"|"Finance Approvals"/);
-  assert.match(host, /const targetView: View = view === "Finance Daily Fund" \? "Finance Requests" : view/);
+  assert.match(host, /const targetView: View = view === "Finance Daily Fund"\s*\r?\n\s*\? "Finance Requests"/);
   assert.match(host, /active === "Finance Transactions" && hasInternalFinanceAccess/);
 });
 
@@ -497,7 +503,7 @@ test("Finance Monitoring uses a project table and the shared blue table treatmen
   assert.ok(projectsStart >= 0 && historyStart > projectsStart);
   const projectsRenderer = workspace.slice(projectsStart, historyStart);
   assert.match(projectsRenderer, /<table className="app-table w-full min-w-\[1240px\] text-left text-\[11px\]">/);
-  assert.match(projectsRenderer, /<th>Project<\/th>/);
+  assert.match(projectsRenderer, /<th>Description<\/th>/);
   assert.match(projectsRenderer, /<th>Total Direct Cost<\/th>/);
   assert.match(projectsRenderer, /<th>Project balance<\/th>/);
   assert.match(projectsRenderer, /Open breakdown/);

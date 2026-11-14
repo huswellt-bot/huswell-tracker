@@ -94,9 +94,9 @@ test("Payment Monitoring cannot be opened by non-Finance roles", () => {
   assert.match(workspace, /const safeInitialView = normalizedInitialView === "Payment Monitoring"/);
 });
 
-test("Finance access is assigned by the Accountant role, not a capability", () => {
-  assert.match(workspace, /const hasInternalFinanceAccess = role === "accountant";/);
-  assert.match(workspace, /const isCombinedSalesPricingAccount = false;/);
+test("Finance access is assigned by the Accountant role or a delegated capability", () => {
+  assert.match(workspace, /const hasInternalFinanceAccess =\s*role === "accountant" \|\| internalFinanceEnabled;/);
+  assert.match(workspace, /const isCombinedSalesPricingAccount =\s*role === "sales_pricing_officer" && internalFinanceEnabled;/);
   assert.doesNotMatch(workspace, /role === "internal_finance"/);
   assert.doesNotMatch(workspace, /role === "external_finance"/);
 });
@@ -123,7 +123,7 @@ test("capability-enabled Internal Finance can read the quotation joined to a pay
 
 test("Finance and Sales/Pricing remain separate sidebar workspaces", () => {
   assert.match(workspace, /type SidebarWorkspace = "sales_pricing" \| "finance"/);
-  assert.match(workspace, /const isCombinedSalesPricingAccount = false/);
+  assert.match(workspace, /const isCombinedSalesPricingAccount =\s*role === "sales_pricing_officer" && internalFinanceEnabled/);
   assert.match(workspace, /id="sidebar-workspace"/);
   assert.match(workspace, /<option value="sales_pricing">Sales &amp; Pricing<\/option>/);
   assert.match(workspace, /<option value="finance">Finance<\/option>/);

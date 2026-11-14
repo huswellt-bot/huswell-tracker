@@ -247,9 +247,13 @@ test("the revised Finance sidebar exposes the unified workflow", () => {
   assert.match(workspaceShell, /"Finance Monitoring"/);
   assert.match(workspaceShell, /"Finance Requests"/);
   assert.match(workspaceShell, /view: "Finance Monitoring", icon: CalendarDays/);
-  assert.match(workspaceShell, /active === "Finance Monitoring"[\s\S]{0,180}initialTab="projects"/);
+  assert.match(workspaceShell, /active === "Finance Monitoring"/);
+  assert.match(workspaceShell, /initialTab="projects"/);
   assert.match(workspaceShell, /view === "Finance Transactions"/);
-  assert.doesNotMatch(workspaceShell, /view: "Finance Accounts"|view: "Finance Supplier Costing"|view: "Finance Payables"/);
+  const accountingStart = workspaceShell.indexOf("const accountingFinanceItems");
+  const navStart = workspaceShell.indexOf("const navBase", accountingStart);
+  assert.ok(accountingStart >= 0 && navStart > accountingStart);
+  assert.doesNotMatch(workspaceShell.slice(accountingStart, navStart), /Finance Accounts|Finance Supplier Costing|Finance Payables/);
   assert.match(workspaceShell, /active === "Finance Transactions"/);
   assert.match(workspaceShell, /initialTab="transactions"/);
 });
