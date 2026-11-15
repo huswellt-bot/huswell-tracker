@@ -6327,6 +6327,10 @@ function Records({
   const dialogVisibleFields = visibleFields.filter(
     (field) =>
       !(module.table === "leads" && isProjectsPage && !editing && field.key === "date_sent"),
+  ).map((field) =>
+    module.table === "leads" && ["contact_name", "address", "phone"].includes(field.key)
+      ? { ...field, required: field.required || !editing }
+      : field,
   );
   const isOfficerSettingLostClient =
     module.table === "leads" &&
@@ -6394,6 +6398,18 @@ function Records({
     setOpen(true);
   };
   const save = async (nextValues = values) => {
+    if (module.table === "leads" && !editing) {
+      const missingFields = [
+        ["contact_name", "Contact Person's Fullname"],
+        ["address", "Company Address"],
+        ["phone", "Contact Number"],
+      ]
+        .filter(([key]) => !String(nextValues[key] ?? "").trim())
+        .map(([, label]) => label);
+      if (missingFields.length) {
+        return notice(`Enter ${missingFields.join(", ")}.`);
+      }
+    }
     setSaving(true);
     const client = createClient();
     const requestNote = text(nextValues.request_note, "").trim();
