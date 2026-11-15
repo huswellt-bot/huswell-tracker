@@ -3,6 +3,7 @@ type ClientCompanyNamesProps = {
   companyName?: unknown;
   className?: string;
   emptyLabel?: string;
+  excludeNames?: unknown[];
 };
 
 const normalizePartyName = (value: unknown) => {
@@ -17,11 +18,19 @@ export function ClientCompanyNames({
   companyName,
   className,
   emptyLabel = "—",
+  excludeNames = [],
 }: ClientCompanyNamesProps) {
   const client = normalizePartyName(clientName);
   const company = normalizePartyName(companyName);
+  const excludedNames = new Set(
+    excludeNames
+      .map(normalizePartyName)
+      .filter(Boolean)
+      .map((name) => name.toLowerCase()),
+  );
   const names = [client, company].filter((name, index, values) =>
     Boolean(name)
+    && !excludedNames.has(name.toLowerCase())
     && values.findIndex((candidate) => candidate.toLowerCase() === name.toLowerCase()) === index,
   );
 
