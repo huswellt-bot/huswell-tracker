@@ -78,6 +78,17 @@ export async function requireWorkspaceAccess() {
         .eq("is_active", true)
         .maybeSingle();
 
+  // Production Operations is a separate additive capability. A missing table
+  // during rollout fails closed so the legacy workspace remains usable until
+  // the migration is applied.
+  const { data: productionOperationsPermission } = await supabase
+    .from("production_operations_permissions")
+    .select("is_active")
+    .eq("organization_id", membership.organization_id)
+    .eq("user_id", user.id)
+    .eq("is_active", true)
+    .maybeSingle();
+
   return {
     organizationId: membership.organization_id,
     organizationName: organization?.name ?? "Huswell Trading",
@@ -87,5 +98,6 @@ export async function requireWorkspaceAccess() {
     internalFinanceEnabled,
     productionApprovalEnabled:
       isManagementRole || Boolean(productionApprovalPermission?.is_active),
+    productionOperationsEnabled: Boolean(productionOperationsPermission?.is_active),
   };
 }

@@ -11,6 +11,7 @@ type CreateUserRequest = {
   role?: unknown;
   internal_finance_enabled?: unknown;
   production_approval_enabled?: unknown;
+  production_operations_enabled?: unknown;
 };
 type UserOperationRequest = {
   user_id?: unknown;
@@ -21,6 +22,7 @@ type UserOperationRequest = {
   role?: unknown;
   internal_finance_enabled?: unknown;
   production_approval_enabled?: unknown;
+  production_operations_enabled?: unknown;
 };
 
 const json = (body: Record<string, unknown>, status: number) =>
@@ -31,6 +33,26 @@ const isMissingProductionApprovalTable = (
 const isMissingMemberCapabilityTable = (
   error: { code?: string } | null | undefined,
 ) => Boolean(error && ["42P01", "PGRST205"].includes(error.code ?? ""));
+const isMissingProductionOperationsTable = (
+  error: { code?: string } | null | undefined,
+) => Boolean(error && ["42P01", "PGRST205"].includes(error.code ?? ""));
+const isMissingManagedUserAccessFunction = (
+  error: { code?: string } | null | undefined,
+) => Boolean(error && ["42883", "PGRST202"].includes(error.code ?? ""));
+const managedUserRoles = [
+  "admin",
+  "project_manager",
+  "sales_pricing_officer",
+  "accountant",
+  "lead_coordinator",
+  "sales",
+  "production",
+  "warehouse",
+  "payroll",
+  "viewer",
+] as const;
+const isManagedUserRole = (value: unknown): value is (typeof managedUserRoles)[number] =>
+  typeof value === "string" && managedUserRoles.includes(value as (typeof managedUserRoles)[number]);
 // The legacy request field remains compatible with the existing admin UI, but
 // only a delegated revised_finance capability can combine Finance with the
 // Sales & Pricing Officer membership role. Retired internal_finance access is
@@ -106,6 +128,99 @@ async function setProductionApprovalPermission(
   return { error: result.error ? { message: result.error.message } : null };
 }
 
+async function setProductionOperationsPermission(
+  admin: NonNullable<ReturnType<typeof adminClient>>,
+  organizationId: string,
+  userId: string,
+  actorUserId: string,
+  enabled: boolean,
+): Promise<{ error: { message: string } | null }> {
+  const now = new Date().toISOString();
+  const result = enabled
+    ? await admin.from("production_operations_permissions").upsert(
+        {
+          organization_id: organizationId,
+          user_id: userId,
+          is_active: true,
+          granted_by: actorUserId,
+          granted_at: now,
+          revoked_by: null,
+          revoked_at: null,
+          updated_at: now,
+        },
+        { onConflict: "organization_id,user_id" },
+      )
+    : await admin
+        .from("production_operations_permissions")
+        .update({
+          is_active: false,
+          revoked_by: actorUserId,
+          revoked_at: now,
+          updated_at: now,
+        })
+        .eq("organization_id", organizationId)
+        .eq("user_id", userId);
+  if (result.error && !enabled && isMissingProductionOperationsTable(result.error))
+    return { error: null };
+  return { error: result.error ? { message: result.error.message } : null };
+}
+
+type PermissionTableName =
+  | "production_approval_permissions"
+  | "production_operations_permissions";
+
+async function checkPermissionTable(
+  admin: NonNullable<ReturnType<typeof adminClient>>,
+  organizationId: string,
+  table: PermissionTableName,
+) {
+  const { error } = await admin
+    .from(table)
+    .select("organization_id")
+    .eq("organization_id", organizationId)
+    .limit(1);
+  if (!error) return null;
+  const missing =
+    table === "production_approval_permissions"
+      ? isMissingProductionApprovalTable(error)
+      : isMissingProductionOperationsTable(error);
+  return {
+    status: missing ? 409 : 500,
+    message: missing
+      ? "The required production permission migration is not installed yet. Apply the database migration before enabling this permission."
+      : error.message,
+  };
+}
+
+async function updateSuperAdminManagedUserAccess(
+  admin: NonNullable<ReturnType<typeof adminClient>>,
+  values: {
+    organizationId: string;
+    userId: string;
+    actorUserId: string;
+    role: string;
+    revisedFinanceEnabled: boolean;
+    productionApprovalEnabled: boolean;
+    productionOperationsEnabled: boolean;
+  },
+) {
+  const { error } = await admin.rpc("update_super_admin_managed_user_access", {
+    p_organization_id: values.organizationId,
+    p_user_id: values.userId,
+    p_actor_user_id: values.actorUserId,
+    p_role: values.role,
+    p_revised_finance_enabled: values.revisedFinanceEnabled,
+    p_production_approval_enabled: values.productionApprovalEnabled,
+    p_production_operations_enabled: values.productionOperationsEnabled,
+  });
+  if (error && isMissingManagedUserAccessFunction(error))
+    return { error: null, missingRoutine: true };
+  return {
+    error: error ? { message: error.message } : null,
+    missingRoutine: false,
+  };
+}
+
 export async function GET() {
   const context = await getSuperAdminOrganization();
   if (!context)
@@ -145,6 +260,7 @@ export async function GET() {
     { data: profiles, error: profileError },
     { data: projectTypeAssignments, error: assignmentError },
     { data: productionApprovals, error: productionApprovalError },
+    { data: productionOperations, error: productionOperationsError },
     { data: financeCapabilities, error: financeCapabilityError },
   ] = await Promise.all([
     userIds.length
@@ -166,6 +282,14 @@ export async function GET() {
       : Promise.resolve({ data: [], error: null }),
     userIds.length
       ? admin
+          .from("production_operations_permissions")
+          .select("user_id, is_active")
+          .eq("organization_id", organizationId)
+          .eq("is_active", true)
+          .in("user_id", userIds)
+      : Promise.resolve({ data: [], error: null }),
+    userIds.length
+      ? admin
           .from("organization_member_capabilities")
           .select("user_id, capability")
           .eq("organization_id", organizationId)
@@ -178,10 +302,23 @@ export async function GET() {
     assignmentError ||
     (productionApprovalError &&
       !isMissingProductionApprovalTable(productionApprovalError)) ||
+    (productionOperationsError &&
+      !isMissingProductionOperationsTable(productionOperationsError)) ||
     (financeCapabilityError &&
       !isMissingMemberCapabilityTable(financeCapabilityError))
   )
-    return json({ error: profileError?.message ?? assignmentError?.message ?? productionApprovalError?.message ?? financeCapabilityError?.message ?? "Unable to load user details." }, 500);
+    return json(
+      {
+        error:
+          profileError?.message ??
+          assignmentError?.message ??
+          productionApprovalError?.message ??
+          productionOperationsError?.message ??
+          financeCapabilityError?.message ??
+          "Unable to load user details.",
+      },
+      500,
+    );
 
   const authUsers = new Map(
     (authData.users ?? []).map((user) => [user.id, user]),
@@ -197,6 +334,11 @@ export async function GET() {
   });
   const productionApprovalUserIds = new Set(
     (productionApprovals ?? [])
+      .filter((permission) => permission.is_active)
+      .map((permission) => permission.user_id),
+  );
+  const productionOperationsUserIds = new Set(
+    (productionOperations ?? [])
       .filter((permission) => permission.is_active)
       .map((permission) => permission.user_id),
   );
@@ -220,6 +362,7 @@ export async function GET() {
             member.role === "accountant" || revisedFinanceUserIds.has(member.user_id),
           project_types: projectTypesByUserId.get(member.user_id) ?? [],
           production_approval_enabled: productionApprovalUserIds.has(member.user_id),
+          production_operations_enabled: productionOperationsUserIds.has(member.user_id),
           signature_url: profileByUserId.get(member.user_id)?.signature_url ?? null,
           created_at: member.created_at,
           banned: Boolean(
@@ -254,15 +397,9 @@ export async function POST(request: Request) {
   const email =
     typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
   const password = typeof body?.password === "string" ? body.password : "";
-  const role =
-    body?.role === "admin" ||
-    body?.role === "project_manager" ||
-    body?.role === "sales_pricing_officer" ||
-    body?.role === "accountant" ||
-    body?.role === "lead_coordinator"
-      ? body.role
-      : null;
+  const role = isManagedUserRole(body?.role) ? body.role : null;
   const productionApprovalEnabled = body?.production_approval_enabled === true;
+  const productionOperationsEnabled = body?.production_operations_enabled === true;
   const internalFinanceEnabled =
     canReceiveInternalFinanceCapability(role) &&
     body?.internal_finance_enabled === true;
@@ -284,6 +421,24 @@ export async function POST(request: Request) {
       { error: "Production approval can only be assigned to a Sales & Pricing Officer." },
       400,
     );
+  if (productionApprovalEnabled) {
+    const permissionTableError = await checkPermissionTable(
+      admin,
+      organizationId,
+      "production_approval_permissions",
+    );
+    if (permissionTableError)
+      return json({ error: permissionTableError.message }, permissionTableError.status);
+  }
+  if (productionOperationsEnabled) {
+    const permissionTableError = await checkPermissionTable(
+      admin,
+      organizationId,
+      "production_operations_permissions",
+    );
+    if (permissionTableError)
+      return json({ error: permissionTableError.message }, permissionTableError.status);
+  }
 
   const { data: created, error: createError } =
     await admin.auth.admin.createUser({
@@ -344,6 +499,24 @@ export async function POST(request: Request) {
       true,
     );
     if (permissionError) {
+      await admin.from("organization_members").delete().eq("organization_id", organizationId).eq("user_id", userId);
+      await admin.from("profiles").delete().eq("id", userId);
+      await admin.auth.admin.deleteUser(userId);
+      return json({ error: permissionError.message }, 500);
+    }
+  }
+
+  if (productionOperationsEnabled) {
+    const { error: permissionError } = await setProductionOperationsPermission(
+      admin,
+      organizationId,
+      userId,
+      actorUserId,
+      true,
+    );
+    if (permissionError) {
+      await admin.from("production_approval_permissions").delete().eq("organization_id", organizationId).eq("user_id", userId);
+      await admin.from("organization_member_capabilities").delete().eq("organization_id", organizationId).eq("user_id", userId).eq("capability", "revised_finance");
       await admin.from("organization_members").delete().eq("organization_id", organizationId).eq("user_id", userId);
       await admin.from("profiles").delete().eq("id", userId);
       await admin.auth.admin.deleteUser(userId);
@@ -425,17 +598,20 @@ export async function PATCH(request: Request) {
   const email =
     typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
   const password = typeof body?.password === "string" ? body.password : "";
-  const role =
-    body?.role === "admin" ||
-    body?.role === "project_manager" ||
-    body?.role === "sales_pricing_officer" ||
-    body?.role === "accountant" ||
-    body?.role === "lead_coordinator"
+  const role = managed.role === "owner"
+    ? body?.role === "owner"
+      ? "owner"
+      : null
+    : isManagedUserRole(body?.role)
       ? body.role
       : null;
   const productionApprovalRequested =
     typeof body?.production_approval_enabled === "boolean"
       ? body.production_approval_enabled
+      : null;
+  const productionOperationsRequested =
+    typeof body?.production_operations_enabled === "boolean"
+      ? body.production_operations_enabled
       : null;
   if (
     !fullName ||
@@ -491,6 +667,40 @@ export async function PATCH(request: Request) {
       return json({ error: permissionReadError.message }, 500);
     productionApprovalEnabled = existingPermission?.is_active === true;
   }
+  let productionOperationsEnabled = productionOperationsRequested === true;
+  if (productionOperationsRequested === null) {
+    const { data: existingPermission, error: permissionReadError } =
+      await managed.admin
+        .from("production_operations_permissions")
+        .select("is_active")
+        .eq("organization_id", organizationId)
+        .eq("user_id", userId)
+        .maybeSingle();
+    if (
+      permissionReadError &&
+      !isMissingProductionOperationsTable(permissionReadError)
+    )
+      return json({ error: permissionReadError.message }, 500);
+    productionOperationsEnabled = existingPermission?.is_active === true;
+  }
+  if (productionApprovalEnabled) {
+    const permissionTableError = await checkPermissionTable(
+      managed.admin,
+      organizationId,
+      "production_approval_permissions",
+    );
+    if (permissionTableError)
+      return json({ error: permissionTableError.message }, permissionTableError.status);
+  }
+  if (productionOperationsEnabled) {
+    const permissionTableError = await checkPermissionTable(
+      managed.admin,
+      organizationId,
+      "production_operations_permissions",
+    );
+    if (permissionTableError)
+      return json({ error: permissionTableError.message }, permissionTableError.status);
+  }
 
   const { error: authError } = await managed.admin.auth.admin.updateUserById(
     userId,
@@ -507,51 +717,81 @@ export async function PATCH(request: Request) {
     .from("profiles")
     .upsert({ id: userId, full_name: fullName });
   if (profileError) return json({ error: profileError.message }, 500);
-  if (role !== "sales_pricing_officer") {
-    const { error: assignmentError } = await managed.admin
-      .from("pricing_officer_project_types")
-      .delete()
-      .eq("organization_id", organizationId)
-      .eq("pricing_officer_user_id", userId);
-    if (assignmentError) return json({ error: assignmentError.message }, 500);
-  }
-  const { error: membershipError } = await managed.admin
-    .from("organization_members")
-    .update({ role })
-    .eq("organization_id", organizationId)
-    .eq("user_id", userId);
-  if (membershipError) return json({ error: membershipError.message }, 500);
+  const accessMutation = await updateSuperAdminManagedUserAccess(
+    managed.admin,
+    {
+      organizationId,
+      userId,
+      actorUserId,
+      role,
+      revisedFinanceEnabled: internalFinanceEnabled,
+      productionApprovalEnabled,
+      productionOperationsEnabled,
+    },
+  );
+  if (accessMutation.error)
+    return json({ error: accessMutation.error.message }, 500);
 
-  const capabilityMutation = internalFinanceEnabled
-    ? await managed.admin.from("organization_member_capabilities").upsert(
-        {
-          organization_id: organizationId,
-          user_id: userId,
-          capability: "revised_finance",
-          granted_by: actorUserId,
-        },
-        { onConflict: "organization_id,user_id,capability" },
-      )
-    : await managed.admin
-        .from("organization_member_capabilities")
+  // Keep older databases usable while the additive migration is rolling out.
+  // Once the new RPC exists, all workspace access rows are changed in one
+  // transaction. The fallback is only used when that RPC is not installed.
+  if (accessMutation.missingRoutine) {
+    if (role !== "sales_pricing_officer") {
+      const { error: assignmentError } = await managed.admin
+        .from("pricing_officer_project_types")
         .delete()
         .eq("organization_id", organizationId)
-        .eq("user_id", userId)
-        .eq("capability", "revised_finance");
-  if (
-    capabilityMutation.error &&
-    !isMissingMemberCapabilityTable(capabilityMutation.error)
-  )
-    return json({ error: capabilityMutation.error.message }, 500);
+        .eq("pricing_officer_user_id", userId);
+      if (assignmentError) return json({ error: assignmentError.message }, 500);
+    }
+    const { error: membershipError } = await managed.admin
+      .from("organization_members")
+      .update({ role })
+      .eq("organization_id", organizationId)
+      .eq("user_id", userId);
+    if (membershipError) return json({ error: membershipError.message }, 500);
 
-  const { error: permissionError } = await setProductionApprovalPermission(
-    managed.admin,
-    organizationId,
-    userId,
-    actorUserId,
-    productionApprovalEnabled,
-  );
-  if (permissionError) return json({ error: permissionError.message }, 500);
+    const capabilityMutation = internalFinanceEnabled
+      ? await managed.admin.from("organization_member_capabilities").upsert(
+          {
+            organization_id: organizationId,
+            user_id: userId,
+            capability: "revised_finance",
+            granted_by: actorUserId,
+          },
+          { onConflict: "organization_id,user_id,capability" },
+        )
+      : await managed.admin
+          .from("organization_member_capabilities")
+          .delete()
+          .eq("organization_id", organizationId)
+          .eq("user_id", userId)
+          .eq("capability", "revised_finance");
+    if (
+      capabilityMutation.error &&
+      !isMissingMemberCapabilityTable(capabilityMutation.error)
+    )
+      return json({ error: capabilityMutation.error.message }, 500);
+
+    const { error: permissionError } = await setProductionApprovalPermission(
+      managed.admin,
+      organizationId,
+      userId,
+      actorUserId,
+      productionApprovalEnabled,
+    );
+    if (permissionError) return json({ error: permissionError.message }, 500);
+
+    const { error: operationsPermissionError } = await setProductionOperationsPermission(
+      managed.admin,
+      organizationId,
+      userId,
+      actorUserId,
+      productionOperationsEnabled,
+    );
+    if (operationsPermissionError)
+      return json({ error: operationsPermissionError.message }, 500);
+  }
 
   return Response.json({ message: "User account updated." });
 }
@@ -578,6 +818,16 @@ export async function DELETE(request: Request) {
     false,
   );
   if (permissionError) return json({ error: permissionError.message }, 500);
+
+  const { error: operationsPermissionError } = await setProductionOperationsPermission(
+    managed.admin,
+    organizationId,
+    userId,
+    actorUserId,
+    false,
+  );
+  if (operationsPermissionError)
+    return json({ error: operationsPermissionError.message }, 500);
 
   const { error: membershipError } = await managed.admin
     .from("organization_members")

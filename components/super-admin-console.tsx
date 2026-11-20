@@ -37,6 +37,7 @@ type ManagedUser = {
   internal_finance_enabled: boolean;
   project_types: string[];
   production_approval_enabled: boolean;
+  production_operations_enabled: boolean;
   banned: boolean;
   signature_url: string | null;
 };
@@ -49,6 +50,7 @@ type UserFormValues = {
   internal_finance_enabled: boolean;
   project_types: string[];
   production_approval_enabled: boolean;
+  production_operations_enabled: boolean;
 };
 
 const displayRole = (role: string, internalFinanceEnabled = false) =>
@@ -97,6 +99,7 @@ export function SuperAdminConsole({
     internal_finance_enabled: false,
     project_types: [],
     production_approval_enabled: false,
+    production_operations_enabled: false,
   });
   const [editValues, setEditValues] = useState<UserFormValues>({
     full_name: "",
@@ -106,6 +109,7 @@ export function SuperAdminConsole({
     internal_finance_enabled: false,
     project_types: [],
     production_approval_enabled: false,
+    production_operations_enabled: false,
   });
   const [signatureFile, setSignatureFile] = useState<File | null>(null);
   const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
@@ -229,6 +233,7 @@ export function SuperAdminConsole({
       internal_finance_enabled: false,
       project_types: [],
       production_approval_enabled: false,
+      production_operations_enabled: false,
     });
     setSignatureFile(null);
     setMessage(
@@ -251,6 +256,7 @@ export function SuperAdminConsole({
       internal_finance_enabled: user.internal_finance_enabled,
       project_types: user.project_types ?? [],
       production_approval_enabled: user.production_approval_enabled,
+      production_operations_enabled: user.production_operations_enabled,
     });
     setEditSignatureFile(null);
     setShowNewPassword(false);
@@ -412,7 +418,7 @@ export function SuperAdminConsole({
             </button>
           </div>
           <div className="table-shell max-h-[460px] overflow-auto">
-              <table className="app-table w-full min-w-[980px] text-left text-[12px]">
+              <table className="app-table w-full min-w-[1120px] text-left text-[12px]">
               <thead className="sticky top-0 z-10 border-b border-[#1F4E79] bg-[#1F4E79] text-[12px] font-bold text-white">
                 <tr>
                   <th className="px-4 py-2">User</th>
@@ -420,6 +426,7 @@ export function SuperAdminConsole({
                   <th className="px-4 py-2">User Type</th>
                   <th className="px-4 py-2">Assigned Project Types</th>
                   <th className="px-4 py-2">Production Approval</th>
+                  <th className="px-4 py-2">Production Operations</th>
                   <th className="px-4 py-2">Account Status</th>
                   <th className="px-4 py-2 text-center">Actions</th>
                 </tr>
@@ -428,7 +435,7 @@ export function SuperAdminConsole({
                 {loading ? (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={8}
                       className="px-5 py-10 text-center text-[#7d8797]"
                     >
                       <LoadingState variant="section" label="Loading users..." />
@@ -455,6 +462,16 @@ export function SuperAdminConsole({
                       </td>
                       <td className="px-5 py-4">
                         {isPricingRole(user.role) && user.production_approval_enabled ? (
+                          <span className="inline-flex items-center gap-1.5 text-[#218b55]">
+                            <span className="size-1.5 rounded-full bg-[#218b55]" />
+                            Enabled
+                          </span>
+                        ) : (
+                          <span className="text-[#8b92a1]">-</span>
+                        )}
+                      </td>
+                      <td className="px-5 py-4">
+                        {user.production_operations_enabled ? (
                           <span className="inline-flex items-center gap-1.5 text-[#218b55]">
                             <span className="size-1.5 rounded-full bg-[#218b55]" />
                             Enabled
@@ -538,7 +555,7 @@ export function SuperAdminConsole({
                 ) : (
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={8}
                       className="px-5 py-10 text-center text-[#7d8797]"
                     >
                       No Users Found.
@@ -625,13 +642,20 @@ export function SuperAdminConsole({
                           : false,
                     });
                   }}
-                  className="mt-1.5 w-full rounded-lg border border-[#cfd8e3] bg-white px-3 py-2 text-[14px] outline-none focus:border-[#c43b43]"
+                  disabled={editValues.role === "owner"}
+                  className="mt-1.5 w-full rounded-lg border border-[#cfd8e3] bg-white px-3 py-2 text-[14px] outline-none focus:border-[#c43b43] disabled:cursor-not-allowed disabled:bg-[#f4f6f8]"
                 >
+                  {editValues.role === "owner" && <option value="owner">Owner</option>}
                   <option value="project_manager">Sales Executive</option>
                   <option value="admin">General Manager</option>
                   <option value="sales_pricing_officer">Sales &amp; Pricing Officer</option>
                   <option value="accountant">Accounting &amp; Finance</option>
                   <option value="lead_coordinator">Lead &amp; Costing Coordinator</option>
+                  <option value="sales">Sales</option>
+                  <option value="production">Production</option>
+                  <option value="warehouse">Warehouse</option>
+                  <option value="payroll">Payroll</option>
+                  <option value="viewer">Viewer</option>
                 </select>
               </label>
               {isPricingRole(editValues.role) && (
@@ -702,6 +726,25 @@ export function SuperAdminConsole({
                   </span>
                 </label>
               )}
+              <label className="flex items-start gap-2 rounded-lg border border-[#dfe5ed] bg-white p-3 text-[13px] font-semibold">
+                <input
+                  type="checkbox"
+                  checked={editValues.production_operations_enabled}
+                  onChange={(event) =>
+                    setEditValues({
+                      ...editValues,
+                      production_operations_enabled: event.target.checked,
+                    })
+                  }
+                  className="mt-0.5 size-4 accent-[#c43b43]"
+                />
+                <span>
+                  <span className="block">Enable Production operations</span>
+                  <span className="mt-0.5 block text-[12px] font-normal text-[#7d8797]">
+                    Adds the table-based Production workspace for approved projects, status updates, and remarks without changing this user&apos;s primary role.
+                  </span>
+                </span>
+              </label>
               {["project_manager", "sales_pricing_officer", "admin"].includes(editValues.role) && (
                 <label className="block text-[14px] font-semibold">
                   Signature image
@@ -864,6 +907,11 @@ export function SuperAdminConsole({
                   <option value="sales_pricing_officer">Sales &amp; Pricing Officer</option>
                   <option value="accountant">Accounting &amp; Finance</option>
                   <option value="lead_coordinator">Lead &amp; Costing Coordinator</option>
+                  <option value="sales">Sales</option>
+                  <option value="production">Production</option>
+                  <option value="warehouse">Warehouse</option>
+                  <option value="payroll">Payroll</option>
+                  <option value="viewer">Viewer</option>
                 </select>
               </label>
               {isPricingRole(values.role) && (
@@ -913,6 +961,25 @@ export function SuperAdminConsole({
                   </span>
                 </label>
               )}
+              <label className="flex items-start gap-2 rounded-lg border border-[#dfe5ed] bg-white p-3 text-[13px] font-semibold">
+                <input
+                  type="checkbox"
+                  checked={values.production_operations_enabled}
+                  onChange={(event) =>
+                    setValues({
+                      ...values,
+                      production_operations_enabled: event.target.checked,
+                    })
+                  }
+                  className="mt-0.5 size-4 accent-[#c43b43]"
+                />
+                <span>
+                  <span className="block">Enable Production operations</span>
+                  <span className="mt-0.5 block text-[12px] font-normal text-[#7d8797]">
+                    Adds the table-based Production workspace for approved projects, status updates, and remarks without changing this user&apos;s primary role.
+                  </span>
+                </span>
+              </label>
               {canReceiveInternalFinanceCapability(values.role) && (
                 <label className="flex items-start gap-2 rounded-lg border border-[#dfe5ed] bg-white p-3 text-[13px] font-semibold">
                   <input
