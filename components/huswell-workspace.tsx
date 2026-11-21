@@ -18628,7 +18628,7 @@ function ProductionCashAdvanceReview({
   request: ProductionCashAdvanceRequest;
   saving: boolean;
   close: () => void;
-  decide: (decision: "approved" | "rejected", note: string) => void;
+  decide: (decision: "approved" | "rejected" | "needs_revision", note: string) => void;
 }) {
   const [decisionNote, setDecisionNote] = useState("");
   const insufficientFund = n(request.project_fund_available) + 0.001 < n(request.requested_amount);
@@ -18680,11 +18680,19 @@ function ProductionCashAdvanceReview({
             value={decisionNote}
             onChange={(event) => setDecisionNote(event.target.value)}
             className="input mt-1 min-h-[76px] resize-y"
-            placeholder="Required when rejecting; optional when approving"
+            placeholder="Required when rejecting or requesting revision; optional when approving"
           />
         </label>
         <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-[#edf0f5] pt-4">
           <Button secondary onClick={close}>Close</Button>
+          <Button
+            secondary
+            loading={saving}
+            disabled={saving || !decisionNote.trim()}
+            onClick={() => decide("needs_revision", decisionNote.trim())}
+          >
+            <RotateCcw size={14} /> Request revision
+          </Button>
           <Button
             secondary
             loading={saving}
@@ -18863,7 +18871,7 @@ function Submissions({
   };
   const decideCashAdvance = async (
     request: ProductionCashAdvanceRequest,
-    decision: "approved" | "rejected",
+    decision: "approved" | "rejected" | "needs_revision",
     note: string,
   ) => {
     if (!request.id) return;
@@ -18882,7 +18890,9 @@ function Submissions({
     notice(
       decision === "approved"
         ? "Cash advance approved and deducted from the Project Fund."
-        : "Cash advance request rejected.",
+        : decision === "needs_revision"
+          ? "Cash advance request returned for revision."
+          : "Cash advance request rejected.",
     );
     await Promise.all([reload(), loadCashAdvanceRequests()]);
   };
@@ -20473,9 +20483,12 @@ function ProductionOperator({
     assignment: ProductionOperatorAssignment;
     requested_amount: string;
     request_note: string;
+    revision_request_id: string | null;
   } | null>(null);
   const [cashAdvanceHistoryAssignment, setCashAdvanceHistoryAssignment] =
     useState<ProductionOperatorAssignment | null>(null);
+  const [cashAdvanceHistoryNote, setCashAdvanceHistoryNote] =
+    useState<ProductionOperatorCashAdvanceRequest | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -20544,6 +20557,7 @@ function ProductionOperator({
     setAssignmentEditor(null);
     setCashAdvanceRequestEditor(null);
     setCashAdvanceHistoryAssignment(null);
+    setCashAdvanceHistoryNote(null);
     if (!(await fetchProductionDetails(project))) setDetailsProject(null);
   };
 
@@ -20555,6 +20569,7 @@ function ProductionOperator({
     setAssignmentEditor(null);
     setCashAdvanceRequestEditor(null);
     setCashAdvanceHistoryAssignment(null);
+    setCashAdvanceHistoryNote(null);
   };
 
   const refreshProductionDetails = async () => {
@@ -20719,11 +20734,19 @@ function ProductionOperator({
     await refreshProductionDetails();
   };
 
-  const openCashAdvanceRequest = (assignment: ProductionOperatorAssignment) => {
+  const openCashAdvanceRequest = (
+    assignment: ProductionOperatorAssignment,
+    revisionRequest?: ProductionOperatorCashAdvanceRequest,
+  ) => {
+    if (revisionRequest) {
+      setCashAdvanceHistoryAssignment(null);
+      setCashAdvanceHistoryNote(null);
+    }
     setCashAdvanceRequestEditor({
       assignment,
-      requested_amount: "",
-      request_note: "",
+      requested_amount: revisionRequest ? String(revisionRequest.requested_amount ?? "") : "",
+      request_note: revisionRequest?.request_note ?? "",
+      revision_request_id: revisionRequest?.id ?? null,
     });
   };
 
@@ -20748,19 +20771,29 @@ function ProductionOperator({
       return;
     }
     setDetailsSaving(true);
-    const { error } = await createClient().rpc("request_production_cash_advance", {
-      p_organization_id: orgId,
-      p_assignment_id: cashAdvanceRequestEditor.assignment.id,
-      p_requested_amount: requestedAmount,
-      p_note: cashAdvanceRequestEditor.request_note.trim(),
-    });
+    const result = cashAdvanceRequestEditor.revision_request_id
+      ? await createClient().rpc("resubmit_production_cash_advance", {
+          p_request_id: cashAdvanceRequestEditor.revision_request_id,
+          p_requested_amount: requestedAmount,
+          p_note: cashAdvanceRequestEditor.request_note.trim(),
+        })
+      : await createClient().rpc("request_production_cash_advance", {
+          p_organization_id: orgId,
+          p_assignment_id: cashAdvanceRequestEditor.assignment.id,
+          p_requested_amount: requestedAmount,
+          p_note: cashAdvanceRequestEditor.request_note.trim(),
+        });
     setDetailsSaving(false);
-    if (error) {
-      notice(error.message);
+    if (result.error) {
+      notice(result.error.message);
       return;
     }
     setCashAdvanceRequestEditor(null);
-    notice("Cash advance request sent to the General Manager.");
+    notice(
+      cashAdvanceRequestEditor.revision_request_id
+        ? "Cash advance request resubmitted to the General Manager."
+        : "Cash advance request sent to the General Manager.",
+    );
     await refreshProductionDetails();
   };
 
@@ -20946,6 +20979,11 @@ function ProductionOperator({
           (request) => request.assignment_id === cashAdvanceHistoryAssignment.id,
         )
       : [];
+  const latestCashAdvanceRequest = cashAdvanceHistoryRequests[0];
+  const latestCashAdvanceRevision =
+    latestCashAdvanceRequest?.status === "needs_revision"
+      ? latestCashAdvanceRequest
+      : null;
 
   return (
     <div className="space-y-5">
@@ -21454,7 +21492,7 @@ function ProductionOperator({
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-[15px] font-semibold text-[var(--color-text-primary)]">
-                  Request cash advance
+                  {cashAdvanceRequestEditor.revision_request_id ? "Resubmit cash advance request" : "Request cash advance"}
                 </h2>
                 <p className="mt-1 text-[12px] text-[var(--color-text-secondary)]">
                   {text(detailsProject.project_name, "Untitled project")} · {cashAdvanceRequestEditor.assignment.box_maker_name}
@@ -21484,7 +21522,9 @@ function ProductionOperator({
               </div>
             </div>
             <p className="mt-3 rounded-[var(--radius-control)] border border-[var(--color-border)] px-3 py-2 text-[11px] leading-4 text-[var(--color-text-secondary)]">
-              The amount will remain pending until the General Manager approves it. The Project Fund is deducted only after approval.
+              {cashAdvanceRequestEditor.revision_request_id
+                ? "Update the request using the General Manager's note, then resubmit it for approval. The Project Fund is deducted only after approval."
+                : "The amount will remain pending until the General Manager approves it. The Project Fund is deducted only after approval."}
             </p>
             <div className="mt-4 grid gap-4">
               <label className="grid gap-1 text-[12px] font-medium text-[var(--color-text-primary)]">
@@ -21531,8 +21571,8 @@ function ProductionOperator({
                 disabled={detailsSaving || cashAdvanceRequestRemaining <= 0}
                 onClick={() => void submitCashAdvanceRequest()}
               >
-                <Send size={14} />
-                Send request
+                {cashAdvanceRequestEditor.revision_request_id ? <RotateCcw size={14} /> : <Send size={14} />}
+                {cashAdvanceRequestEditor.revision_request_id ? "Resubmit for approval" : "Send request"}
               </Button>
             </div>
           </form>
@@ -21560,14 +21600,17 @@ function ProductionOperator({
                 type="button"
                 aria-label="Close cash advance history"
                 className="text-[var(--color-text-secondary)]"
-                onClick={() => setCashAdvanceHistoryAssignment(null)}
+                onClick={() => {
+                  setCashAdvanceHistoryAssignment(null);
+                  setCashAdvanceHistoryNote(null);
+                }}
               >
                 <X size={17} />
               </button>
             </header>
             <div className="max-h-[60vh] overflow-auto p-4">
               {cashAdvanceHistoryRequests.length ? (
-                <Table labels={["Status", "Requested", "Approved", "Request remark", "Decision remark", "Requested Date"]} minWidth={920}>
+                <Table labels={["Status", "Requested", "Approved", "Request remark", "Decision remark", "Requested Date", "Actions"]} minWidth={1040}>
                   {cashAdvanceHistoryRequests.map((request) => (
                     <tr key={request.id}>
                       <td className="px-4 py-3"><Status value={request.status} /></td>
@@ -21576,6 +21619,31 @@ function ProductionOperator({
                       <td className="max-w-[280px] whitespace-normal px-4 py-3 text-[var(--color-text-secondary)]">{text(request.request_note, "-")}</td>
                       <td className="max-w-[240px] whitespace-normal px-4 py-3 text-[var(--color-text-secondary)]">{text(request.decision_note, "-")}</td>
                       <td className="px-4 py-3 whitespace-nowrap text-[var(--color-text-secondary)]">{day(request.requested_at)}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex justify-center gap-2">
+                          {request.decision_note && (
+                            <ActionIcon
+                              label={request.status === "needs_revision" ? "View General Manager revision note" : "View General Manager decision note"}
+                              confirm={false}
+                              onClick={() => setCashAdvanceHistoryNote(request)}
+                            >
+                              <MessageSquareText size={14} />
+                            </ActionIcon>
+                          )}
+                          {canEdit &&
+                            request.id === latestCashAdvanceRevision?.id &&
+                            n(cashAdvanceHistoryAssignment.pending_cash_advance) <= 0 && (
+                              <ActionIcon
+                                label="Resubmit cash advance request for approval"
+                                tone="amber"
+                                confirm={false}
+                                onClick={() => openCashAdvanceRequest(cashAdvanceHistoryAssignment, request)}
+                              >
+                                <RotateCcw size={14} />
+                              </ActionIcon>
+                            )}
+                        </div>
+                      </td>
                     </tr>
                   ))}
                 </Table>
@@ -21584,10 +21652,30 @@ function ProductionOperator({
               )}
             </div>
             <footer className="flex justify-end border-t border-[var(--color-border)] p-4">
-              <Button secondary onClick={() => setCashAdvanceHistoryAssignment(null)}>Close</Button>
+              <Button
+                secondary
+                onClick={() => {
+                  setCashAdvanceHistoryAssignment(null);
+                  setCashAdvanceHistoryNote(null);
+                }}
+              >
+                Close
+              </Button>
             </footer>
           </section>
         </div>
+      )}
+
+      {cashAdvanceHistoryNote && (
+        <NoteDialog
+          open
+          title={cashAdvanceHistoryNote.status === "needs_revision" ? "General Manager revision note" : "General Manager decision note"}
+          context={`${text(cashAdvanceHistoryAssignment?.box_maker_name, "Box Maker")} · ${text(detailsProject?.project_name, "Untitled project")}`}
+          note={text(cashAdvanceHistoryNote.decision_note, "")}
+          emptyText="No decision note was provided."
+          titleId="cash-advance-decision-note-title"
+          onClose={() => setCashAdvanceHistoryNote(null)}
+        />
       )}
 
       {canEdit && assignmentEditor && productionDetails && (
@@ -21778,34 +21866,34 @@ function ProductionOperator({
         </div>
       )}
 
-      <Panel
-        title="Status types"
-        detail="Rename the built-in statuses or add a status label mapped to an existing production stage."
-        action={canEdit ? (
-          <Button
-            compact
-            onClick={() =>
-              setStatusTypeEditor({
-                id: null,
-                name: "",
-                legacy_status: "queued",
-              })
-            }
-          >
-            <Plus size={14} />
-            Add status type
-          </Button>
-        ) : undefined}
-      >
-        {statusTypes.length ? (
-          <Table labels={["Status type", "Production stage", ...(canEdit ? ["Actions"] : [])]} minWidth={680}>
-            {statusTypes.map((statusType) => (
-              <tr key={statusType.id}>
-                <td className="px-5 py-3">{statusType.name}</td>
-                <td className="px-5 py-3 text-[var(--color-text-secondary)]">
-                  {productionOperatorStatusLabel(statusType.legacy_status)}
-                </td>
-                {canEdit && (
+      {canEdit && (
+        <Panel
+          title="Status types"
+          detail="Rename the built-in statuses or add a status label mapped to an existing production stage."
+          action={
+            <Button
+              compact
+              onClick={() =>
+                setStatusTypeEditor({
+                  id: null,
+                  name: "",
+                  legacy_status: "queued",
+                })
+              }
+            >
+              <Plus size={14} />
+              Add status type
+            </Button>
+          }
+        >
+          {statusTypes.length ? (
+            <Table labels={["Status type", "Production stage", "Actions"]} minWidth={680}>
+              {statusTypes.map((statusType) => (
+                <tr key={statusType.id}>
+                  <td className="px-5 py-3">{statusType.name}</td>
+                  <td className="px-5 py-3 text-[var(--color-text-secondary)]">
+                    {productionOperatorStatusLabel(statusType.legacy_status)}
+                  </td>
                   <td className="px-5 py-3 text-center">
                     <Button
                       compact
@@ -21822,14 +21910,14 @@ function ProductionOperator({
                       Edit
                     </Button>
                   </td>
-                )}
-              </tr>
-            ))}
-          </Table>
-        ) : (
-          <Empty>No Production status types are configured.</Empty>
-        )}
-      </Panel>
+                </tr>
+              ))}
+            </Table>
+          ) : (
+            <Empty>No Production status types are configured.</Empty>
+          )}
+        </Panel>
+      )}
 
       {canEdit && statusEditor && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-[#151922]/30 p-4">
@@ -25127,6 +25215,8 @@ export function HuswellWorkspace({
       ? "Finance Overview"
     : requestedInitialView === "Finance Foundation"
       ? defaultWorkspaceView
+    : requestedInitialView === "Projects"
+      ? canViewProduction ? "Production" : defaultWorkspaceView
       : requestedInitialView;
   const financePaymentViewAllowed =
     hasInternalFinanceAccess || ["super_admin", "owner", "admin"].includes(role);
@@ -25241,6 +25331,8 @@ export function HuswellWorkspace({
       ? "Finance Requests"
       : view === "Finance Cash on Hand"
         ? "Finance Overview"
+        : view === "Projects"
+          ? canViewProduction ? "Production" : defaultWorkspaceView
         : view;
     if (financeSidebarViews.includes(targetView) && !financeViewsForRole.includes(targetView)) {
       setActive(defaultWorkspaceView);
@@ -25266,11 +25358,6 @@ export function HuswellWorkspace({
     if (targetView === "Price Quotations") {
       setLeadMode("quotation");
       setActive("Price Quotations");
-      return;
-    }
-    if (targetView === "Projects") {
-      setLeadMode("projects");
-      setActive("Projects");
       return;
     }
     if (targetView === "Leads") setLeadMode("leads");
@@ -25617,7 +25704,6 @@ export function HuswellWorkspace({
       "Dashboard",
       "Leads",
       "Supplier's List",
-      "Projects",
       "Price Quotations",
       "Approvals",
       "Finance Overview",
@@ -25633,7 +25719,6 @@ export function HuswellWorkspace({
       "Dashboard",
       "Leads",
       "Supplier's List",
-      "Projects",
       "Price Quotations",
       "Quotation Costing Overview",
       "Approvals",
@@ -25653,7 +25738,6 @@ export function HuswellWorkspace({
       "Dashboard",
       "Leads",
       "Supplier's List",
-      "Projects",
       "Price Quotations",
       "Quotation Costing Overview",
       "Approvals",
@@ -25672,7 +25756,6 @@ export function HuswellWorkspace({
     project_manager: [
       "Dashboard",
       "Leads",
-      "Projects",
       "Price Quotations",
       "Finance Foundation",
       "Announcements",
@@ -25682,7 +25765,6 @@ export function HuswellWorkspace({
       "Dashboard",
       "Leads",
       "Supplier's List",
-      "Projects",
       "Price Quotations",
       "Price Quotation Review",
       "Quotation Costing Overview",
@@ -25780,7 +25862,6 @@ export function HuswellWorkspace({
           label: "Operations",
           items: [
             { view: "Approvals", icon: ClipboardCheck, badge: sidebarBadge("production_approval") },
-            { view: "Projects", icon: ClipboardCheck },
           ],
         },
       ];
@@ -25834,7 +25915,6 @@ export function HuswellWorkspace({
       items: [
         { view: "Price Quotations", icon: FileText },
         { view: "Quotation Costing Overview", icon: ReceiptText },
-        { view: "Projects", icon: ClipboardCheck },
       ],
     },
     {
@@ -25885,7 +25965,6 @@ export function HuswellWorkspace({
       label: "Operations",
       items: [
         { view: "Approvals", icon: ClipboardCheck, badge: sidebarBadge("production_approval") },
-        { view: "Projects", icon: ClipboardCheck },
       ],
     },
     {
@@ -25921,7 +26000,6 @@ export function HuswellWorkspace({
         { view: "Price Quotations", icon: FileText },
         { view: "Price Quotation Review", icon: ClipboardCheck },
         { view: "Quotation Costing Overview", icon: ReceiptText },
-        { view: "Projects", icon: ClipboardCheck },
       ],
     },
     {
@@ -26241,14 +26319,6 @@ export function HuswellWorkspace({
       <Dashboard store={store} go={navigate} role={role} orgId={organizationId} />
     ) : active === "Lead Costing" ? (
       <DynamicLeadCostingWorkspace organizationId={organizationId} />
-    ) : active === "Projects" ? (
-      <ProjectCalendar
-        store={store}
-        orgId={organizationId}
-        reload={reload}
-        notice={setMessage}
-        role={role}
-      />
     ) : active === "Quotation Costing Overview" ? (
       <QuotationCostingOverview
         store={store}
@@ -26518,10 +26588,8 @@ export function HuswellWorkspace({
             ? "Leads"
         : isManagementRole && view === "Supplier's List"
             ? "Suppliers"
-        : isManagementRole && view === "Projects"
-              ? "Production Status"
-        : view === "Projects"
-              ? "Production"
+        : view === "Production"
+              ? "Production Monitoring"
               : view === "Finance Overview"
                 ? "Dashboard"
               : view === "Finance Funds"
