@@ -170,7 +170,7 @@ export function SearchableSelect({
                 }}
                 onKeyDown={handleSearchKeyDown}
                 placeholder={searchPlaceholder}
-                className="searchable-lead-search input mt-0 h-9 w-full search-input !pr-3 text-[12px]"
+                className="searchable-lead-search input mt-0 h-9 w-full search-input !pl-9 !pr-3 text-[12px]"
               />
             </div>
           </div>

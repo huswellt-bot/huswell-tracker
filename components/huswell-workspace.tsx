@@ -20363,6 +20363,7 @@ type ProductionOperatorAssignment = {
   id: string;
   box_maker_id: string;
   box_maker_name: string;
+  tiers: ProductionOperatorTier[];
   labor_cost: number;
   cash_advance: number;
   pending_cash_advance: number;
@@ -20412,6 +20413,12 @@ type ProductionOperatorDetails = {
   box_makers: ProductionOperatorBoxMaker[];
   assignments: ProductionOperatorAssignment[];
   cash_advance_requests: ProductionOperatorCashAdvanceRequest[];
+};
+
+type ProductionAssignmentTierDraft = {
+  id: string | null;
+  tier_number: number;
+  percentage: string;
 };
 
 const productionOperatorStatusLabel = (value: string) =>
@@ -20501,7 +20508,7 @@ function ProductionBoxMakerPicker({
               <Search
                 size={13}
                 aria-hidden="true"
-                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)]"
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)]"
               />
               <input
                 id="production-box-maker-search"
@@ -20510,7 +20517,7 @@ function ProductionBoxMakerPicker({
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder="Search Box Makers..."
-                className="input mt-0 min-h-8 w-full pl-8 pr-2 text-[12px]"
+                className="input mt-0 min-h-8 w-full !pl-9 !pr-2 text-[12px]"
               />
             </div>
           </div>
@@ -20619,16 +20626,13 @@ function ProductionOperator({
     id: string | null;
     name: string;
   } | null>(null);
-  const [tierEditor, setTierEditor] = useState<{
-    id: string | null;
-    percentage: string;
-  } | null>(null);
   const [assignmentEditor, setAssignmentEditor] = useState<{
     id: string | null;
     box_maker_id: string;
     labor_cost: string;
     cash_advance: string;
     due_date: string;
+    tier_drafts: ProductionAssignmentTierDraft[];
   } | null>(null);
   const [cashAdvanceRequestEditor, setCashAdvanceRequestEditor] = useState<{
     assignment: ProductionOperatorAssignment | null;
@@ -20688,13 +20692,19 @@ function ProductionOperator({
       return false;
     }
     const payload = (data ?? {}) as Partial<ProductionOperatorDetails>;
+    const legacyTiers = Array.isArray(payload.tiers)
+      ? (payload.tiers as ProductionOperatorTier[])
+      : [];
     setProductionDetails({
-      tiers: Array.isArray(payload.tiers) ? (payload.tiers as ProductionOperatorTier[]) : [],
+      tiers: legacyTiers,
       box_makers: Array.isArray(payload.box_makers)
         ? (payload.box_makers as ProductionOperatorBoxMaker[])
         : [],
       assignments: Array.isArray(payload.assignments)
-        ? (payload.assignments as ProductionOperatorAssignment[])
+        ? (payload.assignments as ProductionOperatorAssignment[]).map((assignment) => ({
+            ...assignment,
+            tiers: Array.isArray(assignment.tiers) ? assignment.tiers : legacyTiers,
+          }))
         : [],
       cash_advance_requests: Array.isArray(payload.cash_advance_requests)
         ? (payload.cash_advance_requests as ProductionOperatorCashAdvanceRequest[])
@@ -20708,7 +20718,6 @@ function ProductionOperator({
     setDetailsProject(project);
     setProductionDetails(null);
     setBoxMakerEditor(null);
-    setTierEditor(null);
     setAssignmentEditor(null);
     setCashAdvanceRequestEditor(null);
     setCashAdvanceHistoryAssignment(null);
@@ -20720,7 +20729,6 @@ function ProductionOperator({
     setDetailsProject(null);
     setProductionDetails(null);
     setBoxMakerEditor(null);
-    setTierEditor(null);
     setAssignmentEditor(null);
     setCashAdvanceRequestEditor(null);
     setCashAdvanceHistoryAssignment(null);
@@ -20769,50 +20777,6 @@ function ProductionOperator({
     await refreshProductionDetails();
   };
 
-  const saveTier = async () => {
-    if (!tierEditor) return;
-    const percentage = Number(tierEditor.percentage);
-    if (!Number.isFinite(percentage) || percentage <= 0 || percentage > 100) {
-      notice("Enter a tier percentage between 0.01 and 100.");
-      return;
-    }
-    setDetailsSaving(true);
-    const result = tierEditor.id
-      ? await createClient().rpc("update_production_project_tier", {
-          p_organization_id: orgId,
-          p_tier_id: tierEditor.id,
-          p_percentage: percentage,
-        })
-      : await createClient().rpc("create_production_project_tier", {
-          p_organization_id: orgId,
-          p_production_job_id: detailsProject?.production_job_id,
-          p_percentage: percentage,
-        });
-    setDetailsSaving(false);
-    if (result.error) {
-      notice(result.error.message);
-      return;
-    }
-    setTierEditor(null);
-    notice(tierEditor.id ? "Tier percentage updated." : "Tier percentage added.");
-    await refreshProductionDetails();
-  };
-
-  const archiveTier = async (tier: ProductionOperatorTier) => {
-    setDetailsSaving(true);
-    const { error } = await createClient().rpc("archive_production_project_tier", {
-      p_organization_id: orgId,
-      p_tier_id: tier.id,
-    });
-    setDetailsSaving(false);
-    if (error) {
-      notice(error.message);
-      return;
-    }
-    notice(`Tier ${tier.tier_number} was archived.`);
-    await refreshProductionDetails();
-  };
-
   const openAssignmentEditor = (assignment?: ProductionOperatorAssignment) => {
     setAssignmentEditor(
       assignment
@@ -20822,6 +20786,11 @@ function ProductionOperator({
             labor_cost: String(assignment.labor_cost ?? ""),
             cash_advance: String(assignment.cash_advance ?? ""),
             due_date: assignment.due_date ?? "",
+            tier_drafts: assignment.tiers.map((tier) => ({
+              id: tier.id,
+              tier_number: tier.tier_number,
+              percentage: String(Math.round(n(tier.percentage))),
+            })),
           }
         : {
             id: null,
@@ -20829,7 +20798,35 @@ function ProductionOperator({
             labor_cost: "",
             cash_advance: "",
             due_date: "",
+            tier_drafts: [],
           },
+    );
+  };
+
+  const addAssignmentTier = () => {
+    setAssignmentEditor((current) => {
+      if (!current || current.tier_drafts.length >= 4) return current;
+      const usedTierNumbers = new Set(current.tier_drafts.map((tier) => tier.tier_number));
+      const tierNumber = [1, 2, 3, 4].find((candidate) => !usedTierNumbers.has(candidate));
+      if (!tierNumber) return current;
+      return {
+        ...current,
+        tier_drafts: [
+          ...current.tier_drafts,
+          { id: null, tier_number: tierNumber, percentage: "" },
+        ],
+      };
+    });
+  };
+
+  const removeAssignmentTier = (tierIndex: number) => {
+    setAssignmentEditor((current) =>
+      current
+        ? {
+            ...current,
+            tier_drafts: current.tier_drafts.filter((_, index) => index !== tierIndex),
+          }
+        : current,
     );
   };
 
@@ -20844,22 +20841,25 @@ function ProductionOperator({
       notice("Enter a valid total labor cost.");
       return;
     }
+    const tierPayload = assignmentEditor.tier_drafts.map((tier) => ({
+      id: tier.id,
+      tier_number: tier.tier_number,
+      percentage: Number(tier.percentage),
+    }));
+    if (tierPayload.some((tier) => !Number.isInteger(tier.percentage) || tier.percentage < 1 || tier.percentage > 100)) {
+      notice("Enter whole-number tier percentages between 1 and 100.");
+      return;
+    }
     setDetailsSaving(true);
-    const result = assignmentEditor.id
-      ? await createClient().rpc("update_production_box_maker_assignment", {
-          p_organization_id: orgId,
-          p_assignment_id: assignmentEditor.id,
-          p_box_maker_id: assignmentEditor.box_maker_id,
-          p_labor_cost: laborCost,
-          p_due_date: assignmentEditor.due_date || null,
-        })
-      : await createClient().rpc("create_production_box_maker_assignment", {
-          p_organization_id: orgId,
-          p_production_job_id: detailsProject.production_job_id,
-          p_box_maker_id: assignmentEditor.box_maker_id,
-          p_labor_cost: laborCost,
-          p_due_date: assignmentEditor.due_date || null,
-        });
+    const result = await createClient().rpc("save_production_box_maker_assignment_with_tiers", {
+      p_organization_id: orgId,
+      p_production_job_id: detailsProject.production_job_id,
+      p_assignment_id: assignmentEditor.id,
+      p_box_maker_id: assignmentEditor.box_maker_id,
+      p_labor_cost: laborCost,
+      p_due_date: assignmentEditor.due_date || null,
+      p_tiers: tierPayload,
+    });
     setDetailsSaving(false);
     if (result.error) {
       notice(result.error.message);
@@ -21148,12 +21148,18 @@ function ProductionOperator({
     await load();
   };
 
-  const productionDetailsHasAssignments = (productionDetails?.assignments.length ?? 0) > 0;
+  const productionTierCount = (productionDetails?.assignments ?? []).reduce(
+    (highestTier, assignment) =>
+      Math.max(highestTier, ...assignment.tiers.map((tier) => tier.tier_number)),
+    0,
+  );
+  const productionTierNumbers = Array.from(
+    { length: productionTierCount },
+    (_, index) => index + 1,
+  );
   const productionDetailsTableLabels = [
     "Box Maker",
-    ...(productionDetails?.tiers ?? []).map(
-      (tier) => `Tier ${tier.tier_number} (${n(tier.percentage).toFixed(2)}%)`,
-    ),
+    ...productionTierNumbers.map((tierNumber) => `Tier ${tierNumber} (%)`),
     "Total Labor Cost",
     "Total Cash Advance",
     "Balance",
@@ -21373,7 +21379,7 @@ function ProductionOperator({
             role="dialog"
             aria-modal="true"
             aria-labelledby="production-details-title"
-            className="flex max-h-[calc(100vh-2rem)] w-full max-w-[1400px] flex-col overflow-hidden rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-xl"
+            className="flex max-h-[calc(100vh-2rem)] w-full max-w-[1200px] flex-col overflow-hidden rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] shadow-xl"
           >
             <header className="flex items-start justify-between gap-3 border-b border-[var(--color-border)] p-4">
               <div className="min-w-0">
@@ -21410,23 +21416,11 @@ function ProductionOperator({
                         Production assignments
                       </h3>
                       <p className="mt-1 text-[11px] text-[var(--color-text-secondary)]">
-                        One table for every Box Maker assigned to this project, including tier percentages, costs, balance, and due date.
+                        Each Box Maker can have its own optional tier percentages, costs, balance, and due date.
                       </p>
                     </div>
                     {canEdit && (
                       <div className="flex flex-wrap justify-end gap-2">
-                        <Button
-                          compact
-                          disabled={
-                            detailsSaving ||
-                            !productionDetailsHasAssignments ||
-                            productionDetails.tiers.length >= 4
-                          }
-                          onClick={() => setTierEditor({ id: null, percentage: "" })}
-                        >
-                          <Plus size={13} />
-                          Add tier
-                        </Button>
                         <Button
                           compact
                           disabled={detailsSaving}
@@ -21446,59 +21440,27 @@ function ProductionOperator({
                       </div>
                     )}
                   </div>
-                  {productionDetails.tiers.length > 0 && (
-                    <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-3 py-2 text-[11px]">
-                    {productionDetails.tiers.map((tier) => (
-                      <span
-                        key={tier.id}
-                        className="inline-flex items-center gap-1 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 py-1"
-                      >
-                        <span className="font-medium text-[var(--color-text-primary)]">
-                          Tier {tier.tier_number}: {n(tier.percentage).toFixed(2)}%
-                        </span>
-                        {canEdit && (
-                          <>
-                            <ActionIcon
-                              label={`Edit Tier ${tier.tier_number} percentage`}
-                              confirm={false}
-                              disabled={detailsSaving}
-                              onClick={() =>
-                                setTierEditor({
-                                  id: tier.id,
-                                  percentage: String(tier.percentage ?? ""),
-                                })
-                              }
-                            >
-                              <Pencil size={12} />
-                            </ActionIcon>
-                            <ActionIcon
-                              label={`Archive Tier ${tier.tier_number}`}
-                              tone="red"
-                              disabled={detailsSaving}
-                              confirmationDescription="Archive this tier percentage? Existing project history will be preserved."
-                              onClick={() => void archiveTier(tier)}
-                            >
-                              <Trash2 size={12} />
-                            </ActionIcon>
-                          </>
-                        )}
-                      </span>
-                    ))}
-                    </div>
-                  )}
                   <Table
                     labels={productionDetailsTableLabels}
-                    minWidth={1180 + productionDetails.tiers.length * 72}
+                    minWidth={1180 + productionTierNumbers.length * 72}
                   >
                     {productionDetails.assignments.length ? (
                       productionDetails.assignments.map((assignment) => (
                         <tr key={assignment.id}>
                           <td className="px-4 py-3 font-medium">{assignment.box_maker_name}</td>
-                          {productionDetails.tiers.map((tier) => (
-                            <td key={tier.id} className="px-4 py-3 text-center tabular-nums text-[var(--color-text-secondary)]">
-                              {n(tier.percentage).toFixed(2)}%
-                            </td>
-                          ))}
+                          {productionTierNumbers.map((tierNumber) => {
+                            const tier = assignment.tiers.find(
+                              (candidate) => candidate.tier_number === tierNumber,
+                            );
+                            return (
+                              <td
+                                key={`${assignment.id}-tier-${tierNumber}`}
+                                className="px-4 py-3 text-center tabular-nums text-[var(--color-text-secondary)]"
+                              >
+                                {tier ? `${Math.round(n(tier.percentage))}%` : ""}
+                              </td>
+                            );
+                          })}
                           <td className="px-4 py-3 text-right tabular-nums">{peso.format(n(assignment.labor_cost))}</td>
                           <td className="px-4 py-3 text-right tabular-nums">
                             {peso.format(n(assignment.cash_advance))}
@@ -21570,54 +21532,6 @@ function ProductionOperator({
               <Empty>Production details could not be loaded.</Empty>
             )}
           </section>
-        </div>
-      )}
-
-      {canEdit && tierEditor && (
-        <div className="fixed inset-0 z-[70] grid place-items-center bg-[#151922]/30 p-4">
-          <form
-            className="w-full max-w-sm rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void saveTier();
-            }}
-          >
-            <h2 className="text-[15px] font-semibold text-[var(--color-text-primary)]">
-              {tierEditor.id ? "Edit tier percentage" : "Add tier percentage"}
-            </h2>
-            <p className="mt-1 text-[12px] text-[var(--color-text-secondary)]">
-              Tier percentages are shared by every Box Maker in this project.
-            </p>
-            <label className="mt-5 grid gap-1 text-[12px] font-medium text-[var(--color-text-primary)]">
-              Percentage
-              <div className="flex items-center gap-2">
-                <input
-                  autoFocus
-                  required
-                  type="number"
-                  min="0.01"
-                  max="100"
-                  step="0.01"
-                  value={tierEditor.percentage}
-                  onChange={(event) =>
-                    setTierEditor((current) =>
-                      current ? { ...current, percentage: event.target.value } : current,
-                    )
-                  }
-                  className="min-h-9 flex-1 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[12px]"
-                />
-                <span className="text-[12px] text-[var(--color-text-secondary)]">%</span>
-              </div>
-            </label>
-            <div className="mt-5 flex justify-end gap-2">
-              <Button secondary onClick={() => setTierEditor(null)}>
-                Cancel
-              </Button>
-              <Button loading={detailsSaving} onClick={() => void saveTier()}>
-                Save tier
-              </Button>
-            </div>
-          </form>
         </div>
       )}
 
@@ -21922,7 +21836,7 @@ function ProductionOperator({
               {assignmentEditor.id ? "Edit Box Maker assignment" : "Add Box Maker assignment"}
             </h2>
             <p className="mt-1 text-[12px] text-[var(--color-text-secondary)]">
-              Add Box Makers first. After the first assignment, you can add shared project tiers; each tier can be up to 100%.
+              Set the labor details and optionally add tier percentages for this Box Maker only.
             </p>
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <label className="grid gap-1 text-[12px] font-medium text-[var(--color-text-primary)] sm:col-span-2">
@@ -21944,6 +21858,77 @@ function ProductionOperator({
                   onArchive={(boxMaker) => void archiveBoxMaker(boxMaker)}
                 />
               </label>
+              <div className="sm:col-span-2 overflow-hidden rounded-[var(--radius-control)] border border-[var(--color-border)]">
+                <div className="flex flex-wrap items-start justify-between gap-3 bg-[var(--color-surface-subtle)] px-3 py-2.5">
+                  <div>
+                    <p className="text-[12px] font-medium text-[var(--color-text-primary)]">
+                      Tier percentages <span className="font-normal text-[var(--color-text-secondary)]">(optional)</span>
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-[var(--color-text-secondary)]">
+                      These tiers apply only to this Box Maker. Use whole numbers from 1% to 100%.
+                    </p>
+                  </div>
+                  <Button
+                    compact
+                    disabled={detailsSaving || assignmentEditor.tier_drafts.length >= 4}
+                    onClick={addAssignmentTier}
+                  >
+                    <Plus size={13} />
+                    Add tier
+                  </Button>
+                </div>
+                {assignmentEditor.tier_drafts.length ? (
+                  <div className="grid gap-2 border-t border-[var(--color-border)] p-3">
+                    {assignmentEditor.tier_drafts.map((tier, index) => (
+                      <div key={tier.id ?? `new-tier-${tier.tier_number}`} className="flex items-center gap-2">
+                        <span className="w-14 shrink-0 text-[12px] font-medium text-[var(--color-text-primary)]">
+                          Tier {tier.tier_number}
+                        </span>
+                        <div className="relative min-w-0 flex-1">
+                          <input
+                            required
+                            type="number"
+                            min="1"
+                            max="100"
+                            step="1"
+                            value={tier.percentage}
+                            onChange={(event) =>
+                              setAssignmentEditor((current) =>
+                                current
+                                  ? {
+                                      ...current,
+                                      tier_drafts: current.tier_drafts.map((draft, draftIndex) =>
+                                        draftIndex === index
+                                          ? { ...draft, percentage: event.target.value }
+                                          : draft,
+                                      ),
+                                    }
+                                  : current,
+                              )
+                            }
+                            className="min-h-8 w-full rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 pr-7 text-right text-[12px]"
+                          />
+                          <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[11px] text-[var(--color-text-secondary)]">
+                            %
+                          </span>
+                        </div>
+                        <ActionIcon
+                          label={`Remove Tier ${tier.tier_number}`}
+                          confirm={false}
+                          disabled={detailsSaving}
+                          onClick={() => removeAssignmentTier(index)}
+                        >
+                          <Trash2 size={13} />
+                        </ActionIcon>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="border-t border-[var(--color-border)] px-3 py-2 text-[11px] text-[var(--color-text-secondary)]">
+                    No tiers added for this Box Maker.
+                  </p>
+                )}
+              </div>
               <label className="grid gap-1 text-[12px] font-medium text-[var(--color-text-primary)] sm:col-span-2">
                 Total Labor Cost
                 <input
@@ -22160,15 +22145,22 @@ function ProductionOperator({
                         <label className="sr-only" htmlFor="production-status-search">
                           Search Production statuses
                         </label>
-                        <input
-                          id="production-status-search"
-                          type="search"
-                          autoFocus
-                          value={statusPickerSearch}
-                          onChange={(event) => setStatusPickerSearch(event.target.value)}
-                          placeholder="Search statuses..."
-                          className="input mt-0 min-h-8 w-full px-2 text-[12px]"
-                        />
+                        <div className="relative">
+                          <Search
+                            size={13}
+                            aria-hidden="true"
+                            className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)]"
+                          />
+                          <input
+                            id="production-status-search"
+                            type="search"
+                            autoFocus
+                            value={statusPickerSearch}
+                            onChange={(event) => setStatusPickerSearch(event.target.value)}
+                            placeholder="Search statuses..."
+                            className="input mt-0 min-h-8 w-full !pl-9 !pr-2 text-[12px]"
+                          />
+                        </div>
                       </div>
                       {activeStatusTypes.map((statusType) => (
                         <div key={statusType.id} className="flex items-center gap-1 border-b border-[var(--color-border)] last:border-b-0">

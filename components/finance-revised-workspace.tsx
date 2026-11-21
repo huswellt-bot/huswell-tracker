@@ -12,6 +12,7 @@ import {
   Plus,
   ReceiptText,
   RefreshCw,
+  Search,
   Trash2,
   Wallet,
   X,
@@ -548,15 +549,22 @@ function FinanceCategoryPicker({
             <label className="sr-only" htmlFor={`${direction}-finance-category-search`}>
               Search {directionLabel} categories
             </label>
-            <input
-              id={`${direction}-finance-category-search`}
-              type="search"
-              autoFocus
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search categories..."
-              className="input mt-0 min-h-8 w-full px-2 text-[11px]"
-            />
+            <div className="relative">
+              <Search
+                size={13}
+                aria-hidden="true"
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)]"
+              />
+              <input
+                id={`${direction}-finance-category-search`}
+                type="search"
+                autoFocus
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search categories..."
+                className="input mt-0 min-h-8 w-full !pl-9 !pr-2 text-[11px]"
+              />
+            </div>
           </div>
           {availableCategories.map((category) => {
             const categoryId = textValue(category, "category_id");
