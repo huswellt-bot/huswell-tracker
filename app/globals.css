@@ -207,12 +207,12 @@
   --radius-card: 8px;
   --card-shadow: none;
   --font-family: var(--font-geist-sans), "Geist", "Geist Sans", -apple-system, "Segoe UI", sans-serif;
-  --font-size-base: 13px;
-  --font-size-sm: 12px;
-  --font-size-xs: 11px;
-  --font-size-h2: 14px;
-  --font-size-h1: 16px;
-  --font-size-display: 20px;
+  --font-size-base: 12px;
+  --font-size-sm: 11px;
+  --font-size-xs: 10px;
+  --font-size-h2: 13px;
+  --font-size-h1: 15px;
+  --font-size-display: 19px;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;

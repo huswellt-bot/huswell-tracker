@@ -20318,7 +20318,8 @@ function Production({
 type ProductionOperatorProject = {
   quotation_id: string;
   quotation_no: string;
-  project_name: string;
+  client_name: string | null;
+  project_name: string | null;
   project_type: string | null;
   production_job_id: string | null;
   job_no: string | null;
@@ -20413,17 +20414,6 @@ type ProductionOperatorDetails = {
   cash_advance_requests: ProductionOperatorCashAdvanceRequest[];
 };
 
-const productionOperatorLegacyStatuses = [
-  "queued",
-  "artwork_approval",
-  "materials_ready",
-  "in_production",
-  "quality_check",
-  "completed",
-  "delivered",
-  "cancelled",
-] as const;
-
 const productionOperatorStatusLabel = (value: string) =>
   value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 
@@ -20444,9 +20434,12 @@ function ProductionOperator({
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [productionPage, setProductionPage] = useState(1);
+  const [productionTab, setProductionTab] = useState<"active" | "completed" | "all">("active");
   const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [statusEditor, setStatusEditor] = useState<ProductionOperatorProject | null>(null);
+  const [productionRemarkProject, setProductionRemarkProject] =
+    useState<ProductionOperatorProject | null>(null);
   const [pdfQuote, setPdfQuote] = useState<Row | null>(null);
   const [pdfStore, setPdfStore] = useState<Store | null>(null);
   const [pdfWindow, setPdfWindow] = useState<Window | null>(null);
@@ -20455,6 +20448,8 @@ function ProductionOperator({
     status_type_id: "",
     operator_remark: "",
   });
+  const [statusPickerOpen, setStatusPickerOpen] = useState(false);
+  const [statusPickerSearch, setStatusPickerSearch] = useState("");
   const [statusTypeEditor, setStatusTypeEditor] = useState<{
     id: string | null;
     name: string;
@@ -20518,6 +20513,10 @@ function ProductionOperator({
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!statusPickerOpen) setStatusPickerSearch("");
+  }, [statusPickerOpen]);
 
   const fetchProductionDetails = async (project: ProductionOperatorProject) => {
     if (!project.production_job_id) return false;
@@ -20857,14 +20856,22 @@ function ProductionOperator({
 
   const approvedProjects = projects.filter((project) => !project.is_added);
   const activeProjects = projects.filter((project) => project.is_added);
+  const approvedProjectOptions = approvedProjects.map((project) => ({
+    value: project.quotation_id,
+    label: [
+      text(project.quotation_no, "-"),
+      text(project.project_name, "Untitled project"),
+      text(project.client_name),
+    ].filter(Boolean).join(" · "),
+    searchText: [
+      text(project.quotation_no),
+      text(project.project_name),
+      text(project.client_name),
+      text(project.project_type),
+    ].filter(Boolean).join(" "),
+  }));
   const selectedProject = approvedProjects.find(
     (project) => project.quotation_id === selectedProjectId,
-  );
-  const productionPageCount = Math.max(1, Math.ceil(activeProjects.length / TABLE_PAGE_SIZE));
-  const activeProductionPage = Math.min(productionPage, productionPageCount);
-  const visibleActiveProjects = activeProjects.slice(
-    (activeProductionPage - 1) * TABLE_PAGE_SIZE,
-    activeProductionPage * TABLE_PAGE_SIZE,
   );
 
   const addProject = async (project: ProductionOperatorProject) => {
@@ -20890,9 +20897,14 @@ function ProductionOperator({
         statusType.id === project.status_type_id ||
         statusType.legacy_status === project.status_key,
     );
+    const firstActiveStatus =
+      statusTypes.find(
+        (statusType) => statusType.is_active && statusType.legacy_status === "queued",
+      ) ?? statusTypes.find((statusType) => statusType.is_active);
     setStatusEditor(project);
+    setStatusPickerOpen(false);
     setStatusDraft({
-      status_type_id: matchingStatus?.id ?? statusTypes[0]?.id ?? "",
+      status_type_id: matchingStatus?.is_active ? matchingStatus.id : firstActiveStatus?.id ?? "",
       operator_remark: project.operator_remark ?? "",
     });
   };
@@ -20912,11 +20924,12 @@ function ProductionOperator({
       return;
     }
     setStatusEditor(null);
+    setStatusPickerOpen(false);
     notice("Production status and remark saved.");
     await load();
   };
 
-  const archiveProject = async (project: ProductionOperatorProject) => {
+  const removeProject = async (project: ProductionOperatorProject) => {
     if (!project.production_job_id) return;
     setSavingId(project.production_job_id);
     const { error } = await createClient().rpc("archive_production_operator_project", {
@@ -20928,12 +20941,13 @@ function ProductionOperator({
       notice(error.message);
       return;
     }
-    notice("Production project archived. It can be added again from Add project.");
+    notice("Production project removed. It can be added again from Add project.");
     await load();
   };
 
   const saveStatusType = async () => {
     if (!statusTypeEditor?.name.trim()) return;
+    const editingStatusTypeId = statusTypeEditor.id;
     const client = createClient();
     const result = statusTypeEditor.id
       ? await client.rpc("update_production_status_type", {
@@ -20952,7 +20966,29 @@ function ProductionOperator({
       return;
     }
     setStatusTypeEditor(null);
-    notice(statusTypeEditor.id ? "Production status type updated." : "Production status type added.");
+    setStatusPickerOpen(true);
+    notice(editingStatusTypeId ? "Production status updated." : "Production status added.");
+    await load();
+  };
+
+  const setStatusTypeActive = async (
+    statusType: ProductionOperatorStatusType,
+    isActive: boolean,
+  ) => {
+    if (statusType.is_system && !isActive) return;
+    const savingStatusTypeId = `status-type-${statusType.id}`;
+    setSavingId(savingStatusTypeId);
+    const { error } = await createClient().rpc("set_production_status_type_active", {
+      p_organization_id: orgId,
+      p_status_type_id: statusType.id,
+      p_is_active: isActive,
+    });
+    setSavingId(null);
+    if (error) {
+      notice(error.message);
+      return;
+    }
+    notice(isActive ? "Production status type restored." : "Production status type archived.");
     await load();
   };
 
@@ -20984,6 +21020,30 @@ function ProductionOperator({
     latestCashAdvanceRequest?.status === "needs_revision"
       ? latestCashAdvanceRequest
       : null;
+  const completedProjects = activeProjects.filter((project) => project.status_key === "completed");
+  const productionTableProjects = productionTab === "completed"
+    ? completedProjects
+    : productionTab === "all"
+      ? activeProjects
+      : activeProjects.filter((project) => project.status_key !== "completed");
+  const productionPageCount = Math.max(1, Math.ceil(productionTableProjects.length / TABLE_PAGE_SIZE));
+  const activeProductionPage = Math.min(productionPage, productionPageCount);
+  const visibleProductionProjects = productionTableProjects.slice(
+    (activeProductionPage - 1) * TABLE_PAGE_SIZE,
+    activeProductionPage * TABLE_PAGE_SIZE,
+  );
+  const productionTabLabels = [
+    { key: "active" as const, label: "Active", count: activeProjects.length - completedProjects.length },
+    { key: "completed" as const, label: "Completed", count: completedProjects.length },
+    { key: "all" as const, label: "All", count: activeProjects.length },
+  ];
+  const normalizedStatusPickerSearch = statusPickerSearch.trim().toLowerCase();
+  const activeStatusTypes = statusTypes.filter((statusType) =>
+    statusType.is_active && (!normalizedStatusPickerSearch || statusType.name.toLowerCase().includes(normalizedStatusPickerSearch)),
+  );
+  const archivedStatusTypes = statusTypes.filter((statusType) =>
+    !statusType.is_active && !statusType.is_system && (!normalizedStatusPickerSearch || statusType.name.toLowerCase().includes(normalizedStatusPickerSearch)),
+  );
 
   return (
     <div className="space-y-5">
@@ -21006,91 +21066,133 @@ function ProductionOperator({
           </Button>
         ) : undefined}
       >
+        <nav aria-label="Production project views" className="app-tabs mb-4">
+          {productionTabLabels.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => {
+                setProductionTab(tab.key);
+                setProductionPage(1);
+              }}
+              aria-current={productionTab === tab.key ? "page" : undefined}
+              className="app-tab"
+            >
+              {tab.label} ({tab.count})
+            </button>
+          ))}
+        </nav>
         {loading ? (
           <Empty>Loading Production projects...</Empty>
-        ) : visibleActiveProjects.length ? (
+        ) : visibleProductionProjects.length ? (
           <>
             <Table
-              labels={["Project", "Project Type", "Status", "Remarks", "Actions"]}
-              minWidth={1080}
-              columnWidths={["28%", "18%", "15%", "24%", "15%"]}
+              labels={["Quotation ID", "Project", "Project Type", "Status", "Remarks", "Actions"]}
+              minWidth={1280}
+              columnWidths={["15%", "22%", "18%", "13%", "20%", "12%"]}
             >
-              {visibleActiveProjects.map((project) => (
-                <tr key={project.production_job_id ?? project.quotation_id}>
-                  <td className="px-5 py-3">
-                    <b>{text(project.quotation_no, "-")}</b>
-                    <span className="block text-[var(--color-text-secondary)]">
-                      {text(project.project_name, "Untitled project")}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3 text-[var(--color-text-secondary)]">
-                    {text(project.project_type, "-")}
-                  </td>
-                  <td className="px-5 py-3">
-                    <span
-                      className={"inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium capitalize " + statusStyle(project.status_key)}
-                    >
-                      {text(project.status_label, productionOperatorStatusLabel(project.status_key))}
-                    </span>
-                  </td>
-                  <td className="max-w-[320px] whitespace-normal px-5 py-3 text-[var(--color-text-secondary)]">
-                    {text(project.operator_remark, "-")}
-                  </td>
-                  <td className="px-5 py-3">
-                    <div className="flex flex-wrap justify-center gap-2">
-                      <ActionIcon
-                        label={project.pdf_available === false ? "Price Quotation PDF unavailable" : "View Price Quotation PDF"}
-                        confirm={false}
-                        loading={pdfLoadingId === project.quotation_id}
-                        disabled={project.pdf_available === false || Boolean(pdfLoadingId)}
-                        onClick={() => void openQuotationPdf(project)}
+              {visibleProductionProjects.map((project) => {
+                const projectNames = [project.client_name, project.project_name]
+                  .map((value) => text(value, "").trim())
+                  .filter(Boolean);
+                return (
+                  <tr key={project.production_job_id ?? project.quotation_id}>
+                    <td className="whitespace-nowrap px-5 py-3 font-medium">
+                      {text(project.quotation_no, "-")}
+                    </td>
+                    <td className="px-5 py-3">
+                      {projectNames.length ? projectNames.map((name, index) => (
+                        <span
+                          key={`${project.quotation_id}-${name}-${index}`}
+                          className={index === 0 ? "block font-medium" : "block text-[var(--color-text-secondary)]"}
+                        >
+                          {name}
+                        </span>
+                      )) : "-"}
+                    </td>
+                    <td className="px-5 py-3 text-[var(--color-text-secondary)]">
+                      {text(project.project_type, "-")}
+                    </td>
+                    <td className="px-5 py-3">
+                      <span
+                        className={"inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium capitalize " + statusStyle(project.status_key)}
                       >
-                        <FileText size={15} />
-                      </ActionIcon>
-                      <ActionIcon
-                        label={canEdit ? "Manage Production Details" : "View Production Details"}
-                        confirm={false}
-                        loading={detailsLoading && detailsProject?.production_job_id === project.production_job_id}
-                        disabled={!project.production_job_id || Boolean(detailsSaving)}
-                        onClick={() => void openProductionDetails(project)}
-                      >
-                        <Boxes size={15} />
-                      </ActionIcon>
-                      {canEdit && (
-                        <>
-                          <Button compact secondary onClick={() => openStatusEditor(project)}>
-                            <Pencil size={13} />
-                            Edit
-                          </Button>
-                          <Button
-                            compact
-                            secondary
-                            confirm
-                            confirmationText="Archive this Production project? It will leave the active table and can be added again from Add project."
-                            loading={savingId === project.production_job_id}
-                            onClick={() => void archiveProject(project)}
-                          >
-                            <Archive size={13} />
-                            Archive
-                          </Button>
-                        </>
+                        {text(project.status_label, productionOperatorStatusLabel(project.status_key))}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3 text-center text-[var(--color-text-secondary)]">
+                      {text(project.operator_remark, "").trim() ? (
+                        <NoteAction
+                          label="View production remark"
+                          onClick={() => setProductionRemarkProject(project)}
+                        />
+                      ) : (
+                        "-"
                       )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                    <td className="px-5 py-3">
+                      <div className="flex min-w-max flex-nowrap items-center justify-center gap-2 whitespace-nowrap">
+                        <ActionIcon
+                          label={project.pdf_available === false ? "Price Quotation PDF unavailable" : "View Price Quotation PDF"}
+                          confirm={false}
+                          loading={pdfLoadingId === project.quotation_id}
+                          disabled={project.pdf_available === false || Boolean(pdfLoadingId)}
+                          onClick={() => void openQuotationPdf(project)}
+                        >
+                          <FileText size={15} />
+                        </ActionIcon>
+                        <ActionIcon
+                          label={canEdit ? "Manage Production Details" : "View Production Details"}
+                          confirm={false}
+                          loading={detailsLoading && detailsProject?.production_job_id === project.production_job_id}
+                          disabled={!project.production_job_id || Boolean(detailsSaving)}
+                          onClick={() => void openProductionDetails(project)}
+                        >
+                          <Boxes size={15} />
+                        </ActionIcon>
+                        {canEdit && (
+                          <>
+                            <ActionIcon
+                              label="Edit Production project status and remark"
+                              confirm={false}
+                              disabled={Boolean(savingId)}
+                              onClick={() => openStatusEditor(project)}
+                            >
+                              <Pencil size={13} />
+                            </ActionIcon>
+                            <ActionIcon
+                              label="Remove Production project"
+                              tone="red"
+                              confirm
+                              confirmationDescription="Remove this project from Production Monitoring? It will not delete the quotation or project and can be added again later."
+                              loading={savingId === project.production_job_id}
+                              onClick={() => void removeProject(project)}
+                            >
+                              <Trash2 size={13} />
+                            </ActionIcon>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </Table>
             <TablePagination
               page={activeProductionPage}
               pageCount={productionPageCount}
-              total={activeProjects.length}
+              total={productionTableProjects.length}
               onPageChange={setProductionPage}
-              label="Production projects pagination"
+              label={`${productionTab} Production projects pagination`}
             />
           </>
         ) : (
           <Empty>
-            No projects have been added to Production yet. Use Add project to select an approved quotation.
+            {productionTab === "completed"
+              ? "No completed projects yet. Set a project status to Completed to move it here."
+              : productionTab === "all"
+                ? "No projects have been added to Production yet. Use Add project to select an approved quotation."
+                : "No active projects are in Production. Use Add project to select an approved quotation."}
           </Empty>
         )}
       </Panel>
@@ -21806,19 +21908,19 @@ function ProductionOperator({
             <div className="mt-5 grid gap-4">
               <label className="grid gap-1 text-[12px] font-medium text-[var(--color-text-primary)]">
                 Approved project
-                <select
-                  required
+                <SearchableSelect
+                  options={approvedProjectOptions}
                   value={selectedProjectId}
-                  onChange={(event) => setSelectedProjectId(event.target.value)}
-                  className="min-h-9 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[12px]"
-                >
-                  <option value="">Select an approved project...</option>
-                  {approvedProjects.map((project) => (
-                    <option key={project.quotation_id} value={project.quotation_id}>
-                      {text(project.quotation_no, "-")} - {text(project.project_name, "Untitled project")}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setSelectedProjectId}
+                  placeholder={approvedProjectOptions.length ? "Select an approved project..." : "No approved projects available"}
+                  searchPlaceholder="Search quotation, project, client, or type"
+                  noResultsLabel="No approved project matches your search."
+                  ariaLabel="Approved project"
+                  required
+                  clearable={false}
+                  disabled={!approvedProjectOptions.length}
+                  className="mt-1"
+                />
               </label>
               {selectedProject ? (
                 <div className="grid gap-3 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] p-3 text-[12px]">
@@ -21866,59 +21968,6 @@ function ProductionOperator({
         </div>
       )}
 
-      {canEdit && (
-        <Panel
-          title="Status types"
-          detail="Rename the built-in statuses or add a status label mapped to an existing production stage."
-          action={
-            <Button
-              compact
-              onClick={() =>
-                setStatusTypeEditor({
-                  id: null,
-                  name: "",
-                  legacy_status: "queued",
-                })
-              }
-            >
-              <Plus size={14} />
-              Add status type
-            </Button>
-          }
-        >
-          {statusTypes.length ? (
-            <Table labels={["Status type", "Production stage", "Actions"]} minWidth={680}>
-              {statusTypes.map((statusType) => (
-                <tr key={statusType.id}>
-                  <td className="px-5 py-3">{statusType.name}</td>
-                  <td className="px-5 py-3 text-[var(--color-text-secondary)]">
-                    {productionOperatorStatusLabel(statusType.legacy_status)}
-                  </td>
-                  <td className="px-5 py-3 text-center">
-                    <Button
-                      compact
-                      secondary
-                      onClick={() =>
-                        setStatusTypeEditor({
-                          id: statusType.id,
-                          name: statusType.name,
-                          legacy_status: statusType.legacy_status,
-                        })
-                      }
-                    >
-                      <Pencil size={13} />
-                      Edit
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </Table>
-          ) : (
-            <Empty>No Production status types are configured.</Empty>
-          )}
-        </Panel>
-      )}
-
       {canEdit && statusEditor && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-[#151922]/30 p-4">
           <form
@@ -21941,7 +21990,10 @@ function ProductionOperator({
                 type="button"
                 aria-label="Close status editor"
                 className="text-[var(--color-text-secondary)]"
-                onClick={() => setStatusEditor(null)}
+                onClick={() => {
+                  setStatusEditor(null);
+                  setStatusPickerOpen(false);
+                }}
               >
                 <X size={17} />
               </button>
@@ -21949,23 +22001,135 @@ function ProductionOperator({
             <div className="mt-5 grid gap-4">
               <label className="grid gap-1 text-[12px] font-medium text-[var(--color-text-primary)]">
                 Status
-                <select
-                  required
-                  value={statusDraft.status_type_id}
-                  onChange={(event) =>
-                    setStatusDraft((current) => ({
-                      ...current,
-                      status_type_id: event.target.value,
-                    }))
-                  }
-                  className="min-h-9 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[12px]"
-                >
-                  {statusTypes.filter((statusType) => statusType.is_active).map((statusType) => (
-                    <option key={statusType.id} value={statusType.id}>
-                      {statusType.name}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <button
+                    type="button"
+                    aria-haspopup="listbox"
+                    aria-expanded={statusPickerOpen}
+                    onClick={() => setStatusPickerOpen((current) => !current)}
+                    className="flex min-h-9 w-full items-center justify-between gap-2 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-left text-[12px] hover:border-[var(--color-border-strong)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)]"
+                  >
+                    <span className="min-w-0 truncate">
+                      {statusTypes.find((statusType) => statusType.id === statusDraft.status_type_id)?.name ?? "Select status"}
+                    </span>
+                    <ChevronDown size={15} className="shrink-0 text-[var(--color-text-tertiary)]" />
+                  </button>
+                  {statusPickerOpen && (
+                    <div
+                      role="listbox"
+                      aria-label="Production status types"
+                      className="absolute inset-x-0 top-full z-20 mt-1 max-h-72 overflow-y-auto rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] p-1 shadow-lg"
+                    >
+                      <div className="flex items-center justify-between border-b border-[var(--color-border)] px-2 py-1.5">
+                        <span className="text-[11px] font-semibold text-[var(--color-text-secondary)]">
+                          Manage statuses
+                        </span>
+                        <ActionIcon
+                          label="Add Production status"
+                          confirm={false}
+                          onClick={() => {
+                            setStatusPickerOpen(false);
+                            setStatusTypeEditor({
+                              id: null,
+                              name: "",
+                              legacy_status: "queued",
+                            });
+                          }}
+                        >
+                          <Plus size={14} />
+                        </ActionIcon>
+                      </div>
+                      <div className="px-1 pt-1.5">
+                        <label className="sr-only" htmlFor="production-status-search">
+                          Search Production statuses
+                        </label>
+                        <input
+                          id="production-status-search"
+                          type="search"
+                          autoFocus
+                          value={statusPickerSearch}
+                          onChange={(event) => setStatusPickerSearch(event.target.value)}
+                          placeholder="Search statuses..."
+                          className="input mt-0 min-h-8 w-full px-2 text-[12px]"
+                        />
+                      </div>
+                      {activeStatusTypes.map((statusType) => (
+                        <div key={statusType.id} className="flex items-center gap-1 border-b border-[var(--color-border)] last:border-b-0">
+                          <button
+                            type="button"
+                            role="option"
+                            aria-selected={statusDraft.status_type_id === statusType.id}
+                            onClick={() => {
+                              setStatusDraft((current) => ({
+                                ...current,
+                                status_type_id: statusType.id,
+                              }));
+                              setStatusPickerOpen(false);
+                            }}
+                            className={`min-w-0 flex-1 truncate rounded-[var(--radius-control)] px-2 py-2 text-left text-[12px] hover:bg-[var(--color-surface-subtle)] ${statusDraft.status_type_id === statusType.id ? "font-semibold text-[var(--color-accent-text)]" : "text-[var(--color-text-primary)]"}`}
+                          >
+                            {statusType.name}
+                          </button>
+                          <ActionIcon
+                            label={`Edit Production status ${statusType.name}`}
+                            confirm={false}
+                            onClick={() => {
+                              setStatusPickerOpen(false);
+                              setStatusTypeEditor({
+                                id: statusType.id,
+                                name: statusType.name,
+                                legacy_status: statusType.legacy_status,
+                              });
+                            }}
+                          >
+                            <Pencil size={13} />
+                          </ActionIcon>
+                          <ActionIcon
+                            label={statusType.is_system ? `Built-in status ${statusType.name} cannot be archived` : `Archive Production status ${statusType.name}`}
+                            tone="red"
+                            disabled={statusType.is_system || savingId === `status-type-${statusType.id}`}
+                            confirm={!statusType.is_system}
+                            confirmationDescription={`Archive the Production status ${statusType.name}? It will no longer be available for new updates.`}
+                            loading={savingId === `status-type-${statusType.id}`}
+                            onClick={() => void setStatusTypeActive(statusType, false)}
+                          >
+                            <Archive size={13} />
+                          </ActionIcon>
+                        </div>
+                      ))}
+                      {archivedStatusTypes.length > 0 && (
+                        <>
+                          <div className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-text-tertiary)]">
+                            Archived
+                          </div>
+                          {archivedStatusTypes.map((statusType) => (
+                            <div key={statusType.id} className="flex items-center gap-1 border-b border-[var(--color-border)] px-2 py-1.5 last:border-b-0">
+                              <span className="min-w-0 flex-1 truncate text-[12px] text-[var(--color-text-tertiary)]">
+                                {statusType.name}
+                              </span>
+                              <ActionIcon
+                                label={`Restore Production status ${statusType.name}`}
+                                tone="amber"
+                                confirm={false}
+                                loading={savingId === `status-type-${statusType.id}`}
+                                onClick={() => void setStatusTypeActive(statusType, true)}
+                              >
+                                <Undo2 size={13} />
+                              </ActionIcon>
+                            </div>
+                          ))}
+                        </>
+                      )}
+                      {!activeStatusTypes.length && (
+                        <p className="px-2 py-3 text-[12px] text-[var(--color-text-secondary)]">
+                          {normalizedStatusPickerSearch
+                            ? "No active Production statuses match your search."
+                            : "No active Production statuses are configured."}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
               </label>
               <label className="grid gap-1 text-[12px] font-medium text-[var(--color-text-primary)]">
                 Remarks
@@ -21985,10 +22149,17 @@ function ProductionOperator({
               </label>
             </div>
             <div className="mt-5 flex justify-end gap-2">
-              <Button secondary onClick={() => setStatusEditor(null)}>
+              <Button
+                secondary
+                onClick={() => {
+                  setStatusEditor(null);
+                  setStatusPickerOpen(false);
+                }}
+              >
                 Cancel
               </Button>
               <Button
+                disabled={!statusDraft.status_type_id || savingId === statusEditor.production_job_id}
                 loading={savingId === statusEditor.production_job_id}
                 onClick={() => void saveProjectStatus()}
               >
@@ -22011,24 +22182,27 @@ function ProductionOperator({
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-[15px] font-semibold text-[var(--color-text-primary)]">
-                  {statusTypeEditor.id ? "Edit status type" : "Add status type"}
+                  {statusTypeEditor.id ? "Edit status" : "Add status"}
                 </h2>
                 <p className="mt-1 text-[12px] text-[var(--color-text-secondary)]">
-                  Choose the existing production stage used for timestamps and legacy reporting.
+                  Set the name shown in the Production status dropdown.
                 </p>
               </div>
               <button
                 type="button"
                 aria-label="Close status type editor"
                 className="text-[var(--color-text-secondary)]"
-                onClick={() => setStatusTypeEditor(null)}
+                onClick={() => {
+                  setStatusTypeEditor(null);
+                  setStatusPickerOpen(true);
+                }}
               >
                 <X size={17} />
               </button>
             </div>
             <div className="mt-5 grid gap-4">
               <label className="grid gap-1 text-[12px] font-medium text-[var(--color-text-primary)]">
-                Status type name
+                Status name
                 <input
                   required
                   maxLength={80}
@@ -22041,33 +22215,28 @@ function ProductionOperator({
                   className="min-h-9 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[12px]"
                 />
               </label>
-              <label className="grid gap-1 text-[12px] font-medium text-[var(--color-text-primary)]">
-                Production stage
-                <select
-                  value={statusTypeEditor.legacy_status}
-                  onChange={(event) =>
-                    setStatusTypeEditor((current) =>
-                      current ? { ...current, legacy_status: event.target.value } : current,
-                    )
-                  }
-                  className="min-h-9 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[12px]"
-                >
-                  {productionOperatorLegacyStatuses.map((status) => (
-                    <option key={status} value={status}>
-                      {productionOperatorStatusLabel(status)}
-                    </option>
-                  ))}
-                </select>
-              </label>
             </div>
             <div className="mt-5 flex justify-end gap-2">
-              <Button secondary onClick={() => setStatusTypeEditor(null)}>
+              <Button secondary onClick={() => {
+                setStatusTypeEditor(null);
+                setStatusPickerOpen(true);
+              }}>
                 Cancel
               </Button>
-              <Button onClick={() => void saveStatusType()}>Save status type</Button>
+              <Button onClick={() => void saveStatusType()}>Save status</Button>
             </div>
           </form>
         </div>
+      )}
+      {productionRemarkProject && (
+        <NoteDialog
+          open
+          title="Production remark"
+          context={`${text(productionRemarkProject.quotation_no, "Quotation")} · ${text(productionRemarkProject.project_name, "Untitled project")}`}
+          note={text(productionRemarkProject.operator_remark, "")}
+          titleId="production-remark-dialog-title"
+          onClose={() => setProductionRemarkProject(null)}
+        />
       )}
       {pdfQuote && pdfStore && (
         <QuotationDocument

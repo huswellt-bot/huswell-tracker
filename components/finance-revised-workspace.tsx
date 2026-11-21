@@ -4,6 +4,7 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Check,
+  ChevronDown,
   ChevronRight,
   Download,
   Landmark,
@@ -11,7 +12,6 @@ import {
   Plus,
   ReceiptText,
   RefreshCw,
-  Tag,
   Trash2,
   Wallet,
   X,
@@ -23,12 +23,14 @@ import { ClientCompanyNames } from "@/components/ui/client-company-names";
 import { FileUploadControl } from "@/components/ui/file-upload-control";
 import { LoadingState } from "@/components/ui/loading-state";
 import { NotificationDialog } from "@/components/ui/notification-dialog";
+import { SearchableSelect, type SearchableOption } from "@/components/ui/searchable-select";
 import { createClient } from "@/lib/supabase/client";
 
 type Row = Record<string, unknown>;
 type RevisedTab = "dashboard" | "funds" | "daily_fund" | "transactions" | "requests" | "approvals" | "projects" | "commissions" | "history";
 type DialogKind = "capital" | "transfer" | "return_capital" | "daily_request" | "daily_return" | "cash_in" | "cash_out" | null;
 type CategoryDirection = "income" | "expense";
+type CategoryEditor = { direction: CategoryDirection; id: string | null; name: string };
 type CashOutSource = "project" | "non_project";
 type ApprovalTab = "all" | "cash_in" | "cash_out" | "working_funds" | "daily_fund";
 type ApprovalItemKind = "transaction" | "working_request" | "daily_request";
@@ -66,8 +68,6 @@ type HistoryFilters = {
   project: string;
   actor: string;
 };
-
-const addCategoryOptionValue = "__add_revised_finance_category__";
 
 type RequestLine = {
   description: string;
@@ -463,6 +463,168 @@ function Modal({
   );
 }
 
+function FinanceCategoryPicker({
+  direction,
+  value,
+  categories,
+  canManage,
+  open,
+  saving,
+  onToggle,
+  onSelect,
+  onAdd,
+  onEdit,
+  onDelete,
+}: {
+  direction: CategoryDirection;
+  value: string;
+  categories: Row[];
+  canManage: boolean;
+  open: boolean;
+  saving: boolean;
+  onToggle: () => void;
+  onSelect: (categoryId: string) => void;
+  onAdd: () => void;
+  onEdit: (category: Row) => void;
+  onDelete: (category: Row) => void;
+}) {
+  const directionLabel = direction === "income" ? "Cash In" : "Cash Out";
+  const [search, setSearch] = useState("");
+  const directionCategories = categories.filter(
+    (category) => textValue(category, "direction") === direction,
+  );
+  const selectedCategory = directionCategories.find(
+    (category) => textValue(category, "category_id") === value,
+  );
+  const normalizedSearch = search.trim().toLowerCase();
+  const availableCategories = directionCategories.filter((category) =>
+    !normalizedSearch || textValue(category, "name").toLowerCase().includes(normalizedSearch),
+  );
+
+  return (
+    <div className="relative mt-1">
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => {
+          if (open) setSearch("");
+          onToggle();
+        }}
+        className="flex min-h-9 w-full items-center justify-between gap-2 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-left text-[11px] text-[var(--color-text-primary)] hover:border-[var(--color-border-strong)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)]"
+      >
+        <span className={selectedCategory ? "truncate" : "truncate text-[var(--color-text-disabled)]"}>
+          {textValue(selectedCategory, "name", `Select ${directionLabel} category`)}
+        </span>
+        <ChevronDown size={14} className="shrink-0 text-[var(--color-text-tertiary)]" />
+      </button>
+      {open ? (
+        <div
+          role="listbox"
+          aria-label={`${directionLabel} categories`}
+          className="absolute inset-x-0 top-full z-20 mt-1 max-h-72 overflow-y-auto rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] p-1 shadow-lg"
+        >
+          <div className="flex items-center justify-between border-b border-[var(--color-border)] px-2 py-1.5">
+            <span className="text-[10px] font-semibold text-[var(--color-text-secondary)]">
+              {canManage ? "Manage categories" : "Categories"}
+            </span>
+            {canManage ? (
+              <button
+                type="button"
+                aria-label={`Add ${directionLabel} category`}
+                title={`Add ${directionLabel} category`}
+                onClick={() => {
+                  setSearch("");
+                  onAdd();
+                }}
+                disabled={saving}
+                className="grid h-7 w-7 place-items-center rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)]"
+              >
+                <Plus size={14} />
+              </button>
+            ) : null}
+          </div>
+          <div className="px-1 pt-1.5">
+            <label className="sr-only" htmlFor={`${direction}-finance-category-search`}>
+              Search {directionLabel} categories
+            </label>
+            <input
+              id={`${direction}-finance-category-search`}
+              type="search"
+              autoFocus
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search categories..."
+              className="input mt-0 min-h-8 w-full px-2 text-[11px]"
+            />
+          </div>
+          {availableCategories.map((category) => {
+            const categoryId = textValue(category, "category_id");
+            const categoryName = textValue(category, "name");
+            return (
+              <div
+                key={categoryId}
+                className="flex items-center gap-1 border-b border-[var(--color-border)] last:border-b-0"
+              >
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={value === categoryId}
+                  onClick={() => {
+                    setSearch("");
+                    onSelect(categoryId);
+                  }}
+                  className={`min-w-0 flex-1 truncate rounded-[var(--radius-control)] px-2 py-2 text-left text-[11px] hover:bg-[var(--color-surface-subtle)] ${value === categoryId ? "font-semibold text-[var(--color-accent-text)]" : "text-[var(--color-text-primary)]"}`}
+                >
+                  {categoryName}
+                </button>
+                {canManage ? (
+                  <>
+                    <button
+                      type="button"
+                      aria-label={`Edit ${categoryName} category`}
+                      title="Edit category"
+                      onClick={() => {
+                        setSearch("");
+                        onEdit(category);
+                      }}
+                      disabled={saving}
+                      className="grid h-7 w-7 place-items-center rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)]"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    {!Boolean(category.is_system) ? (
+                      <button
+                        type="button"
+                        aria-label={`Remove ${categoryName} category`}
+                        title="Remove category"
+                        onClick={() => {
+                          setSearch("");
+                          onDelete(category);
+                        }}
+                        disabled={saving}
+                        className="grid h-7 w-7 place-items-center rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-danger-subtle)] hover:text-[var(--color-danger-text)]"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    ) : null}
+                  </>
+                ) : null}
+              </div>
+            );
+          })}
+          {!availableCategories.length ? (
+            <p className="px-2 py-3 text-[11px] text-[var(--color-text-secondary)]">
+              {normalizedSearch ? `No ${directionLabel} categories match your search.` : `No ${directionLabel} categories are configured.`}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {saving ? <span className="sr-only">Saving category</span> : null}
+    </div>
+  );
+}
+
 function EmptyState({ children }: { children: ReactNode }) {
   return <div className="px-5 py-10 text-center text-[12px] text-[var(--color-text-secondary)]">{children}</div>;
 }
@@ -565,9 +727,8 @@ export function FinanceRevisedWorkspace({
     note: "",
     receiptFile: null as File | null,
   });
-  const [categoryManagerDirection, setCategoryManagerDirection] = useState<CategoryDirection | null>(null);
-  const [categoryDraft, setCategoryDraft] = useState("");
-  const [editingCategory, setEditingCategory] = useState<Row | null>(null);
+  const [categoryDropdownDirection, setCategoryDropdownDirection] = useState<CategoryDirection | null>(null);
+  const [categoryEditor, setCategoryEditor] = useState<CategoryEditor | null>(null);
   const [deleteCategoryTarget, setDeleteCategoryTarget] = useState<Row | null>(null);
   const [projectSearch, setProjectSearch] = useState("");
   const [historyFilters, setHistoryFilters] = useState<HistoryFilters>({
@@ -621,6 +782,19 @@ export function FinanceRevisedWorkspace({
 
   const cashInProjects = projects.filter((project) => ["open", "on_hold", "closed"].includes(textValue(project, "project_status")));
   const openProjects = projects.filter((project) => ["open", "on_hold"].includes(textValue(project, "project_status")));
+  const projectOption = (project: Row, includeCompleted = false): SearchableOption => {
+    const projectName = textValue(project, "project_name", "Project");
+    const clientName = textValue(project, "client_name") || textValue(project, "company_name");
+    const quotationNumber = textValue(project, "quotation_number") || textValue(project, "quotation_no");
+    const statusLabel = includeCompleted && textValue(project, "project_status") === "closed" ? "Completed" : "";
+    return {
+      value: textValue(project, "project_fund_id"),
+      label: [projectName, clientName || "No client", statusLabel].filter(Boolean).join(" · "),
+      searchText: [projectName, clientName, quotationNumber, textValue(project, "project_type"), statusLabel].filter(Boolean).join(" "),
+    };
+  };
+  const cashInProjectOptions = cashInProjects.map((project) => projectOption(project, true));
+  const openProjectOptions = openProjects.map((project) => projectOption(project));
   const hasActiveRevisionChild = (transaction: Row) => {
     const transactionId = textValue(transaction, "id");
     return Boolean(transactionId) && transactions.some((candidate) =>
@@ -1029,6 +1203,9 @@ export function FinanceRevisedWorkspace({
   const closeTransactionDialog = () => {
     setDialog(null);
     setRevisionSource(null);
+    setCategoryDropdownDirection(null);
+    setCategoryEditor(null);
+    setDeleteCategoryTarget(null);
     setCashIn((current) => ({ ...current, receiptFile: null }));
     setCashOut((current) => ({ ...current, receiptFile: null }));
   };
@@ -1150,69 +1327,57 @@ export function FinanceRevisedWorkspace({
     }
   };
 
-  const openCategoryManager = (direction: CategoryDirection) => {
-    setCategoryManagerDirection(direction);
-    setCategoryDraft("");
-    setEditingCategory(null);
-    setDeleteCategoryTarget(null);
-    setError(null);
-  };
-
-  const closeCategoryManager = () => {
-    setCategoryManagerDirection(null);
-    setCategoryDraft("");
-    setEditingCategory(null);
-    setDeleteCategoryTarget(null);
-  };
-
-  const handleCategorySelection = (direction: CategoryDirection, value: string) => {
-    if (value === addCategoryOptionValue) {
-      openCategoryManager(direction);
-      return;
-    }
+  const selectCategory = (direction: CategoryDirection, value: string) => {
     if (direction === "income") {
       setCashIn((current) => ({ ...current, categoryId: value }));
     } else {
       setCashOut((current) => ({ ...current, categoryId: value }));
     }
+    setCategoryDropdownDirection(null);
   };
 
-  const startCategoryEdit = (category: Row) => {
-    setEditingCategory(category);
-    setCategoryDraft(textValue(category, "name"));
+  const openCategoryEditor = (direction: CategoryDirection, category?: Row) => {
+    setCategoryDropdownDirection(null);
+    setCategoryEditor({
+      direction,
+      id: category ? textValue(category, "category_id") : null,
+      name: category ? textValue(category, "name") : "",
+    });
     setDeleteCategoryTarget(null);
+    setError(null);
   };
 
   const saveCategory = async () => {
-    if (!categoryManagerDirection || !categoryDraft.trim()) return;
+    if (!categoryEditor || !categoryEditor.name.trim()) return;
+    const { direction, id, name } = categoryEditor;
     setSaving(true);
     setError(null);
     try {
-      const editing = Boolean(editingCategory);
+      const editing = Boolean(id);
       const { data, error: requestError } = editing
         ? await client.rpc("update_finance_revised_category", {
           p_organization_id: organizationId,
-          p_category_id: textValue(editingCategory, "category_id"),
-          p_name: categoryDraft.trim(),
+          p_category_id: id,
+          p_name: name.trim(),
         })
         : await client.rpc("create_finance_revised_category", {
           p_organization_id: organizationId,
-          p_direction: categoryManagerDirection,
-          p_name: categoryDraft.trim(),
-          p_expense_class: categoryManagerDirection === "expense" ? "operating" : null,
+          p_direction: direction,
+          p_name: name.trim(),
+          p_expense_class: direction === "expense" ? "operating" : null,
         });
       if (requestError) throw new Error(requestError.message);
 
       const savedId = data ? String(data) : "";
       if (!editing && savedId) {
-        if (categoryManagerDirection === "income") {
+        if (direction === "income") {
           setCashIn((current) => ({ ...current, categoryId: savedId }));
         } else {
           setCashOut((current) => ({ ...current, categoryId: savedId }));
         }
       }
-      setCategoryDraft("");
-      setEditingCategory(null);
+      setCategoryEditor(null);
+      setCategoryDropdownDirection(direction);
       setNotice(editing ? "Finance category was renamed." : "Finance category was added.");
       await load();
     } catch (caught) {
@@ -1226,6 +1391,7 @@ export function FinanceRevisedWorkspace({
     if (!deleteCategoryTarget) return;
     const targetId = textValue(deleteCategoryTarget, "category_id");
     const targetName = textValue(deleteCategoryTarget, "name", "Finance category");
+    const targetDirection = textValue(deleteCategoryTarget, "direction") as CategoryDirection;
     setSaving(true);
     setError(null);
     try {
@@ -1241,8 +1407,7 @@ export function FinanceRevisedWorkspace({
         setCashOut((current) => ({ ...current, categoryId: "" }));
       }
       setDeleteCategoryTarget(null);
-      setEditingCategory(null);
-      setCategoryDraft("");
+      setCategoryDropdownDirection(targetDirection);
       setNotice(data === "archived" ? `${targetName} was archived because it is already in use.` : `${targetName} was archived.`);
       await load();
     } catch (caught) {
@@ -2051,8 +2216,26 @@ export function FinanceRevisedWorkspace({
 
       {dialog === "cash_in" ? <Modal title={revisionSource ? "Correct and resubmit Cash In" : "Record project Cash In"} close={closeTransactionDialog}>
         <form className="grid gap-3 sm:grid-cols-2" onSubmit={handleCashIn}>
-          <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Project</span><select className="input mt-1 w-full" value={cashIn.projectId} onChange={(event) => setCashIn((current) => ({ ...current, projectId: event.target.value }))} required><option value="">Select project</option>{cashInProjects.map((project) => <option key={textValue(project, "project_fund_id")} value={textValue(project, "project_fund_id")}>{textValue(project, "project_name")} · {textValue(project, "client_name", "No client")}{textValue(project, "project_status") === "closed" ? " · Completed" : ""}</option>)}</select></label>
-          <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Cash In category</span><div className="mt-1 flex items-center gap-2"><select className="input w-full" value={cashIn.categoryId} onChange={(event) => handleCategorySelection("income", event.target.value)} required><option value="">Select Cash In category</option>{categories.filter((category) => textValue(category, "direction") === "income").map((category) => <option key={textValue(category, "category_id")} value={textValue(category, "category_id")}>{textValue(category, "name")}</option>)}<option value={addCategoryOptionValue}>＋ Add Cash In category</option></select><button type="button" className="button-secondary inline-flex shrink-0 items-center gap-1 text-[10px]" onClick={() => openCategoryManager("income")}><Tag size={13} /> Manage</button></div></label>
+          <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Project</span><SearchableSelect options={cashInProjectOptions} value={cashIn.projectId} onChange={(value) => setCashIn((current) => ({ ...current, projectId: value }))} placeholder={cashInProjectOptions.length ? "Select project" : "No projects available"} searchPlaceholder="Search project, client, or quotation" noResultsLabel="No matching project found." ariaLabel="Cash In project" required clearable={false} disabled={!cashInProjectOptions.length} className="mt-1" /></label>
+          <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2">
+            <span>Cash In category</span>
+            <FinanceCategoryPicker
+              direction="income"
+              value={cashIn.categoryId}
+              categories={categories}
+              canManage={canOperate}
+              open={categoryDropdownDirection === "income"}
+              saving={saving}
+              onToggle={() => setCategoryDropdownDirection((current) => current === "income" ? null : "income")}
+              onSelect={(value) => selectCategory("income", value)}
+              onAdd={() => openCategoryEditor("income")}
+              onEdit={(category) => openCategoryEditor("income", category)}
+              onDelete={(category) => {
+                setCategoryDropdownDirection(null);
+                setDeleteCategoryTarget(category);
+              }}
+            />
+          </label>
           <Field label="Amount" value={cashIn.amount} onChange={(value) => setCashIn((current) => ({ ...current, amount: value }))} type="number" min="0.01" step="0.01" required />
           <Field label="Collection date" value={cashIn.date} onChange={(value) => setCashIn((current) => ({ ...current, date: value }))} type="date" required />
           {cashIn.projectId ? <BalancePreview currentLabel="Current project balance" current={cashInCurrentBalance} afterLabel="Balance after Cash In" after={cashInAfterBalance} /> : null}
@@ -2087,8 +2270,26 @@ export function FinanceRevisedWorkspace({
               ))}
             </div>
           </div>
-          {cashOut.source === "project" ? <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Project</span><select className="input mt-1 w-full" value={cashOut.projectId} onChange={(event) => setCashOut((current) => ({ ...current, projectId: event.target.value }))} disabled={Boolean(revisionSource)} required><option value="">Select project</option>{openProjects.map((project) => <option key={textValue(project, "project_fund_id")} value={textValue(project, "project_fund_id")}>{textValue(project, "project_name")}</option>)}</select></label> : null}
-          <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Cash Out category</span><div className="mt-1 flex items-center gap-2"><select className="input w-full" value={cashOut.categoryId} onChange={(event) => handleCategorySelection("expense", event.target.value)} required><option value="">Select Cash Out category</option>{categories.filter((category) => textValue(category, "direction") === "expense").map((category) => <option key={textValue(category, "category_id")} value={textValue(category, "category_id")}>{textValue(category, "name")}</option>)}<option value={addCategoryOptionValue}>＋ Add Cash Out category</option></select><button type="button" className="button-secondary inline-flex shrink-0 items-center gap-1 text-[10px]" onClick={() => openCategoryManager("expense")}><Tag size={13} /> Manage</button></div></label>
+          {cashOut.source === "project" ? <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2"><span>Project</span><SearchableSelect options={openProjectOptions} value={cashOut.projectId} onChange={(value) => setCashOut((current) => ({ ...current, projectId: value }))} placeholder={openProjectOptions.length ? "Select project" : "No open projects available"} searchPlaceholder="Search project, client, or quotation" noResultsLabel="No matching project found." ariaLabel="Cash Out project" required clearable={false} disabled={Boolean(revisionSource) || !openProjectOptions.length} className="mt-1" /></label> : null}
+          <label className="block text-[11px] font-medium text-[var(--color-text-primary)] sm:col-span-2">
+            <span>Cash Out category</span>
+            <FinanceCategoryPicker
+              direction="expense"
+              value={cashOut.categoryId}
+              categories={categories}
+              canManage={canOperate}
+              open={categoryDropdownDirection === "expense"}
+              saving={saving}
+              onToggle={() => setCategoryDropdownDirection((current) => current === "expense" ? null : "expense")}
+              onSelect={(value) => selectCategory("expense", value)}
+              onAdd={() => openCategoryEditor("expense")}
+              onEdit={(category) => openCategoryEditor("expense", category)}
+              onDelete={(category) => {
+                setCategoryDropdownDirection(null);
+                setDeleteCategoryTarget(category);
+              }}
+            />
+          </label>
           <Field label="Amount" value={cashOut.amount} onChange={(value) => setCashOut((current) => ({ ...current, amount: value }))} type="number" min="0.01" step="0.01" required />
           <Field label="Cash Out date" value={cashOut.date} onChange={(value) => setCashOut((current) => ({ ...current, date: value }))} type="date" required />
           {cashOut.source === "project" && cashOut.projectId ? <BalancePreview currentLabel="Current project balance" current={cashOutCurrentBalance} afterLabel="Balance after Cash Out" after={cashOutAfterBalance} /> : null}
@@ -2113,65 +2314,56 @@ export function FinanceRevisedWorkspace({
         </form>
       </Modal> : null}
 
-      {categoryManagerDirection ? <Modal title="Manage Finance categories" detail="Accounting & Finance can add, rename, or archive categories for both Cash In and Cash Out." close={closeCategoryManager}>
+      {categoryEditor ? <Modal title={categoryEditor.id ? "Edit category" : "Add category"} close={() => {
+        const direction = categoryEditor.direction;
+        setCategoryEditor(null);
+        setCategoryDropdownDirection(direction);
+      }}>
+        <form className="grid gap-4" onSubmit={(event) => {
+          event.preventDefault();
+          void saveCategory();
+        }}>
+          <p className="text-[11px] text-[var(--color-text-secondary)]">
+            {categoryEditor.direction === "income" ? "Cash In category" : "Cash Out category"}
+          </p>
+          <label className="block text-[11px] font-medium text-[var(--color-text-primary)]">
+            Category name
+            <input
+              autoFocus
+              required
+              maxLength={100}
+              className="input mt-1 w-full"
+              value={categoryEditor.name}
+              onChange={(event) => setCategoryEditor((current) => current ? { ...current, name: event.target.value } : current)}
+              placeholder={categoryEditor.direction === "income" ? "Downpayment, progress payment..." : "Materials, payroll, rent..."}
+            />
+          </label>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              className="button-secondary"
+              onClick={() => {
+                const direction = categoryEditor.direction;
+                setCategoryEditor(null);
+                setCategoryDropdownDirection(direction);
+              }}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="button-primary" disabled={saving || !categoryEditor.name.trim()}>
+              {categoryEditor.id ? "Save name" : "Add category"}
+            </button>
+          </div>
+        </form>
+      </Modal> : null}
+
+      {deleteCategoryTarget ? <Modal title={`Remove ${textValue(deleteCategoryTarget, "name", "category")}?`} close={() => setDeleteCategoryTarget(null)}>
         <div className="space-y-4">
-          <div className="flex flex-wrap gap-2 border-b border-[var(--color-border)] pb-3">
-            {(["income", "expense"] as CategoryDirection[]).map((direction) => (
-              <button
-                key={direction}
-                type="button"
-                className={"button-secondary text-[11px] " + (categoryManagerDirection === direction ? "border-[var(--color-accent)] bg-[var(--color-surface-muted)] text-[var(--color-text-primary)]" : "")}
-                onClick={() => {
-                  setCategoryManagerDirection(direction);
-                  setCategoryDraft("");
-                  setEditingCategory(null);
-                  setDeleteCategoryTarget(null);
-                }}
-              >
-                {direction === "income" ? "Cash In categories" : "Cash Out categories"}
-              </button>
-            ))}
+          <p className="text-[12px] text-[var(--color-text-primary)]">Remove this category? Historical transactions will keep their category reference. Categories already in use are archived safely.</p>
+          <div className="flex justify-end gap-2">
+            <button type="button" className="button-secondary text-[11px]" onClick={() => setDeleteCategoryTarget(null)}>Cancel</button>
+            <button type="button" className="button-danger text-[11px]" onClick={() => void confirmDeleteCategory()} disabled={saving}>Remove category</button>
           </div>
-
-          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)] p-3">
-            <div className="flex flex-wrap items-end gap-2">
-              <label className="min-w-[220px] flex-1 text-[11px] font-medium text-[var(--color-text-primary)]">
-                {editingCategory ? "Edit category name" : "Add category"}
-                <input className="input mt-1 w-full" value={categoryDraft} onChange={(event) => setCategoryDraft(event.target.value)} placeholder={categoryManagerDirection === "income" ? "Downpayment, progress payment..." : "Materials, payroll, rent..."} maxLength={100} />
-              </label>
-              <button type="button" className="button-primary inline-flex items-center gap-1 text-[11px]" onClick={() => void saveCategory()} disabled={saving || !categoryDraft.trim()}>
-                <Plus size={13} /> {editingCategory ? "Save name" : "Add category"}
-              </button>
-              {editingCategory ? <button type="button" className="button-secondary text-[11px]" onClick={() => { setEditingCategory(null); setCategoryDraft(""); }}>Cancel edit</button> : null}
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-[11px] font-semibold text-[var(--color-text-primary)]">{categoryManagerDirection === "income" ? "Cash In categories" : "Cash Out categories"}</p>
-            </div>
-            <div className="space-y-1.5">
-              {categories.filter((category) => textValue(category, "direction") === categoryManagerDirection).map((category) => (
-                <div key={textValue(category, "category_id")} className="group flex items-center justify-between gap-3 rounded-md border border-[var(--color-border)] px-3 py-2.5">
-                  <div className="min-w-0"><p className="truncate text-[11px] font-medium text-[var(--color-text-primary)]">{textValue(category, "name")}</p></div>
-                  <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
-                    <button type="button" className="grid h-7 w-7 place-items-center rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text-primary)]" onClick={() => startCategoryEdit(category)} aria-label={`Edit ${textValue(category, "name")} category`} title="Edit category"><Pencil size={14} /></button>
-                    {!Boolean(category.is_system) ? <button type="button" className="grid h-7 w-7 place-items-center rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-danger-subtle)] hover:text-[var(--color-danger-text)]" onClick={() => { setDeleteCategoryTarget(category); setEditingCategory(null); setCategoryDraft(""); }} aria-label={`Archive ${textValue(category, "name")} category`} title="Archive category"><Trash2 size={14} /></button> : null}
-                  </div>
-                </div>
-              ))}
-              {!categories.some((category) => textValue(category, "direction") === categoryManagerDirection) ? <EmptyState>No categories yet.</EmptyState> : null}
-            </div>
-          </div>
-
-          {deleteCategoryTarget ? <Modal title={"Archive " + textValue(deleteCategoryTarget, "name", "category") + "?"} close={() => setDeleteCategoryTarget(null)}>
-            <div className="space-y-4">
-              <p className="text-[12px] text-[var(--color-text-primary)]">Archive this category? Historical transactions will keep their category reference.</p>
-              <div className="flex justify-end gap-2"><button type="button" className="button-secondary text-[11px]" onClick={() => setDeleteCategoryTarget(null)}>Cancel</button><button type="button" className="button-danger text-[11px]" onClick={() => void confirmDeleteCategory()} disabled={saving}>Archive category</button></div>
-            </div>
-          </Modal> : null}
-
-          <div className="flex justify-end"><button type="button" className="button-secondary" onClick={closeCategoryManager}>Done</button></div>
         </div>
       </Modal> : null}
 
@@ -2235,7 +2427,7 @@ export function FinanceRevisedWorkspace({
 
       {selectedRequest?.new ? <Modal title="Request Working Funds" detail="Select one project and provide the exact breakdown the GM will review." close={() => setSelectedRequest(null)} wide>
         <form className="space-y-4" onSubmit={handleRequest}>
-          <div className="grid gap-3 sm:grid-cols-2"><label className="block text-[11px] font-medium text-[var(--color-text-primary)]"><span>Project</span><select className="input mt-1 w-full" value={requestForm.projectId} onChange={(event) => setRequestForm((current) => ({ ...current, projectId: event.target.value }))} required><option value="">Select project</option>{openProjects.map((project) => <option key={textValue(project, "project_fund_id")} value={textValue(project, "project_fund_id")}>{textValue(project, "project_name")} · {textValue(project, "client_name", "No client")}</option>)}</select></label><Field label="Purpose" value={requestForm.purpose} onChange={(value) => setRequestForm((current) => ({ ...current, purpose: value }))} placeholder="Materials needed to continue..." required /></div>
+          <div className="grid gap-3 sm:grid-cols-2"><label className="block text-[11px] font-medium text-[var(--color-text-primary)]"><span>Project</span><SearchableSelect options={openProjectOptions} value={requestForm.projectId} onChange={(value) => setRequestForm((current) => ({ ...current, projectId: value }))} placeholder={openProjectOptions.length ? "Select project" : "No open projects available"} searchPlaceholder="Search project, client, or quotation" noResultsLabel="No matching project found." ariaLabel="Working Funds project" required clearable={false} disabled={!openProjectOptions.length} className="mt-1" /></label><Field label="Purpose" value={requestForm.purpose} onChange={(value) => setRequestForm((current) => ({ ...current, purpose: value }))} placeholder="Materials needed to continue..." required /></div>
           <TextArea label="Request note" value={requestForm.note} onChange={(value) => setRequestForm((current) => ({ ...current, note: value }))} placeholder="Optional context for the GM" />
           <div className="rounded-lg border border-[var(--color-border)]">
             <div className="flex items-center justify-between border-b border-[var(--color-border)] px-3 py-2"><p className="text-[11px] font-semibold text-[var(--color-text-primary)]">Expense breakdown</p><button type="button" className="button-secondary inline-flex items-center gap-1 text-[10px]" onClick={() => setRequestForm((current) => ({ ...current, lines: [...current.lines, { description: "", category: "Project expense", amount: "" }] }))}><Plus size={13} /> Add line</button></div>
@@ -2451,6 +2643,20 @@ function TransactionsHistoryTable({
   onReview: (item: FinanceHistoryRow) => void;
   onRevise?: (transaction: Row) => void;
 }) {
+  const historyProjectOptions: SearchableOption[] = [
+    { value: "all", label: "All projects and funds", searchText: "all projects funds" },
+    { value: "non_project", label: "Non-project / fund activity", searchText: "non project fund activity" },
+    ...projects.map((project) => {
+      const projectName = textValue(project, "project_name", "Project");
+      const clientName = textValue(project, "client_name") || textValue(project, "company_name");
+      const quotationNumber = textValue(project, "quotation_number") || textValue(project, "quotation_no");
+      return {
+        value: textValue(project, "project_fund_id"),
+        label: [projectName, clientName || "No client"].filter(Boolean).join(" · "),
+        searchText: [projectName, clientName, quotationNumber, textValue(project, "project_type")].filter(Boolean).join(" "),
+      };
+    }),
+  ];
   return (
     <>
       <div className="border-b border-[var(--color-border)] p-4 sm:p-5">
@@ -2489,11 +2695,7 @@ function TransactionsHistoryTable({
           </label>
           <label className="block text-[11px] font-medium text-[var(--color-text-primary)]">
             <span>Project / fund</span>
-            <select className="input mt-1 w-full" value={filters.project} onChange={(event) => onFilterChange({ project: event.target.value })}>
-              <option value="all">All projects and funds</option>
-              <option value="non_project">Non-project / fund activity</option>
-              {projects.map((project) => <option key={textValue(project, "project_fund_id")} value={textValue(project, "project_fund_id")}>{textValue(project, "project_name", "Project")}</option>)}
-            </select>
+            <SearchableSelect options={historyProjectOptions} value={filters.project} onChange={(value) => onFilterChange({ project: value })} placeholder="All projects and funds" searchPlaceholder="Search project, client, or quotation" noResultsLabel="No matching project found." ariaLabel="Project or fund filter" clearable={false} className="mt-1" />
           </label>
           <label className="block text-[11px] font-medium text-[var(--color-text-primary)]">
             <span>Actor</span>
