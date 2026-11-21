@@ -2186,17 +2186,10 @@ const workspaceViewTables = (
       "pricing_officer_project_types",
     ];
   if (view === "Supplier's List") return ["suppliers", "business_settings"];
-  if (view === "Production")
-    return [
-      "production_jobs",
-      "production_material_usage",
-      "production_job_activity",
-      "quotation_payment_records",
-      "inventory_items",
-      "inventory_movements",
-      "finished_product_stock_ins",
-      "customers",
-    ];
+  // The Production page reads through its access-controlled RPCs. Do not
+  // preload the legacy production tables for users who only have the new
+  // Production page view.
+  if (view === "Production") return [];
   if (view === "Catalog") return ["inventory_items"];
   if (view === "Inventory")
     return [
@@ -20430,9 +20423,11 @@ const isMissingProductionCashAdvanceRpcError = (error: { message?: string } | nu
 function ProductionOperator({
   orgId,
   notice,
+  canEdit = true,
 }: {
   orgId: string;
   notice: (message: string) => void;
+  canEdit?: boolean;
 }) {
   const [projects, setProjects] = useState<ProductionOperatorProject[]>([]);
   const [statusTypes, setStatusTypes] = useState<ProductionOperatorStatusType[]>([]);
@@ -20956,8 +20951,10 @@ function ProductionOperator({
     <div className="space-y-5">
       <Panel
         title="Production Projects"
-        detail="Projects added to Production. Set the current status and leave an operational remark."
-        action={
+        detail={canEdit
+          ? "Projects added to Production. Set the current status and leave an operational remark."
+          : "View-only access. Review production projects, remarks, details, and quotation PDFs."}
+        action={canEdit ? (
           <Button
             compact
             disabled={loading || Boolean(savingId) || approvedProjects.length === 0}
@@ -20969,7 +20966,7 @@ function ProductionOperator({
             <Plus size={14} />
             Add project
           </Button>
-        }
+        ) : undefined}
       >
         {loading ? (
           <Empty>Loading Production projects...</Empty>
@@ -21013,7 +21010,7 @@ function ProductionOperator({
                         <FileText size={15} />
                       </ActionIcon>
                       <ActionIcon
-                        label="Manage Production Details"
+                        label={canEdit ? "Manage Production Details" : "View Production Details"}
                         confirm={false}
                         loading={detailsLoading && detailsProject?.production_job_id === project.production_job_id}
                         disabled={!project.production_job_id || Boolean(detailsSaving)}
@@ -21021,21 +21018,25 @@ function ProductionOperator({
                       >
                         <Boxes size={15} />
                       </ActionIcon>
-                      <Button compact secondary onClick={() => openStatusEditor(project)}>
-                        <Pencil size={13} />
-                        Edit
-                      </Button>
-                      <Button
-                        compact
-                        secondary
-                        confirm
-                        confirmationText="Archive this Production project? It will leave the active table and can be added again from Add project."
-                        loading={savingId === project.production_job_id}
-                        onClick={() => void archiveProject(project)}
-                      >
-                        <Archive size={13} />
-                        Archive
-                      </Button>
+                      {canEdit && (
+                        <>
+                          <Button compact secondary onClick={() => openStatusEditor(project)}>
+                            <Pencil size={13} />
+                            Edit
+                          </Button>
+                          <Button
+                            compact
+                            secondary
+                            confirm
+                            confirmationText="Archive this Production project? It will leave the active table and can be added again from Add project."
+                            loading={savingId === project.production_job_id}
+                            onClick={() => void archiveProject(project)}
+                          >
+                            <Archive size={13} />
+                            Archive
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -21103,53 +21104,57 @@ function ProductionOperator({
                           The same percentages apply to every Box Maker in this project.
                         </p>
                       </div>
-                      <Button
-                        compact
-                        disabled={detailsSaving || productionDetails.tiers.length >= 4}
-                        onClick={() => setTierEditor({ id: null, percentage: "" })}
-                      >
-                        <Plus size={13} />
-                        Add tier
-                      </Button>
+                      {canEdit && (
+                        <Button
+                          compact
+                          disabled={detailsSaving || productionDetails.tiers.length >= 4}
+                          onClick={() => setTierEditor({ id: null, percentage: "" })}
+                        >
+                          <Plus size={13} />
+                          Add tier
+                        </Button>
+                      )}
                     </div>
                     <div className="flex items-center justify-between gap-3 border-b border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-3 py-2 text-[11px]">
                       <span className="text-[var(--color-text-secondary)]">Tier rule</span>
                       <b className="text-[var(--color-success-text)]">Each tier can be up to 100%</b>
                     </div>
                     {productionDetails.tiers.length ? (
-                      <Table labels={["Tier", "Percentage", "Actions"]} minWidth={520}>
+                      <Table labels={["Tier", "Percentage", ...(canEdit ? ["Actions"] : [])]} minWidth={520}>
                         {productionDetails.tiers.map((tier) => (
                           <tr key={tier.id}>
                             <td className="px-4 py-2.5 font-medium">Tier {tier.tier_number}</td>
                             <td className="px-4 py-2.5 tabular-nums text-[var(--color-text-secondary)]">
                               {n(tier.percentage).toFixed(2)}%
                             </td>
-                            <td className="px-4 py-2.5 text-center">
-                              <div className="flex justify-center gap-2">
-                                <ActionIcon
-                                  label={`Edit Tier ${tier.tier_number} percentage`}
-                                  confirm={false}
-                                  disabled={detailsSaving}
-                                  onClick={() =>
-                                    setTierEditor({
-                                      id: tier.id,
-                                      percentage: String(tier.percentage ?? ""),
-                                    })
-                                  }
-                                >
-                                  <Pencil size={14} />
-                                </ActionIcon>
-                                <ActionIcon
-                                  label={`Archive Tier ${tier.tier_number}`}
-                                  tone="red"
-                                  disabled={detailsSaving}
-                                  confirmationDescription="Archive this tier percentage? Existing project history will be preserved."
-                                  onClick={() => void archiveTier(tier)}
-                                >
-                                  <Trash2 size={14} />
-                                </ActionIcon>
-                              </div>
-                            </td>
+                            {canEdit && (
+                              <td className="px-4 py-2.5 text-center">
+                                <div className="flex justify-center gap-2">
+                                  <ActionIcon
+                                    label={`Edit Tier ${tier.tier_number} percentage`}
+                                    confirm={false}
+                                    disabled={detailsSaving}
+                                    onClick={() =>
+                                      setTierEditor({
+                                        id: tier.id,
+                                        percentage: String(tier.percentage ?? ""),
+                                      })
+                                    }
+                                  >
+                                    <Pencil size={14} />
+                                  </ActionIcon>
+                                  <ActionIcon
+                                    label={`Archive Tier ${tier.tier_number}`}
+                                    tone="red"
+                                    disabled={detailsSaving}
+                                    confirmationDescription="Archive this tier percentage? Existing project history will be preserved."
+                                    onClick={() => void archiveTier(tier)}
+                                  >
+                                    <Trash2 size={14} />
+                                  </ActionIcon>
+                                </div>
+                              </td>
+                            )}
                           </tr>
                         ))}
                       </Table>
@@ -21168,46 +21173,50 @@ function ProductionOperator({
                           Manage the names available in the Box Maker dropdown.
                         </p>
                       </div>
-                      <Button compact onClick={() => setBoxMakerEditor({ id: null, name: "" })}>
-                        <Plus size={13} />
-                        Add Box Maker
-                      </Button>
+                      {canEdit && (
+                        <Button compact onClick={() => setBoxMakerEditor({ id: null, name: "" })}>
+                          <Plus size={13} />
+                          Add Box Maker
+                        </Button>
+                      )}
                     </div>
                     {productionDetails.box_makers.length ? (
-                      <Table labels={["Box Maker", "State", "Actions"]} minWidth={520}>
+                      <Table labels={["Box Maker", "State", ...(canEdit ? ["Actions"] : [])]} minWidth={520}>
                         {productionDetails.box_makers.map((boxMaker) => (
                           <tr key={boxMaker.id}>
                             <td className="px-4 py-2.5 font-medium">{boxMaker.name}</td>
                             <td className="px-4 py-2.5 text-[var(--color-text-secondary)]">
                               {boxMaker.is_active ? "Active" : "Archived"}
                             </td>
-                            <td className="px-4 py-2.5 text-center">
-                              {boxMaker.is_active ? (
-                                <div className="flex justify-center gap-2">
-                                  <ActionIcon
-                                    label={`Edit ${boxMaker.name}`}
-                                    confirm={false}
-                                    disabled={detailsSaving}
-                                    onClick={() =>
-                                      setBoxMakerEditor({ id: boxMaker.id, name: boxMaker.name })
-                                    }
-                                  >
-                                    <Pencil size={14} />
-                                  </ActionIcon>
-                                  <ActionIcon
-                                    label={`Archive ${boxMaker.name}`}
-                                    tone="red"
-                                    disabled={detailsSaving}
-                                    confirmationDescription={`Archive ${boxMaker.name} from the Box Maker dropdown? Existing assignments will be preserved.`}
-                                    onClick={() => void archiveBoxMaker(boxMaker)}
-                                  >
-                                    <Trash2 size={14} />
-                                  </ActionIcon>
-                                </div>
-                              ) : (
-                                <span className="text-[11px] text-[var(--color-text-secondary)]">Not available for new assignments</span>
-                              )}
-                            </td>
+                            {canEdit && (
+                              <td className="px-4 py-2.5 text-center">
+                                {boxMaker.is_active ? (
+                                  <div className="flex justify-center gap-2">
+                                    <ActionIcon
+                                      label={`Edit ${boxMaker.name}`}
+                                      confirm={false}
+                                      disabled={detailsSaving}
+                                      onClick={() =>
+                                        setBoxMakerEditor({ id: boxMaker.id, name: boxMaker.name })
+                                      }
+                                    >
+                                      <Pencil size={14} />
+                                    </ActionIcon>
+                                    <ActionIcon
+                                      label={`Archive ${boxMaker.name}`}
+                                      tone="red"
+                                      disabled={detailsSaving}
+                                      confirmationDescription={`Archive ${boxMaker.name} from the Box Maker dropdown? Existing assignments will be preserved.`}
+                                      onClick={() => void archiveBoxMaker(boxMaker)}
+                                    >
+                                      <Trash2 size={14} />
+                                    </ActionIcon>
+                                  </div>
+                                ) : (
+                                  <span className="text-[11px] text-[var(--color-text-secondary)]">Not available for new assignments</span>
+                                )}
+                              </td>
+                            )}
                           </tr>
                         ))}
                       </Table>
@@ -21227,18 +21236,20 @@ function ProductionOperator({
                         Add each Box Maker&apos;s labor cost, request cash advances, and track the approved balance.
                       </p>
                     </div>
-                    <Button
-                      compact
-                      disabled={
-                        detailsSaving ||
-                        !productionDetailsHasTiers ||
-                        !productionDetails.box_makers.some((boxMaker) => boxMaker.is_active)
-                      }
-                      onClick={() => openAssignmentEditor()}
-                    >
-                      <Plus size={13} />
-                      Add Box Maker
-                    </Button>
+                    {canEdit && (
+                      <Button
+                        compact
+                        disabled={
+                          detailsSaving ||
+                          !productionDetailsHasTiers ||
+                          !productionDetails.box_makers.some((boxMaker) => boxMaker.is_active)
+                        }
+                        onClick={() => openAssignmentEditor()}
+                      >
+                        <Plus size={13} />
+                        Add Box Maker
+                      </Button>
+                    )}
                   </div>
                   {!productionDetailsHasTiers && (
                     <p className="border-b border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-3 py-2 text-[11px] text-[var(--color-warning-text)]">
@@ -21279,20 +21290,22 @@ function ProductionOperator({
                           </td>
                           <td className="px-4 py-3 text-center">
                             <div className="flex justify-center gap-2">
-                              <ActionIcon
-                                label={
-                                  n(assignment.pending_cash_advance) > 0
-                                    ? `${assignment.box_maker_name} has a pending cash advance request`
-                                    : `Request cash advance for ${assignment.box_maker_name}`
-                                }
-                                confirm={false}
-                                disabled={
-                                  detailsSaving || n(assignment.pending_cash_advance) > 0
-                                }
-                                onClick={() => openCashAdvanceRequest(assignment)}
-                              >
-                                <Wallet size={14} />
-                              </ActionIcon>
+                              {canEdit && (
+                                <ActionIcon
+                                  label={
+                                    n(assignment.pending_cash_advance) > 0
+                                      ? `${assignment.box_maker_name} has a pending cash advance request`
+                                      : `Request cash advance for ${assignment.box_maker_name}`
+                                  }
+                                  confirm={false}
+                                  disabled={
+                                    detailsSaving || n(assignment.pending_cash_advance) > 0
+                                  }
+                                  onClick={() => openCashAdvanceRequest(assignment)}
+                                >
+                                  <Wallet size={14} />
+                                </ActionIcon>
+                              )}
                               <ActionIcon
                                 label={`View ${assignment.box_maker_name} cash advance history`}
                                 confirm={false}
@@ -21301,23 +21314,27 @@ function ProductionOperator({
                               >
                                 <ReceiptText size={14} />
                               </ActionIcon>
-                              <ActionIcon
-                                label={`Edit ${assignment.box_maker_name} assignment`}
-                                confirm={false}
-                                disabled={detailsSaving}
-                                onClick={() => openAssignmentEditor(assignment)}
-                              >
-                                <Pencil size={14} />
-                              </ActionIcon>
-                              <ActionIcon
-                                label={`Remove ${assignment.box_maker_name} assignment`}
-                                tone="red"
-                                disabled={detailsSaving}
-                                confirmationDescription="Remove this Box Maker from the project? The assignment will be archived and its history preserved."
-                                onClick={() => void archiveAssignment(assignment)}
-                              >
-                                <Trash2 size={14} />
-                              </ActionIcon>
+                              {canEdit && (
+                                <>
+                                  <ActionIcon
+                                    label={`Edit ${assignment.box_maker_name} assignment`}
+                                    confirm={false}
+                                    disabled={detailsSaving}
+                                    onClick={() => openAssignmentEditor(assignment)}
+                                  >
+                                    <Pencil size={14} />
+                                  </ActionIcon>
+                                  <ActionIcon
+                                    label={`Remove ${assignment.box_maker_name} assignment`}
+                                    tone="red"
+                                    disabled={detailsSaving}
+                                    confirmationDescription="Remove this Box Maker from the project? The assignment will be archived and its history preserved."
+                                    onClick={() => void archiveAssignment(assignment)}
+                                  >
+                                    <Trash2 size={14} />
+                                  </ActionIcon>
+                                </>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -21335,7 +21352,7 @@ function ProductionOperator({
         </div>
       )}
 
-      {tierEditor && (
+      {canEdit && tierEditor && (
         <div className="fixed inset-0 z-[70] grid place-items-center bg-[#151922]/30 p-4">
           <form
             className="w-full max-w-sm rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl"
@@ -21383,7 +21400,7 @@ function ProductionOperator({
         </div>
       )}
 
-      {boxMakerEditor && (
+      {canEdit && boxMakerEditor && (
         <div className="fixed inset-0 z-[70] grid place-items-center bg-[#151922]/30 p-4">
           <form
             className="w-full max-w-sm rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl"
@@ -21425,7 +21442,7 @@ function ProductionOperator({
         </div>
       )}
 
-      {cashAdvanceRequestEditor && detailsProject && (
+      {canEdit && cashAdvanceRequestEditor && detailsProject && (
         <div className="fixed inset-0 z-[70] grid place-items-center bg-[#151922]/30 p-4">
           <form
             className="w-full max-w-lg rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl"
@@ -21573,7 +21590,7 @@ function ProductionOperator({
         </div>
       )}
 
-      {assignmentEditor && productionDetails && (
+      {canEdit && assignmentEditor && productionDetails && (
         <div className="fixed inset-0 z-[70] grid place-items-center bg-[#151922]/30 p-4">
           <form
             className="w-full max-w-lg rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl"
@@ -21668,7 +21685,7 @@ function ProductionOperator({
         </div>
       )}
 
-      {addProjectOpen && (
+      {canEdit && addProjectOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-[#151922]/30 p-4">
           <form
             className="w-full max-w-lg rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl"
@@ -21764,7 +21781,7 @@ function ProductionOperator({
       <Panel
         title="Status types"
         detail="Rename the built-in statuses or add a status label mapped to an existing production stage."
-        action={
+        action={canEdit ? (
           <Button
             compact
             onClick={() =>
@@ -21778,32 +21795,34 @@ function ProductionOperator({
             <Plus size={14} />
             Add status type
           </Button>
-        }
+        ) : undefined}
       >
         {statusTypes.length ? (
-          <Table labels={["Status type", "Production stage", "Actions"]} minWidth={680}>
+          <Table labels={["Status type", "Production stage", ...(canEdit ? ["Actions"] : [])]} minWidth={680}>
             {statusTypes.map((statusType) => (
               <tr key={statusType.id}>
                 <td className="px-5 py-3">{statusType.name}</td>
                 <td className="px-5 py-3 text-[var(--color-text-secondary)]">
                   {productionOperatorStatusLabel(statusType.legacy_status)}
                 </td>
-                <td className="px-5 py-3 text-center">
-                  <Button
-                    compact
-                    secondary
-                    onClick={() =>
-                      setStatusTypeEditor({
-                        id: statusType.id,
-                        name: statusType.name,
-                        legacy_status: statusType.legacy_status,
-                      })
-                    }
-                  >
-                    <Pencil size={13} />
-                    Edit
-                  </Button>
-                </td>
+                {canEdit && (
+                  <td className="px-5 py-3 text-center">
+                    <Button
+                      compact
+                      secondary
+                      onClick={() =>
+                        setStatusTypeEditor({
+                          id: statusType.id,
+                          name: statusType.name,
+                          legacy_status: statusType.legacy_status,
+                        })
+                      }
+                    >
+                      <Pencil size={13} />
+                      Edit
+                    </Button>
+                  </td>
+                )}
               </tr>
             ))}
           </Table>
@@ -21812,7 +21831,7 @@ function ProductionOperator({
         )}
       </Panel>
 
-      {statusEditor && (
+      {canEdit && statusEditor && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-[#151922]/30 p-4">
           <form
             className="w-full max-w-lg rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl"
@@ -21892,7 +21911,7 @@ function ProductionOperator({
         </div>
       )}
 
-      {statusTypeEditor && (
+      {canEdit && statusTypeEditor && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-[#151922]/30 p-4">
           <form
             className="w-full max-w-lg rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl"
@@ -25078,6 +25097,9 @@ export function HuswellWorkspace({
   const hasInternalFinanceAccess =
     role === "accountant" || internalFinanceEnabled;
   const isManagementRole = memberRole(role);
+  const productionViewOnly = isManagementRole || hasInternalFinanceAccess;
+  const canViewProduction = productionOperationsEnabled || productionViewOnly;
+  const canEditProduction = productionOperationsEnabled && !productionViewOnly;
   const financeViewsForRole = useMemo(
     () => isManagementRole
       ? gmFinanceSidebarViews
@@ -25110,6 +25132,8 @@ export function HuswellWorkspace({
     hasInternalFinanceAccess || ["super_admin", "owner", "admin"].includes(role);
   const safeInitialView = normalizedInitialView === "Payment Monitoring" && !financePaymentViewAllowed
     ? defaultWorkspaceView
+    : normalizedInitialView === "Production" && !canViewProduction
+      ? defaultWorkspaceView
     : financeSidebarViews.includes(normalizedInitialView) && !financeViewsForRole.includes(normalizedInitialView)
       ? defaultWorkspaceView
       : normalizedInitialView;
@@ -25230,6 +25254,10 @@ export function HuswellWorkspace({
       setActive(defaultWorkspaceView);
       return;
     }
+    if (targetView === "Production" && !canViewProduction) {
+      setActive(defaultWorkspaceView);
+      return;
+    }
     if (targetView === "Costing Breakdown") return selectLeadWorkspaceMode("quotation");
     if (targetView === "Submissions") {
       setActive("Approvals");
@@ -25247,7 +25275,7 @@ export function HuswellWorkspace({
     }
     if (targetView === "Leads") setLeadMode("leads");
     setActive(targetView);
-  }, [defaultWorkspaceView, financePaymentViewAllowed, financeViewsForRole, selectLeadWorkspaceMode, setActive]);
+  }, [canViewProduction, defaultWorkspaceView, financePaymentViewAllowed, financeViewsForRole, selectLeadWorkspaceMode, setActive]);
   const switchSidebarWorkspace = useCallback((workspace: SidebarWorkspace) => {
     setSidebarWorkspace(workspace);
     navigate(workspace === "finance" ? "Finance Overview" : "Dashboard");
@@ -25684,14 +25712,14 @@ export function HuswellWorkspace({
     ],
   };
   const productionApprovalOnly = productionApprovalEnabled && !isManagementRole;
-  const allowedRoleViews = [
+  const allowedRoleViews: View[] = [
     ...(allowedViews[role] ?? allowedViews.viewer),
     ...(isCombinedSalesPricingAccount ? accountingFinanceSidebarViews : []),
-  ];
+  ].filter((view) => view !== "Production");
   if (productionApprovalOnly && !allowedRoleViews.includes("Approvals")) {
     allowedRoleViews.push("Approvals");
   }
-  if (productionOperationsEnabled && !allowedRoleViews.includes("Production")) {
+  if (canViewProduction && !allowedRoleViews.includes("Production")) {
     allowedRoleViews.push("Production");
   }
   useEffect(() => {
@@ -25923,6 +25951,16 @@ export function HuswellWorkspace({
       ],
     },
   ];
+  if (canViewProduction && !navBase.some((group) => group.items.some((item) => item.view === "Production"))) {
+    const productionGroup = navBase.find((group) =>
+      ["Operations", "Project operations", "Lead & Costing", "Finance"].includes(group.label),
+    );
+    if (productionGroup) {
+      productionGroup.items.push({ view: "Production", icon: Boxes });
+    } else {
+      navBase.push({ label: "Operations", items: [{ view: "Production", icon: Boxes }] });
+    }
+  }
   const nav = navBase
     .map((group) => ({
       ...group,
@@ -26008,9 +26046,10 @@ export function HuswellWorkspace({
         "Use Price Quotations to prepare, submit, and manage client quotations.",
     },
     Production: {
-      title: "Production jobs",
-      detail:
-        "Record material usage and delivery progress for approved quotations.",
+      title: "Production projects",
+      detail: canEditProduction
+        ? "Add approved projects, manage Box Makers and tiers, and update production status."
+        : "Review approved projects, Box Makers, tiers, status, remarks, and quotation PDFs.",
     },
     Catalog: {
       title: catalog.title,
@@ -26288,23 +26327,20 @@ export function HuswellWorkspace({
         <Empty>Use Price Quotations to follow the current workflow.</Empty>
       </Panel>
     ) : active === "Production" ? (
-      <div className="space-y-6">
-        {productionOperationsEnabled && (
-          <ProductionOperator
-            orgId={organizationId}
-            notice={setMessage}
-          />
-        )}
-        {!productionOperationsEnabled && (
-        <Production
-          store={store}
+      canViewProduction ? (
+        <ProductionOperator
           orgId={organizationId}
-          reload={reload}
           notice={setMessage}
-          role={role}
+          canEdit={canEditProduction}
         />
-        )}
-      </div>
+      ) : (
+        <Panel
+          title="Production"
+          detail="Production access is limited to the delegated Production Operations user, General Manager, and Finance."
+        >
+          <Empty>You do not have access to the Production page.</Empty>
+        </Panel>
+      )
     ) : active === "Catalog" ? (
       <Records
         module={catalog}
