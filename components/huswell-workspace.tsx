@@ -1124,6 +1124,10 @@ const agreementFileTypes = [
   "application/pdf",
 ] as const;
 const agreementFileMaxSize = 10 * 1024 * 1024;
+const productionEvidenceFileTypes = ["image/jpeg", "image/png", "image/webp"] as const;
+const productionEvidenceFileMaxSize = 10 * 1024 * 1024;
+const productionEvidenceFileExtension = (file: File) =>
+  file.type === "image/jpeg" ? "jpg" : file.type === "image/png" ? "png" : "webp";
 const agreementFileExtension = (file: File) => {
   const extensions: Record<(typeof agreementFileTypes)[number], string> = {
     "image/jpeg": "jpg",
@@ -2316,7 +2320,7 @@ const workspaceViewCriticalTables = (
       "pricing_officer_project_types",
     ];
   } else if (view === "Supplier's List") criticalTables = ["suppliers"];
-  else if (view === "Production") criticalTables = ["production_jobs", "customers", "inventory_items"];
+  else if (view === "Production") criticalTables = [];
   else if (view === "Catalog" || view === "Inventory") criticalTables = ["inventory_items"];
   else if (view === "Sales") criticalTables = ["invoices", "customers", "payments"];
   else if (view === "Expenses") criticalTables = ["expenses", "suppliers"];
@@ -18686,22 +18690,26 @@ function ProductionCashAdvanceReview({
   decide: (decision: "approved" | "rejected" | "needs_revision", note: string) => void;
 }) {
   const [decisionNote, setDecisionNote] = useState("");
-  const insufficientFund = n(request.project_fund_available) + 0.001 < n(request.requested_amount);
+  const isDailyFundPayment = !request.project_fund_id;
+  const availableFund = isDailyFundPayment
+    ? request.daily_fund_available ?? request.project_fund_available
+    : request.project_fund_available;
+  const insufficientFund = n(availableFund) + 0.001 < n(request.requested_amount);
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4">
       <section className="mx-auto my-8 w-full max-w-3xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl">
         <div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4">
           <div>
-            <h2 className="text-[17px] font-semibold text-[#202938]">Review Production Cash Advance</h2>
+            <h2 className="text-[17px] font-semibold text-[#202938]">Review Box Maker Payment</h2>
             <p className="mt-1 text-[12px] text-[#687386]">
               {text(request.quotation_no, "Price Quotation")} · {text(request.project_name, "Project")} · {text(request.box_maker_name, "Box Maker")}
             </p>
           </div>
-          <button type="button" onClick={close} aria-label="Close cash advance review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938]">
+          <button type="button" onClick={close} aria-label="Close payment review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] transition-colors hover:bg-[#f0f3f7] hover:text-[#202938]">
             <X size={18} />
           </button>
         </div>
-        <Table labels={["Project", "Box Maker", "Labor Cost", "Approved Advance", "Requested", "Fund Available"]} minWidth={860}>
+        <Table labels={["Project", "Box Maker", "Labor Cost", "Paid", "Requested", isDailyFundPayment ? "Daily Fund Available" : "Project Fund Available"]} minWidth={860}>
           <tr>
             <td className="px-4 py-3">{text(request.project_name, "-")}</td>
             <td className="px-4 py-3 font-medium">{text(request.box_maker_name, "-")}</td>
@@ -18709,7 +18717,7 @@ function ProductionCashAdvanceReview({
             <td className="px-4 py-3 text-right tabular-nums">{peso.format(n(request.approved_cash_advance))}</td>
             <td className="px-4 py-3 text-right font-semibold tabular-nums">{peso.format(n(request.requested_amount))}</td>
             <td className={`px-4 py-3 text-right font-semibold tabular-nums ${insufficientFund ? "text-[#b42318]" : "text-[#218b55]"}`}>
-              {peso.format(n(request.project_fund_available))}
+              {peso.format(n(availableFund))}
             </td>
           </tr>
         </Table>
@@ -18724,7 +18732,7 @@ function ProductionCashAdvanceReview({
         </section>
         {insufficientFund && (
           <p className="mt-4 rounded-lg border border-[#fed7d7] bg-[#fff5f5] p-3 text-[12px] leading-5 text-[#9b1c1c]">
-            This project fund does not have enough available balance. Approval is blocked until the fund has enough available balance.
+            The {isDailyFundPayment ? "Daily Fund" : "Project Fund"} does not have enough available balance. Approval is blocked until the fund has enough available balance.
           </p>
         )}
         <label className="mt-4 block text-[12px] font-medium text-[#202938]">
@@ -18762,7 +18770,7 @@ function ProductionCashAdvanceReview({
             disabled={saving || insufficientFund}
             onClick={() => decide("approved", decisionNote.trim())}
           >
-            <Check size={14} /> Approve and deduct fund
+            <Check size={14} /> Approve and deduct {isDailyFundPayment ? "Daily Fund" : "Project Fund"}
           </Button>
         </div>
       </section>
@@ -18834,7 +18842,7 @@ function Submissions({
       setCashAdvanceRequests((data ?? []) as ProductionCashAdvanceRequest[]);
     } catch (error) {
       setCashAdvanceRequests([]);
-      notice(caughtErrorMessage(error, "Cash advance requests could not be loaded."));
+      notice(caughtErrorMessage(error, "Box Maker payment requests could not be loaded."));
     }
   }, [notice, orgId, productionOnly]);
 
@@ -18971,14 +18979,16 @@ function Submissions({
       setCashAdvanceReview(null);
       notice(
         decision === "approved"
-          ? "Cash advance approved and deducted from the Project Fund."
+          ? request.project_fund_id
+            ? "Historical Box Maker payment approved and deducted from the Project Fund."
+            : "Box Maker payment approved and deducted from the Daily Fund."
           : decision === "needs_revision"
-            ? "Cash advance request returned for revision."
-            : "Cash advance request rejected.",
+            ? "Box Maker payment request returned for revision."
+            : "Box Maker payment request rejected.",
       );
       await Promise.all([refreshApprovalQueue(), loadCashAdvanceRequests()]);
     } catch (error) {
-      notice(caughtErrorMessage(error, "Cash advance request could not be reviewed."));
+      notice(caughtErrorMessage(error, "Box Maker payment request could not be reviewed."));
     } finally {
       setSavingId(null);
     }
@@ -19185,7 +19195,7 @@ function Submissions({
       if (error) throw error;
       notice(
         decision === "approved"
-          ? "Project marked completed, delivered, and counted in the KPI."
+          ? "Project marked completed and counted in the KPI. It is ready for delivery."
           : "Project completion request rejected.",
       );
       await reload();
@@ -19561,13 +19571,13 @@ function Submissions({
     ...visiblePendingCashAdvanceRequests.map((request) => ({
       key: `cash-advance-${request.id}`,
       tab: "cash_advances" as const,
-      category: "Cash advance",
+      category: "Box Maker payment",
       title: `${text(request.quotation_no, "Project")} · ${text(request.box_maker_name, "Box Maker")}`,
       detail: `${peso.format(n(request.requested_amount))} requested · ${text(request.project_name, "Project")}`,
       requester: text(request.requester_name, "Team member"),
       submittedAt: request.requested_at,
       selectable: false,
-      action: <ActionIcon label="Review Production cash advance" confirm={false} onClick={() => setCashAdvanceReview(request)}><FileText size={15} /></ActionIcon>,
+      action: <ActionIcon label="Review Box Maker payment" confirm={false} onClick={() => setCashAdvanceReview(request)}><FileText size={15} /></ActionIcon>,
     })),
     ...visiblePendingApprovalRequests.map((request) => ({
       key: `approval-${text(request.id)}`,
@@ -19743,7 +19753,7 @@ function Submissions({
         <button type="button" onClick={() => setTab("calendar_revisions")} aria-current={tab === "calendar_revisions" ? "page" : undefined} className="app-tab">Project Revisions ({visiblePendingProjectScheduleRevisions.length})</button>
         <button type="button" onClick={() => setTab("calendar_completions")} aria-current={tab === "calendar_completions" ? "page" : undefined} className="app-tab">Project Completion ({visiblePendingProjectScheduleCompletions.length})</button>
         {!productionOnly && (
-          <button type="button" onClick={() => setTab("cash_advances")} aria-current={tab === "cash_advances" ? "page" : undefined} className="app-tab">Cash Advances ({visiblePendingCashAdvanceRequests.length})</button>
+          <button type="button" onClick={() => setTab("cash_advances")} aria-current={tab === "cash_advances" ? "page" : undefined} className="app-tab">Box Maker Payments ({visiblePendingCashAdvanceRequests.length})</button>
         )}
         {!productionOnly && (
           <>
@@ -20004,7 +20014,7 @@ function Submissions({
         </Table>
       ) : <Empty>No Project Calendar completion requests are awaiting review.</Empty>)}
       {tab === "cash_advances" && (visiblePendingCashAdvanceRequests.length ? (
-        <Table labels={["Project", "Box Maker", "Requested", "Fund Available", "Requester", "Submitted", "Remark", "Review"]} minWidth={1260}>
+        <Table labels={["Project", "Box Maker", "Requested", "Available Fund", "Requester", "Submitted", "Remark", "Review"]} minWidth={1260}>
           {visiblePendingCashAdvanceRequests.map((request) => (
             <tr key={request.id}>
               <td className="px-5 py-3">
@@ -20013,21 +20023,21 @@ function Submissions({
               </td>
               <td className="px-5 py-3 font-medium">{text(request.box_maker_name, "-")}</td>
               <td className="px-5 py-3 text-right font-semibold tabular-nums">{peso.format(n(request.requested_amount))}</td>
-              <td className={`px-5 py-3 text-right font-semibold tabular-nums ${n(request.project_fund_available) + 0.001 < n(request.requested_amount) ? "text-[#b42318]" : "text-[#218b55]"}`}>
-                {peso.format(n(request.project_fund_available))}
+              <td className={`px-5 py-3 text-right font-semibold tabular-nums ${n(request.daily_fund_available ?? request.project_fund_available) + 0.001 < n(request.requested_amount) ? "text-[#b42318]" : "text-[#218b55]"}`}>
+                {peso.format(n(request.daily_fund_available ?? request.project_fund_available))}
               </td>
               <td className="px-5 py-3">{text(request.requester_name, "Team member")}</td>
               <td className="px-5 py-3 whitespace-nowrap text-[var(--color-text-secondary)]">{day(request.requested_at)}</td>
               <td className="max-w-[260px] whitespace-normal px-5 py-3 text-[var(--color-text-secondary)]">{text(request.request_note, "-")}</td>
               <td className="px-5 py-3 text-center">
-                <ActionIcon label="Review Production cash advance" confirm={false} onClick={() => setCashAdvanceReview(request)}>
+                <ActionIcon label="Review Box Maker payment" confirm={false} onClick={() => setCashAdvanceReview(request)}>
                   <FileText size={15} />
                 </ActionIcon>
               </td>
             </tr>
           ))}
         </Table>
-      ) : <Empty>No Production cash advance requests are awaiting review.</Empty>)}
+      ) : <Empty>No Box Maker payment requests are awaiting review.</Empty>)}
       {tab === "projects" && (visiblePendingProjectEdits.length ? (
         <Table labels={["Project", "Client / Company", "Sales Executive", "Submitted", "Requested changes", "Review"]}>
           {visiblePendingProjectEdits.map((request) => {
@@ -20440,12 +20450,18 @@ type ProductionOperatorProject = {
   project_type: string | null;
   production_job_id: string | null;
   job_no: string | null;
+  project_schedule_id: string | null;
+  due_date: string | null;
   status_key: string;
   status_label: string;
   status_type_id: string | null;
   operator_remark: string | null;
   is_added: boolean;
   pdf_available: boolean;
+  completed_at: string | null;
+  delivered_at: string | null;
+  delivery_proof_storage_path: string | null;
+  payment_receipt_storage_path: string | null;
 };
 
 type ProductionQuotationPdfPayload = {
@@ -20492,7 +20508,7 @@ type ProductionCashAdvanceRequest = {
   id: string;
   production_job_id: string;
   assignment_id: string;
-  project_fund_id: string;
+  project_fund_id: string | null;
   quotation_no: string;
   project_name: string;
   project_type: string | null;
@@ -20504,12 +20520,15 @@ type ProductionCashAdvanceRequest = {
   approved_amount: number | null;
   status: string;
   project_fund_available: number;
+  daily_fund_available?: number;
   request_note: string;
   decision_note: string | null;
   requested_by: string;
   requester_name: string;
   requested_at: string;
   decided_at: string | null;
+  payment_date?: string | null;
+  balance_after_payment?: number | null;
 };
 
 type ProductionOperatorCashAdvanceRequest = Pick<
@@ -20521,8 +20540,11 @@ type ProductionOperatorCashAdvanceRequest = Pick<
   | "status"
   | "request_note"
   | "decision_note"
+  | "requester_name"
   | "requested_at"
   | "decided_at"
+  | "payment_date"
+  | "balance_after_payment"
 >;
 
 type ProductionOperatorDetails = {
@@ -20530,6 +20552,8 @@ type ProductionOperatorDetails = {
   box_makers: ProductionOperatorBoxMaker[];
   assignments: ProductionOperatorAssignment[];
   cash_advance_requests: ProductionOperatorCashAdvanceRequest[];
+  daily_fund_available: number;
+  daily_fund_reserved: number;
 };
 
 type ProductionAssignmentTierDraft = {
@@ -20715,9 +20739,12 @@ function ProductionOperator({
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [productionPage, setProductionPage] = useState(1);
-  const [productionTab, setProductionTab] = useState<"active" | "completed" | "all">("active");
+  const [productionStage, setProductionStage] = useState<"active" | "completed" | "delivered">("active");
+  const [calendarMonth, setCalendarMonth] = useState(currentMonth());
+  const [calendarDateFilter, setCalendarDateFilter] = useState<string | null>(null);
   const [addProjectOpen, setAddProjectOpen] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState("");
+  const [projectDueDate, setProjectDueDate] = useState("");
   const [statusEditor, setStatusEditor] = useState<ProductionOperatorProject | null>(null);
   const [productionRemarkProject, setProductionRemarkProject] =
     useState<ProductionOperatorProject | null>(null);
@@ -20728,6 +20755,7 @@ function ProductionOperator({
   const [statusDraft, setStatusDraft] = useState({
     status_type_id: "",
     operator_remark: "",
+    due_date: "",
   });
   const [statusPickerOpen, setStatusPickerOpen] = useState(false);
   const [statusPickerSearch, setStatusPickerSearch] = useState("");
@@ -20762,6 +20790,19 @@ function ProductionOperator({
     useState<ProductionOperatorAssignment | null>(null);
   const [cashAdvanceHistoryNote, setCashAdvanceHistoryNote] =
     useState<ProductionOperatorCashAdvanceRequest | null>(null);
+  const [cashAdvanceHistoryStatus, setCashAdvanceHistoryStatus] = useState("approved");
+  const [completionProject, setCompletionProject] = useState<ProductionOperatorProject | null>(null);
+  const [deliveryProject, setDeliveryProject] = useState<ProductionOperatorProject | null>(null);
+  const [deliveryProofFile, setDeliveryProofFile] = useState<File | null>(null);
+  const [paymentReceiptFile, setPaymentReceiptFile] = useState<File | null>(null);
+  const [deliveryInputKey, setDeliveryInputKey] = useState(0);
+  const [deliverySaving, setDeliverySaving] = useState(false);
+  const [deliveryEvidence, setDeliveryEvidence] = useState<{
+    project: ProductionOperatorProject;
+    proofUrl: string | null;
+    receiptUrl: string | null;
+  } | null>(null);
+  const [dailyFundError, setDailyFundError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -20827,6 +20868,8 @@ function ProductionOperator({
       cash_advance_requests: Array.isArray(payload.cash_advance_requests)
         ? (payload.cash_advance_requests as ProductionOperatorCashAdvanceRequest[])
         : [],
+      daily_fund_available: n(payload.daily_fund_available),
+      daily_fund_reserved: n(payload.daily_fund_reserved),
     });
     return true;
   };
@@ -20840,6 +20883,7 @@ function ProductionOperator({
     setCashAdvanceRequestEditor(null);
     setCashAdvanceHistoryAssignment(null);
     setCashAdvanceHistoryNote(null);
+    setCashAdvanceHistoryStatus("approved");
     if (!(await fetchProductionDetails(project))) setDetailsProject(null);
   };
 
@@ -20851,10 +20895,138 @@ function ProductionOperator({
     setCashAdvanceRequestEditor(null);
     setCashAdvanceHistoryAssignment(null);
     setCashAdvanceHistoryNote(null);
+    setCashAdvanceHistoryStatus("approved");
   };
 
   const refreshProductionDetails = async () => {
     if (detailsProject) await fetchProductionDetails(detailsProject);
+  };
+
+  const completeProject = async (project: ProductionOperatorProject) => {
+    if (!project.production_job_id) return;
+    setSavingId(project.production_job_id);
+    const { error } = await createClient().rpc("mark_production_project_completed", {
+      p_organization_id: orgId,
+      p_production_job_id: project.production_job_id,
+    });
+    setSavingId(null);
+    if (error) {
+      notice(error.message);
+      return;
+    }
+    setCompletionProject(null);
+    notice("Production project marked Completed. It is ready for delivery.");
+    await load();
+  };
+
+  const resetDeliveryFiles = () => {
+    setDeliveryProofFile(null);
+    setPaymentReceiptFile(null);
+    setDeliveryInputKey((current) => current + 1);
+  };
+
+  const openDeliveryDialog = (project: ProductionOperatorProject) => {
+    resetDeliveryFiles();
+    setDeliveryProject(project);
+  };
+
+  const validateDeliveryFile = (file: File | null, label: string) => {
+    if (!file) {
+      notice(`Upload the ${label.toLowerCase()} image.`);
+      return false;
+    }
+    if (!productionEvidenceFileTypes.includes(file.type as (typeof productionEvidenceFileTypes)[number])) {
+      notice(`${label} must be a JPEG, PNG, or WebP image.`);
+      return false;
+    }
+    if (file.size <= 0 || file.size > productionEvidenceFileMaxSize) {
+      notice(`${label} must be no larger than 10 MB.`);
+      return false;
+    }
+    return true;
+  };
+
+  const submitDelivery = async () => {
+    if (!deliveryProject?.production_job_id) return;
+    if (!validateDeliveryFile(deliveryProofFile, "Proof of Delivery")) return;
+    if (!validateDeliveryFile(paymentReceiptFile, "Client Payment Receipt")) return;
+    if (!deliveryProofFile || !paymentReceiptFile) return;
+
+    const client = createClient();
+    const jobId = deliveryProject.production_job_id;
+    const proofPath = `${orgId}/production-jobs/${jobId}/${crypto.randomUUID()}.${productionEvidenceFileExtension(deliveryProofFile)}`;
+    const receiptPath = `${orgId}/production-jobs/${jobId}/${crypto.randomUUID()}.${productionEvidenceFileExtension(paymentReceiptFile)}`;
+    setDeliverySaving(true);
+    try {
+      const { error: proofError } = await client.storage
+        .from("production-delivery-evidence")
+        .upload(proofPath, deliveryProofFile, {
+          cacheControl: "3600",
+          contentType: deliveryProofFile.type,
+          upsert: false,
+        });
+      if (proofError) throw proofError;
+
+      const { error: receiptError } = await client.storage
+        .from("production-delivery-evidence")
+        .upload(receiptPath, paymentReceiptFile, {
+          cacheControl: "3600",
+          contentType: paymentReceiptFile.type,
+          upsert: false,
+        });
+      if (receiptError) throw receiptError;
+
+      const { error } = await client.rpc("mark_production_project_delivered", {
+        p_organization_id: orgId,
+        p_production_job_id: jobId,
+        p_delivery_proof_storage_path: proofPath,
+        p_delivery_proof_file_name: deliveryProofFile.name,
+        p_delivery_proof_content_type: deliveryProofFile.type,
+        p_delivery_proof_file_size: deliveryProofFile.size,
+        p_payment_receipt_storage_path: receiptPath,
+        p_payment_receipt_file_name: paymentReceiptFile.name,
+        p_payment_receipt_content_type: paymentReceiptFile.type,
+        p_payment_receipt_file_size: paymentReceiptFile.size,
+      });
+      if (error) throw error;
+
+      setDeliverySaving(false);
+      setDeliveryProject(null);
+      resetDeliveryFiles();
+      notice("Production project marked Delivered.");
+      await load();
+    } catch (error) {
+      await client.storage.from("production-delivery-evidence").remove([proofPath, receiptPath]);
+      setDeliverySaving(false);
+      notice(error instanceof Error ? error.message : "Delivery could not be saved.");
+    }
+  };
+
+  const openDeliveryEvidence = async (project: ProductionOperatorProject) => {
+    const paths = [project.delivery_proof_storage_path, project.payment_receipt_storage_path];
+    if (!paths[0] && !paths[1]) {
+      notice("No delivery evidence was recorded for this historical project.");
+      return;
+    }
+    const client = createClient();
+    const [proofResult, receiptResult] = await Promise.all([
+      paths[0]
+        ? client.storage.from("production-delivery-evidence").createSignedUrl(paths[0], 5 * 60)
+        : Promise.resolve({ data: null, error: null }),
+      paths[1]
+        ? client.storage.from("production-delivery-evidence").createSignedUrl(paths[1], 5 * 60)
+        : Promise.resolve({ data: null, error: null }),
+    ]);
+    const error = proofResult.error ?? receiptResult.error;
+    if (error) {
+      notice(error.message);
+      return;
+    }
+    setDeliveryEvidence({
+      project,
+      proofUrl: proofResult.data?.signedUrl ?? null,
+      receiptUrl: receiptResult.data?.signedUrl ?? null,
+    });
   };
 
   const saveBoxMaker = async () => {
@@ -21032,15 +21204,22 @@ function ProductionOperator({
       n(assignment.labor_cost) - n(assignment.cash_advance),
     );
     if (!Number.isFinite(requestedAmount) || requestedAmount <= 0) {
-      notice("Enter a cash advance amount greater than zero.");
+      notice("Enter a payment amount greater than zero.");
       return;
     }
     if (requestedAmount > remainingBalance) {
-      notice("The cash advance cannot exceed the Box Maker balance.");
+      notice("The payment cannot exceed the Box Maker balance.");
       return;
     }
     if (!cashAdvanceRequestEditor.request_note.trim()) {
       notice("Add a remark for the General Manager.");
+      return;
+    }
+    const dailyFundAvailable = n(productionDetails?.daily_fund_available);
+    if (!cashAdvanceRequestEditor.revision_request_id && requestedAmount > dailyFundAvailable + 0.001) {
+      setDailyFundError(
+        `The requested payment is ${peso.format(requestedAmount)}, but only ${peso.format(dailyFundAvailable)} is currently available in the Daily Fund.`,
+      );
       return;
     }
     setDetailsSaving(true);
@@ -21058,14 +21237,17 @@ function ProductionOperator({
         });
     setDetailsSaving(false);
     if (result.error) {
+      if (/daily fund/i.test(result.error.message)) {
+        setDailyFundError(result.error.message);
+      }
       notice(result.error.message);
       return;
     }
     setCashAdvanceRequestEditor(null);
     notice(
       cashAdvanceRequestEditor.revision_request_id
-        ? "Cash advance request resubmitted to the General Manager."
-        : "Cash advance request sent to the General Manager.",
+        ? "Payment request resubmitted to the General Manager."
+        : "Payment request sent to the General Manager.",
     );
     await refreshProductionDetails();
   };
@@ -21149,10 +21331,16 @@ function ProductionOperator({
   );
 
   const addProject = async (project: ProductionOperatorProject) => {
+    const dueDate = projectDueDate.trim();
+    if (!dueDate) {
+      notice("Enter the project due date before adding it to Production.");
+      return;
+    }
     setSavingId(project.quotation_id);
     const { error } = await createClient().rpc("add_production_operator_project", {
       p_organization_id: orgId,
       p_quotation_id: project.quotation_id,
+      p_due_date: dueDate,
     });
     setSavingId(null);
     if (error) {
@@ -21162,6 +21350,7 @@ function ProductionOperator({
     notice("Approved project added to Production.");
     setAddProjectOpen(false);
     setSelectedProjectId("");
+    setProjectDueDate("");
     await load();
   };
 
@@ -21180,17 +21369,24 @@ function ProductionOperator({
     setStatusDraft({
       status_type_id: matchingStatus?.is_active ? matchingStatus.id : firstActiveStatus?.id ?? "",
       operator_remark: project.operator_remark ?? "",
+      due_date: text(project.due_date, "").slice(0, 10),
     });
   };
 
   const saveProjectStatus = async () => {
     if (!statusEditor || !statusDraft.status_type_id || !statusEditor.production_job_id) return;
+    const dueDate = statusDraft.due_date.trim();
+    if (!dueDate) {
+      notice("Enter the project due date before saving the Production project.");
+      return;
+    }
     setSavingId(statusEditor.production_job_id);
     const { error } = await createClient().rpc("update_production_operator_project", {
       p_organization_id: orgId,
       p_production_job_id: statusEditor.production_job_id,
       p_status_type_id: statusDraft.status_type_id,
       p_operator_remark: statusDraft.operator_remark,
+      p_due_date: dueDate,
     });
     setSavingId(null);
     if (error) {
@@ -21279,7 +21475,7 @@ function ProductionOperator({
     "Box Maker",
     ...productionTierNumbers.map((tierNumber) => `Tier ${tierNumber} (%)`),
     "Total Labor Cost",
-    "Total Cash Advance",
+    "Total Paid",
     "Balance",
     "Due Date",
     "Actions",
@@ -21292,6 +21488,12 @@ function ProductionOperator({
           n(cashAdvanceRequestAssignment.cash_advance),
       )
     : 0;
+  const cashAdvanceRequestAmount = n(cashAdvanceRequestEditor?.requested_amount);
+  const cashAdvanceProjectedBalance = Math.max(
+    0,
+    cashAdvanceRequestRemaining - cashAdvanceRequestAmount,
+  );
+  const currentDailyFundAvailable = n(productionDetails?.daily_fund_available);
   const cashAdvanceAssignmentOptions = (productionDetails?.assignments ?? [])
     .filter(
       (assignment) =>
@@ -21309,31 +21511,75 @@ function ProductionOperator({
           (request) => request.assignment_id === cashAdvanceHistoryAssignment.id,
         )
       : [];
+  const filteredCashAdvanceHistoryRequests = cashAdvanceHistoryStatus === "all"
+    ? cashAdvanceHistoryRequests
+    : cashAdvanceHistoryRequests.filter((request) => request.status === cashAdvanceHistoryStatus);
   const latestCashAdvanceRequest = cashAdvanceHistoryRequests[0];
   const latestCashAdvanceRevision =
     latestCashAdvanceRequest?.status === "needs_revision"
       ? latestCashAdvanceRequest
       : null;
-  const completedProjects = activeProjects.filter((project) => project.status_key === "completed");
-  const productionTableProjects = productionTab === "completed"
-    ? completedProjects
-    : productionTab === "all"
-      ? activeProjects
-      : activeProjects.filter((project) => project.status_key !== "completed");
+  const stageForProject = (project: ProductionOperatorProject) =>
+    project.status_key === "delivered"
+      ? "delivered"
+      : project.status_key === "completed"
+        ? "completed"
+        : "active";
+  const visibleProductionProjects = activeProjects.filter((project) => {
+    if (["cancelled", "archived"].includes(project.status_key)) return false;
+    return stageForProject(project) === productionStage;
+  });
+  const productionCalendarProjects = visibleProductionProjects.filter((project) => Boolean(text(project.due_date, "").trim()));
+  const productionCalendarDotColor = (statusKey: string) => {
+    if (statusKey === "delivered") return "#64748b";
+    if (statusKey === "completed") return "#218b55";
+    if (statusKey === "in_production") return "#2864c7";
+    if (statusKey === "queued") return "#8b92a1";
+    return "#a76605";
+  };
+  const calendarMonths = Array.from({ length: 3 }, (_, index) => {
+    const start = monthStartFromValue(calendarMonth);
+    start.setMonth(start.getMonth() + index);
+    return start;
+  });
+  const calendarProjectsByDate = new Map<string, ProductionOperatorProject[]>();
+  productionCalendarProjects.forEach((project) => {
+    const dueDate = text(project.due_date, "").slice(0, 10);
+    if (!dueDate) return;
+    const current = calendarProjectsByDate.get(dueDate) ?? [];
+    current.push(project);
+    calendarProjectsByDate.set(dueDate, current);
+  });
+  const calendarStatusLegend = Array.from(
+    new Map(
+      productionCalendarProjects.map((project) => [
+        project.status_key,
+        {
+          label: text(project.status_label, productionOperatorStatusLabel(project.status_key)),
+          color: productionCalendarDotColor(project.status_key),
+        },
+      ]),
+    ).values(),
+  );
+  const productionTableProjects = calendarDateFilter
+    ? visibleProductionProjects.filter((project) => text(project.due_date, "").slice(0, 10) === calendarDateFilter)
+    : visibleProductionProjects;
   const productionPageCount = Math.max(1, Math.ceil(productionTableProjects.length / TABLE_PAGE_SIZE));
   const activeProductionPage = Math.min(productionPage, productionPageCount);
-  const visibleProductionProjects = productionTableProjects.slice(
+  const visibleProductionRows = productionTableProjects.slice(
     (activeProductionPage - 1) * TABLE_PAGE_SIZE,
     activeProductionPage * TABLE_PAGE_SIZE,
   );
-  const productionTabLabels = [
-    { key: "active" as const, label: "Active", count: activeProjects.length - completedProjects.length },
-    { key: "completed" as const, label: "Completed", count: completedProjects.length },
-    { key: "all" as const, label: "All", count: activeProjects.length },
+  const productionStageLabels = [
+    { key: "active" as const, label: "Active", count: activeProjects.filter((project) => stageForProject(project) === "active").length },
+    { key: "completed" as const, label: "Completed", count: activeProjects.filter((project) => stageForProject(project) === "completed").length },
+    { key: "delivered" as const, label: "Delivered", count: activeProjects.filter((project) => stageForProject(project) === "delivered").length },
   ];
   const normalizedStatusPickerSearch = statusPickerSearch.trim().toLowerCase();
   const activeStatusTypes = statusTypes.filter((statusType) =>
-    statusType.is_active && (!normalizedStatusPickerSearch || statusType.name.toLowerCase().includes(normalizedStatusPickerSearch)),
+    statusType.is_active &&
+    !["completed", "delivered"].includes(statusType.legacy_status) &&
+    (!normalizedStatusPickerSearch || statusType.name.toLowerCase().includes(normalizedStatusPickerSearch)),
   );
   const archivedStatusTypes = statusTypes.filter((statusType) =>
     !statusType.is_active && !statusType.is_system && (!normalizedStatusPickerSearch || statusType.name.toLowerCase().includes(normalizedStatusPickerSearch)),
@@ -21352,6 +21598,7 @@ function ProductionOperator({
             disabled={loading || Boolean(savingId) || approvedProjects.length === 0}
             onClick={() => {
               setSelectedProjectId("");
+              setProjectDueDate("");
               setAddProjectOpen(true);
             }}
           >
@@ -21360,32 +21607,174 @@ function ProductionOperator({
           </Button>
         ) : undefined}
       >
-        <nav aria-label="Production project views" className="app-tabs mb-4">
-          {productionTabLabels.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => {
-                setProductionTab(tab.key);
-                setProductionPage(1);
-              }}
-              aria-current={productionTab === tab.key ? "page" : undefined}
-              className="app-tab"
-            >
-              {tab.label} ({tab.count})
-            </button>
-          ))}
-        </nav>
+        <section className="mb-5 rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] p-3 sm:p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Button
+                secondary
+                compact
+                onClick={() => {
+                  const start = monthStartFromValue(calendarMonth);
+                  start.setMonth(start.getMonth() - 3);
+                  setCalendarMonth(monthValue(start));
+                  setCalendarDateFilter(null);
+                  setProductionPage(1);
+                }}
+                aria-label="Show previous three months"
+              >
+                <ChevronLeft size={14} />
+              </Button>
+              <label className="flex min-h-8 items-center gap-2 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2.5 text-[11px] font-medium text-[var(--color-text-secondary)]">
+                <CalendarDays size={14} className="text-[var(--color-accent)]" />
+                <span className="sr-only">Starting month</span>
+                <input
+                  type="month"
+                  value={calendarMonth}
+                  onChange={(event) => {
+                    setCalendarMonth(event.target.value);
+                    setCalendarDateFilter(null);
+                    setProductionPage(1);
+                  }}
+                  className="border-0 bg-transparent p-0 text-[11px] font-medium outline-none"
+                />
+              </label>
+              <Button
+                secondary
+                compact
+                onClick={() => {
+                  const start = monthStartFromValue(calendarMonth);
+                  start.setMonth(start.getMonth() + 3);
+                  setCalendarMonth(monthValue(start));
+                  setCalendarDateFilter(null);
+                  setProductionPage(1);
+                }}
+                aria-label="Show next three months"
+              >
+                <ChevronRight size={14} />
+              </Button>
+            </div>
+            <p className="text-[11px] text-[var(--color-text-secondary)]">
+              Due dates for the selected stage. Select a date to filter the table.
+            </p>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[11px] text-[var(--color-text-secondary)]">
+            {calendarStatusLegend.map((legend) => (
+              <span key={legend.label} className="inline-flex items-center gap-1.5">
+                <span className="size-2.5 rounded-full" style={{ backgroundColor: legend.color }} aria-hidden="true" />
+                {legend.label}
+              </span>
+            ))}
+            {!calendarStatusLegend.length && <span>No due dates in this stage.</span>}
+            {calendarDateFilter && (
+              <button
+                type="button"
+                className="font-medium text-[var(--color-accent-text)] hover:underline"
+                onClick={() => {
+                  setCalendarDateFilter(null);
+                  setProductionPage(1);
+                }}
+              >
+                Clear date filter
+              </button>
+            )}
+          </div>
+          <div className="mt-3 grid gap-3 xl:grid-cols-3">
+            {calendarMonths.map((calendarMonthDate) => {
+              const year = calendarMonthDate.getFullYear();
+              const monthIndex = calendarMonthDate.getMonth();
+              const firstWeekday = calendarMonthDate.getDay();
+              const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+              return (
+                <section key={monthValue(calendarMonthDate)} className="overflow-hidden rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)]">
+                  <h3 className="border-b border-[var(--color-border)] px-3 py-2 text-center text-[12px] font-semibold text-[var(--color-text-primary)]">
+                    {new Intl.DateTimeFormat("en-PH", { month: "long", year: "numeric" }).format(calendarMonthDate)}
+                  </h3>
+                  <div className="grid grid-cols-7 bg-[var(--color-surface-muted)] text-center text-[9px] font-semibold uppercase text-[var(--color-text-tertiary)]">
+                    {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((weekday) => (
+                      <span key={weekday} className="border-r border-[var(--color-border)] py-1 last:border-r-0">{weekday}</span>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-7">
+                    {Array.from({ length: 42 }, (_, index) => {
+                      const dayNumber = index - firstWeekday + 1;
+                      if (dayNumber < 1 || dayNumber > daysInMonth) {
+                        return <div key={index} className="min-h-11 border-b border-r border-[var(--color-border)] bg-[var(--color-surface-subtle)] last:border-r-0" />;
+                      }
+                      const date = new Date(year, monthIndex, dayNumber);
+                      const key = localDateKey(date);
+                      const dueProjects = calendarProjectsByDate.get(key) ?? [];
+                      const selected = calendarDateFilter === key;
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => {
+                            setCalendarDateFilter(selected ? null : key);
+                            setProductionPage(1);
+                          }}
+                          aria-pressed={selected}
+                          title={dueProjects.map((project) => text(project.project_name, text(project.quotation_no))).join(" · ") || undefined}
+                          className={`min-h-11 border-b border-r border-[var(--color-border)] p-1 text-right text-[10px] text-[var(--color-text-secondary)] last:border-r-0 hover:bg-[var(--color-surface-subtle)] ${selected ? "bg-[var(--color-accent-subtle)]" : ""}`}
+                        >
+                          <span className="block">{dayNumber}</span>
+                          {dueProjects.length > 0 && (
+                            <span className="mt-1 flex flex-wrap justify-end gap-1">
+                              {dueProjects.slice(0, 4).map((project) => (
+                                <span
+                                  key={`${project.production_job_id}-${project.status_key}`}
+                                  className="size-2.5 rounded-full ring-1 ring-black/10"
+                                  style={{ backgroundColor: productionCalendarDotColor(project.status_key) }}
+                                  aria-label={`${text(project.status_label, productionOperatorStatusLabel(project.status_key))} due`}
+                                />
+                              ))}
+                              {dueProjects.length > 4 && <span className="text-[9px] font-semibold text-[var(--color-text-tertiary)]">+{dueProjects.length - 4}</span>}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
+        </section>
+        <div className="mb-4 flex justify-end">
+          <div role="group" aria-label="Production stages" className="inline-flex max-w-full items-stretch rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface-subtle)]">
+            {productionStageLabels.map((stage, index) => (
+              <button
+                key={stage.key}
+                type="button"
+                onClick={() => {
+                  setProductionStage(stage.key);
+                  setCalendarDateFilter(null);
+                  setProductionPage(1);
+                }}
+                aria-pressed={productionStage === stage.key}
+                style={{
+                  clipPath: index === productionStageLabels.length - 1
+                    ? "polygon(10px 0, 100% 0, 100% 100%, 10px 100%, 0 50%)"
+                    : index === 0
+                      ? "polygon(0 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 0 100%)"
+                      : "polygon(10px 0, calc(100% - 10px) 0, 100% 50%, calc(100% - 10px) 100%, 10px 100%, 0 50%)",
+                }}
+                className={`min-h-8 px-3 text-[11px] font-medium sm:px-4 ${index > 0 ? "pl-5 sm:pl-6" : ""} ${productionStage === stage.key ? "bg-[var(--color-accent)] text-[var(--color-on-accent)]" : "text-[var(--color-text-secondary)] hover:bg-[var(--color-surface)]"}`}
+              >
+                {stage.label} ({stage.count})
+              </button>
+            ))}
+          </div>
+        </div>
         {loading ? (
           <Empty>Loading Production projects...</Empty>
-        ) : visibleProductionProjects.length ? (
+        ) : visibleProductionRows.length ? (
           <>
             <Table
               labels={["Quotation ID", "Project", "Project Type", "Status", "Remarks", "Actions"]}
               minWidth={1280}
               columnWidths={["15%", "22%", "18%", "13%", "20%", "12%"]}
             >
-              {visibleProductionProjects.map((project) => {
+              {visibleProductionRows.map((project) => {
                 const projectNames = [project.client_name, project.project_name]
                   .map((value) => text(value, "").trim())
                   .filter(Boolean);
@@ -21405,7 +21794,14 @@ function ProductionOperator({
                       )) : "-"}
                     </td>
                     <td className="px-5 py-3 text-[var(--color-text-secondary)]">
-                      {text(project.project_type, "-")}
+                      <span className="inline-flex items-center gap-1.5">
+                        <span
+                          className="size-2.5 shrink-0 rounded-full ring-1 ring-black/10"
+                          style={{ backgroundColor: quotationProjectTypeColors[text(project.project_type, "").trim()] ?? "#64748b" }}
+                          aria-hidden="true"
+                        />
+                        {text(project.project_type, "-")}
+                      </span>
                     </td>
                     <td className="px-5 py-3">
                       <span
@@ -21444,27 +21840,60 @@ function ProductionOperator({
                         >
                           <Boxes size={15} />
                         </ActionIcon>
+                        {project.status_key === "delivered" && (project.delivery_proof_storage_path || project.payment_receipt_storage_path) && (
+                          <ActionIcon
+                            label="View delivery evidence"
+                            confirm={false}
+                            onClick={() => void openDeliveryEvidence(project)}
+                          >
+                            <ImageIcon size={14} />
+                          </ActionIcon>
+                        )}
                         {canEdit && (
                           <>
-                            <ActionIcon
-                              label="Edit Production project status and remark"
-                              confirm={false}
-                              disabled={Boolean(savingId)}
-                              onClick={() => openStatusEditor(project)}
-                            >
-                              <Pencil size={13} />
-                            </ActionIcon>
-                            <ActionIcon
-                              label="Remove Production project"
-                              tone="red"
-                              confirm
-                              confirmationDescription="Remove this project from Production Monitoring? It will not delete the quotation or project and can be added again later."
-                              loading={savingId === project.production_job_id}
-                              onClick={() => void removeProject(project)}
-                            >
-                              <Trash2 size={13} />
-                            </ActionIcon>
+                            {project.status_key !== "completed" && project.status_key !== "delivered" && (
+                              <>
+                                <ActionIcon
+                                  label="Edit Production project status, due date, and remark"
+                                  confirm={false}
+                                  disabled={Boolean(savingId)}
+                                  onClick={() => openStatusEditor(project)}
+                                >
+                                  <Pencil size={13} />
+                                </ActionIcon>
+                                <ActionIcon
+                                  label="Remove Production project"
+                                  tone="red"
+                                  confirm
+                                  confirmationDescription="Remove this project from Production Monitoring? It will not delete the quotation or project and can be added again later."
+                                  loading={savingId === project.production_job_id}
+                                  onClick={() => void removeProject(project)}
+                                >
+                                  <Trash2 size={13} />
+                                </ActionIcon>
+                              </>
+                            )}
                           </>
+                        )}
+                        {canEdit && project.status_key !== "completed" && project.status_key !== "delivered" && (
+                          <Button
+                            compact
+                            tone="green"
+                            disabled={Boolean(savingId)}
+                            onClick={() => setCompletionProject(project)}
+                          >
+                            Complete
+                          </Button>
+                        )}
+                        {canEdit && project.status_key === "completed" && (
+                          <Button
+                            compact
+                            tone="green"
+                            disabled={Boolean(savingId)}
+                            onClick={() => openDeliveryDialog(project)}
+                          >
+                            Deliver
+                          </Button>
                         )}
                       </div>
                     </td>
@@ -21477,16 +21906,18 @@ function ProductionOperator({
               pageCount={productionPageCount}
               total={productionTableProjects.length}
               onPageChange={setProductionPage}
-              label={`${productionTab} Production projects pagination`}
+              label={`${productionStage} Production projects pagination`}
             />
           </>
         ) : (
           <Empty>
-            {productionTab === "completed"
-              ? "No completed projects yet. Set a project status to Completed to move it here."
-              : productionTab === "all"
-                ? "No projects have been added to Production yet. Use Add project to select an approved quotation."
-                : "No active projects are in Production. Use Add project to select an approved quotation."}
+            {calendarDateFilter
+              ? `No ${productionStage} projects are due on ${day(calendarDateFilter)}.`
+              : productionStage === "completed"
+                ? "No completed projects are waiting for delivery."
+                : productionStage === "delivered"
+                  ? "No delivered projects yet."
+                  : "No active projects are in Production. Use Add project to select an approved quotation."}
           </Empty>
         )}
       </Panel>
@@ -21536,6 +21967,9 @@ function ProductionOperator({
                       <p className="mt-1 text-[11px] text-[var(--color-text-secondary)]">
                         Each Box Maker can have its own optional tier percentages, costs, balance, and due date.
                       </p>
+                      <p className="mt-2 text-[11px] text-[var(--color-text-secondary)]">
+                        Daily Fund available: <span className="font-semibold tabular-nums text-[var(--color-text-primary)]">{peso.format(n(productionDetails.daily_fund_available))}</span>
+                      </p>
                     </div>
                     {canEdit && (
                       <div className="flex flex-wrap justify-end gap-2">
@@ -21553,7 +21987,7 @@ function ProductionOperator({
                           onClick={() => openCashAdvanceRequest()}
                         >
                           <Wallet size={13} />
-                          Request cash advance
+                          Request payment
                         </Button>
                       </div>
                     )}
@@ -21601,7 +22035,7 @@ function ProductionOperator({
                           <td className="px-4 py-3 text-center">
                             <div className="flex justify-center gap-2">
                               <ActionIcon
-                                label={`View ${assignment.box_maker_name} cash advance history`}
+                                label={`View ${assignment.box_maker_name} payment history`}
                                 confirm={false}
                                 disabled={detailsSaving}
                                 onClick={() => setCashAdvanceHistoryAssignment(assignment)}
@@ -21707,7 +22141,7 @@ function ProductionOperator({
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-[15px] font-semibold text-[var(--color-text-primary)]">
-                  {cashAdvanceRequestEditor.revision_request_id ? "Resubmit cash advance request" : "Request cash advance"}
+                  {cashAdvanceRequestEditor.revision_request_id ? "Resubmit payment request" : "Request Box Maker payment"}
                 </h2>
                 <p className="mt-1 text-[12px] text-[var(--color-text-secondary)]">
                   {text(detailsProject.project_name, "Untitled project")} · {cashAdvanceRequestAssignment?.box_maker_name ?? "Select a Box Maker"}
@@ -21715,7 +22149,7 @@ function ProductionOperator({
               </div>
               <button
                 type="button"
-                aria-label="Close cash advance request"
+                aria-label="Close payment request"
                 className="text-[var(--color-text-secondary)]"
                 onClick={() => setCashAdvanceRequestEditor(null)}
               >
@@ -21749,7 +22183,7 @@ function ProductionOperator({
                 }
                 searchPlaceholder="Search Box Makers"
                 noResultsLabel="No eligible Box Maker matches your search."
-                ariaLabel="Cash advance Box Maker"
+                ariaLabel="Payment Box Maker"
                 required
                 clearable={false}
                 disabled={detailsSaving || Boolean(cashAdvanceRequestEditor.revision_request_id)}
@@ -21766,27 +22200,37 @@ function ProductionOperator({
                   <b className="tabular-nums">{peso.format(n(cashAdvanceRequestAssignment.labor_cost))}</b>
                 </div>
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-[var(--color-text-secondary)]">Current total cash advance</span>
+                  <span className="text-[var(--color-text-secondary)]">Current paid</span>
                   <b className="tabular-nums">{peso.format(n(cashAdvanceRequestAssignment.cash_advance))}</b>
                 </div>
                 <div className="flex items-center justify-between gap-3 border-t border-[var(--color-border)] pt-2">
-                  <span className="text-[var(--color-text-secondary)]">Available Box Maker balance</span>
+                  <span className="text-[var(--color-text-secondary)]">Balance before payment</span>
                   <b className="tabular-nums text-[var(--color-success-text)]">{peso.format(cashAdvanceRequestRemaining)}</b>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[var(--color-text-secondary)]">Balance after payment</span>
+                  <b className="tabular-nums text-[var(--color-success-text)]">{peso.format(cashAdvanceProjectedBalance)}</b>
+                </div>
+                <div className="flex items-center justify-between gap-3 border-t border-[var(--color-border)] pt-2">
+                  <span className="text-[var(--color-text-secondary)]">Daily Fund available</span>
+                  <b className={`tabular-nums ${currentDailyFundAvailable + 0.001 < cashAdvanceRequestAmount ? "text-[var(--color-danger-text)]" : "text-[var(--color-success-text)]"}`}>
+                    {peso.format(currentDailyFundAvailable)}
+                  </b>
                 </div>
               </div>
             ) : (
               <p className="mt-4 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-3 py-2 text-[11px] text-[var(--color-text-secondary)]">
-                Choose a Box Maker to see the available balance before requesting cash advance.
+                Choose a Box Maker to see the labor cost, balance, and available Daily Fund before requesting payment.
               </p>
             )}
             <p className="mt-3 rounded-[var(--radius-control)] border border-[var(--color-border)] px-3 py-2 text-[11px] leading-4 text-[var(--color-text-secondary)]">
               {cashAdvanceRequestEditor.revision_request_id
-                ? "Update the request using the General Manager's note, then resubmit it for approval. The Project Fund is deducted only after approval."
-                : "The amount will remain pending until the General Manager approves it. The Project Fund is deducted only after approval."}
+                ? "Update the request using the General Manager's note, then resubmit it for approval. The Daily Fund is deducted only after approval."
+                : "The amount remains pending until the General Manager approves it. The Daily Fund is deducted only after approval."}
             </p>
             <div className="mt-4 grid gap-4">
               <label className="grid gap-1 text-[12px] font-medium text-[var(--color-text-primary)]">
-                Requested amount
+                Payment amount
                 <input
                   autoFocus
                   required
@@ -21817,7 +22261,7 @@ function ProductionOperator({
                     )
                   }
                   className="min-h-[96px] resize-y rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 text-[12px]"
-                  placeholder="Explain what this cash advance is for."
+                  placeholder="Explain what this payment is for."
                 />
               </label>
             </div>
@@ -21853,7 +22297,7 @@ function ProductionOperator({
             <header className="flex items-start justify-between gap-3 border-b border-[var(--color-border)] p-4">
               <div>
                 <h2 id="cash-advance-history-title" className="text-[15px] font-semibold text-[var(--color-text-primary)]">
-                  Cash advance history
+                  Payment history
                 </h2>
                 <p className="mt-1 text-[12px] text-[var(--color-text-secondary)]">
                   {cashAdvanceHistoryAssignment.box_maker_name} · {text(detailsProject?.project_name, "Untitled project")}
@@ -21861,7 +22305,7 @@ function ProductionOperator({
               </div>
               <button
                 type="button"
-                aria-label="Close cash advance history"
+                aria-label="Close payment history"
                 className="text-[var(--color-text-secondary)]"
                 onClick={() => {
                   setCashAdvanceHistoryAssignment(null);
@@ -21872,16 +22316,39 @@ function ProductionOperator({
               </button>
             </header>
             <div className="max-h-[60vh] overflow-auto p-4">
-              {cashAdvanceHistoryRequests.length ? (
-                <Table labels={["Status", "Requested", "Approved", "Request remark", "Decision remark", "Requested Date", "Actions"]} minWidth={1040}>
-                  {cashAdvanceHistoryRequests.map((request) => (
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-[11px] text-[var(--color-text-secondary)]">
+                  All Box Maker payment transactions for this project.
+                </p>
+                <label className="flex items-center gap-2 text-[11px] font-medium text-[var(--color-text-secondary)]">
+                  Status
+                  <select
+                    value={cashAdvanceHistoryStatus}
+                    onChange={(event) => setCashAdvanceHistoryStatus(event.target.value)}
+                    className="min-h-8 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-[11px] text-[var(--color-text-primary)]"
+                  >
+                    <option value="approved">Approved</option>
+                    <option value="pending">Pending</option>
+                    <option value="needs_revision">Needs revision</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="cancelled">Cancelled</option>
+                    <option value="all">All statuses</option>
+                  </select>
+                </label>
+              </div>
+              {filteredCashAdvanceHistoryRequests.length ? (
+                <Table labels={["Status", "Requested", "Approved", "Balance after", "Requested by", "Requested Date", "Payment Date", "Request remark", "Decision remark", "Actions"]} minWidth={1480}>
+                  {filteredCashAdvanceHistoryRequests.map((request) => (
                     <tr key={request.id}>
                       <td className="px-4 py-3"><Status value={request.status} /></td>
                       <td className="px-4 py-3 text-right tabular-nums">{peso.format(n(request.requested_amount))}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{request.approved_amount == null ? "-" : peso.format(n(request.approved_amount))}</td>
+                      <td className="px-4 py-3 text-right tabular-nums">{request.balance_after_payment == null ? "-" : peso.format(n(request.balance_after_payment))}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">{text(request.requester_name, "Team member")}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-[var(--color-text-secondary)]">{day(request.requested_at)}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-[var(--color-text-secondary)]">{request.payment_date ? day(request.payment_date) : "-"}</td>
                       <td className="max-w-[280px] whitespace-normal px-4 py-3 text-[var(--color-text-secondary)]">{text(request.request_note, "-")}</td>
                       <td className="max-w-[240px] whitespace-normal px-4 py-3 text-[var(--color-text-secondary)]">{text(request.decision_note, "-")}</td>
-                      <td className="px-4 py-3 whitespace-nowrap text-[var(--color-text-secondary)]">{day(request.requested_at)}</td>
                       <td className="px-4 py-3">
                         <div className="flex justify-center gap-2">
                           {request.decision_note && (
@@ -21897,7 +22364,7 @@ function ProductionOperator({
                             request.id === latestCashAdvanceRevision?.id &&
                             n(cashAdvanceHistoryAssignment.pending_cash_advance) <= 0 && (
                               <ActionIcon
-                                label="Resubmit cash advance request for approval"
+                                label="Resubmit payment request for approval"
                                 tone="amber"
                                 confirm={false}
                                 onClick={() => openCashAdvanceRequest(cashAdvanceHistoryAssignment, request)}
@@ -21911,7 +22378,7 @@ function ProductionOperator({
                   ))}
                 </Table>
               ) : (
-                <Empty>No cash advance requests have been submitted for this Box Maker.</Empty>
+                <Empty>{cashAdvanceHistoryRequests.length ? "No payment transactions match this status." : "No payment requests have been submitted for this Box Maker."}</Empty>
               )}
             </div>
             <footer className="flex justify-end border-t border-[var(--color-border)] p-4">
@@ -22110,7 +22577,7 @@ function ProductionOperator({
                   Add project to Production
                 </h2>
                 <p className="mt-1 text-[12px] text-[var(--color-text-secondary)]">
-                  Select an approved quotation to add to the Production table.
+                  Select an approved quotation and set its project due date.
                 </p>
               </div>
               <button
@@ -22120,6 +22587,7 @@ function ProductionOperator({
                 onClick={() => {
                   setAddProjectOpen(false);
                   setSelectedProjectId("");
+                  setProjectDueDate("");
                 }}
               >
                 <X size={17} />
@@ -22131,7 +22599,10 @@ function ProductionOperator({
                 <SearchableSelect
                   options={approvedProjectOptions}
                   value={selectedProjectId}
-                  onChange={setSelectedProjectId}
+                  onChange={(value) => {
+                    setSelectedProjectId(value);
+                    setProjectDueDate("");
+                  }}
                   placeholder={approvedProjectOptions.length ? "Select an approved project..." : "No approved projects available"}
                   searchPlaceholder="Search quotation, project, client, or type"
                   noResultsLabel="No approved project matches your search."
@@ -22141,6 +22612,20 @@ function ProductionOperator({
                   disabled={!approvedProjectOptions.length}
                   className="mt-1"
                 />
+              </label>
+              <label className="grid gap-1 text-[12px] font-medium text-[var(--color-text-primary)]">
+                Project due date
+                <input
+                  type="date"
+                  required
+                  disabled={!selectedProject}
+                  value={projectDueDate}
+                  onChange={(event) => setProjectDueDate(event.target.value)}
+                  className="min-h-9 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[12px] disabled:cursor-not-allowed disabled:bg-[var(--color-surface-subtle)]"
+                />
+                <span className="text-[11px] font-normal text-[var(--color-text-secondary)]">
+                  This is the project deadline shown on the Production calendar.
+                </span>
               </label>
               {selectedProject ? (
                 <div className="grid gap-3 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] p-3 text-[12px]">
@@ -22169,6 +22654,7 @@ function ProductionOperator({
                 onClick={() => {
                   setAddProjectOpen(false);
                   setSelectedProjectId("");
+                  setProjectDueDate("");
                 }}
               >
                 Cancel
@@ -22360,6 +22846,24 @@ function ProductionOperator({
                 </div>
               </label>
               <label className="grid gap-1 text-[12px] font-medium text-[var(--color-text-primary)]">
+                Project due date
+                <input
+                  type="date"
+                  required
+                  value={statusDraft.due_date}
+                  onChange={(event) =>
+                    setStatusDraft((current) => ({
+                      ...current,
+                      due_date: event.target.value,
+                    }))
+                  }
+                  className="min-h-9 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-[12px]"
+                />
+                <span className="text-[11px] font-normal text-[var(--color-text-secondary)]">
+                  Box Maker assignment dates are managed separately.
+                </span>
+              </label>
+              <label className="grid gap-1 text-[12px] font-medium text-[var(--color-text-primary)]">
                 Remarks
                 <textarea
                   value={statusDraft.operator_remark}
@@ -22387,7 +22891,7 @@ function ProductionOperator({
                 Cancel
               </Button>
               <Button
-                disabled={!statusDraft.status_type_id || savingId === statusEditor.production_job_id}
+                disabled={!statusDraft.status_type_id || !statusDraft.due_date || savingId === statusEditor.production_job_id}
                 loading={savingId === statusEditor.production_job_id}
                 onClick={() => void saveProjectStatus()}
               >
@@ -22466,6 +22970,128 @@ function ProductionOperator({
           onClose={() => setProductionRemarkProject(null)}
         />
       )}
+      <ConfirmationDialog
+        open={Boolean(completionProject)}
+        title="Mark project Completed?"
+        description="This moves the project to the Completed stage. Completed projects cannot be reopened and must be delivered separately with the required evidence."
+        onCancel={() => setCompletionProject(null)}
+        onConfirm={() => {
+          if (completionProject) void completeProject(completionProject);
+        }}
+      />
+      {canEdit && deliveryProject && (
+        <div className="fixed inset-0 z-[70] grid place-items-center overflow-y-auto bg-[#151922]/30 p-4">
+          <form
+            className="w-full max-w-lg rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submitDelivery();
+            }}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-[15px] font-semibold text-[var(--color-text-primary)]">Deliver project</h2>
+                <p className="mt-1 text-[12px] text-[var(--color-text-secondary)]">
+                  {text(deliveryProject.quotation_no, "Quotation")} · {text(deliveryProject.project_name, "Project")}
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close delivery dialog"
+                className="text-[var(--color-text-secondary)]"
+                onClick={() => {
+                  setDeliveryProject(null);
+                  resetDeliveryFiles();
+                }}
+              >
+                <X size={17} />
+              </button>
+            </div>
+            <p className="mt-4 rounded-[var(--radius-control)] border border-[var(--color-border)] bg-[var(--color-surface-subtle)] px-3 py-2 text-[11px] leading-4 text-[var(--color-text-secondary)]">
+              Both images are required. The Client Payment Receipt is delivery evidence only and does not create a Finance transaction.
+            </p>
+            <div className="mt-4 grid gap-4">
+              <label className="grid gap-1 text-[12px] font-medium text-[var(--color-text-primary)]">
+                Proof of Delivery
+                <FileUploadControl
+                  inputKey={`${deliveryInputKey}-proof`}
+                  accept="image/jpeg,image/png,image/webp"
+                  ariaLabel="Choose Proof of Delivery image"
+                  emptyLabel="Choose JPEG, PNG, or WebP image"
+                  files={deliveryProofFile ? [deliveryProofFile] : []}
+                  disabled={deliverySaving}
+                  onFilesSelected={(files) => setDeliveryProofFile(files[0] ?? null)}
+                />
+              </label>
+              <label className="grid gap-1 text-[12px] font-medium text-[var(--color-text-primary)]">
+                Client Payment Receipt
+                <FileUploadControl
+                  inputKey={`${deliveryInputKey}-receipt`}
+                  accept="image/jpeg,image/png,image/webp"
+                  ariaLabel="Choose Client Payment Receipt image"
+                  emptyLabel="Choose JPEG, PNG, or WebP image"
+                  files={paymentReceiptFile ? [paymentReceiptFile] : []}
+                  disabled={deliverySaving}
+                  onFilesSelected={(files) => setPaymentReceiptFile(files[0] ?? null)}
+                />
+              </label>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button
+                secondary
+                disabled={deliverySaving}
+                onClick={() => {
+                  setDeliveryProject(null);
+                  resetDeliveryFiles();
+                }}
+              >
+                Cancel
+              </Button>
+              <Button loading={deliverySaving} disabled={!deliveryProofFile || !paymentReceiptFile} onClick={() => void submitDelivery()}>
+                <Check size={14} /> Save and deliver
+              </Button>
+            </div>
+          </form>
+        </div>
+      )}
+      {deliveryEvidence && (
+        <div className="fixed inset-0 z-[70] grid place-items-center overflow-y-auto bg-[#151922]/30 p-4">
+          <section className="w-full max-w-3xl rounded-[var(--radius-card)] border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-[15px] font-semibold text-[var(--color-text-primary)]">Delivery evidence</h2>
+                <p className="mt-1 text-[12px] text-[var(--color-text-secondary)]">
+                  {text(deliveryEvidence.project.quotation_no, "Quotation")} · {text(deliveryEvidence.project.project_name, "Project")}
+                </p>
+              </div>
+              <button type="button" aria-label="Close delivery evidence" className="text-[var(--color-text-secondary)]" onClick={() => setDeliveryEvidence(null)}>
+                <X size={17} />
+              </button>
+            </div>
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              <div>
+                <p className="mb-2 text-[12px] font-medium text-[var(--color-text-primary)]">Proof of Delivery</p>
+                {deliveryEvidence.proofUrl ? (
+                  <img src={deliveryEvidence.proofUrl} alt="Proof of Delivery" className="max-h-[360px] w-full rounded-[var(--radius-control)] border border-[var(--color-border)] object-contain" />
+                ) : <p className="rounded-[var(--radius-control)] border border-[var(--color-border)] p-4 text-[11px] text-[var(--color-text-secondary)]">No image recorded.</p>}
+              </div>
+              <div>
+                <p className="mb-2 text-[12px] font-medium text-[var(--color-text-primary)]">Client Payment Receipt</p>
+                {deliveryEvidence.receiptUrl ? (
+                  <img src={deliveryEvidence.receiptUrl} alt="Client Payment Receipt" className="max-h-[360px] w-full rounded-[var(--radius-control)] border border-[var(--color-border)] object-contain" />
+                ) : <p className="rounded-[var(--radius-control)] border border-[var(--color-border)] p-4 text-[11px] text-[var(--color-text-secondary)]">No image recorded.</p>}
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+      <ConfirmationDialog
+        open={Boolean(dailyFundError)}
+        title="Insufficient Daily Fund"
+        description={dailyFundError ?? "The Daily Fund does not have enough available balance for this payment."}
+        onCancel={() => setDailyFundError(null)}
+        onConfirm={() => setDailyFundError(null)}
+      />
       {pdfQuote && pdfStore && (
         <QuotationDocument
           quote={pdfQuote}
@@ -23990,69 +24616,6 @@ function ProjectOfficerSalesFunnel({
   </section>;
 }
 
-function GeneralManagerPerformanceDashboard({ orgId }: { orgId: string }) {
-  const month = currentMonth();
-  const sharedKpis = useSharedKpiDashboard(orgId, month);
-  const financeKpis = useSharedFinanceKpiDashboard(orgId, month);
-  const cashOnHand = n(financeKpis?.available_cash);
-  const expectedCollections = n(sharedKpis?.receivables);
-  const payablesDue = n(financeKpis?.supplier_payables_open) + n(financeKpis?.commission_payables_open);
-  const netCashPosition = cashOnHand + expectedCollections - payablesDue;
-  const loaded = Boolean(sharedKpis && financeKpis);
-  const formatAmount = (value: number) => loaded ? peso.format(value) : "—";
-  const supportingMetrics = [
-    { label: "Cash on Hand", value: cashOnHand, color: "#16386d" },
-    { label: "Expected Collections", value: expectedCollections, color: "#16854f" },
-    { label: "Payables Due", value: payablesDue, color: "#d33c43" },
-  ];
-  const asOfLabel = new Intl.DateTimeFormat("en-PH", {
-    dateStyle: "medium",
-    timeZone: "Asia/Manila",
-  }).format(new Date());
-
-  return (
-    <div className="space-y-4">
-      <header className="flex flex-wrap items-end justify-between gap-3 border-b border-[#e4e8ef] pb-4">
-        <div>
-          <h1 className="text-[20px] font-semibold tracking-[-.02em] text-[#202938]">Performance</h1>
-          <p className="mt-1 text-[12px] text-[#687386]">Cash Flow &amp; Position</p>
-        </div>
-        <p className="text-[11px] text-[#687386]">As of {asOfLabel}</p>
-      </header>
-      <section className="overflow-hidden rounded-lg border border-[#dfe5ed] bg-white">
-        <div className="border-b border-[#e4e8ef] px-4 py-3 sm:px-5">
-          <h2 className="text-[13px] font-semibold uppercase tracking-[.08em] text-[#687386]">Cash Flow &amp; Position</h2>
-        </div>
-        <div className="space-y-3 p-4 sm:p-5">
-          <article className="min-w-0 rounded-lg border border-[#cbd8ea] bg-[#f6f9fe] p-5 sm:p-7">
-            <p className="text-[11px] font-semibold uppercase tracking-[.12em] text-[#687386]">Net Cash Position</p>
-            <p
-              aria-label="Net Cash Position"
-              className={`mt-3 break-words font-semibold leading-none tabular-nums ${netCashPosition < 0 ? "text-[#d33c43]" : "text-[#16854f]"}`}
-              style={{ fontSize: dashboardMetricFontSize(formatAmount(netCashPosition), 48) }}
-            >
-              {formatAmount(netCashPosition)}
-            </p>
-          </article>
-          <div className="grid gap-3 sm:grid-cols-3">
-            {supportingMetrics.map((metric) => (
-              <article key={metric.label} className="min-w-0 rounded-lg border border-[#dfe5ed] bg-white p-4 sm:p-5">
-                <p className="text-[11px] font-medium uppercase tracking-[.08em] text-[#687386]">{metric.label}</p>
-                <p
-                  className="mt-3 break-words font-semibold leading-tight tabular-nums"
-                  style={{ color: metric.color, fontSize: dashboardMetricFontSize(formatAmount(metric.value), 28) }}
-                >
-                  {formatAmount(metric.value)}
-                </p>
-              </article>
-            ))}
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-}
-
 function dashboardMetricFontSize(value: unknown, maximum = 22) {
   const length = String(value ?? "").length;
   if (length > 24) return "12px";
@@ -24112,7 +24675,6 @@ function Dashboard({
     };
   }, [isProjectOfficer, orgId, role, selectedMonth]);
   if (isProjectOfficer) return <ProjectOfficerSalesFunnel store={store} orgId={orgId} />;
-  if (role === "admin") return <GeneralManagerPerformanceDashboard orgId={orgId} />;
   const quarterStartMonth = (Math.floor((selectedMonthIndex - 1) / 3)) * 3;
   const isCurrentMonth = (value: unknown) => {
     const raw = text(value, "");
@@ -25583,7 +26145,7 @@ export function HuswellWorkspace({
     role === "accountant" || internalFinanceEnabled;
   const isManagementRole = memberRole(role);
   const productionViewOnly = isManagementRole || hasInternalFinanceAccess;
-  const canViewProduction = productionOperationsEnabled || productionViewOnly;
+  const canViewProduction = true;
   const canEditProduction = productionOperationsEnabled && !productionViewOnly;
   const financeViewsForRole = useMemo(
     () => isManagementRole
@@ -25599,6 +26161,8 @@ export function HuswellWorkspace({
     ? "Finance Overview"
     : role === "lead_coordinator"
       ? "Leads"
+      : role === "admin"
+        ? "Approvals"
       : "Dashboard";
   const requestedInitialView: View =
     initialView === "Costing Breakdown"
@@ -25617,7 +26181,9 @@ export function HuswellWorkspace({
       : requestedInitialView;
   const financePaymentViewAllowed =
     hasInternalFinanceAccess || ["super_admin", "owner", "admin"].includes(role);
-  const safeInitialView = normalizedInitialView === "Payment Monitoring" && !financePaymentViewAllowed
+  const safeInitialView = role === "admin" && normalizedInitialView === "Dashboard"
+    ? "Approvals"
+    : normalizedInitialView === "Payment Monitoring" && !financePaymentViewAllowed
     ? defaultWorkspaceView
     : normalizedInitialView === "Production" && !canViewProduction
       ? defaultWorkspaceView
@@ -25731,6 +26297,10 @@ export function HuswellWorkspace({
         : view === "Projects"
           ? canViewProduction ? "Production" : defaultWorkspaceView
         : view;
+    if (role === "admin" && targetView === "Dashboard") {
+      setActive(defaultWorkspaceView);
+      return;
+    }
     if (financeSidebarViews.includes(targetView) && !financeViewsForRole.includes(targetView)) {
       setActive(defaultWorkspaceView);
       return;
@@ -25759,7 +26329,7 @@ export function HuswellWorkspace({
     }
     if (targetView === "Leads") setLeadMode("leads");
     setActive(targetView);
-  }, [canViewProduction, defaultWorkspaceView, financePaymentViewAllowed, financeViewsForRole, selectLeadWorkspaceMode, setActive]);
+  }, [canViewProduction, defaultWorkspaceView, financePaymentViewAllowed, financeViewsForRole, role, selectLeadWorkspaceMode, setActive]);
   const switchSidebarWorkspace = useCallback((workspace: SidebarWorkspace) => {
     setSidebarWorkspace(workspace);
     navigate(workspace === "finance" ? "Finance Overview" : "Dashboard");
@@ -26132,7 +26702,6 @@ export function HuswellWorkspace({
       "Settings",
     ],
     admin: [
-      "Dashboard",
       "Leads",
       "Supplier's List",
       "Price Quotations",
@@ -26451,12 +27020,10 @@ export function HuswellWorkspace({
   }, [active, financeViewsForRole, isManagementRole]);
   const pageHeader: Record<View, { title: string; detail: string }> = {
     Dashboard: {
-      title: isProjectOfficerRole(role) ? "KPI Dashboard" : role === "admin" ? "Performance" : "Dashboard",
+      title: isProjectOfficerRole(role) ? "KPI Dashboard" : "Dashboard",
       detail:
         isProjectOfficerRole(role)
           ? "Track your lead, quotation, and supplier key performance indicators."
-          : role === "admin"
-            ? "Review cash on hand, expected collections, payables due, and net cash position."
           : "Monitor business performance and current work.",
     },
     Leads: {
@@ -26803,7 +27370,7 @@ export function HuswellWorkspace({
       ) : (
         <Panel
           title="Production"
-          detail="Production access is limited to the delegated Production Operations user, General Manager, and Finance."
+          detail="Production is available as view-only monitoring for workspace members."
         >
           <Empty>You do not have access to the Production page.</Empty>
         </Panel>
@@ -26975,8 +27542,6 @@ export function HuswellWorkspace({
     const navigationLabel =
       view === "Dashboard" && isProjectOfficerRole(role)
         ? "KPI"
-      : role === "admin" && view === "Dashboard"
-          ? "Performance"
       : view === "Announcements"
           ? "Announcements"
         : view === "Policy"
