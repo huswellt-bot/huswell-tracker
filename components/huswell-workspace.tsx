@@ -241,6 +241,15 @@ const parseSidebarQueueCounts = (value: unknown): SidebarQueueCounts | null => {
   }, {} as SidebarQueueCounts);
 };
 
+const caughtErrorMessage = (error: unknown, fallback: string) => {
+  if (error instanceof Error && error.message.trim()) return error.message;
+  if (error && typeof error === "object" && "message" in error) {
+    const message = String((error as { message?: unknown }).message ?? "").trim();
+    if (message) return message;
+  }
+  return fallback;
+};
+
 const TEMPORARILY_HIDDEN_VIEWS: ReadonlyArray<View> = [
   "Payment Reviews",
 ];
@@ -2930,6 +2939,7 @@ function ActionIcon({
   tone = "primary",
   confirm = true,
   confirmationDescription,
+  className = "",
 }: {
   label: string;
   children: ReactNode;
@@ -2939,6 +2949,7 @@ function ActionIcon({
   tone?: "primary" | "green" | "amber" | "red";
   confirm?: boolean;
   confirmationDescription?: string;
+  className?: string;
 }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const colors = {
@@ -2956,7 +2967,7 @@ function ActionIcon({
           disabled={disabled || loading}
           aria-busy={loading || undefined}
           aria-label={label}
-          className={`disabled:cursor-not-allowed disabled:opacity-50 ${colors[tone]}`}
+          className={`disabled:cursor-not-allowed disabled:opacity-50 ${colors[tone]} ${className}`}
         >
           {loading ? <LoaderCircle className="size-4 animate-spin" aria-hidden="true" /> : children}
         </button>
@@ -14246,13 +14257,18 @@ function Quotations({
                           <ActionIcon
                             label="View Costing Breakdown"
                             confirm={false}
-                            onClick={() =>
+                            onClick={() => {
+                              const costingId = text(q.id, "");
+                              if (!costingId) {
+                                notice("This Costing Breakdown has no valid record ID.");
+                                return;
+                              }
                               window.open(
-                                `/costing-breakdown/${text(q.id, "")}`,
+                                `/costing-breakdown/${encodeURIComponent(costingId)}`,
                                 "_blank",
                                 "noopener,noreferrer",
-                              )
-                            }
+                              );
+                            }}
                           >
                             <FileText size={15} />
                           </ActionIcon>
@@ -15599,13 +15615,17 @@ function PriceQuotationWorkspace({
   useEffect(() => {
     let active = true;
     setCommissionOfficerDirectory([]);
-    void createClient()
-      .rpc("quotation_commission_officer_options", {
+    void Promise.resolve(
+      createClient().rpc("quotation_commission_officer_options", {
         p_organization_id: orgId,
         p_project_type: projectType.trim() || null,
-      })
+      }),
+    )
       .then(({ data, error }) => {
         if (active && !error) setCommissionOfficerDirectory((data ?? []) as Row[]);
+      })
+      .catch(() => {
+        if (active) setCommissionOfficerDirectory([]);
       });
     return () => {
       active = false;
@@ -17382,13 +17402,17 @@ function PriceQuotationReview({
   const [commissionOfficerDirectory, setCommissionOfficerDirectory] = useState<Row[]>([]);
   useEffect(() => {
     let active = true;
-    void createClient()
-      .rpc("quotation_commission_officer_options", {
+    void Promise.resolve(
+      createClient().rpc("quotation_commission_officer_options", {
         p_organization_id: text(quotation.organization_id, ""),
         p_project_type: text(quotation.project_types, "") || null,
-      })
+      }),
+    )
       .then(({ data, error }) => {
         if (active && !error) setCommissionOfficerDirectory((data ?? []) as Row[]);
+      })
+      .catch(() => {
+        if (active) setCommissionOfficerDirectory([]);
       });
     return () => {
       active = false;
@@ -17490,18 +17514,21 @@ function PriceQuotationReview({
     let active = true;
     const organizationId = text(quotation.organization_id);
     if (!organizationId) return;
-    void createClient()
-      .from("business_settings")
-      .select("default_bank_details, vat_rate, pricing_markup_defaults")
-      .eq("organization_id", organizationId)
-      .maybeSingle()
+    void Promise.resolve(
+      createClient()
+        .from("business_settings")
+        .select("default_bank_details, vat_rate, pricing_markup_defaults")
+        .eq("organization_id", organizationId)
+        .maybeSingle(),
+    )
       .then(({ data, error }) => {
         if (!active || error) return;
         setFetchedPricingDefaultSettings((data ?? {}) as Row);
         if (useLatestBankDefault && !bankDetailsTouched.current && data?.default_bank_details !== undefined) {
           setBankDetails(quotationBankDetails(data.default_bank_details));
         }
-      });
+      })
+      .catch(() => undefined);
     return () => {
       active = false;
     };
@@ -17522,10 +17549,11 @@ function PriceQuotationReview({
     }
     let active = true;
     setPrintingComputationsError("");
-    void createClient()
-      .rpc("list_lead_costing_print_computations", {
+    void Promise.resolve(
+      createClient().rpc("list_lead_costing_print_computations", {
         p_organization_id: text(quotation.organization_id, ""),
-      })
+      }),
+    )
       .then(({ data, error }) => {
         if (!active) return;
         if (error) {
@@ -17534,6 +17562,13 @@ function PriceQuotationReview({
           return;
         }
         setPrintingComputations((data ?? []) as PrintingComputation[]);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setPrintingComputations([]);
+        setPrintingComputationsError(
+          caughtErrorMessage(error, "Printing computations could not be loaded."),
+        );
       });
     return () => {
       active = false;
@@ -17558,54 +17593,62 @@ function PriceQuotationReview({
     setProductCostingsLoading(true);
     setProductCostingsError("");
     const loadProductCostings = async () => {
-      const client = createClient();
-      const { data: costingData, error: costingError } = await client
-        .from("price_quotation_product_costings")
-        .select("*")
-        .eq("quotation_id", quotation.id)
-        .eq("organization_id", text(quotation.organization_id, ""));
-      if (!active) return;
-      if (costingError) {
-        setProductCostingsLoading(false);
-        setProductCostingsError("Quotation costing data could not be loaded. Please retry.");
-        return;
-      }
+      try {
+        const client = createClient();
+        const { data: costingData, error: costingError } = await client
+          .from("price_quotation_product_costings")
+          .select("*")
+          .eq("quotation_id", quotation.id)
+          .eq("organization_id", text(quotation.organization_id, ""));
+        if (!active) return;
+        if (costingError) {
+          setProductCostingsLoading(false);
+          setProductCostingsError("Quotation costing data could not be loaded. Please retry.");
+          return;
+        }
 
-      const costings = (costingData ?? []) as Row[];
-      if (!costings.length) {
-        setProductCostings([]);
+        const costings = (costingData ?? []) as Row[];
+        if (!costings.length) {
+          setProductCostings([]);
+          setProductCostingsLoading(false);
+          return;
+        }
+        const costingIds = costings.map((costing) => text(costing.id)).filter(Boolean);
+        const [costLineResult, markupResult] = await Promise.all([
+          client
+            .from("price_quotation_costing_lines")
+            .select("*")
+            .in("product_costing_id", costingIds)
+            .eq("organization_id", text(quotation.organization_id, "")),
+          client
+            .from("price_quotation_costing_markups")
+            .select("*")
+            .in("product_costing_id", costingIds)
+            .eq("organization_id", text(quotation.organization_id, "")),
+        ]);
+        if (!active) return;
+        if (costLineResult.error || markupResult.error) {
+          setProductCostingsLoading(false);
+          setProductCostingsError("Quotation costing lines or markups could not be loaded. Please retry.");
+          return;
+        }
+        const loadedCostings = productCostingDrafts(
+          costings,
+          (costLineResult.data ?? []) as Row[],
+          (markupResult.data ?? []) as Row[],
+          lines,
+        );
+        setProductCostings(useCurrentGmMarkups
+          ? loadedCostings.map((costing) => applyCurrentPricingDefaultsToCosting(costing, defaultPricingDefaults))
+          : loadedCostings);
         setProductCostingsLoading(false);
-        return;
-      }
-      const costingIds = costings.map((costing) => text(costing.id)).filter(Boolean);
-      const [costLineResult, markupResult] = await Promise.all([
-        client
-          .from("price_quotation_costing_lines")
-          .select("*")
-          .in("product_costing_id", costingIds)
-          .eq("organization_id", text(quotation.organization_id, "")),
-        client
-          .from("price_quotation_costing_markups")
-          .select("*")
-          .in("product_costing_id", costingIds)
-          .eq("organization_id", text(quotation.organization_id, "")),
-      ]);
-      if (!active) return;
-      if (costLineResult.error || markupResult.error) {
+      } catch (error) {
+        if (!active) return;
         setProductCostingsLoading(false);
-        setProductCostingsError("Quotation costing lines or markups could not be loaded. Please retry.");
-        return;
+        setProductCostingsError(
+          caughtErrorMessage(error, "Quotation costing data could not be loaded. Please retry."),
+        );
       }
-      const loadedCostings = productCostingDrafts(
-        costings,
-        (costLineResult.data ?? []) as Row[],
-        (markupResult.data ?? []) as Row[],
-        lines,
-      );
-      setProductCostings(useCurrentGmMarkups
-        ? loadedCostings.map((costing) => applyCurrentPricingDefaultsToCosting(costing, defaultPricingDefaults))
-        : loadedCostings);
-      setProductCostingsLoading(false);
     };
     void loadProductCostings();
     return () => {
@@ -17619,14 +17662,17 @@ function PriceQuotationReview({
   );
   useEffect(() => {
     let active = true;
-    void createClient()
-      .from("price_quotation_illustrations")
-      .select("*")
-      .eq("quotation_id", illustrationQuotationId)
-      .order("sort_order", { ascending: true })
+    void Promise.resolve(
+      createClient()
+        .from("price_quotation_illustrations")
+        .select("*")
+        .eq("quotation_id", illustrationQuotationId)
+        .order("sort_order", { ascending: true }),
+    )
       .then(({ data }) => {
         if (active && data) setGalleryIllustrations(data as Row[]);
-      });
+      })
+      .catch(() => undefined);
     return () => {
       active = false;
     };
@@ -17749,6 +17795,7 @@ function PriceQuotationReview({
       return false;
     }
     setWorking(true);
+    try {
     const savedTerms = quotationTermsWithPaymentOption(
       terms
       .filter((term) => term.trim())
@@ -17879,7 +17926,6 @@ function PriceQuotationReview({
           p_line_prices: lines.map((line) => ({ id: line.id, unit_cost: n(prices[text(line.id)]) })),
           p_revision_note: revisionNote,
         });
-    setWorking(false);
     if (error) {
       notice(error.message);
       return false;
@@ -17888,6 +17934,12 @@ function PriceQuotationReview({
     notice(decision === "approved" ? (finalApproval ? `${documentLabel} approved.` : pricingRevision ? `${documentLabel} resubmitted to the General Manager.` : `${documentLabel} submitted to the General Manager.`) : `${documentLabel} returned for revision.`);
     await reload();
     return true;
+    } catch (error) {
+      notice(caughtErrorMessage(error, `${documentLabel} review could not be saved.`));
+      return false;
+    } finally {
+      setWorking(false);
+    }
   };
   /*
   return <div className="fixed inset-0 z-50 overflow-y-auto bg-[#151922]/35 p-4"><section className="mx-auto my-4 w-full max-w-4xl rounded-[14px] border border-[#d9e0e9] bg-white p-5 shadow-xl"><div className="flex items-start justify-between gap-4 border-b border-[#edf0f5] pb-4"><div><h2 className="text-[17px] font-semibold text-[#202938]">Review Price Quotation</h2><p className="mt-1 text-[12px] text-[#687386]">{text(quotation.quotation_no)} - {text(quotation.client_name)} - Enter selling prices before approval.</p></div><button type="button" onClick={close} aria-label="Close review" className="grid size-8 place-items-center rounded-md text-[#8a95a6] hover:bg-[#f0f3f7]"><X size={18} /></button></div><PriceQuotationReviewContent lines={lines} prices={prices} setPrices={setPrices} subtotal={subtotal} vatRate={vatRate} setVatRate={setVatRate} tax={tax} shipping={shipping} setShipping={setShipping} total={total} terms={terms} setTerms={setTerms} bankDetails={bankDetails} setBankDetails={setBankDetails} revisionNote={revisionNote} setRevisionNote={setRevisionNote} close={close} saving={saving} working={working} review={review} /></section></div>;
@@ -18038,15 +18090,18 @@ function GeneralManagerCostingReview({
     let active = true;
     const organizationId = text(quotation.organization_id);
     if (!organizationId || hasSavedBankDetails) return;
-    void createClient()
-      .from("business_settings")
-      .select("default_bank_details")
-      .eq("organization_id", organizationId)
-      .maybeSingle()
+    void Promise.resolve(
+      createClient()
+        .from("business_settings")
+        .select("default_bank_details")
+        .eq("organization_id", organizationId)
+        .maybeSingle(),
+    )
       .then(({ data, error }) => {
         if (!active || error || bankDetailsTouched.current || data?.default_bank_details === undefined) return;
         setBankDetailsState(quotationBankDetails(data.default_bank_details));
-      });
+      })
+      .catch(() => undefined);
     return () => {
       active = false;
     };
@@ -18749,21 +18804,38 @@ function Submissions({
   const [cashAdvanceRequests, setCashAdvanceRequests] = useState<ProductionCashAdvanceRequest[]>([]);
   const [cashAdvanceReview, setCashAdvanceReview] = useState<ProductionCashAdvanceRequest | null>(null);
   const approvalOfficers = useMemo(() => projectOfficerOptions(store), [store]);
+  const refreshApprovalQueue = async () => {
+    try {
+      await reload();
+    } catch (error) {
+      notice(
+        `The decision was saved, but the approval queue could not refresh: ${caughtErrorMessage(
+          error,
+          "Please refresh the page and try again.",
+        )}`,
+      );
+    }
+  };
   const loadCashAdvanceRequests = useCallback(async () => {
     if (productionOnly) {
       setCashAdvanceRequests([]);
       return;
     }
-    const { data, error } = await createClient().rpc(
-      "list_production_cash_advance_requests",
-      { p_organization_id: orgId },
-    );
-    if (error) {
-      if (!isMissingProductionCashAdvanceRpcError(error)) notice(error.message);
+    try {
+      const { data, error } = await createClient().rpc(
+        "list_production_cash_advance_requests",
+        { p_organization_id: orgId },
+      );
+      if (error) {
+        if (!isMissingProductionCashAdvanceRpcError(error)) notice(error.message);
+        setCashAdvanceRequests([]);
+        return;
+      }
+      setCashAdvanceRequests((data ?? []) as ProductionCashAdvanceRequest[]);
+    } catch (error) {
       setCashAdvanceRequests([]);
-      return;
+      notice(caughtErrorMessage(error, "Cash advance requests could not be loaded."));
     }
-    setCashAdvanceRequests((data ?? []) as ProductionCashAdvanceRequest[]);
   }, [notice, orgId, productionOnly]);
 
   useEffect(() => {
@@ -18800,59 +18872,64 @@ function Submissions({
   ) => {
     if (!quotation.id) return;
     setSavingId(quotation.id);
-    const client = createClient();
-    const paymentTermsOption = quotationPaymentTermsOption(
-      reviewChanges.payment_terms_option ?? quotation.payment_terms_option,
-    );
-    const pdcTermDays = quotationPaymentTermDays(
-      reviewChanges.pdc_term_days ?? quotation.pdc_term_days,
-    );
-    const { error } = await client.rpc("review_costing_breakdown_with_payment_terms", {
-      p_costing_id: quotation.id,
-      p_decision: status,
-      p_profit_margin_rate: n(
-        reviewChanges.profit_margin_rate ?? quotation.profit_margin_rate,
-      ),
-      p_overhead_rate: n(reviewChanges.overhead_rate ?? quotation.overhead_rate),
-      p_buffer_margin_rate: n(
-        reviewChanges.buffer_margin_rate ?? quotation.buffer_margin_rate,
-      ),
-      p_commission_rate: n(
-        reviewChanges.commission_rate ?? quotation.commission_rate,
-      ),
-      p_vat_rate: n(reviewChanges.vat_rate ?? quotationVatRate(quotation)),
-      p_terms_conditions: quotationTermsWithPaymentOption(
-        typeof reviewChanges.terms_conditions === "string"
-          ? reviewChanges.terms_conditions
-          : text(quotation.terms_conditions, DEFAULT_QUOTATION_TERMS),
-        {
-          payment_terms_option: paymentTermsOption,
-          pdc_term_days: pdcTermDays,
-        },
-      ),
-      p_bank_details: Array.isArray(reviewChanges.bank_details)
-        ? reviewChanges.bank_details
-        : quotationBankDetails(quotation.bank_details),
-      p_revision_note: revisionNote,
-      p_payment_terms_option: paymentTermsOption,
-      p_pdc_term_days: pdcTermDays,
-    });
-    setSavingId(null);
-    if (error) return notice(error.message);
-    setSelected(null);
-    const hasLinkedPriceQuotation = store.quotations.some(
-      (item) =>
-        item.costing_source_id === quotation.id &&
-        text(item.document_type) === "price_quotation",
-    );
-    notice(
-      status === "approved"
-        ? hasLinkedPriceQuotation
-          ? "Costing Breakdown approved and Price Quotation updated."
-          : "Costing Breakdown approved and Price Quotation created."
-        : "Returned to the Sales Executive for re-evaluation.",
-    );
-    await reload();
+    try {
+      const client = createClient();
+      const paymentTermsOption = quotationPaymentTermsOption(
+        reviewChanges.payment_terms_option ?? quotation.payment_terms_option,
+      );
+      const pdcTermDays = quotationPaymentTermDays(
+        reviewChanges.pdc_term_days ?? quotation.pdc_term_days,
+      );
+      const { error } = await client.rpc("review_costing_breakdown_with_payment_terms", {
+        p_costing_id: quotation.id,
+        p_decision: status,
+        p_profit_margin_rate: n(
+          reviewChanges.profit_margin_rate ?? quotation.profit_margin_rate,
+        ),
+        p_overhead_rate: n(reviewChanges.overhead_rate ?? quotation.overhead_rate),
+        p_buffer_margin_rate: n(
+          reviewChanges.buffer_margin_rate ?? quotation.buffer_margin_rate,
+        ),
+        p_commission_rate: n(
+          reviewChanges.commission_rate ?? quotation.commission_rate,
+        ),
+        p_vat_rate: n(reviewChanges.vat_rate ?? quotationVatRate(quotation)),
+        p_terms_conditions: quotationTermsWithPaymentOption(
+          typeof reviewChanges.terms_conditions === "string"
+            ? reviewChanges.terms_conditions
+            : text(quotation.terms_conditions, DEFAULT_QUOTATION_TERMS),
+          {
+            payment_terms_option: paymentTermsOption,
+            pdc_term_days: pdcTermDays,
+          },
+        ),
+        p_bank_details: Array.isArray(reviewChanges.bank_details)
+          ? reviewChanges.bank_details
+          : quotationBankDetails(quotation.bank_details),
+        p_revision_note: revisionNote,
+        p_payment_terms_option: paymentTermsOption,
+        p_pdc_term_days: pdcTermDays,
+      });
+      if (error) return notice(error.message);
+      setSelected(null);
+      const hasLinkedPriceQuotation = store.quotations.some(
+        (item) =>
+          item.costing_source_id === quotation.id &&
+          text(item.document_type) === "price_quotation",
+      );
+      notice(
+        status === "approved"
+          ? hasLinkedPriceQuotation
+            ? "Costing Breakdown approved and Price Quotation updated."
+            : "Costing Breakdown approved and Price Quotation created."
+          : "Returned to the Sales Executive for re-evaluation.",
+      );
+      await refreshApprovalQueue();
+    } catch (error) {
+      notice(caughtErrorMessage(error, "Costing Breakdown review could not be saved."));
+    } finally {
+      setSavingId(null);
+    }
   };
   const decideApprovalRequest = async (
     request: Row,
@@ -18860,14 +18937,19 @@ function Submissions({
   ) => {
     if (!request.id) return;
     setSavingId(text(request.id));
-    const { error } = await createClient().rpc("review_approval_request", {
-      p_request_id: request.id,
-      p_decision: decision,
-    });
-    setSavingId(null);
-    if (error) return notice(error.message);
-    notice(decision === "approved" ? "Approval request approved." : "Approval request rejected.");
-    await reload();
+    try {
+      const { error } = await createClient().rpc("review_approval_request", {
+        p_request_id: request.id,
+        p_decision: decision,
+      });
+      if (error) return notice(error.message);
+      notice(decision === "approved" ? "Approval request approved." : "Approval request rejected.");
+      await refreshApprovalQueue();
+    } catch (error) {
+      notice(caughtErrorMessage(error, "Approval request could not be reviewed."));
+    } finally {
+      setSavingId(null);
+    }
   };
   const decideCashAdvance = async (
     request: ProductionCashAdvanceRequest,
@@ -18876,25 +18958,30 @@ function Submissions({
   ) => {
     if (!request.id) return;
     setSavingId(request.id);
-    const { error } = await createClient().rpc("review_production_cash_advance", {
-      p_request_id: request.id,
-      p_decision: decision,
-      p_decision_note: note || null,
-    });
-    setSavingId(null);
-    if (error) {
-      notice(error.message);
-      return;
+    try {
+      const { error } = await createClient().rpc("review_production_cash_advance", {
+        p_request_id: request.id,
+        p_decision: decision,
+        p_decision_note: note || null,
+      });
+      if (error) {
+        notice(error.message);
+        return;
+      }
+      setCashAdvanceReview(null);
+      notice(
+        decision === "approved"
+          ? "Cash advance approved and deducted from the Project Fund."
+          : decision === "needs_revision"
+            ? "Cash advance request returned for revision."
+            : "Cash advance request rejected.",
+      );
+      await Promise.all([refreshApprovalQueue(), loadCashAdvanceRequests()]);
+    } catch (error) {
+      notice(caughtErrorMessage(error, "Cash advance request could not be reviewed."));
+    } finally {
+      setSavingId(null);
     }
-    setCashAdvanceReview(null);
-    notice(
-      decision === "approved"
-        ? "Cash advance approved and deducted from the Project Fund."
-        : decision === "needs_revision"
-          ? "Cash advance request returned for revision."
-          : "Cash advance request rejected.",
-    );
-    await Promise.all([reload(), loadCashAdvanceRequests()]);
   };
   const decideProjectEdit = async (
     request: Row,
@@ -18903,20 +18990,25 @@ function Submissions({
   ) => {
     if (!request.id) return;
     setSavingId(text(request.id));
-    const { error } = await createClient().rpc("review_project_edit", {
-      p_request_id: request.id,
-      p_decision: decision,
-      p_decision_note: note,
-    });
-    setSavingId(null);
-    if (error) return notice(error.message);
-    setSelectedProjectEdit(null);
-    notice(
-      decision === "approved"
-        ? "Project edit approved."
-        : "Project edit returned for revision.",
-    );
-    await reload();
+    try {
+      const { error } = await createClient().rpc("review_project_edit", {
+        p_request_id: request.id,
+        p_decision: decision,
+        p_decision_note: note,
+      });
+      if (error) return notice(error.message);
+      setSelectedProjectEdit(null);
+      notice(
+        decision === "approved"
+          ? "Project edit approved."
+          : "Project edit returned for revision.",
+      );
+      await refreshApprovalQueue();
+    } catch (error) {
+      notice(caughtErrorMessage(error, "Project edit could not be reviewed."));
+    } finally {
+      setSavingId(null);
+    }
   };
   const decideLeadChange = async (
     request: Row,
@@ -18925,25 +19017,30 @@ function Submissions({
   ) => {
     if (!request.id) return;
     setSavingId(text(request.id));
-    const { error } = await createClient().rpc("review_lead_change", {
-      p_request_id: request.id,
-      p_decision: decision,
-      p_decision_note: note,
-    });
-    setSavingId(null);
-    if (error) return notice(error.message);
-    setSelectedLeadChange(null);
-    const isDeletion = text(request.change_type, "") === "delete";
-    notice(
-      decision === "approved"
-        ? isDeletion
-          ? "Lead deletion approved."
-          : "Lead edit approved."
-        : decision === "needs_revision"
-          ? "Lead edit returned for revision."
-          : "Lead deletion rejected.",
-    );
-    await reload();
+    try {
+      const { error } = await createClient().rpc("review_lead_change", {
+        p_request_id: request.id,
+        p_decision: decision,
+        p_decision_note: note,
+      });
+      if (error) return notice(error.message);
+      setSelectedLeadChange(null);
+      const isDeletion = text(request.change_type, "") === "delete";
+      notice(
+        decision === "approved"
+          ? isDeletion
+            ? "Lead deletion approved."
+            : "Lead edit approved."
+          : decision === "needs_revision"
+            ? "Lead edit returned for revision."
+            : "Lead deletion rejected.",
+      );
+      await refreshApprovalQueue();
+    } catch (error) {
+      notice(caughtErrorMessage(error, "Lead change could not be reviewed."));
+    } finally {
+      setSavingId(null);
+    }
   };
   const decideLeadUnendorsement = async (
     request: Row,
@@ -18951,18 +19048,23 @@ function Submissions({
   ) => {
     if (!request.id) return;
     setSavingId(text(request.id));
-    const { error } = await createClient().rpc("review_lead_unendorsement", {
-      p_request_id: request.id,
-      p_decision: decision,
-    });
-    setSavingId(null);
-    if (error) return notice(error.message);
-    notice(
-      decision === "approved"
-        ? "Lead unendorsement approved. The Pricing Officer no longer has access to this lead."
-        : "Lead unendorsement request rejected.",
-    );
-    await reload();
+    try {
+      const { error } = await createClient().rpc("review_lead_unendorsement", {
+        p_request_id: request.id,
+        p_decision: decision,
+      });
+      if (error) return notice(error.message);
+      notice(
+        decision === "approved"
+          ? "Lead unendorsement approved. The Pricing Officer no longer has access to this lead."
+          : "Lead unendorsement request rejected.",
+      );
+      await refreshApprovalQueue();
+    } catch (error) {
+      notice(caughtErrorMessage(error, "Lead unendorsement could not be reviewed."));
+    } finally {
+      setSavingId(null);
+    }
   };
   const decideQuotationRevision = async (
     request: Row,
@@ -18970,18 +19072,23 @@ function Submissions({
   ) => {
     if (!request.id) return;
     setSavingId(text(request.id));
-    const { error } = await createClient().rpc("review_quotation_revision", {
-      p_request_id: request.id,
-      p_decision: decision,
-    });
-    setSavingId(null);
-    if (error) return notice(error.message);
-    notice(
-      decision === "approved"
-        ? "Costing Breakdown reopened for revision."
-        : "Costing Breakdown revision request rejected.",
-    );
-    await reload();
+    try {
+      const { error } = await createClient().rpc("review_quotation_revision", {
+        p_request_id: request.id,
+        p_decision: decision,
+      });
+      if (error) return notice(error.message);
+      notice(
+        decision === "approved"
+          ? "Costing Breakdown reopened for revision."
+          : "Costing Breakdown revision request rejected.",
+      );
+      await refreshApprovalQueue();
+    } catch (error) {
+      notice(caughtErrorMessage(error, "Costing Breakdown revision could not be reviewed."));
+    } finally {
+      setSavingId(null);
+    }
   };
   const decidePriceQuotationRevision = async (
     request: Row,
@@ -18989,14 +19096,19 @@ function Submissions({
   ) => {
     if (!request.id) return;
     setSavingId(text(request.id));
-    const { error } = await createClient().rpc("review_price_quotation_revision", {
-      p_request_id: request.id,
-      p_decision: decision,
-    });
-    setSavingId(null);
-    if (error) return notice(error.message);
-    notice(decision === "approved" ? "Price Quotation reopened for revision." : "Price Quotation revision request rejected.");
-    await reload();
+    try {
+      const { error } = await createClient().rpc("review_price_quotation_revision", {
+        p_request_id: request.id,
+        p_decision: decision,
+      });
+      if (error) return notice(error.message);
+      notice(decision === "approved" ? "Price Quotation reopened for revision." : "Price Quotation revision request rejected.");
+      await refreshApprovalQueue();
+    } catch (error) {
+      notice(caughtErrorMessage(error, "Price Quotation revision could not be reviewed."));
+    } finally {
+      setSavingId(null);
+    }
   };
   const decideProjectSchedule = async (
     schedule: Row,
@@ -19547,38 +19659,43 @@ function Submissions({
     }
 
     setBulkSaving(true);
-    const results = await Promise.allSettled(
-      items.map(async (item) => {
-        const result = await item.bulkAction?.(decision);
-        if (result?.error) {
-          throw new Error(result.error.message || "The approval could not be updated.");
-        }
-      }),
-    );
-    setBulkSaving(false);
-    setSelectedApprovalKeys(new Set());
-
-    const failures = results.filter(
-      (result): result is PromiseRejectedResult => result.status === "rejected",
-    );
-    const succeeded = results.length - failures.length;
-    const actionLabel = decision === "approved" ? "approved" : "rejected";
-    if (failures.length) {
-      const failureSummary = failures
-        .slice(0, 2)
-        .map((failure) =>
-          failure.reason instanceof Error
-            ? failure.reason.message
-            : "One approval could not be updated.",
-        )
-        .join(" ");
-      notice(
-        `${succeeded} approval${succeeded === 1 ? "" : "s"} ${actionLabel}; ${failures.length} failed. ${failureSummary}`,
+    try {
+      const results = await Promise.allSettled(
+        items.map(async (item) => {
+          const result = await item.bulkAction?.(decision);
+          if (result?.error) {
+            throw new Error(result.error.message || "The approval could not be updated.");
+          }
+        }),
       );
-    } else {
-      notice(`${succeeded} approval${succeeded === 1 ? "" : "s"} ${actionLabel}.`);
+      setSelectedApprovalKeys(new Set());
+
+      const failures = results.filter(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      const succeeded = results.length - failures.length;
+      const actionLabel = decision === "approved" ? "approved" : "rejected";
+      if (failures.length) {
+        const failureSummary = failures
+          .slice(0, 2)
+          .map((failure) =>
+            failure.reason instanceof Error
+              ? failure.reason.message
+              : "One approval could not be updated.",
+          )
+          .join(" ");
+        notice(
+          `${succeeded} approval${succeeded === 1 ? "" : "s"} ${actionLabel}; ${failures.length} failed. ${failureSummary}`,
+        );
+      } else {
+        notice(`${succeeded} approval${succeeded === 1 ? "" : "s"} ${actionLabel}.`);
+      }
+      await refreshApprovalQueue();
+    } catch (error) {
+      notice(caughtErrorMessage(error, "Bulk approval could not be completed."));
+    } finally {
+      setBulkSaving(false);
     }
-    await reload();
   };
   const renderSelectionCell = (key: string) => {
     const item = pendingQueueItemByKey.get(key);
@@ -20491,6 +20608,7 @@ function ProductionBoxMakerPicker({
               <ActionIcon
                 label="Add Box Maker"
                 confirm={false}
+                className="table-action--outlined"
                 onClick={() => {
                   closePicker();
                   onAdd();
@@ -22129,6 +22247,7 @@ function ProductionOperator({
                         <ActionIcon
                           label="Add Production status"
                           confirm={false}
+                          className="table-action--outlined"
                           onClick={() => {
                             setStatusPickerOpen(false);
                             setStatusTypeEditor({

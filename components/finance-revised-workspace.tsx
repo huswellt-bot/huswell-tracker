@@ -539,7 +539,7 @@ function FinanceCategoryPicker({
                   onAdd();
                 }}
                 disabled={saving}
-                className="grid h-7 w-7 place-items-center rounded-md text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)]"
+                className="grid h-7 w-7 place-items-center rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-subtle)] hover:text-[var(--color-text-primary)]"
               >
                 <Plus size={14} />
               </button>
@@ -814,72 +814,73 @@ export function FinanceRevisedWorkspace({
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const periodStart = month + "-01";
-    const [year, monthNumber] = month.split("-").map(Number);
-    const periodEnd = new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
-    const pageSize = 500;
-    const loadTransactions = async () => {
-      const rows: Row[] = [];
-      for (let offset = 0; ; offset += pageSize) {
-        const result = await client
-          .from("finance_revised_transaction_feed")
-          .select("*")
-          .eq("organization_id", organizationId)
-          .order("transaction_date", { ascending: false })
-          .order("created_at", { ascending: false })
-          .range(offset, offset + pageSize - 1);
-        if (result.error) return { data: rows, error: result.error };
-        const page = (result.data as Row[] | null) ?? [];
-        rows.push(...page);
-        if (page.length < pageSize) return { data: rows, error: null };
-      }
-    };
-    const loadWorkingRequests = async () => {
-      const rows: Row[] = [];
-      for (let offset = 0; ; offset += pageSize) {
-        const result = await client
-          .from("finance_revised_working_fund_request_feed")
-          .select("*")
-          .eq("organization_id", organizationId)
-          .order("requested_at", { ascending: false })
-          .range(offset, offset + pageSize - 1);
-        if (result.error) return { data: rows, error: result.error };
-        const page = (result.data as Row[] | null) ?? [];
-        rows.push(...page);
-        if (page.length < pageSize) return { data: rows, error: null };
-      }
-    };
-    const loadDailyFundRequests = async () => {
-      const rows: Row[] = [];
-      for (let offset = 0; ; offset += pageSize) {
-        const result = await client
-          .from("finance_revised_daily_fund_request_feed")
-          .select("*")
-          .eq("organization_id", organizationId)
-          .order("fund_date", { ascending: false })
-          .order("requested_at", { ascending: false })
-          .range(offset, offset + pageSize - 1);
-        if (result.error) return { data: rows, error: result.error };
-        const page = (result.data as Row[] | null) ?? [];
-        rows.push(...page);
-        if (page.length < pageSize) return { data: rows, error: null };
-      }
-    };
-    const [snapshotResult, currentFundBalancesResult, dailySnapshotResult, projectResult, transactionResult, requestResult, dailyRequestResult, commissionResult, categoryResult] = await Promise.all([
-      client.rpc("get_finance_revised_snapshot", {
-        p_organization_id: organizationId,
-        p_period_start: periodStart,
-        p_period_end: periodEnd,
-      }),
-      client.rpc("get_finance_revised_current_balances", { p_organization_id: organizationId }),
-      client.rpc("get_finance_revised_daily_fund_snapshot", { p_organization_id: organizationId }),
-      client.rpc("list_finance_revised_projects", { p_organization_id: organizationId }),
-      loadTransactions(),
-      loadWorkingRequests(),
-      loadDailyFundRequests(),
-      client.rpc("list_finance_revised_commission_payables", { p_organization_id: organizationId }),
-      client.rpc("list_finance_revised_categories", { p_organization_id: organizationId }),
-    ]);
+    try {
+      const periodStart = month + "-01";
+      const [year, monthNumber] = month.split("-").map(Number);
+      const periodEnd = new Date(Date.UTC(year, monthNumber, 0)).toISOString().slice(0, 10);
+      const pageSize = 500;
+      const loadTransactions = async () => {
+        const rows: Row[] = [];
+        for (let offset = 0; ; offset += pageSize) {
+          const result = await client
+            .from("finance_revised_transaction_feed")
+            .select("*")
+            .eq("organization_id", organizationId)
+            .order("transaction_date", { ascending: false })
+            .order("created_at", { ascending: false })
+            .range(offset, offset + pageSize - 1);
+          if (result.error) return { data: rows, error: result.error };
+          const page = (result.data as Row[] | null) ?? [];
+          rows.push(...page);
+          if (page.length < pageSize) return { data: rows, error: null };
+        }
+      };
+      const loadWorkingRequests = async () => {
+        const rows: Row[] = [];
+        for (let offset = 0; ; offset += pageSize) {
+          const result = await client
+            .from("finance_revised_working_fund_request_feed")
+            .select("*")
+            .eq("organization_id", organizationId)
+            .order("requested_at", { ascending: false })
+            .range(offset, offset + pageSize - 1);
+          if (result.error) return { data: rows, error: result.error };
+          const page = (result.data as Row[] | null) ?? [];
+          rows.push(...page);
+          if (page.length < pageSize) return { data: rows, error: null };
+        }
+      };
+      const loadDailyFundRequests = async () => {
+        const rows: Row[] = [];
+        for (let offset = 0; ; offset += pageSize) {
+          const result = await client
+            .from("finance_revised_daily_fund_request_feed")
+            .select("*")
+            .eq("organization_id", organizationId)
+            .order("fund_date", { ascending: false })
+            .order("requested_at", { ascending: false })
+            .range(offset, offset + pageSize - 1);
+          if (result.error) return { data: rows, error: result.error };
+          const page = (result.data as Row[] | null) ?? [];
+          rows.push(...page);
+          if (page.length < pageSize) return { data: rows, error: null };
+        }
+      };
+      const [snapshotResult, currentFundBalancesResult, dailySnapshotResult, projectResult, transactionResult, requestResult, dailyRequestResult, commissionResult, categoryResult] = await Promise.all([
+        client.rpc("get_finance_revised_snapshot", {
+          p_organization_id: organizationId,
+          p_period_start: periodStart,
+          p_period_end: periodEnd,
+        }),
+        client.rpc("get_finance_revised_current_balances", { p_organization_id: organizationId }),
+        client.rpc("get_finance_revised_daily_fund_snapshot", { p_organization_id: organizationId }),
+        client.rpc("list_finance_revised_projects", { p_organization_id: organizationId }),
+        loadTransactions(),
+        loadWorkingRequests(),
+        loadDailyFundRequests(),
+        client.rpc("list_finance_revised_commission_payables", { p_organization_id: organizationId }),
+        client.rpc("list_finance_revised_categories", { p_organization_id: organizationId }),
+      ]);
 
     const errors = [snapshotResult.error, currentFundBalancesResult.error, dailySnapshotResult.error, projectResult.error, transactionResult.error, requestResult.error, dailyRequestResult.error, commissionResult.error, categoryResult.error]
       .filter(Boolean)
@@ -928,8 +929,16 @@ export function FinanceRevisedWorkspace({
     setRequests(((requestResult.data as Row[] | null) ?? []).map(withProjectContext));
     setDailyFundRequests((dailyRequestResult.data as Row[] | null) ?? []);
     setCommissionPayables(((commissionResult.data as Row[] | null) ?? []).map(withProjectContext));
-    setCategories((categoryResult.data as Row[] | null) ?? []);
-    setLoading(false);
+      setCategories((categoryResult.data as Row[] | null) ?? []);
+    } catch (loadError) {
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : "Accounting and Finance data could not be loaded.",
+      );
+    } finally {
+      setLoading(false);
+    }
   }, [client, month, organizationId]);
 
   useEffect(() => {
