@@ -32,13 +32,14 @@ import {
   remainingProjectExpense,
 } from "@/lib/finance-project-expense";
 import { FileUploadControl } from "@/components/ui/file-upload-control";
-import { ClientCompanyNames } from "@/components/ui/client-company-names";
+import { ProjectIdentity } from "@/components/ui/client-company-names";
 import { LoadingState } from "@/components/ui/loading-state";
 import { NumberInput } from "@/components/ui/number-input";
 import { SearchableLeadSelect } from "@/components/ui/searchable-lead-select";
 import { SearchableSelect, type SearchableOption } from "@/components/ui/searchable-select";
 import { TABLE_PAGE_SIZE, TablePagination } from "@/components/ui/table-pagination";
 import { NotificationDialog } from "@/components/ui/notification-dialog";
+import { formatProjectOptionLabel } from "@/lib/project-option-label";
 
 type Row = { id?: string; [key: string]: unknown };
 type FinanceRemoveTarget = { kind: "category" | "account_type"; id: string; label: string };
@@ -183,8 +184,14 @@ const financeProjectLabel = (
 ) => {
   const companyName = stringValue(quotation, "client_name") || stringValue(lead, "client_name");
   const clientName = stringValue(quotation, "client_contact_name") || stringValue(lead, "contact_name");
-  const quotationId = stringValue(quotation, "quotation_no") || fallback;
-  return uniqueTextParts([companyName, clientName, quotationId]).join(" - ") || fallback;
+  const projectName = stringValue(quotation, "project_name") || stringValue(lead, "project_name");
+  return formatProjectOptionLabel({
+    quotationNumber: stringValue(quotation, "quotation_no"),
+    projectName,
+    companyName,
+    clientName,
+    fallback,
+  });
 };
 const numericValue = (row: Row | null | undefined, key: string) => {
   const value = Number(row?.[key]);
@@ -1427,7 +1434,7 @@ function PendingQuotationPaymentTable({
       </div>
       <div className="table-shell hidden overflow-x-auto md:block">
         <table className="app-table w-full min-w-[1220px]">
-          <thead><tr><th>Paid date</th><th>Quotation</th><th>Client</th><th>Project</th><th>Type</th><th>Received into</th><th>Payment method</th><th>Amount</th><th>Receipt</th><th>Review</th></tr></thead>
+          <thead><tr><th>Paid date</th><th>Quotation</th><th>Project</th><th>Type</th><th>Received into</th><th>Payment method</th><th>Amount</th><th>Receipt</th><th>Review</th></tr></thead>
           <tbody>
             {visibleRows.map((payment) => {
               const details = paymentDetails(payment);
@@ -1435,8 +1442,7 @@ function PendingQuotationPaymentTable({
                 <tr key={String(payment.id)}>
                   <td>{details.date}</td>
                   <td>{details.quoteNo}</td>
-                  <td>{details.client}</td>
-                  <td>{details.project || "-"}</td>
+                  <td><ProjectIdentity projectName={details.project} clientName={details.client} className="block" projectClassName="font-medium" partyClassName="text-[10px] text-[#7d8797]" /></td>
                   <td className="capitalize">{details.kind}</td>
                   <td>
                     {details.accountOptions.length ? (
@@ -1461,7 +1467,7 @@ function PendingQuotationPaymentTable({
                 </tr>
               );
             })}
-            {!rows.length && <tr><td colSpan={10} className="text-center text-[#7d8797]">No project payment receipts are awaiting verification.</td></tr>}
+            {!rows.length && <tr><td colSpan={9} className="text-center text-[#7d8797]">No project payment receipts are awaiting verification.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -2561,8 +2567,18 @@ export function FinanceWorkspace({
   const quotationOptions = useMemo<SearchableOption[]>(
     () => quotations.map((quotation) => ({
       value: String(quotation.id),
-      label: `${stringValue(quotation, "quotation_no")} · ${stringValue(quotation, "client_name", "Name / Company not set")}`,
-      searchText: [stringValue(quotation, "quotation_no"), stringValue(quotation, "client_name"), stringValue(quotation, "project_name")].join(" "),
+      label: formatProjectOptionLabel({
+        quotationNumber: stringValue(quotation, "quotation_no"),
+        projectName: stringValue(quotation, "project_name"),
+        companyName: stringValue(quotation, "client_name"),
+        clientName: stringValue(quotation, "client_contact_name"),
+      }),
+      searchText: [
+        stringValue(quotation, "quotation_no"),
+        stringValue(quotation, "project_name"),
+        stringValue(quotation, "client_name"),
+        stringValue(quotation, "client_contact_name"),
+      ].join(" "),
     })),
     [quotations],
   );
@@ -2579,14 +2595,19 @@ export function FinanceWorkspace({
 
   const projectExpenseOptions = useMemo<SearchableOption[]>(
     () => projectExpenseRows.map((project) => {
-      const projectName = stringValue(project, "project_name") || stringValue(project, "client_name", "Unnamed project");
-      const clientName = stringValue(project, "client_name", "Client not set");
-      const clientContactName = stringValue(project, "client_contact_name");
-      const quotationNo = stringValue(project, "quotation_no", "Project");
+      const projectName = stringValue(project, "project_name");
+      const companyName = stringValue(project, "client_name");
+      const clientName = stringValue(project, "client_contact_name");
+      const quotationNo = stringValue(project, "quotation_no");
       return {
         value: `quotation:${String(project.quotation_id)}`,
-        label: `${projectName} · ${quotationNo}`,
-        searchText: [projectName, clientName, clientContactName, quotationNo, stringValue(project, "lead_id")].join(" "),
+        label: formatProjectOptionLabel({
+          quotationNumber: quotationNo,
+          projectName,
+          companyName,
+          clientName,
+        }),
+        searchText: [projectName, companyName, clientName, quotationNo, stringValue(project, "lead_id")].join(" "),
       };
     }),
     [projectExpenseRows],
@@ -2606,12 +2627,22 @@ export function FinanceWorkspace({
       .filter((quotation) => stringValue(quotation, "document_type") === "price_quotation" && stringValue(quotation, "status") === "approved")
       .map((quotation) => {
         const lead = leads.find((item) => String(item.id) === String(quotation.lead_id));
-        const companyName = stringValue(quotation, "client_name", stringValue(lead, "client_name", "Company not set"));
-        const clientName = stringValue(quotation, "client_contact_name", stringValue(lead, "contact_name", "Client not set"));
+        const companyName = stringValue(quotation, "client_name") || stringValue(lead, "client_name");
+        const clientName = stringValue(quotation, "client_contact_name") || stringValue(lead, "contact_name");
         return {
           value: String(quotation.id),
-          label: `${companyName} — ${clientName}`,
-          searchText: [companyName, clientName, stringValue(quotation, "quotation_no"), stringValue(quotation, "project_name")].filter(Boolean).join(" "),
+          label: formatProjectOptionLabel({
+            quotationNumber: stringValue(quotation, "quotation_no"),
+            projectName: stringValue(quotation, "project_name") || stringValue(lead, "project_name"),
+            companyName,
+            clientName,
+          }),
+          searchText: [
+            companyName,
+            clientName,
+            stringValue(quotation, "quotation_no"),
+            stringValue(quotation, "project_name"),
+          ].filter(Boolean).join(" "),
         };
       }),
     [leads, quotations],
@@ -4824,7 +4855,7 @@ export function FinanceWorkspace({
 
       {tab === "supplier_costing" && !budgetOnly && (
         <Panel title="Supplier Costing logbook" detail="External Finance records supplier obligations here. These entries become Cash Out only when an actual supplier payment is made." action={canRecordSupplierCosting ? <button type="button" onClick={() => setSupplierCostOpen(true)} className={primaryButton}><Plus size={13} /> Log supplier cost</button> : undefined}>
-          <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[1080px]"><thead><tr><th>Supplier</th><th>Project</th><th>Client / Company</th><th>Description</th><th>Total cost</th><th>Paid</th><th>Remaining</th><th>Due</th><th>Status</th></tr></thead><tbody>{visibleSupplierCostingRows.map((payable) => { const linkedLead = stringValue(payable, "lead_id"); const linkedQuotation = quotations.find((quotation) => quotation.id === payable.quotation_id); const linkedLeadRow = leads.find((lead) => String(lead.id) === linkedLead); const clientName = stringValue(linkedQuotation, "client_contact_name") || stringValue(linkedLeadRow, "contact_name") || "—"; const companyName = stringValue(linkedQuotation, "client_name") || stringValue(linkedLeadRow, "client_name") || "—"; return <tr key={String(payable.id)}><td>{supplierName(payable.supplier_id)}</td><td>{quotationName(payable.quotation_id)}</td><td><ClientCompanyNames clientName={clientName} companyName={companyName} /></td><td>{stringValue(payable, "description", "—")}</td><td className="font-semibold">{peso.format(numericValue(payable, "amount"))}</td><td>{peso.format(numericValue(payable, "amount_paid"))}</td><td className="font-semibold text-[#b42318]">{peso.format(Math.max(numericValue(payable, "amount") - numericValue(payable, "amount_paid"), 0))}</td><td>{displayDate(payable.due_date)}</td><td><StatusPill value={stringValue(payable, "status")} /></td></tr>; })}{!supplierCostingRows.length && <tr><td colSpan={9} className="text-center text-[#7d8797]">No supplier costing entries yet.</td></tr>}</tbody></table></div>
+          <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[1080px]"><thead><tr><th>Supplier</th><th>Project</th><th>Description</th><th>Total cost</th><th>Paid</th><th>Remaining</th><th>Due</th><th>Status</th></tr></thead><tbody>{visibleSupplierCostingRows.map((payable) => { const linkedLead = stringValue(payable, "lead_id"); const linkedQuotation = quotations.find((quotation) => quotation.id === payable.quotation_id); const linkedLeadRow = leads.find((lead) => String(lead.id) === linkedLead); const clientName = stringValue(linkedQuotation, "client_contact_name") || stringValue(linkedLeadRow, "contact_name") || "—"; const companyName = stringValue(linkedQuotation, "client_name") || stringValue(linkedLeadRow, "client_name") || "—"; return <tr key={String(payable.id)}><td>{supplierName(payable.supplier_id)}</td><td><ProjectIdentity projectName={quotationName(payable.quotation_id)} clientName={clientName} companyName={companyName} className="block" projectClassName="font-medium" partyClassName="text-[10px] text-[#7d8797]" /></td><td>{stringValue(payable, "description", "—")}</td><td className="font-semibold">{peso.format(numericValue(payable, "amount"))}</td><td>{peso.format(numericValue(payable, "amount_paid"))}</td><td className="font-semibold text-[#b42318]">{peso.format(Math.max(numericValue(payable, "amount") - numericValue(payable, "amount_paid"), 0))}</td><td>{displayDate(payable.due_date)}</td><td><StatusPill value={stringValue(payable, "status")} /></td></tr>; })}{!supplierCostingRows.length && <tr><td colSpan={8} className="text-center text-[#7d8797]">No supplier costing entries yet.</td></tr>}</tbody></table></div>
           <TablePagination page={activeSupplierCostingPage} pageCount={supplierCostingPageCount} total={supplierCostingRows.length} onPageChange={setSupplierCostingPage} label="Supplier costing pagination" />
         </Panel>
       )}
@@ -4900,7 +4931,7 @@ export function FinanceWorkspace({
               </nav>
             </div>
             <div id={`commission-payables-panel-${commissionPayablesView}`} role="tabpanel" aria-labelledby={`commission-payables-tab-${commissionPayablesView}`}>
-              <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[1200px]"><thead><tr><th>Project</th><th>Client / Company</th><th>Recipient</th><th>Role</th><th>Division</th><th>Amount</th><th>Status</th>{commissionPayablesView === "ready_to_pay" && <th className="finance-action-column">Action</th>}</tr></thead><tbody>{visiblePayablesRows.map((allocation) => { const verifiedAt = verifiedPaymentByQuotation.get(stringValue(allocation, "quotation_id")); const eligible = eligibleCommissionAllocations.some((eligibleAllocation) => String(eligibleAllocation.id) === String(allocation.id)); const quotation = quotationForId(allocation.quotation_id); const summary = commissionSummaryForQuotation(allocation.quotation_id); const clientName = stringValue(quotation, "client_contact_name") || stringValue(summary, "client_contact_name") || "—"; const companyName = stringValue(quotation, "client_name") || stringValue(summary, "client_name") || "—"; return <tr key={String(allocation.id)}><td>{quotationName(allocation.quotation_id)}</td><td><ClientCompanyNames clientName={clientName} companyName={companyName} /></td><td>{profileName(allocation.recipient_user_id)}</td><td>{commissionRoleLabel(allocation.allocation_role)}</td><td>{commissionDivisionLabel(stringValue(quotation, "commission_split_option") || stringValue(summary, "commission_split_option"))}</td><td className="font-semibold text-[#b42318]">{peso.format(numericValue(allocation, "amount"))}</td><td>{commissionPayablesView === "ready_to_pay" ? <StatusPill value={stringValue(allocation, "status")} /> : <span className="text-[11px] text-[#a76605]">{verifiedAt ? "Awaiting full payment" : "Awaiting verified payment"}</span>}</td>{commissionPayablesView === "ready_to_pay" && <td className="finance-action-cell">{eligible ? <button type="button" onClick={() => openCommissionPayout(String(allocation.id))} disabled={saving} className="inline-flex min-h-7 items-center gap-1 rounded-[6px] bg-[#218b55] px-2.5 text-[10px] font-semibold text-white transition-colors hover:bg-[#176b40] disabled:cursor-not-allowed disabled:opacity-50" aria-label={"Pay commission for " + quotationName(allocation.quotation_id)}>Pay commission</button> : "—"}</td>}</tr>; })}{!filteredPayablesRows.length && <tr><td colSpan={commissionPayablesView === "ready_to_pay" ? 8 : 7} className="text-center text-[#7d8797]">{normalizedCommissionPayoutQuery || commissionPayablesMonth ? "No commission payouts match the selected filters." : commissionPayablesView === "ready_to_pay" ? "No fully paid projects are ready for commission payout." : "No commission projects are awaiting verified payment."}</td></tr>}</tbody></table></div>
+              <div className="table-shell overflow-x-auto"><table className="app-table w-full min-w-[1200px]"><thead><tr><th>Project</th><th>Recipient</th><th>Role</th><th>Division</th><th>Amount</th><th>Status</th>{commissionPayablesView === "ready_to_pay" && <th className="finance-action-column">Action</th>}</tr></thead><tbody>{visiblePayablesRows.map((allocation) => { const verifiedAt = verifiedPaymentByQuotation.get(stringValue(allocation, "quotation_id")); const eligible = eligibleCommissionAllocations.some((eligibleAllocation) => String(eligibleAllocation.id) === String(allocation.id)); const quotation = quotationForId(allocation.quotation_id); const summary = commissionSummaryForQuotation(allocation.quotation_id); const clientName = stringValue(quotation, "client_contact_name") || stringValue(summary, "client_contact_name") || "—"; const companyName = stringValue(quotation, "client_name") || stringValue(summary, "client_name") || "—"; return <tr key={String(allocation.id)}><td><ProjectIdentity projectName={quotationName(allocation.quotation_id)} clientName={clientName} companyName={companyName} className="block" projectClassName="font-medium" partyClassName="text-[10px] text-[#7d8797]" /></td><td>{profileName(allocation.recipient_user_id)}</td><td>{commissionRoleLabel(allocation.allocation_role)}</td><td>{commissionDivisionLabel(stringValue(quotation, "commission_split_option") || stringValue(summary, "commission_split_option"))}</td><td className="font-semibold text-[#b42318]">{peso.format(numericValue(allocation, "amount"))}</td><td>{commissionPayablesView === "ready_to_pay" ? <StatusPill value={stringValue(allocation, "status")} /> : <span className="text-[11px] text-[#a76605]">{verifiedAt ? "Awaiting full payment" : "Awaiting verified payment"}</span>}</td>{commissionPayablesView === "ready_to_pay" && <td className="finance-action-cell">{eligible ? <button type="button" onClick={() => openCommissionPayout(String(allocation.id))} disabled={saving} className="inline-flex min-h-7 items-center gap-1 rounded-[6px] bg-[#218b55] px-2.5 text-[10px] font-semibold text-white transition-colors hover:bg-[#176b40] disabled:cursor-not-allowed disabled:opacity-50" aria-label={"Pay commission for " + quotationName(allocation.quotation_id)}>Pay commission</button> : "—"}</td>}</tr>; })}{!filteredPayablesRows.length && <tr><td colSpan={commissionPayablesView === "ready_to_pay" ? 7 : 6} className="text-center text-[#7d8797]">{normalizedCommissionPayoutQuery || commissionPayablesMonth ? "No commission payouts match the selected filters." : commissionPayablesView === "ready_to_pay" ? "No fully paid projects are ready for commission payout." : "No commission projects are awaiting verified payment."}</td></tr>}</tbody></table></div>
             </div>
           </Panel>
           <TablePagination page={activePayablesPage} pageCount={payablesPageCount} total={filteredPayablesRows.length} onPageChange={setPayablesPage} label="Payables pagination" />
@@ -4953,7 +4984,7 @@ export function FinanceWorkspace({
           </div>
           <div className="table-shell overflow-x-auto">
             <table className="app-table w-full min-w-[1060px]">
-              <thead><tr><th>Paid date</th><th>Project</th><th>Client / Company</th><th>Pricing officer</th><th>Role</th><th>Division</th><th>Amount paid</th><th>Account</th></tr></thead>
+              <thead><tr><th>Paid date</th><th>Project</th><th>Pricing officer</th><th>Role</th><th>Division</th><th>Amount paid</th><th>Account</th></tr></thead>
               <tbody>
                 {visiblePaidCommissionRows.map((transaction) => {
                   const allocation = commissionAllocations.find((item) => String(item.id) === String(transaction.commission_allocation_id));
@@ -4965,8 +4996,7 @@ export function FinanceWorkspace({
                   return (
                     <tr key={String(transaction.id)}>
                       <td>{displayDate(stringValue(transaction, "paid_at") || transaction.transaction_date)}</td>
-                      <td>{quotationName(quotationId)}</td>
-                      <td><ClientCompanyNames clientName={clientName} companyName={companyName} /></td>
+                      <td><ProjectIdentity projectName={quotationName(quotationId)} clientName={clientName} companyName={companyName} className="block" projectClassName="font-medium" partyClassName="text-[10px] text-[#7d8797]" /></td>
                       <td>{allocation ? profileName(allocation.recipient_user_id) : "—"}</td>
                       <td>{allocation ? commissionRoleLabel(allocation.allocation_role) : "—"}</td>
                       <td>{commissionDivisionLabel(stringValue(quotation, "commission_split_option") || stringValue(summary, "commission_split_option"))}</td>
@@ -4975,7 +5005,7 @@ export function FinanceWorkspace({
                     </tr>
                   );
                 })}
-                {!filteredPaidCommissionRows.length && <tr><td colSpan={8} className="text-center text-[#7d8797]">{normalizedPaidCommissionQuery || paidCommissionMonth ? "No paid commissions match the selected filters." : "No paid commissions yet."}</td></tr>}
+                {!filteredPaidCommissionRows.length && <tr><td colSpan={7} className="text-center text-[#7d8797]">{normalizedPaidCommissionQuery || paidCommissionMonth ? "No paid commissions match the selected filters." : "No paid commissions yet."}</td></tr>}
               </tbody>
             </table>
           </div>

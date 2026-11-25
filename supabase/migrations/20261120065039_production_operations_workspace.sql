@@ -1305,8 +1305,11 @@ begin
   if not private.has_production_operations(p_organization_id) then
     raise exception 'Production Operations permission is required';
   end if;
-  if v_percentage is null or v_percentage <= 0 or v_percentage > 100 then
-    raise exception 'Tier percentage must be greater than 0 and no more than 100';
+  if v_percentage is null
+    or v_percentage <= 0
+    or v_percentage > 100
+    or v_percentage <> trunc(v_percentage) then
+    raise exception 'Tier percentage must be a whole number greater than 0 and no more than 100';
   end if;
   if not exists (
     select 1
@@ -1363,8 +1366,11 @@ begin
   if not private.has_production_operations(p_organization_id) then
     raise exception 'Production Operations permission is required';
   end if;
-  if v_percentage is null or v_percentage <= 0 or v_percentage > 100 then
-    raise exception 'Tier percentage must be greater than 0 and no more than 100';
+  if v_percentage is null
+    or v_percentage <= 0
+    or v_percentage > 100
+    or v_percentage <> trunc(v_percentage) then
+    raise exception 'Tier percentage must be a whole number greater than 0 and no more than 100';
   end if;
 
   select * into v_tier

@@ -25,6 +25,7 @@ import { FileUploadControl } from "@/components/ui/file-upload-control";
 import { LoadingState } from "@/components/ui/loading-state";
 import { NotificationDialog } from "@/components/ui/notification-dialog";
 import { SearchableSelect, type SearchableOption } from "@/components/ui/searchable-select";
+import { formatProjectOptionLabel } from "@/lib/project-option-label";
 import { createClient } from "@/lib/supabase/client";
 
 type Row = Record<string, unknown>;
@@ -791,14 +792,15 @@ export function FinanceRevisedWorkspace({
   const cashInProjects = projects.filter((project) => ["open", "on_hold", "closed"].includes(textValue(project, "project_status")));
   const openProjects = projects.filter((project) => ["open", "on_hold"].includes(textValue(project, "project_status")));
   const projectOption = (project: Row, includeCompleted = false): SearchableOption => {
-    const projectName = textValue(project, "project_name", "Project");
-    const clientName = textValue(project, "client_name") || textValue(project, "company_name");
+    const projectName = textValue(project, "project_name");
+    const companyName = textValue(project, "company_name");
+    const clientName = textValue(project, "client_name");
     const quotationNumber = textValue(project, "quotation_number") || textValue(project, "quotation_no");
     const statusLabel = includeCompleted && textValue(project, "project_status") === "closed" ? "Completed" : "";
     return {
       value: textValue(project, "project_fund_id"),
-      label: [projectName, clientName || "No client", statusLabel].filter(Boolean).join(" · "),
-      searchText: [projectName, clientName, quotationNumber, textValue(project, "project_type"), statusLabel].filter(Boolean).join(" "),
+      label: formatProjectOptionLabel({ quotationNumber, projectName, companyName, clientName }),
+      searchText: [projectName, companyName, clientName, quotationNumber, textValue(project, "project_type"), statusLabel].filter(Boolean).join(" "),
     };
   };
   const cashInProjectOptions = cashInProjects.map((project) => projectOption(project, true));
@@ -2664,13 +2666,14 @@ function TransactionsHistoryTable({
     { value: "all", label: "All projects and funds", searchText: "all projects funds" },
     { value: "non_project", label: "Non-project / fund activity", searchText: "non project fund activity" },
     ...projects.map((project) => {
-      const projectName = textValue(project, "project_name", "Project");
-      const clientName = textValue(project, "client_name") || textValue(project, "company_name");
+      const projectName = textValue(project, "project_name");
+      const companyName = textValue(project, "company_name");
+      const clientName = textValue(project, "client_name");
       const quotationNumber = textValue(project, "quotation_number") || textValue(project, "quotation_no");
       return {
         value: textValue(project, "project_fund_id"),
-        label: [projectName, clientName || "No client"].filter(Boolean).join(" · "),
-        searchText: [projectName, clientName, quotationNumber, textValue(project, "project_type")].filter(Boolean).join(" "),
+        label: formatProjectOptionLabel({ quotationNumber, projectName, companyName, clientName }),
+        searchText: [projectName, companyName, clientName, quotationNumber, textValue(project, "project_type")].filter(Boolean).join(" "),
       };
     }),
   ];

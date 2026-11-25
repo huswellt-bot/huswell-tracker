@@ -102,7 +102,7 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { MultiSelect, parseMultiSelectValue } from "@/components/ui/multi-select";
 import { NumberInput } from "@/components/ui/number-input";
 import { NotificationDialog } from "@/components/ui/notification-dialog";
-import { ClientCompanyNames } from "@/components/ui/client-company-names";
+import { ClientCompanyNames, ProjectIdentity } from "@/components/ui/client-company-names";
 import { SearchableLeadSelect, type SearchableLeadOption } from "@/components/ui/searchable-lead-select";
 import { SearchableSelect } from "@/components/ui/searchable-select";
 import { TABLE_PAGE_SIZE, TablePagination } from "@/components/ui/table-pagination";
@@ -117,6 +117,7 @@ import {
   quotationProjectTypeColors,
   quotationProjectTypes,
 } from "@/lib/quotation-project-types";
+import { formatProjectOptionLabel } from "@/lib/project-option-label";
 import { workspaceAccountLabel } from "@/lib/role-labels";
 
 const DynamicLeadCostingWorkspace = dynamic(
@@ -2464,19 +2465,8 @@ const leads: Module = {
     },
   ],
   columns: [
-    {
-      label: "Project",
-      value: (r) => text(r.project_name, "—"),
-    },
-    {
-      label: "Client / Company",
-      value: (r) => (
-        <ClientCompanyNames
-          clientName={r.contact_name}
-          companyName={r.client_name}
-        />
-      ),
-    },
+    { label: "Client Name", value: (r) => text(r.contact_name, "—") },
+    { label: "Company Name", value: (r) => text(r.client_name, "—") },
     { label: "Email", value: (r) => text(r.email, "—") },
     { label: "Phone Number", value: (r) => text(r.phone, "—") },
     {
@@ -2830,6 +2820,7 @@ function Button({
   secondary = false,
   tone = "blue",
   compact = false,
+  small = false,
   disabled = false,
   loading = false,
   confirm = false,
@@ -2840,6 +2831,7 @@ function Button({
   secondary?: boolean;
   tone?: "blue" | "green";
   compact?: boolean;
+  small?: boolean;
   disabled?: boolean;
   loading?: boolean;
   confirm?: boolean;
@@ -2862,10 +2854,10 @@ function Button({
         disabled={disabled || loading}
         aria-busy={loading || undefined}
         onClick={trigger}
-        style={{ fontSize: "var(--font-size-body)", lineHeight: "var(--line-height-body)" }}
-        className={`${secondary ? "border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-subtle)]" : tone === "green" ? "bg-[var(--color-success)] text-white hover:bg-[color-mix(in_srgb,var(--color-success)_85%,black)]" : "bg-[var(--color-accent)] text-[var(--color-on-accent)] hover:bg-[var(--color-accent-hover)]"} inline-flex ${compact ? "min-h-7 py-0.5" : "min-h-8"} items-center gap-1.5 rounded-[var(--radius-control)] px-3 text-[13px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)]`}
+        style={{ fontSize: small ? "11px" : "var(--font-size-body)", lineHeight: small ? "1.1" : "var(--line-height-body)" }}
+        className={`${secondary ? "border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-primary)] hover:border-[var(--color-border-strong)] hover:bg-[var(--color-surface-subtle)]" : tone === "green" ? "bg-[var(--color-success)] text-white hover:bg-[color-mix(in_srgb,var(--color-success)_85%,black)]" : "bg-[var(--color-accent)] text-[var(--color-on-accent)] hover:bg-[var(--color-accent-hover)]"} inline-flex ${small ? "min-h-6 px-2" : `${compact ? "min-h-7 py-0.5" : "min-h-8"} px-3`} items-center ${small ? "gap-1" : "gap-1.5"} rounded-[var(--radius-control)] ${small ? "text-[11px]" : "text-[13px]"} font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--color-accent)]`}
       >
-        {loading && <LoaderCircle className="size-4 animate-spin" aria-hidden="true" />}
+        {loading && <LoaderCircle className={`${small ? "size-3" : "size-4"} animate-spin`} aria-hidden="true" />}
         {children}
       </button>
       {confirm && (
@@ -9514,7 +9506,7 @@ function PaymentMonitoring({
         {rows.length ? (
           <>
           <div className="modern-table-shell">
-          <Table labels={["Quotation", "Project", "Client / Company", "Prepared by", "Payment status", "Pending", "Verified", "Total", "Last receipt", isExternalFinance ? "Payments" : isInternalFinance ? "View" : "Review"]} minWidth={1400}>
+          <Table labels={["Quotation", "Project", "Prepared by", "Payment status", "Pending", "Verified", "Total", "Last receipt", isExternalFinance ? "Payments" : isInternalFinance ? "View" : "Review"]} minWidth={1400}>
             {visiblePaymentRows.map(({ quote, allRecords, pendingForReview, summary }) => {
               const party = quotationParty(quote, store);
               const preparedBy = text(store.profiles.find((profile) => profile.id === (quote.prepared_by_user_id ?? quote.created_by))?.full_name, text(quote.representative, "Sales Executive"));
@@ -9523,8 +9515,7 @@ function PaymentMonitoring({
                 : summary.pending;
               return <tr key={text(quote.id)}>
                 <td className="px-5 py-3">{text(quote.quotation_no, "—")}</td>
-                <td className="px-5 py-3">{text(quote.project_name, "—")}</td>
-                <td className="px-5 py-3"><ClientCompanyNames clientName={party.clientName} companyName={party.companyName} /></td>
+                <td className="px-5 py-3"><ProjectIdentity projectName={quote.project_name} clientName={party.clientName} companyName={party.companyName} className="block" projectClassName="font-medium" partyClassName="text-[10px] text-[var(--color-text-secondary)]" /></td>
                 <td className="px-5 py-3">{preparedBy}</td>
                 <td className="px-5 py-3"><PaymentStatusBadge status={summary.status} /></td>
                 <td className="px-5 py-3 font-medium text-[#a76605]">{peso.format(pendingAmountForRow)}</td>
@@ -9827,7 +9818,7 @@ function QuotationCostingOverview({
         )}
         {filteredCostedQuotations.length ? (
           <div className="modern-table-shell">
-          <Table labels={isGeneralManager ? ["Select", "Price Quotation", "Project", "Client / Company", "Project Type", "Status", "Costed", "Actions"] : ["Price Quotation", "Project", "Client / Company", "Project Type", "Status", "Costed", "Actions"]} minWidth={isGeneralManager ? 1260 : 1200} className="!w-full">
+          <Table labels={isGeneralManager ? ["Select", "Price Quotation", "Project", "Project Type", "Status", "Costed", "Actions"] : ["Price Quotation", "Project", "Project Type", "Status", "Costed", "Actions"]} minWidth={isGeneralManager ? 1260 : 1200} className="!w-full">
             {filteredCostedQuotations.map((quote) => {
               const party = quotationParty(quote, store);
               return (
@@ -9843,8 +9834,7 @@ function QuotationCostingOverview({
                     </td>
                   )}
                   <td className="px-5 py-3">{text(quote.quotation_no, "—")}</td>
-                  <td className="px-5 py-3">{text(quote.project_name, "—")}</td>
-                  <td className="px-5 py-3"><ClientCompanyNames clientName={party.clientName} companyName={party.companyName} /></td>
+                  <td className="px-5 py-3"><ProjectIdentity projectName={quote.project_name} clientName={party.clientName} companyName={party.companyName} className="block" projectClassName="font-medium" partyClassName="text-[10px] text-[var(--color-text-secondary)]" /></td>
                   <td className="px-5 py-3">{text(quote.project_types)}</td>
                   <td className="px-5 py-3"><Status value={quote.status} /></td>
                   <td className="px-5 py-3">{day(quote.pricing_reviewed_at ?? quote.updated_at)}</td>
@@ -10045,7 +10035,12 @@ function ProjectCalendar({
       required: true,
       options: approvedQuotes.map(
         (quote) =>
-          `${text(quote.id)}|${text(quote.quotation_no)} - ${text(quote.client_name, "Client")}`,
+          `${text(quote.id)}|${formatProjectOptionLabel({
+            quotationNumber: text(quote.quotation_no),
+            projectName: text(quote.project_name),
+            companyName: text(quote.client_name),
+            clientName: text(quote.client_contact_name),
+          })}`,
       ),
     },
     { key: "start_date", label: "Start date", type: "date", required: true },
@@ -15102,7 +15097,12 @@ function Quotations({
               required: true,
               options: store.quotations.map(
                 (q) =>
-                  `${q.id}|${text(q.quotation_no)} — ${text(q.project_name)}`,
+                  `${q.id}|${formatProjectOptionLabel({
+                    quotationNumber: text(q.quotation_no),
+                    projectName: text(q.project_name),
+                    companyName: text(q.client_name),
+                    clientName: text(q.client_contact_name),
+                  })}`,
               ),
             },
             {
@@ -15363,15 +15363,14 @@ function PriceQuotationSubmissions({
       ) : activeSubmissions.length ? (
         <>
         <div className="modern-table-shell">
-        <Table labels={["Price Quotation", "Project", "Client / Company", "Status", "Assigned to", queueStage === "gm_revision" ? "Returned" : "Submitted", "Note", "Review"]} minWidth={1120}>
+        <Table labels={["Price Quotation", "Project", "Status", "Assigned to", queueStage === "gm_revision" ? "Returned" : "Submitted", "Note", "Review"]} minWidth={1120}>
           {visibleSubmissions.map((quotation) => {
             const lead = store.leads.find((item) => item.id === quotation.lead_id);
             const party = quotationParty(quotation, store);
             return (
               <tr key={text(quotation.id)}>
                 <td className="px-5 py-3">{text(quotation.quotation_no, "—")}</td>
-                <td className="px-5 py-3">{text(quotation.project_name, text(lead?.project_name, "—"))}</td>
-                <td className="px-5 py-3 font-medium"><ClientCompanyNames clientName={party.clientName} companyName={party.companyName} /></td>
+                <td className="px-5 py-3"><ProjectIdentity projectName={quotation.project_name || lead?.project_name} clientName={party.clientName} companyName={party.companyName} className="block" projectClassName="font-medium" partyClassName="text-[10px] text-[var(--color-text-secondary)]" /></td>
                 <td className="px-5 py-3"><Status value={queueStage === "gm_revision" ? "gm revision" : submissionLabel(quotation)} /></td>
                 <td className="px-5 py-3">{officerName(quotation)}</td>
                 <td className="px-5 py-3">{day(queueStage === "gm_revision" ? quotation.revision_requested_at ?? quotation.updated_at ?? quotation.created_at : quotation.submitted_at)}</td>
@@ -16046,8 +16045,8 @@ function PriceQuotationWorkspace({
     ? (["approved"] as const)
     : (["draft", "pending", "needs_revision", "approved"] as const);
   const quotationTableLabels = isProjectOfficerRole(role)
-    ? ["Quotation", "Project", "Client / Company", "Status", "Revision", "Note", "Date", "Actions"]
-    : ["Quotation", "Project", "Client / Company", "Prepared by", "Status", "Revision", "Note", "Date", "Actions"];
+    ? ["Quotation", "Project", "Status", "Revision", "Note", "Date", "Actions"]
+    : ["Quotation", "Project", "Prepared by", "Status", "Revision", "Note", "Date", "Actions"];
   return (
     <Panel
       title="Price Quotations"
@@ -16114,8 +16113,7 @@ function PriceQuotationWorkspace({
             return (
               <tr key={text(quote.id)}>
                 <td className="px-5 py-3">{text(quote.quotation_no, "—")}</td>
-                <td className="px-5 py-3">{text(quote.project_name, text(lead?.project_name, "—"))}</td>
-                <td className="px-5 py-3"><ClientCompanyNames clientName={party.clientName} companyName={party.companyName} /></td>
+                <td className="px-5 py-3"><ProjectIdentity projectName={quote.project_name || lead?.project_name} clientName={party.clientName} companyName={party.companyName} className="block" projectClassName="font-medium" partyClassName="text-[10px] text-[var(--color-text-secondary)]" /></td>
                 {!isProjectOfficerRole(role) && <td className="px-5 py-3">{preparedBy}</td>}
                 <td className="px-5 py-3"><Status value={quote.status} /></td>
                 <td className="px-5 py-3">{priceRevisionRequest ? "Requested" : "—"}</td>
@@ -19857,20 +19855,20 @@ function Submissions({
         </Table>
       ) : <Empty>{productionOnly ? "No production approvals are awaiting review." : "No management approvals are awaiting review."}</Empty>)}
       {tab === "quotations" && (visiblePendingPriceQuotations.length ? (
-        <Table labels={["Select", "Price Quotation", "Project", "Client / Company", "Prepared by", "Submitted", "Note", "Review"]} minWidth={1180}>
+        <Table labels={["Select", "Price Quotation", "Project", "Prepared by", "Submitted", "Note", "Review"]} minWidth={1180}>
           {visiblePendingPriceQuotations.map((quotation) => {
             const party = quotationParty(quotation, store);
             const note = text(quotation.pricing_submission_note, "").trim();
-            return <tr key={text(quotation.id)}>{renderSelectionCell(`price-${text(quotation.id)}`)}<td className="px-5 py-3">{text(quotation.quotation_no, "—")}</td><td className="px-5 py-3">{text(quotation.project_name, "—")}</td><td className="px-5 py-3 font-medium"><ClientCompanyNames clientName={party.clientName} companyName={party.companyName} /></td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3">{note ? <NoteAction label="View Pricing Officer note" tone="amber" onClick={() => setSubmissionNoteQuotation(quotation)} /> : <span className="text-[11px] text-[#8b92a1]">â€”</span>}</td><td className="px-5 py-3"><ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>;
+            return <tr key={text(quotation.id)}>{renderSelectionCell(`price-${text(quotation.id)}`)}<td className="px-5 py-3">{text(quotation.quotation_no, "—")}</td><td className="px-5 py-3"><ProjectIdentity projectName={quotation.project_name} clientName={party.clientName} companyName={party.companyName} className="block" projectClassName="font-medium" partyClassName="text-[10px] text-[var(--color-text-secondary)]" /></td><td className="px-5 py-3">{officerName(quotation)}</td><td className="px-5 py-3">{day(quotation.submitted_at)}</td><td className="px-5 py-3">{note ? <NoteAction label="View Pricing Officer note" tone="amber" onClick={() => setSubmissionNoteQuotation(quotation)} /> : <span className="text-[11px] text-[#8b92a1]">â€”</span>}</td><td className="px-5 py-3"><ActionIcon label="Review Price Quotation" confirm={false} onClick={() => setSelectedPriceQuotation(quotation)}><FileText size={15} /></ActionIcon></td></tr>;
           })}
         </Table>
       ) : <Empty>No Price Quotations are awaiting review.</Empty>)}
       {tab === "price_revisions" && (visiblePendingPriceQuotationRevisions.length ? (
-        <Table labels={["Select", "Price Quotation", "Project", "Client / Company", "Sales Executive", "Requested", "Review"]} minWidth={1040}>
+        <Table labels={["Select", "Price Quotation", "Project", "Sales Executive", "Requested", "Review"]} minWidth={1040}>
           {visiblePendingPriceQuotationRevisions.map((request) => {
             const quotation = store.quotations.find((item) => item.id === request.quotation_id);
             const party = quotation ? quotationParty(quotation, store) : { clientName: "-", companyName: "-" };
-            return <tr key={text(request.id)}>{renderSelectionCell(`price-revision-${text(request.id)}`)}<td className="px-5 py-3">{text(quotation?.quotation_no, "Price Quotation")}</td><td className="px-5 py-3">{text(quotation?.project_name, "—")}</td><td className="px-5 py-3"><ClientCompanyNames clientName={party.clientName} companyName={party.companyName} /></td><td className="px-5 py-3">{projectOfficerName(request)}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>;
+            return <tr key={text(request.id)}>{renderSelectionCell(`price-revision-${text(request.id)}`)}<td className="px-5 py-3">{text(quotation?.quotation_no, "Price Quotation")}</td><td className="px-5 py-3"><ProjectIdentity projectName={quotation?.project_name} clientName={party.clientName} companyName={party.companyName} className="block" projectClassName="font-medium" partyClassName="text-[10px] text-[var(--color-text-secondary)]" /></td><td className="px-5 py-3">{projectOfficerName(request)}</td><td className="px-5 py-3">{day(request.submitted_at)}</td><td className="px-5 py-3"><div className="flex items-center gap-1"><ActionIcon label="Approve Price Quotation revision" tone="green" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decidePriceQuotationRevision(request, "approved")}><Check size={15} /></ActionIcon><ActionIcon label="Reject Price Quotation revision" tone="red" loading={savingId === request.id} disabled={savingId === request.id || bulkSaving} onClick={() => void decidePriceQuotationRevision(request, "rejected")}><X size={15} /></ActionIcon></div></td></tr>;
           })}
         </Table>
       ) : <Empty>No Price Quotation revisions are awaiting review.</Empty>)}
@@ -19880,7 +19878,6 @@ function Submissions({
             "Costing Breakdown",
             "Price Quotation",
             "Project",
-            "Client / Company",
             "Sales Executive",
             "Submitted",
             "Estimated COGS",
@@ -19893,10 +19890,7 @@ function Submissions({
               <tr key={text(quotation.id)}>
                 <td className="px-5 py-3">Costing Breakdown</td>
                 <td className="px-5 py-3">{text(quotation.quotation_no, "—")}</td>
-                <td className="px-5 py-3">{text(quotation.project_name, "—")}</td>
-                <td className="px-5 py-3 font-medium">
-                  <ClientCompanyNames clientName={party.clientName} companyName={party.companyName} />
-                </td>
+                <td className="px-5 py-3"><ProjectIdentity projectName={quotation.project_name} clientName={party.clientName} companyName={party.companyName} className="block" projectClassName="font-medium" partyClassName="text-[10px] text-[var(--color-text-secondary)]" /></td>
                 <td className="px-5 py-3 font-medium">
                   {officerName(quotation)}
                 </td>
@@ -20039,13 +20033,12 @@ function Submissions({
         </Table>
       ) : <Empty>No Box Maker payment requests are awaiting review.</Empty>)}
       {tab === "projects" && (visiblePendingProjectEdits.length ? (
-        <Table labels={["Project", "Client / Company", "Sales Executive", "Submitted", "Requested changes", "Review"]}>
+        <Table labels={["Project", "Sales Executive", "Submitted", "Requested changes", "Review"]}>
           {visiblePendingProjectEdits.map((request) => {
             const project = store.leads.find((lead) => lead.id === request.project_id);
             const changes = request.proposed_changes && typeof request.proposed_changes === "object" ? Object.keys(request.proposed_changes as Record<string, unknown>) : [];
             return <tr key={text(request.id)}>
-              <td className="px-5 py-3">{text(project?.project_name, "—")}</td>
-              <td className="px-5 py-3"><ClientCompanyNames clientName={project?.contact_name} companyName={project?.client_name} /></td>
+              <td className="px-5 py-3"><ProjectIdentity projectName={project?.project_name} clientName={project?.contact_name} companyName={project?.client_name} className="block" projectClassName="font-medium" partyClassName="text-[10px] text-[var(--color-text-secondary)]" /></td>
               <td className="px-5 py-3">{projectOfficerName(request)}</td>
               <td className="px-5 py-3">{day(request.submitted_at)}</td>
               <td className="px-5 py-3">{changes.map((change) => change.replaceAll("_", " ")).join(", ")}</td>
@@ -21314,11 +21307,11 @@ function ProductionOperator({
   const activeProjects = projects.filter((project) => project.is_added);
   const approvedProjectOptions = approvedProjects.map((project) => ({
     value: project.quotation_id,
-    label: [
-      text(project.quotation_no, "-"),
-      text(project.project_name, "Untitled project"),
-      text(project.client_name),
-    ].filter(Boolean).join(" · "),
+    label: formatProjectOptionLabel({
+      quotationNumber: project.quotation_no,
+      projectName: project.project_name,
+      companyName: project.client_name,
+    }),
     searchText: [
       text(project.quotation_no),
       text(project.project_name),
@@ -21774,24 +21767,19 @@ function ProductionOperator({
               minWidth={1280}
               columnWidths={["15%", "22%", "18%", "13%", "20%", "12%"]}
             >
-              {visibleProductionRows.map((project) => {
-                const projectNames = [project.client_name, project.project_name]
-                  .map((value) => text(value, "").trim())
-                  .filter(Boolean);
-                return (
+              {visibleProductionRows.map((project) => (
                   <tr key={project.production_job_id ?? project.quotation_id}>
                     <td className="whitespace-nowrap px-5 py-3 font-medium">
                       {text(project.quotation_no, "-")}
                     </td>
                     <td className="px-5 py-3">
-                      {projectNames.length ? projectNames.map((name, index) => (
-                        <span
-                          key={`${project.quotation_id}-${name}-${index}`}
-                          className={index === 0 ? "block font-medium" : "block text-[var(--color-text-secondary)]"}
-                        >
-                          {name}
-                        </span>
-                      )) : "-"}
+                      <ProjectIdentity
+                        projectName={project.project_name}
+                        companyName={project.client_name}
+                        className="block"
+                        projectClassName="font-medium"
+                        partyClassName="text-[var(--color-text-secondary)]"
+                      />
                     </td>
                     <td className="px-5 py-3 text-[var(--color-text-secondary)]">
                       <span className="inline-flex items-center gap-1.5">
@@ -21878,6 +21866,7 @@ function ProductionOperator({
                         {canEdit && project.status_key !== "completed" && project.status_key !== "delivered" && (
                           <Button
                             compact
+                            small
                             tone="green"
                             disabled={Boolean(savingId)}
                             onClick={() => setCompletionProject(project)}
@@ -21888,6 +21877,7 @@ function ProductionOperator({
                         {canEdit && project.status_key === "completed" && (
                           <Button
                             compact
+                            small
                             tone="green"
                             disabled={Boolean(savingId)}
                             onClick={() => openDeliveryDialog(project)}
@@ -21898,8 +21888,7 @@ function ProductionOperator({
                       </div>
                     </td>
                   </tr>
-                );
-              })}
+              ))}
             </Table>
             <TablePagination
               page={activeProductionPage}
@@ -26145,7 +26134,8 @@ export function HuswellWorkspace({
     role === "accountant" || internalFinanceEnabled;
   const isManagementRole = memberRole(role);
   const productionViewOnly = isManagementRole || hasInternalFinanceAccess;
-  const canViewProduction = true;
+  const canViewProduction =
+    isManagementRole || hasInternalFinanceAccess || productionOperationsEnabled;
   const canEditProduction = productionOperationsEnabled && !productionViewOnly;
   const financeViewsForRole = useMemo(
     () => isManagementRole
@@ -27370,7 +27360,7 @@ export function HuswellWorkspace({
       ) : (
         <Panel
           title="Production"
-          detail="Production is available as view-only monitoring for workspace members."
+          detail="Production is available only to the selected Production operator, management, and Finance."
         >
           <Empty>You do not have access to the Production page.</Empty>
         </Panel>

@@ -13,6 +13,10 @@ const workspace = readFileSync(
   join(repoRoot, "components", "huswell-workspace.tsx"),
   "utf8",
 );
+const revisedWorkspace = readFileSync(
+  join(repoRoot, "components", "finance-revised-workspace.tsx"),
+  "utf8",
+);
 const revisedMigration = readFileSync(
   join(repoRoot, "supabase", "migrations", "20261112004726_20261112074513_retire_legacy_finance_surface.sql"),
   "utf8",
@@ -40,11 +44,11 @@ test("GM Finance dashboard reads the revised project ledger", () => {
 });
 
 test("GM dashboard renders the cash position and supporting financial metrics", () => {
-  assert.match(workspace, /shared_kpi_finance_dashboard/);
-  assert.match(workspace, /aria-label="Net Cash Position"/);
-  assert.match(workspace, /Cash on Hand/);
-  assert.match(workspace, /Expected Collections/);
-  assert.match(workspace, /Payables Due/);
+  assert.match(workspace, /DynamicFinanceRevisedWorkspace[\s\S]*initialTab="dashboard"/);
+  assert.match(revisedWorkspace, /<Metric label="Cash on hand"/);
+  assert.match(revisedWorkspace, /<Metric label="Period Cash In"/);
+  assert.match(revisedWorkspace, /<Metric label="Period Cash Out"/);
+  assert.match(revisedWorkspace, /<Metric label="Daily Fund total"/);
 });
 
 test("GM dashboard does not expose the Monthly report navigation page", () => {

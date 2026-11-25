@@ -1,16 +1,22 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const migrationPath = (suffix) => {
+  const migrationsDir = join(repoRoot, "supabase", "migrations");
+  const fileName = readdirSync(migrationsDir).find((name) => name.endsWith(suffix));
+  assert.ok(fileName, `Migration ending with ${suffix} was not found`);
+  return join(migrationsDir, fileName);
+};
 const accessMigration = readFileSync(
   join(repoRoot, "supabase", "migrations", "20261111233138_revised_finance_access_and_current_balances.sql"),
   "utf8",
 ).toLowerCase();
 const combinedRoleMigration = readFileSync(
-  join(repoRoot, "supabase", "migrations", "20261114090000_revised_finance_combined_role.sql"),
+  migrationPath("_revised_finance_combined_role.sql"),
   "utf8",
 ).toLowerCase();
 const roleMigration = readFileSync(

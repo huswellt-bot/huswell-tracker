@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const migrationPath = (suffix) => {
+  const migrationsDir = join(root, "supabase", "migrations");
+  const fileName = readdirSync(migrationsDir).find((name) => name.endsWith(suffix));
+  assert.ok(fileName, `Migration ending with ${suffix} was not found`);
+  return join(migrationsDir, fileName);
+};
 const migration = [
   readFileSync(join(root, "supabase", "migrations", "20261111054845_revised_finance_ledger.sql"), "utf8"),
   readFileSync(join(root, "supabase", "migrations", "20261111054855_revised_finance_categories.sql"), "utf8"),
@@ -13,17 +19,17 @@ const migration = [
 ].join("\n");
 const integrityMigration = readFileSync(join(root, "supabase", "migrations", "20261111083110_revised_finance_integrity_fixes.sql"), "utf8");
 const fundModalMigration = readFileSync(join(root, "supabase", "migrations", "20261111091638_revised_finance_gm_fund_modal_simplification.sql"), "utf8");
-const workingToCapitalMigration = readFileSync(join(root, "supabase", "migrations", "20261112100000_revised_finance_working_to_capital.sql"), "utf8");
+const workingToCapitalMigration = readFileSync(migrationPath("_revised_finance_working_to_capital.sql"), "utf8");
 const actorVisibilityMigration = readFileSync(join(root, "supabase", "migrations", "20261111122521_revised_finance_actor_visibility.sql"), "utf8");
 const revisionMigration = readFileSync(join(root, "supabase", "migrations", "20261111135536_revised_finance_revision_flow.sql"), "utf8");
 const accessMigration = readFileSync(join(root, "supabase", "migrations", "20261111233138_revised_finance_access_and_current_balances.sql"), "utf8");
 const legacyBoundaryMigration = readFileSync(join(root, "supabase", "migrations", "20261112004726_20261112074513_retire_legacy_finance_surface.sql"), "utf8");
 const accountantWriteMigration = readFileSync(join(root, "supabase", "migrations", "20261112004737_20261112091500_revised_finance_accountant_write_boundary.sql"), "utf8");
-const sharedPoolMigration = readFileSync(join(root, "supabase", "migrations", "20261112113000_revised_finance_shared_daily_pool_and_receipts.sql"), "utf8");
-const reviewFixMigration = readFileSync(join(root, "supabase", "migrations", "20261112130000_revised_finance_review_fixes.sql"), "utf8");
-const retiredReceiptPolicyMigration = readFileSync(join(root, "supabase", "migrations", "20261112143000_remove_retired_finance_receipt_policies.sql"), "utf8");
+const sharedPoolMigration = readFileSync(migrationPath("_revised_finance_shared_daily_pool_and_receipts.sql"), "utf8");
+const reviewFixMigration = readFileSync(migrationPath("_revised_finance_review_fixes.sql"), "utf8");
+const retiredReceiptPolicyMigration = readFileSync(migrationPath("_remove_retired_finance_receipt_policies.sql"), "utf8");
 const roleMigration = readFileSync(join(root, "supabase", "migrations", "20261111054901_unify_accounting_finance_role.sql"), "utf8");
-const combinedRoleMigration = readFileSync(join(root, "supabase", "migrations", "20261114090000_revised_finance_combined_role.sql"), "utf8");
+const combinedRoleMigration = readFileSync(migrationPath("_revised_finance_combined_role.sql"), "utf8");
 const workspace = readFileSync(join(root, "components", "finance-revised-workspace.tsx"), "utf8");
 const host = readFileSync(join(root, "components", "huswell-workspace.tsx"), "utf8");
 const globalStyles = readFileSync(join(root, "app", "globals.css"), "utf8");
@@ -94,7 +100,7 @@ test("system Finance categories cannot be deleted", () => {
 
 test("Finance category deletion uses a modal confirmation", () => {
   assert.match(workspace, /deleteCategoryTarget \? <Modal/);
-  assert.match(workspace, /Archive this category\? Historical transactions will keep their category reference/);
+  assert.match(workspace, /Remove this category\? Historical transactions will keep their category reference/);
   assert.match(workspace, /onClick=\{\(\) => void confirmDeleteCategory\(\)\}/);
 });
 
@@ -247,7 +253,8 @@ test("the visible Finance flow is project-ledger based", () => {
   assert.match(workspace, /Generate PDF/);
   assert.match(workspace, /create_finance_revised_cash_in/);
   assert.match(workspace, /create_finance_revised_cash_out/);
-  assert.match(workspace, /Manage Finance categories/);
+  assert.match(workspace, /Cash In category/);
+  assert.match(workspace, /Cash Out category/);
   assert.match(workspace, /create_finance_revised_category/);
   assert.match(workspace, /update_finance_revised_category/);
   assert.match(workspace, /delete_finance_revised_category/);

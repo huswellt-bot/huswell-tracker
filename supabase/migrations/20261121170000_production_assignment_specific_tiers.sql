@@ -50,7 +50,12 @@ before update on public.production_box_maker_assignment_tiers
 for each row execute function public.set_updated_at();
 
 -- The legacy project-level table is retained for rolling-client compatibility,
--- but whole-number percentages are now required everywhere.
+-- but whole-number percentages are now required everywhere. Normalize older
+-- fractional rows before adding the compatibility constraint.
+update public.production_project_tiers
+set percentage = greatest(1::numeric, least(100::numeric, round(percentage)))
+where percentage <> trunc(percentage);
+
 do $$
 begin
   if not exists (
