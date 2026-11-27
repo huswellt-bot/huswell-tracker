@@ -11,17 +11,26 @@ const GENERAL_MANAGER_ROLES = new Set(["super_admin", "owner", "admin"]);
 type BackupResource = "leads" | "suppliers";
 type BackupRow = Record<string, unknown>;
 type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
+type BackupResourceMetadata = {
+  sheetName: string;
+  filePrefix: string;
+  preferredColumns: string[];
+  excludedColumns?: string[];
+  orderColumn: string;
+  includeInfoSheet: boolean;
+};
 
 const resources: Record<
   BackupResource,
-  { sheetName: string; filePrefix: string; preferredColumns: string[] }
+  BackupResourceMetadata
 > = {
   leads: {
     sheetName: "Leads",
     filePrefix: "leads-backup",
+    excludedColumns: ["id", "organization_id"],
+    orderColumn: "date_sent",
+    includeInfoSheet: false,
     preferredColumns: [
-      "id",
-      "organization_id",
       "lead_no",
       "project_name",
       "project_description",
@@ -55,6 +64,8 @@ const resources: Record<
   suppliers: {
     sheetName: "Suppliers",
     filePrefix: "suppliers-backup",
+    orderColumn: "created_at",
+    includeInfoSheet: true,
     preferredColumns: [
       "id",
       "organization_id",
@@ -120,12 +131,17 @@ const columnName = (columnIndex: number) => {
 };
 
 const columnsFor = (resource: BackupResource, rows: BackupRow[]) => {
+  const metadata = resources[resource];
+  const excludedColumns = new Set(metadata.excludedColumns ?? []);
   const discovered = new Set(rows.flatMap((row) => Object.keys(row)));
-  const preferred = resources[resource].preferredColumns.filter((column) =>
-    discovered.has(column),
+  const preferred = metadata.preferredColumns.filter(
+    (column) => discovered.has(column) && !excludedColumns.has(column),
   );
   const remaining = [...discovered]
-    .filter((column) => !preferred.includes(column))
+    .filter(
+      (column) =>
+        !excludedColumns.has(column) && !preferred.includes(column),
+    )
     .sort((left, right) => left.localeCompare(right));
   return [...preferred, ...remaining];
 };
@@ -153,6 +169,10 @@ const fetchAllRows = async (
       .from(resource)
       .select("*")
       .eq("organization_id", organizationId)
+      .order(resources[resource].orderColumn, {
+        ascending: true,
+        nullsFirst: false,
+      })
       .order("created_at", { ascending: true })
       .order("id", { ascending: true })
       .range(offset, offset + PAGE_SIZE - 1);
@@ -173,6 +193,79 @@ const fetchAllRows = async (
   return rows;
 };
 
+const LEAD_COLUMN_WIDTHS: Record<string, number> = {
+  lead_no: 16,
+  project_name: 30,
+  project_description: 42,
+  client_name: 28,
+  contact_name: 28,
+  address: 38,
+  email: 32,
+  phone: 20,
+  date_sent: 16,
+  date_contacted: 18,
+  contact_method: 20,
+  evaluation_number: 28,
+  done_deal_status: 28,
+  status: 18,
+  notes: 40,
+  lead_remark: 40,
+  outbound_caller: 24,
+  lead_source: 22,
+  external_lead_id: 26,
+  assigned_to: 38,
+  created_by: 38,
+  endorsed_by: 38,
+  endorsed_to: 38,
+  endorsed_at: 22,
+  endorsement_history_locked: 24,
+  lead_import_batch_id: 38,
+  lead_import_row_number: 24,
+  created_at: 24,
+  updated_at: 24,
+};
+
+const styleLeadWorksheet = (
+  worksheet: ExcelJS.Worksheet,
+  columns: string[],
+  rows: BackupRow[],
+) => {
+  worksheet.views = [{ state: "frozen", ySplit: 1 }];
+  worksheet.properties.defaultRowHeight = 24;
+
+  columns.forEach((column, index) => {
+    worksheet.getColumn(index + 1).width =
+      LEAD_COLUMN_WIDTHS[column] ?? Math.min(Math.max(column.length + 4, 18), 40);
+  });
+
+  const header = worksheet.getRow(1);
+  header.height = 30;
+  header.eachCell({ includeEmpty: true }, (cell) => {
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF1F4E79" },
+    };
+    cell.alignment = {
+      horizontal: "center",
+      vertical: "middle",
+      wrapText: true,
+    };
+  });
+
+  for (let rowIndex = 2; rowIndex <= rows.length + 1; rowIndex += 1) {
+    const row = worksheet.getRow(rowIndex);
+    row.height = 36;
+    row.eachCell({ includeEmpty: true }, (cell) => {
+      cell.alignment = {
+        vertical: "top",
+        wrapText: true,
+      };
+    });
+  }
+};
+
 const makeWorkbook = (
   resource: BackupResource,
   organizationId: string,
@@ -182,17 +275,19 @@ const makeWorkbook = (
   const columns = columnsFor(resource, rows);
   const workbook = new ExcelJS.Workbook();
   const generatedAt = new Date().toISOString();
-  const infoSheet = workbook.addWorksheet("Backup Info");
-  infoSheet.addRows([
-    ["Backup type", "Organization data backup"],
-    ["Source table", resource],
-    ["Organization ID", organizationId],
-    ["Generated at", generatedAt],
-    ["Record count", rows.length],
-    ["Scope", "All organization records; page filters ignored"],
-  ]);
-  infoSheet.getColumn(1).width = 24;
-  infoSheet.getColumn(2).width = 72;
+  if (metadata.includeInfoSheet) {
+    const infoSheet = workbook.addWorksheet("Backup Info");
+    infoSheet.addRows([
+      ["Backup type", "Organization data backup"],
+      ["Source table", resource],
+      ["Organization ID", organizationId],
+      ["Generated at", generatedAt],
+      ["Record count", rows.length],
+      ["Scope", "All organization records; page filters ignored"],
+    ]);
+    infoSheet.getColumn(1).width = 24;
+    infoSheet.getColumn(2).width = 72;
+  }
 
   const dataSheet = workbook.addWorksheet(metadata.sheetName);
   dataSheet.addRow(columns);
@@ -206,6 +301,7 @@ const makeWorkbook = (
       to: `${columnName(columns.length - 1)}${rows.length + 1}`,
     };
   }
+  if (resource === "leads") styleLeadWorksheet(dataSheet, columns, rows);
   workbook.creator = "Huswell Tracker";
   workbook.title = `${metadata.sheetName} backup`;
   workbook.subject = "Huswell Tracker organization data backup";
